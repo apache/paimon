@@ -35,6 +35,7 @@ import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.HashMaskTransform;
 import org.apache.paimon.predicate.PartialMaskTransform;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
@@ -407,6 +408,27 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             List<String> actual = new ArrayList<>();
             reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
             assertThat(actual).containsExactly("PFX_abcdef_SFX", "PFX_ghijkl_SFX");
+        }
+
+        {
+            // Mask col1 by hashing (SHA-256, hex lowercase)
+            Transform hashMaskTransform =
+                    new HashMaskTransform(
+                            new FieldRef(0, "col1", DataTypes.STRING()), "sha256", null);
+            restCatalogServer.addTableColumnMasking(
+                    identifier, ImmutableMap.of("col1", hashMaskTransform));
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+
+            List<String> actual = new ArrayList<>();
+            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            assertThat(actual)
+                    .containsExactly(
+                            "bef57ec7f53a6d40beb640a780a639c83bc29ac8a9816f1fc6c5c6dcd93c4721",
+                            "54f6ee81b58accbc57adbceb0f50264897626060071dc9e92f897e7b373deb93");
         }
     }
 

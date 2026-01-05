@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.HashMaskTransform;
 import org.apache.paimon.predicate.PartialMaskTransform;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
@@ -55,6 +56,7 @@ public class TransformJsonSerde {
     private static final String TRANSFORM_TYPE_CONCAT_WS = "concat_ws";
     private static final String TRANSFORM_TYPE_CAST = "cast";
     private static final String TRANSFORM_TYPE_MASK = "mask";
+    private static final String TRANSFORM_TYPE_HASH = "hash";
     private static final String TRANSFORM_TYPE_LITERAL = "literal";
 
     private static final String FIELD_INPUTS = "inputs";
@@ -64,6 +66,8 @@ public class TransformJsonSerde {
     private static final String FIELD_PREFIX_LEN = "prefixLen";
     private static final String FIELD_SUFFIX_LEN = "suffixLen";
     private static final String FIELD_MASK = "mask";
+    private static final String FIELD_ALGORITHM = "algorithm";
+    private static final String FIELD_SALT = "salt";
     private static final String FIELD_INDEX = "index";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_DATA_TYPE = "dataType";
@@ -134,6 +138,19 @@ public class TransformJsonSerde {
             return node;
         }
 
+        if (transform instanceof HashMaskTransform) {
+            HashMaskTransform hashTransform = (HashMaskTransform) transform;
+            ObjectNode node = MAPPER.createObjectNode();
+            node.put(FIELD_TYPE, TRANSFORM_TYPE_HASH);
+            node.set(FIELD_FIELD, fieldRefToJsonNode(hashTransform.fieldRef()));
+            node.put(FIELD_ALGORITHM, hashTransform.algorithm());
+            BinaryString salt = hashTransform.salt();
+            if (salt != null) {
+                node.put(FIELD_SALT, salt.toString());
+            }
+            return node;
+        }
+
         throw new IllegalArgumentException(
                 "Unsupported transform type: " + transform.getClass().getName());
     }
@@ -179,6 +196,13 @@ public class TransformJsonSerde {
             String mask = optionalText(node, FIELD_MASK, "*");
             return new PartialMaskTransform(
                     fieldRef, prefixLen, suffixLen, BinaryString.fromString(mask));
+        }
+        if (TRANSFORM_TYPE_HASH.equals(type)) {
+            FieldRef fieldRef = parseFieldRef(required(node, FIELD_FIELD));
+            String algorithm = optionalText(node, FIELD_ALGORITHM, "SHA-256");
+            String salt = optionalText(node, FIELD_SALT, null);
+            return new HashMaskTransform(
+                    fieldRef, algorithm, salt == null ? null : BinaryString.fromString(salt));
         }
         throw new IllegalArgumentException("Unsupported transform type: " + type);
     }
