@@ -43,7 +43,6 @@ import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -102,12 +101,19 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         }
     }
 
-    @Test
-    public void testReadShreddedVariant() throws Exception {
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "null",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"age\",\"type\":\"INT\"},{\"name\":\"city\",\"type\":\"STRING\"}]}}]}",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"weather\",\"type\":\"INT\"}]}}]}",
+                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"other\",\"type\":\"STRING\"}]}}]}"
+            })
+    public void testReadShreddedVariant(String shreddingSchema) throws Exception {
         Options options = new Options();
-        options.set(
-                "parquet.variant.shreddingSchema",
-                "{\"type\":\"ROW\",\"fields\":[{\"name\":\"v\",\"type\":{\"type\":\"ROW\",\"fields\":[{\"name\":\"age\",\"type\":\"INT\"},{\"name\":\"city\",\"type\":\"STRING\"}]}}]}");
+        if (!shreddingSchema.equals("null")) {
+            options.set("parquet.variant.shreddingSchema", shreddingSchema);
+        }
         ParquetFileFormat format =
                 new ParquetFileFormat(new FileFormatFactory.FormatContext(options, 1024, 1024));
 
@@ -188,5 +194,28 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                                                 GenericRow.of(
                                                         25, BinaryString.fromString("Hello")))))
                 .isTrue();
+
+        // read unexisted col
+        List<VariantAccessInfo.VariantField> variantFields4 = new ArrayList<>();
+        variantFields4.add(
+                new VariantAccessInfo.VariantField(
+                        new DataField(0, "unexist_col", DataTypes.INT()), "$.unexist_col"));
+        VariantAccessInfo[] variantAccess4 = {new VariantAccessInfo("v", variantFields4)};
+        RowType readStructType4 =
+                DataTypes.ROW(
+                        DataTypes.FIELD(
+                                0,
+                                "v",
+                                DataTypes.ROW(DataTypes.FIELD(0, "unexist_col", DataTypes.INT()))));
+        List<InternalRow> result4 = new ArrayList<>();
+        try (RecordReader<InternalRow> reader =
+                format.createReaderFactory(writeType, writeType, new ArrayList<>(), variantAccess4)
+                        .createReader(
+                                new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
+            InternalRowSerializer serializer = new InternalRowSerializer(readStructType4);
+            reader.forEachRemaining(row -> result4.add(serializer.copy(row)));
+        }
+        assertThat(result4.get(0).getRow(0, 1).isNullAt(0)).isTrue();
+        assertThat(result4.get(1).getRow(0, 1).isNullAt(0)).isTrue();
     }
 }
