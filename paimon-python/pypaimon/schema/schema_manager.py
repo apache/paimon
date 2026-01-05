@@ -104,6 +104,19 @@ def _handle_drop_column(change: DropColumn, new_fields: List[DataField]):
         raise ValueError("Cannot drop all fields in table")
 
 
+def _assert_not_updating_partition_keys(
+        schema: 'TableSchema', field_names: List[str], operation: str):
+    """Assert that the operation is not updating partition keys."""
+    # partition keys can't be nested columns
+    if len(field_names) > 1:
+        return
+    field_name = field_names[0]
+    if field_name in schema.partition_keys:
+        raise ValueError(
+            f"Cannot {operation} partition column: [{field_name}]"
+        )
+
+
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
     field_name = change.field_names[-1]
     new_name = change.new_name
@@ -286,6 +299,9 @@ class SchemaManager:
             elif isinstance(change, AddColumn):
                 _handle_add_column(change, new_fields, highest_field_id)
             elif isinstance(change, RenameColumn):
+                _assert_not_updating_partition_keys(
+                    old_table_schema, change.field_names, "rename"
+                )
                 _handle_rename_column(change, new_fields)
             elif isinstance(change, DropColumn):
                 _handle_drop_column(change, new_fields)
@@ -301,6 +317,9 @@ class SchemaManager:
                 raise NotImplementedError(f"Unsupported change: {type(change)}")
 
         rename_mappings = _get_rename_mappings(changes)
+        new_partition_keys = SchemaManager._apply_not_nested_column_rename(
+            old_table_schema.partition_keys, rename_mappings
+        )
         new_primary_keys = SchemaManager._apply_not_nested_column_rename(
             old_table_schema.primary_keys, rename_mappings
         )
@@ -308,7 +327,7 @@ class SchemaManager:
 
         new_schema = Schema(
             fields=new_fields,
-            partition_keys=old_table_schema.partition_keys,
+            partition_keys=new_partition_keys,
             primary_keys=new_primary_keys,
             options=new_options,
             comment=new_comment
