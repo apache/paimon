@@ -115,6 +115,15 @@ def _assert_not_updating_partition_keys(
         )
 
 
+def _assert_not_updating_primary_keys(
+        schema: 'TableSchema', field_names: List[str], operation: str):
+    if len(field_names) > 1:
+        return
+    field_name = field_names[0]
+    if field_name in schema.primary_keys:
+        raise ValueError(f"Cannot {operation} primary key")
+
+
 def _handle_rename_column(change: RenameColumn, new_fields: List[DataField]):
     field_name = change.field_names[-1]
     new_name = change.new_name
@@ -304,8 +313,18 @@ class SchemaManager:
             elif isinstance(change, DropColumn):
                 _handle_drop_column(change, new_fields)
             elif isinstance(change, UpdateColumnType):
+                _assert_not_updating_partition_keys(
+                    old_table_schema, change.field_names, "update"
+                )
+                _assert_not_updating_primary_keys(
+                    old_table_schema, change.field_names, "update"
+                )
                 _handle_update_column_type(change, new_fields)
             elif isinstance(change, UpdateColumnNullability):
+                if change.new_nullability:
+                    _assert_not_updating_primary_keys(
+                        old_table_schema, change.field_names, "change nullability of"
+                    )
                 _handle_update_column_nullability(change, new_fields)
             elif isinstance(change, UpdateColumnComment):
                 _handle_update_column_comment(change, new_fields)
@@ -315,9 +334,6 @@ class SchemaManager:
                 raise NotImplementedError(f"Unsupported change: {type(change)}")
 
         rename_mappings = _get_rename_mappings(changes)
-        new_partition_keys = SchemaManager._apply_not_nested_column_rename(
-            old_table_schema.partition_keys, rename_mappings
-        )
         new_primary_keys = SchemaManager._apply_not_nested_column_rename(
             old_table_schema.primary_keys, rename_mappings
         )
@@ -325,7 +341,7 @@ class SchemaManager:
 
         new_schema = Schema(
             fields=new_fields,
-            partition_keys=new_partition_keys,
+            partition_keys=old_table_schema.partition_keys,
             primary_keys=new_primary_keys,
             options=new_options,
             comment=new_comment
