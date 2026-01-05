@@ -52,7 +52,12 @@ class SchemaChange(ABC):
         return UpdateComment(comment)
 
     @staticmethod
-    def add_column(field_name: Union[str, List[str]], data_type: DataType, comment: Optional[str] = None, move: Optional["Move"] = None) -> "AddColumn":
+    def add_column(
+            field_name: Union[str, List[str]],
+            data_type: DataType,
+            comment: Optional[str] = None,
+            move: Optional["Move"] = None
+    ) -> "AddColumn":
         if isinstance(field_name, str):
             return AddColumn(field_names=[field_name], data_type=data_type, comment=comment, move=move)
         else:
@@ -73,14 +78,21 @@ class SchemaChange(ABC):
             return DropColumn(field_name)
 
     @staticmethod
-    def update_column_type(field_name: Union[str, List[str]], new_data_type: DataType, keep_nullability: bool = False) -> "UpdateColumnType":
+    def update_column_type(
+            field_name: Union[str, List[str]],
+            new_data_type: DataType,
+            keep_nullability: bool = False
+    ) -> "UpdateColumnType":
         if isinstance(field_name, str):
             return UpdateColumnType([field_name], new_data_type, keep_nullability)
         else:
             return UpdateColumnType(field_name, new_data_type, keep_nullability)
 
     @staticmethod
-    def update_column_nullability(field_name: Union[str, List[str]], new_nullability: bool) -> "UpdateColumnNullability":
+    def update_column_nullability(
+            field_name: Union[str, List[str]],
+            new_nullability: bool
+    ) -> "UpdateColumnNullability":
         if isinstance(field_name, str):
             return UpdateColumnNullability([field_name], new_nullability)
         else:
@@ -275,4 +287,3 @@ class Move:
     field_name: str = json_field(FIELD_FIELD_NAME)
     reference_field_name: Optional[str] = json_field(FIELD_REFERENCE_FIELD_NAME)
     type: MoveType = json_field(FIELD_TYPE)
-

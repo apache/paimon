@@ -124,9 +124,13 @@ def _dict_to_schema_change(change_dict: dict) -> SchemaChange:
                 field_name = move_dict.get("fieldName") or move_dict.get(Move.FIELD_FIELD_NAME)
                 if field_name is None:
                     raise ValueError(f"Missing fieldName field in Move: {move_dict}")
+                reference_field = (
+                    move_dict.get("referenceFieldName") or
+                    move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME)
+                )
                 move = Move(
                     field_name=field_name,
-                    reference_field_name=move_dict.get("referenceFieldName") or move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME),
+                    reference_field_name=reference_field,
                     type=move_type
                 )
         field_names = change_dict.get("fieldNames") or change_dict.get(AddColumn.FIELD_FIELD_NAMES)
@@ -775,12 +779,13 @@ class RESTCatalogServer:
                 schema_changes.append(change)
 
         table_metadata = self.table_metadata_store[identifier.get_full_name()]
-        old_schema = table_metadata.schema
 
-        table_path = Path(self.data_path) / self.warehouse / identifier.get_database_name() / identifier.get_object_name()
+        table_path = (
+            Path(self.data_path) / self.warehouse /
+            identifier.get_database_name() / identifier.get_object_name()
+        )
         schema_manager = SchemaManager(self._get_file_io(), str(table_path))
-        new_schema = schema_manager.commit_changes(old_schema, schema_changes)
-        schema_manager.commit(new_schema)
+        new_schema = schema_manager.commit_changes(schema_changes)
 
         updated_metadata = TableMetadata(
             schema=new_schema,

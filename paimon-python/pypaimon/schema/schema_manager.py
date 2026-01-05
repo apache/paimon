@@ -22,10 +22,12 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import AtomicInteger, DataField
 from pypaimon.schema.schema import Schema
-from pypaimon.schema.schema_change import (AddColumn, DropColumn, RemoveOption, RenameColumn,
-                                          SchemaChange, SetOption, UpdateColumnComment,
-                                          UpdateColumnNullability, UpdateColumnPosition,
-                                          UpdateColumnType, UpdateComment)
+from pypaimon.schema.schema_change import (
+    AddColumn, DropColumn, RemoveOption, RenameColumn,
+    SchemaChange, SetOption, UpdateColumnComment,
+    UpdateColumnNullability, UpdateColumnPosition,
+    UpdateColumnType, UpdateComment
+)
 from pypaimon.schema.table_schema import TableSchema
 
 
@@ -65,7 +67,9 @@ def _handle_update_column_nullability(
     if field_index is None:
         raise ColumnNotExistException(field_name)
     field = new_fields[field_index]
-    new_type = field.type
+    from pypaimon.schema.data_types import DataTypeParser
+    field_type_dict = field.type.to_dict()
+    new_type = DataTypeParser.parse_data_type(field_type_dict)
     new_type.nullable = change.new_nullability
     new_fields[field_index] = DataField(
         field.id, field.name, new_type, field.description, field.default_value
@@ -80,7 +84,9 @@ def _handle_update_column_type(
     if field_index is None:
         raise ColumnNotExistException(field_name)
     field = new_fields[field_index]
-    new_type = change.new_data_type
+    from pypaimon.schema.data_types import DataTypeParser
+    new_type_dict = change.new_data_type.to_dict()
+    new_type = DataTypeParser.parse_data_type(new_type_dict)
     if change.keep_nullability:
         new_type.nullable = field.type.nullable
     new_fields[field_index] = DataField(
@@ -234,8 +240,15 @@ class SchemaManager:
                     continue
         return versions
 
-    def commit_changes(self, old_table_schema: TableSchema, changes: List[SchemaChange]) -> TableSchema:
+    def commit_changes(self, changes: List[SchemaChange]) -> TableSchema:
         while True:
+            old_table_schema = self.latest()
+            if old_table_schema is None:
+                raise RuntimeError(
+                    f"Table schema does not exist at path: {self.table_path}. "
+                    "This may happen if the table was deleted concurrently."
+                )
+            
             new_table_schema = self._generate_table_schema(old_table_schema, changes)
             try:
                 success = self.commit(new_table_schema)
@@ -248,7 +261,18 @@ class SchemaManager:
         self, old_table_schema: TableSchema, changes: List[SchemaChange]
     ) -> TableSchema:
         new_options = dict(old_table_schema.options)
-        new_fields = list(old_table_schema.fields)
+        new_fields = []
+        for field in old_table_schema.fields:
+            from pypaimon.schema.data_types import DataTypeParser
+            field_type_dict = field.type.to_dict()
+            copied_type = DataTypeParser.parse_data_type(field_type_dict)
+            new_fields.append(DataField(
+                field.id,
+                field.name,
+                copied_type,
+                field.description,
+                field.default_value
+            ))
         highest_field_id = AtomicInteger(old_table_schema.highest_field_id)
         new_comment = old_table_schema.comment
 
@@ -333,4 +357,3 @@ class SchemaManager:
             new_options[sequence_field] = ",".join(new_sequence_fields)
 
         return new_options
-

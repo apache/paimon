@@ -20,12 +20,12 @@ from typing import List, Optional, Union
 
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import (ColumnAlreadyExistException,
-                                                ColumnNotExistException,
-                                                DatabaseAlreadyExistException,
-                                                DatabaseNotExistException,
-                                                TableAlreadyExistException,
-                                                TableNotExistException)
+from pypaimon.catalog.catalog_exception import (
+    DatabaseAlreadyExistException,
+    DatabaseNotExistException,
+    TableAlreadyExistException,
+    TableNotExistException
+)
 from pypaimon.catalog.database import Database
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
@@ -128,7 +128,7 @@ class FileSystemCatalog(Catalog):
             identifier = Identifier.from_string(identifier)
         try:
             self.get_table(identifier)
-        except TableNotExistException as e:
+        except TableNotExistException:
             if not ignore_if_not_exists:
                 raise
             return
@@ -136,11 +136,7 @@ class FileSystemCatalog(Catalog):
         table_path = self.get_table_path(identifier)
         schema_manager = SchemaManager(self.file_io, table_path)
         try:
-            old_schema = schema_manager.latest()
-            if old_schema is None:
-                raise TableNotExistException(identifier)
-            new_schema = schema_manager.commit_changes(old_schema, changes)
-            schema_manager.commit(new_schema)
+            schema_manager.commit_changes(changes)
         except Exception as e:
             raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
 
