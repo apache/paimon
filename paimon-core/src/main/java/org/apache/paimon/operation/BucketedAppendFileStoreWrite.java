@@ -40,8 +40,6 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** {@link BaseAppendFileStoreWrite} for {@link org.apache.paimon.table.BucketMode#HASH_FIXED}. */
 public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
 
@@ -101,12 +99,7 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
             @Nullable BucketedDvMaintainer dvMaintainer) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
-        } else if (!options.bucketAppendOrdered()
-                && !options.deletionVectorsEnabled()
-                && options.clusteringIncrementalEnabled()) {
-            checkArgument(
-                    ioManager != null,
-                    "BucketedAppendClusterManager must be used with a valid IOManager.");
+        } else if (options.bucketClusterEnabled()) {
             return new BucketedAppendClusterManager(
                     compactExecutor,
                     restoredFiles,
