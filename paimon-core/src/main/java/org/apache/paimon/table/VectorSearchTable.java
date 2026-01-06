@@ -24,21 +24,20 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.types.RowType;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
 import java.util.Map;
 
 /**
- * A table wrapper to hold vector search information. This is used by Spark engine to pass vector
- * search pushdown information from logical plan optimization to physical plan execution.
+ * A table wrapper to hold vector search information. This is used to pass vector search pushdown
+ * information from logical plan optimization to physical plan execution. For now, it is only used
+ * by internal for Spark engine.
  */
 public class VectorSearchTable implements ReadonlyTable {
 
     private final InnerTable origin;
     private final VectorSearch vectorSearch;
 
-    VectorSearchTable(InnerTable origin, VectorSearch vectorSearch) {
+    private VectorSearchTable(InnerTable origin, VectorSearch vectorSearch) {
         this.origin = origin;
         this.vectorSearch = vectorSearch;
     }
@@ -47,7 +46,6 @@ public class VectorSearchTable implements ReadonlyTable {
         return new VectorSearchTable(origin, vectorSearch);
     }
 
-    @Nullable
     public VectorSearch vectorSearch() {
         return vectorSearch;
     }
@@ -93,7 +91,7 @@ public class VectorSearchTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return origin.newScan();
+        throw new UnsupportedOperationException();
     }
 
     @Override

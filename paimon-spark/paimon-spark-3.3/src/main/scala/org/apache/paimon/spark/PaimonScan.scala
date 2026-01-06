@@ -39,7 +39,7 @@ case class PaimonScan(
     pushedDataFilters: Seq[Predicate],
     override val pushedLimit: Option[Int],
     override val pushedTopN: Option[TopN],
-    override val pushedVectorSearch: Option[VectorSearch] = None,
+    override val pushedVectorSearch: Option[VectorSearch],
     bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table)
   with SupportsRuntimeFiltering

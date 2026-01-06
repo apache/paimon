@@ -117,7 +117,7 @@ object PaimonTableValuedFunctions {
       argsWithoutTable: Seq[Expression]): LogicalPlan = {
     sparkTable match {
       case st @ SparkTable(innerTable: InnerTable) =>
-        val vectorSearch = vsq.createVectorSearch(argsWithoutTable)
+        val vectorSearch = vsq.createVectorSearch(innerTable, argsWithoutTable)
         val vectorSearchTable = VectorSearchTable.create(innerTable, vectorSearch)
         DataSourceV2Relation.create(
           st.copy(table = vectorSearchTable),
@@ -126,7 +126,8 @@ object PaimonTableValuedFunctions {
           CaseInsensitiveStringMap.empty())
       case _ =>
         throw new RuntimeException(
-          s"vector_search only supports Paimon tables, got ${sparkTable.getClass.getName}")
+          "vector_search only supports Paimon SparkTable backed by InnerTable, " +
+            s"but got table implementation: ${sparkTable.getClass.getName}")
     }
   }
 
@@ -258,21 +259,32 @@ case class VectorSearchQuery(override val args: Seq[Expression])
     Map.empty
   }
 
-  def createVectorSearch(argsWithoutTable: Seq[Expression]): VectorSearch = {
-    assert(
-      argsWithoutTable.size == 3,
-      s"$VECTOR_SEARCH needs four parameters: table_name, column_name, query_vector, limit. " +
-        s"Got ${argsWithoutTable.size + 1} parameters."
-    )
-
+  def createVectorSearch(
+      innerTable: InnerTable,
+      argsWithoutTable: Seq[Expression]): VectorSearch = {
+    if (argsWithoutTable.size != 3) {
+      throw new RuntimeException(
+        s"$VECTOR_SEARCH needs three parameters after table_name: column_name, query_vector, limit. " +
+          s"Got ${argsWithoutTable.size} parameters after table_name."
+      )
+    }
     val columnName = argsWithoutTable.head.eval().toString
+    if (!innerTable.rowType().containsField(columnName)) {
+      throw new RuntimeException(
+        s"Column $columnName does not exist in table ${innerTable.name()}"
+      )
+    }
     val queryVector = extractQueryVector(argsWithoutTable(1))
     val limit = argsWithoutTable(2).eval() match {
       case i: Int => i
       case l: Long => l.toInt
       case other => throw new RuntimeException(s"Invalid limit type: ${other.getClass.getName}")
     }
-
+    if (limit <= 0) {
+      throw new IllegalArgumentException(
+        s"Limit must be a positive integer, but got: $limit"
+      )
+    }
     new VectorSearch(queryVector, limit, columnName)
   }
 
@@ -281,7 +293,7 @@ case class VectorSearchQuery(override val args: Seq[Expression])
       case Literal(arrayData, _) if arrayData != null =>
         val arr = arrayData.asInstanceOf[org.apache.spark.sql.catalyst.util.ArrayData]
         arr.toFloatArray()
-      case CreateArray(elements, _) =>
+      case CreateArray(elements, _) if elements != null =>
         elements.map {
           case Literal(v: Float, _) => v
           case Literal(v: Double, _) => v.toFloat

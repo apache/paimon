@@ -55,6 +55,46 @@ class BaseVectorSearchPushDownTest extends PaimonSparkTestBase with StreamTest {
 
       // Should return results (actual filtering depends on vector index)
       assert(result.nonEmpty)
+
+      // Test invalid limit (negative)
+      val ex1 = intercept[Exception] {
+        spark
+          .sql("""
+                 |SELECT * FROM vector_search('T', 'v', array(1.0f, 0.0f, 0.0f), -3)
+                 |""".stripMargin)
+          .collect()
+      }
+      assert(ex1.getMessage.contains("Limit must be a positive integer"))
+
+      // Test invalid limit (zero)
+      val ex2 = intercept[Exception] {
+        spark
+          .sql("""
+                 |SELECT * FROM vector_search('T', 'v', array(1.0f, 0.0f, 0.0f), 0)
+                 |""".stripMargin)
+          .collect()
+      }
+      assert(ex2.getMessage.contains("Limit must be a positive integer"))
+
+      // Test missing parameters
+      val ex3 = intercept[Exception] {
+        spark
+          .sql("""
+                 |SELECT * FROM vector_search('T', 'v', array(1.0f, 0.0f, 0.0f))
+                 |""".stripMargin)
+          .collect()
+      }
+      assert(ex3.getMessage.contains("vector_search needs three parameters after table_name"))
+
+      // Test non-existent column
+      val ex4 = intercept[Exception] {
+        spark
+          .sql("""
+                 |SELECT * FROM vector_search('T', 'non_existent_col', array(1.0f, 0.0f, 0.0f), 3)
+                 |""".stripMargin)
+          .collect()
+      }
+      assert(ex4.getMessage.nonEmpty)
     }
   }
 }
