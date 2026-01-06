@@ -64,7 +64,7 @@ public class CompactDatabaseAction extends ActionBase {
     @Nullable private Pattern excludingPattern;
     private Pattern databasePattern = Pattern.compile(".*");
 
-    private MultiTablesSinkMode databaseCompactMode = MultiTablesSinkMode.DIVIDED;
+    private MultiTablesSinkMode databaseCompactMode = MultiTablesSinkMode.COMBINED;
 
     private final Map<String, FileStoreTable> tableMap = new HashMap<>();
 
