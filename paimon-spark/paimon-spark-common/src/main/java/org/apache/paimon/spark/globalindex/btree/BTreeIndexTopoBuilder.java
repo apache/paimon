@@ -104,10 +104,10 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopoBuilder {
                         .map(functions::col)
                         .toArray(Column[]::new);
 
-        long recordPerRange = options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
+        long recordsPerRange = options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
         // this should be superfast since append only table can utilize count-start pushdown well.
         long rowCount = source.count();
-        int partitionNum = Math.max((int) (rowCount / recordPerRange), 1);
+        int partitionNum = Math.max((int) (rowCount / recordsPerRange), 1);
         int maxParallelism = options.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
         partitionNum = Math.min(partitionNum, maxParallelism);
 
