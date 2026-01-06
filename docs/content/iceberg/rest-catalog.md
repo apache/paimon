@@ -40,13 +40,13 @@ This feature needs dependency:
 
 {{< stable >}}
 
-[paimon-iceberg-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-iceberg/{{< version >}}/paimon-iceberg-{{< version >}}.jar).
+[paimon-iceberg-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-iceberg/{{< version >}}/paimon-iceberg-{{< version >}}.jar),
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-[paimon-iceberg-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-iceberg/{{< version >}}/).
+[paimon-iceberg-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-iceberg/{{< version >}}/),
 
 {{< /unstable >}}
 
