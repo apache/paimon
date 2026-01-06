@@ -173,7 +173,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         // Step 1: build index by certain index system
                         GlobalIndexTopoBuilder topoBuilder =
                                 GlobalIndexBuilderFactoryUtils.createTopoBuilder(indexType);
-                        System.out.println("Topo Builder in driver: " + topoBuilder);
+
                         if (topoBuilder != null) {
                             // do not need to prepare index shards for custom topo builder
                             indexResults =

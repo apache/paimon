@@ -344,10 +344,6 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
 
       val sorted = metas.sortWith((m1, m2) => comparator.compare(m1.first, m2.first) < 0)
 
-      sorted.foreach(
-        m => println(s"firstKey: ${m.first}, lastKey: ${m.last}")
-      )
-
       // should not overlap
       sorted.sliding(2).foreach {
         case Seq(prev, next) =>
