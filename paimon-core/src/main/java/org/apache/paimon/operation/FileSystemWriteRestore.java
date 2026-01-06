@@ -24,20 +24,35 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.BucketFilter;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
 /** {@link WriteRestore} to restore files directly from file system. */
 public class FileSystemWriteRestore implements WriteRestore {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FileSystemWriteRestore.class);
+
     private final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
     private final IndexFileHandler indexFileHandler;
+
+    private final Boolean usePrefetchManifestEntries;
+    @Nullable private transient PrefetchedManifestEntries prefetchedManifestEntries;
 
     public FileSystemWriteRestore(
             CoreOptions options,
@@ -52,6 +67,7 @@ public class FileSystemWriteRestore implements WriteRestore {
                 this.scan.dropStats();
             }
         }
+        this.usePrefetchManifestEntries = options.prefetchManifestEntries();
     }
 
     @Override
@@ -60,6 +76,19 @@ public class FileSystemWriteRestore implements WriteRestore {
                 .latestSnapshotOfUserFromFilesystem(user)
                 .map(Snapshot::commitIdentifier)
                 .orElse(Long.MIN_VALUE);
+    }
+
+    public synchronized PrefetchedManifestEntries prefetchManifestEntries(Snapshot snapshot) {
+        RowType partitionType = scan.manifestsReader().partitionType();
+        List<ManifestEntry> manifestEntries = scan.withSnapshot(snapshot).plan().files();
+        LOG.info(
+                "FileSystemWriteRestore prefetched manifestEntries for snapshot {}: {} entries",
+                snapshot.id(),
+                manifestEntries.size());
+
+        prefetchedManifestEntries =
+                new PrefetchedManifestEntries(snapshot, partitionType, manifestEntries);
+        return prefetchedManifestEntries;
     }
 
     @Override
@@ -75,9 +104,29 @@ public class FileSystemWriteRestore implements WriteRestore {
             return RestoreFiles.empty();
         }
 
+        List<ManifestEntry> entries;
+        if (usePrefetchManifestEntries) {
+            // local reference of the prefetch container for safety across mutation
+            PrefetchedManifestEntries prefetch = prefetchedManifestEntries;
+            if (prefetch == null || prefetch.snapshot().id() != snapshot.id()) {
+                // refresh the prefetched manifest entries
+                prefetch = prefetchManifestEntries(snapshot);
+            }
+            entries = prefetch.filter(partition, bucket);
+        } else {
+            entries =
+                    scan.withSnapshot(snapshot)
+                            .withPartitionBucket(partition, bucket)
+                            .plan()
+                            .files();
+        }
+        LOG.info(
+                "FileSystemWriteRestore filtered manifestEntries for {}, {}: {} entries",
+                partition,
+                bucket,
+                entries.size());
+
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        List<ManifestEntry> entries =
-                scan.withSnapshot(snapshot).withPartitionBucket(partition, bucket).plan().files();
         Integer totalBuckets = WriteRestore.extractDataFiles(entries, restoreFiles);
 
         IndexFileMeta dynamicBucketIndex = null;
@@ -94,5 +143,50 @@ public class FileSystemWriteRestore implements WriteRestore {
 
         return new RestoreFiles(
                 snapshot, totalBuckets, restoreFiles, dynamicBucketIndex, deleteVectorsIndex);
+    }
+
+    /**
+     * Container for a {@link Snapshot}'s manifest entries, used by {@link FileSystemWriteRestore}
+     * to broker thread-safe access to cached results.
+     */
+    public static class PrefetchedManifestEntries {
+
+        private final Snapshot snapshot;
+        private final RowType partitionType;
+        private final List<ManifestEntry> manifestEntries;
+
+        public PrefetchedManifestEntries(
+                Snapshot snapshot, RowType partitionType, List<ManifestEntry> manifestEntries) {
+            this.snapshot = snapshot;
+            this.partitionType = partitionType;
+            this.manifestEntries = manifestEntries;
+        }
+
+        public Snapshot snapshot() {
+            return snapshot;
+        }
+
+        public RowType partitionType() {
+            return partitionType;
+        }
+
+        public List<ManifestEntry> manifestEntries() {
+            return manifestEntries;
+        }
+
+        public List<ManifestEntry> filter(BinaryRow partition, int bucket) {
+            PartitionPredicate partitionPredicate =
+                    PartitionPredicate.fromMultiple(
+                            partitionType, Collections.singletonList(partition));
+
+            BucketFilter bucketFilter = BucketFilter.create(false, bucket, null, null);
+            return manifestEntries.stream()
+                    .filter(
+                            m ->
+                                    (partitionPredicate == null
+                                                    || partitionPredicate.test(m.partition()))
+                                            && bucketFilter.test(m.bucket(), m.totalBuckets()))
+                    .collect(Collectors.toList());
+        }
     }
 }
