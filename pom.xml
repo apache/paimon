@@ -60,6 +60,7 @@ under the License.
         <module>paimon-flink</module>
         <module>paimon-docs</module>
         <module>paimon-e2e-tests</module>
+        <module>paimon-vector-e2e-test</module>
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
         <module>paimon-lance</module>

@@ -89,7 +89,7 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
         }
         checkDimension(vector);
         vectorEntries.add(new VectorEntry(count, vector));
-
+        count++;
         if (vectorEntries.size() >= sizePerIndex) {
             try {
                 flush();
@@ -97,7 +97,6 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
                 throw new RuntimeException(e);
             }
         }
-        count++;
     }
 
     @Override

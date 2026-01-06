@@ -1,0 +1,92 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+name: Faiss Vector Index Tests
+
+on:
+  push:
+    paths:
+      - 'paimon-faiss/**'
+      - 'paimon-faiss-jni/**'
+      - '.github/workflows/faiss-vector-index-tests.yml'
+  pull_request:
+    paths:
+      - 'paimon-faiss/**'
+      - 'paimon-faiss-jni/**'
+      - '.github/workflows/faiss-vector-index-tests.yml'
+
+env:
+  JDK_VERSION: 8
+  MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup FAISS and build paimon-faiss
+        uses: ./.github/actions/setup-faiss
+
+      - name: List bundled libraries
+        run: |
+          echo "=== Bundled libraries ==="
+          ls -la paimon-faiss-jni/src/main/resources/linux/amd64/
+          echo ""
+          echo "=== Library dependencies ==="
+          ldd paimon-faiss-jni/src/main/resources/linux/amd64/libpaimon_faiss_jni.so || true
+
+      - name: Test paimon-faiss-jni
+        timeout-minutes: 10
+        run: |
+          mvn -T 1C  -B test -pl paimon-faiss-jni -DskipFaissTests=false -Ppaimon-faiss-vector
+        env:
+          MAVEN_OPTS: -Xmx2048m
+
+      - name: Test paimon-faiss
+        timeout-minutes: 30
+        run: |
+          mvn -T 1C  -B test -pl paimon-faiss -Ppaimon-faiss-vector
+        env:
+          MAVEN_OPTS: -Xmx4096m
+
+      - name: Build Vector E2E Test Module
+        run: mvn -T 2C -B clean install -DskipTests -Pspark3,flink1,paimon-faiss-vector -pl paimon-vector-e2e-test -am
+
+      - name: Run Vector E2E Tests
+        timeout-minutes: 30
+        run: |
+          # run tests with random timezone to find out timezone related bugs
+          . .github/workflows/utils.sh
+          jvm_timezone=$(random_timezone)
+          echo "JVM timezone is set to $jvm_timezone"
+          mvn -T 2C -B verify -Pspark3,flink1,paimon-faiss-vector -pl paimon-vector-e2e-test -Duser.timezone=$jvm_timezone
+        env:
+          MAVEN_OPTS: -Xmx4096m
