@@ -209,7 +209,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
 
       // should not overlap
       sorted.sliding(2).foreach {
-        case Seq(prev, next) =>
+        case Seq(prev: MetaWithKey, next: MetaWithKey) =>
           assert(comparator.compare(prev.last, next.first) <= 0)
         case _ => // ignore
       }
@@ -346,7 +346,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
 
       // should not overlap
       sorted.sliding(2).foreach {
-        case Seq(prev, next) =>
+        case Seq(prev: MetaWithKey, next: MetaWithKey) =>
           assert(
             comparator.compare(prev.last, next.first) <= 0,
             s"Found overlap for partition ${k.getString(0).toString}. The last key ${prev.last}, next first key ${next.first}"
