@@ -28,6 +28,9 @@ paimon-lucene/.idea/
 
 ### Native build artifacts ###
 paimon-faiss-jni/build/
+paimon-faiss-jni/src/main/resources/darwin*
+paimon-faiss-jni/src/main/resources/linux*
+paimon-faiss-jni/src/main/native/cmake-build-debug/
 
 ### VS Code ###
 .vscode/

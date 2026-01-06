@@ -528,6 +528,12 @@ under the License.
                 <module>paimon-faiss</module>
                 <module>paimon-faiss-jni</module>
             </modules>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>paimon-faiss-vector</name>
+                </property>
+            </activation>
         </profile>
     </profiles>
 

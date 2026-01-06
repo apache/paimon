@@ -26,7 +26,7 @@ Paimon Faiss JNI provides a high-performance Java API for Faiss, following a sim
 <dependency>
     <groupId>org.apache.paimon</groupId>
     <artifactId>paimon-faiss-jni</artifactId>
-    <version>0.1.0</version>
+    <version>[version]</version>
 </dependency>
 ```
 
@@ -261,5 +261,4 @@ Apache License 2.0
 ## Acknowledgments
 
 - [Faiss](https://github.com/facebookresearch/faiss) by Facebook AI Research
-- [RocksDB Java](https://github.com/facebook/rocksdb) for the JNI architecture inspiration
 
