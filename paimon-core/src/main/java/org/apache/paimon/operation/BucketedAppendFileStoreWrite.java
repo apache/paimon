@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.BucketedAppendCompactManager;
+import org.apache.paimon.append.cluster.BucketedAppendClusterManager;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
@@ -28,6 +29,7 @@ import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
@@ -38,10 +40,13 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** {@link BaseAppendFileStoreWrite} for {@link org.apache.paimon.table.BucketMode#HASH_FIXED}. */
 public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
 
     private final String commitUser;
+    private final SchemaManager schemaManager;
 
     public BucketedAppendFileStoreWrite(
             FileIO fileIO,
@@ -55,7 +60,8 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
             FileStoreScan scan,
             CoreOptions options,
             @Nullable BucketedDvMaintainer.Factory dvMaintainerFactory,
-            String tableName) {
+            String tableName,
+            SchemaManager schemaManager) {
         super(
                 fileIO,
                 read,
@@ -72,6 +78,7 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
             super.withIgnorePreviousFiles(options.writeOnly());
         }
         this.commitUser = commitUser;
+        this.schemaManager = schemaManager;
     }
 
     @Override
@@ -94,6 +101,22 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
             @Nullable BucketedDvMaintainer dvMaintainer) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
+        } else if (!options.bucketAppendOrdered()
+                && !options.deletionVectorsEnabled()
+                && options.clusteringIncrementalEnabled()) {
+            checkArgument(
+                    ioManager != null,
+                    "BucketedAppendClusterManager must be used with a valid IOManager.");
+            return new BucketedAppendClusterManager(
+                    compactExecutor,
+                    restoredFiles,
+                    schemaManager,
+                    options.clusteringColumns(),
+                    options.maxSizeAmplificationPercent(),
+                    options.sortedRunSizeRatio(),
+                    options.numSortedRunCompactionTrigger(),
+                    options.numLevels(),
+                    files -> clusterRewrite(partition, bucket, files));
         } else {
             Function<String, DeletionVector> dvFactory =
                     dvMaintainer != null
