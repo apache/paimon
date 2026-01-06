@@ -67,6 +67,7 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static java.util.Collections.singletonMap;
+import static org.apache.paimon.CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT;
 import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -421,18 +422,16 @@ public class TableCommitTest {
         TableWriteImpl<?> write1 = table.newWrite(user1);
         TableCommitImpl commit1 = table.newCommit(user1);
 
-        Map<String, String> newOptions = new HashMap<>();
-        newOptions.put(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "-1");
-        table = table.copy(newOptions);
-        String user2 = UUID.randomUUID().toString();
-        TableWriteImpl<?> write2 = table.newWrite(user2);
-        TableCommitImpl commit2 = table.newCommit(user2);
-
-        // by default, first commit is not checked
-
         write1.write(GenericRow.of(0, 0L));
         write1.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit1.commit(1, write1.prepareCommit(true, 1));
+
+        // test skip this commit check
+
+        String user2 = UUID.randomUUID().toString();
+        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = table.newWrite(user2);
+        TableCommitImpl commit2 = table.newCommit(user2);
 
         write2.write(GenericRow.of(1, 1L));
         commit2.commit(1, write2.prepareCommit(false, 1));
@@ -482,18 +481,16 @@ public class TableCommitTest {
         TableWriteImpl<?> write1 = fixedBucketWriteTable.newWrite(user1);
         TableCommitImpl commit1 = fixedBucketWriteTable.newCommit(user1);
 
-        Map<String, String> newOptions = new HashMap<>();
-        newOptions.put(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "-1");
-        table = table.copy(newOptions);
-        String user2 = UUID.randomUUID().toString();
-        TableWriteImpl<?> write2 = table.newWrite(user2);
-        TableCommitImpl commit2 = table.newCommit(user2).withOverwrite(Collections.emptyMap());
-
-        // by default, first commit is not checked
-
         write1.write(GenericRow.of(0, 0L));
         write1.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit1.commit(1, write1.prepareCommit(true, 1));
+
+        // test skip this commit check
+
+        String user2 = UUID.randomUUID().toString();
+        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = table.newWrite(user2);
+        TableCommitImpl commit2 = table.newCommit(user2).withOverwrite(Collections.emptyMap());
 
         write2.write(GenericRow.of(1, 1L));
         commit2.commit(1, write2.prepareCommit(false, 1));
@@ -560,18 +557,16 @@ public class TableCommitTest {
         TableWriteImpl<?> write1 = fixedBucketWriteTable.newWrite(user1);
         TableCommitImpl commit1 = fixedBucketWriteTable.newCommit(user1);
 
-        Map<String, String> newOptions = new HashMap<>();
-        newOptions.put(CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "-1");
-        table = table.copy(newOptions);
-        String user2 = UUID.randomUUID().toString();
-        TableWriteImpl<?> write2 = table.newWrite(user2);
-        TableCommitImpl commit2 = table.newCommit(user2);
-
-        // by default, first commit is not checked
-
         write1.write(GenericRow.of(0, 0L));
         write1.compact(BinaryRow.EMPTY_ROW, 0, true);
         commit1.commit(1, write1.prepareCommit(true, 1));
+
+        // test skip this commit check
+
+        String user2 = UUID.randomUUID().toString();
+        table = table.copy(singletonMap(COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(), "2"));
+        TableWriteImpl<?> write2 = table.newWrite(user2);
+        TableCommitImpl commit2 = table.newCommit(user2);
 
         write2.write(GenericRow.of(1, 1L));
         commit2.commit(1, write2.prepareCommit(false, 1));
@@ -896,15 +891,14 @@ public class TableCommitTest {
                         tableSchema,
                         CatalogEnvironment.empty());
         String user1 = UUID.randomUUID().toString();
-        FileStoreTable overwriteUpgrade =
-                table.copy(Collections.singletonMap("write-only", "true"));
+        FileStoreTable overwriteUpgrade = table.copy(singletonMap("write-only", "true"));
         TableWriteImpl<?> write1 = overwriteUpgrade.newWrite(user1);
         TableCommitImpl commit1 =
                 overwriteUpgrade.newCommit(user1).withOverwrite(Collections.emptyMap());
 
         String user2 = UUID.randomUUID().toString();
         FileStoreTable compactTable =
-                table.copy(Collections.singletonMap("compaction.force-up-level-0", "true"));
+                table.copy(singletonMap("compaction.force-up-level-0", "true"));
         TableWriteImpl<?> write2 = compactTable.newWrite(user2);
         TableCommitImpl commit2 = compactTable.newCommit(user2);
 

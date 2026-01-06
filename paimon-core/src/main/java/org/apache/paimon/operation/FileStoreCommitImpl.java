@@ -30,7 +30,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -47,9 +46,10 @@ import org.apache.paimon.operation.commit.CommitKindProvider;
 import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
-import org.apache.paimon.operation.commit.ConflictDetection.ConflictCheck;
 import org.apache.paimon.operation.commit.ManifestEntryChanges;
 import org.apache.paimon.operation.commit.RetryCommitResult;
+import org.apache.paimon.operation.commit.RowTrackingCommitUtils.RowTrackingAssigned;
+import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.operation.commit.SuccessCommitResult;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.operation.metrics.CommitStats;
@@ -94,14 +94,11 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
-import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestEntry.nullableRecordCount;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountAdd;
 import static org.apache.paimon.manifest.ManifestEntry.recordCountDelete;
-import static org.apache.paimon.operation.commit.ConflictDetection.hasConflictChecked;
-import static org.apache.paimon.operation.commit.ConflictDetection.mustConflictCheck;
-import static org.apache.paimon.operation.commit.ConflictDetection.noConflictCheck;
 import static org.apache.paimon.operation.commit.ManifestEntryChanges.changedPartitions;
+import static org.apache.paimon.operation.commit.RowTrackingCommitUtils.assignRowTracking;
 import static org.apache.paimon.partition.PartitionPredicate.createBinaryPartitions;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -158,10 +155,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final long commitMinRetryWait;
     private final long commitMaxRetryWait;
     private final int commitMaxRetries;
-    @Nullable private Long strictModeLastSafeSnapshot;
     private final InternalRowPartitionComputer partitionComputer;
     private final boolean rowTrackingEnabled;
     private final boolean discardDuplicateFiles;
+    @Nullable private final StrictModeChecker strictModeChecker;
     private final ConflictDetection conflictDetection;
     private final CommitCleaner commitCleaner;
 
@@ -198,10 +195,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitTimeout,
             long commitMinRetryWait,
             long commitMaxRetryWait,
-            @Nullable Long strictModeLastSafeSnapshot,
             boolean rowTrackingEnabled,
             boolean discardDuplicateFiles,
-            ConflictDetection conflictDetection) {
+            ConflictDetection conflictDetection,
+            @Nullable StrictModeChecker strictModeChecker) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -228,7 +225,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitTimeout = commitTimeout;
         this.commitMinRetryWait = commitMinRetryWait;
         this.commitMaxRetryWait = commitMaxRetryWait;
-        this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
         this.partitionComputer =
                 new InternalRowPartitionComputer(
                         options.partitionDefaultName(),
@@ -241,6 +237,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.bucketMode = bucketMode;
         this.rowTrackingEnabled = rowTrackingEnabled;
         this.discardDuplicateFiles = discardDuplicateFiles;
+        this.strictModeChecker = strictModeChecker;
         this.conflictDetection = conflictDetection;
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
@@ -307,9 +304,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long started = System.nanoTime();
         int generatedSnapshot = 0;
         int attempts = 0;
-        Snapshot latestSnapshot = null;
-        Long safeLatestSnapshotId = null;
-        List<SimpleFileEntry> baseEntries = new ArrayList<>();
 
         ManifestEntryChanges changes = collectChanges(committable.fileCommittables());
         try {
@@ -319,60 +313,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     || !changes.appendTableFiles.isEmpty()
                     || !changes.appendChangelog.isEmpty()
                     || !changes.appendIndexFiles.isEmpty()) {
-                // Optimization for common path.
-                // Step 1:
-                // Read manifest entries from changed partitions here and check for conflicts.
-                // If there are no other jobs committing at the same time,
-                // we can skip conflict checking in tryCommit method.
-                // This optimization is mainly used to decrease the number of times we read from
-                // files.
-                latestSnapshot = snapshotManager.latestSnapshot();
                 CommitKind commitKind = CommitKind.APPEND;
-                ConflictCheck conflictCheck = noConflictCheck();
+                if (appendCommitCheckConflict) {
+                    checkAppendFiles = true;
+                }
                 if (containsFileDeletionOrDeletionVectors(
                         appendSimpleEntries, changes.appendIndexFiles)) {
                     commitKind = CommitKind.OVERWRITE;
-                    conflictCheck = mustConflictCheck();
-                } else if (latestSnapshot != null && appendCommitCheckConflict) {
-                    conflictCheck = mustConflictCheck();
-                }
-
-                boolean discardDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
-                if (discardDuplicate) {
                     checkAppendFiles = true;
-                }
-
-                if (latestSnapshot != null && checkAppendFiles) {
-                    // it is possible that some partitions only have compact changes,
-                    // so we need to contain all changes
-                    baseEntries.addAll(
-                            scanner.readAllEntriesFromChangedPartitions(
-                                    latestSnapshot,
-                                    changedPartitions(
-                                            changes.appendTableFiles,
-                                            changes.compactTableFiles,
-                                            changes.appendIndexFiles)));
-                    if (discardDuplicate) {
-                        Set<FileEntry.Identifier> baseIdentifiers =
-                                baseEntries.stream()
-                                        .map(FileEntry::identifier)
-                                        .collect(Collectors.toSet());
-                        changes.appendTableFiles =
-                                changes.appendTableFiles.stream()
-                                        .filter(
-                                                entry ->
-                                                        !baseIdentifiers.contains(
-                                                                entry.identifier()))
-                                        .collect(Collectors.toList());
-                        appendSimpleEntries = SimpleFileEntry.from(changes.appendTableFiles);
-                    }
-                    conflictDetection.checkNoConflictsOrFail(
-                            latestSnapshot,
-                            baseEntries,
-                            appendSimpleEntries,
-                            changes.appendIndexFiles,
-                            commitKind);
-                    safeLatestSnapshotId = latestSnapshot.id();
                 }
 
                 attempts +=
@@ -385,7 +333,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.properties(),
                                 CommitKindProvider.provider(commitKind),
-                                conflictCheck,
+                                checkAppendFiles,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -393,25 +341,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (!changes.compactTableFiles.isEmpty()
                     || !changes.compactChangelog.isEmpty()
                     || !changes.compactIndexFiles.isEmpty()) {
-                // Optimization for common path.
-                // Step 2:
-                // Add appendChanges to the manifest entries read above and check for conflicts.
-                // If there are no other jobs committing at the same time,
-                // we can skip conflict checking in tryCommit method.
-                // This optimization is mainly used to decrease the number of times we read from
-                // files.
-                if (safeLatestSnapshotId != null) {
-                    baseEntries.addAll(appendSimpleEntries);
-                    conflictDetection.checkNoConflictsOrFail(
-                            latestSnapshot,
-                            baseEntries,
-                            SimpleFileEntry.from(changes.compactTableFiles),
-                            changes.compactIndexFiles,
-                            CommitKind.COMPACT);
-                    // assume this compact commit follows just after the append commit created above
-                    safeLatestSnapshotId += 1;
-                }
-
                 attempts +=
                         tryCommit(
                                 CommitChangesProvider.provider(
@@ -422,7 +351,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.properties(),
                                 CommitKindProvider.provider(CommitKind.COMPACT),
-                                hasConflictChecked(safeLatestSnapshotId),
+                                true,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -587,7 +516,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.properties(),
                                 CommitKindProvider.provider(CommitKind.COMPACT),
-                                mustConflictCheck(),
+                                true,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -726,7 +655,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 null,
                 Collections.emptyMap(),
                 CommitKindProvider.provider(CommitKind.ANALYZE),
-                noConflictCheck(),
+                false,
                 statsFileName);
     }
 
@@ -753,7 +682,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long watermark,
             Map<String, String> properties,
             CommitKindProvider commitKindProvider,
-            ConflictCheck conflictCheck,
+            boolean detectConflicts,
             @Nullable String statsFileName) {
         int retryCount = 0;
         RetryCommitResult retryResult = null;
@@ -773,7 +702,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             properties,
                             commitKind,
                             latestSnapshot,
-                            conflictCheck,
+                            detectConflicts,
                             statsFileName);
 
             if (result.isSuccess()) {
@@ -824,7 +753,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 watermark,
                 properties,
                 commitKindProvider,
-                mustConflictCheck(),
+                true,
                 null);
     }
 
@@ -839,7 +768,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<String, String> properties,
             CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,
-            ConflictCheck conflictCheck,
+            boolean detectConflicts,
             @Nullable String newStatsFileName) {
         long startMillis = System.currentTimeMillis();
 
@@ -873,10 +802,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        if (strictModeLastSafeSnapshot != null && strictModeLastSafeSnapshot >= 0) {
-            conflictDetection.commitStrictModeCheck(
-                    strictModeLastSafeSnapshot, newSnapshotId, commitKind, snapshotManager);
-            strictModeLastSafeSnapshot = newSnapshotId - 1;
+        if (strictModeChecker != null) {
+            strictModeChecker.check(newSnapshotId, commitKind);
+            strictModeChecker.update(newSnapshotId - 1);
         }
 
         if (LOG.isDebugEnabled()) {
@@ -892,12 +820,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         List<SimpleFileEntry> baseDataFiles = new ArrayList<>();
         boolean discardDuplicate = discardDuplicateFiles && commitKind == CommitKind.APPEND;
-        if (latestSnapshot != null
-                && (discardDuplicate || conflictCheck.shouldCheck(latestSnapshot.id()))) {
+        if (latestSnapshot != null && (discardDuplicate || detectConflicts)) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
-            List<BinaryRow> changedPartitions =
-                    changedPartitions(deltaFiles, Collections.emptyList(), indexFiles);
+            List<BinaryRow> changedPartitions = changedPartitions(deltaFiles, indexFiles);
             if (retryResult != null && retryResult.latestSnapshot != null) {
                 baseDataFiles = new ArrayList<>(retryResult.baseDataFiles);
                 List<SimpleFileEntry> incremental =
@@ -970,14 +896,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             baseManifestList = manifestList.write(mergeAfterManifests);
 
             if (rowTrackingEnabled) {
-                // assigned snapshot id to delta files
-                List<ManifestEntry> snapshotAssigned = new ArrayList<>();
-                assignSnapshotId(newSnapshotId, deltaFiles, snapshotAssigned);
-                // assign row id for new files
-                List<ManifestEntry> rowIdAssigned = new ArrayList<>();
-                nextRowIdStart =
-                        assignRowTrackingMeta(firstRowIdStart, snapshotAssigned, rowIdAssigned);
-                deltaFiles = rowIdAssigned;
+                RowTrackingAssigned assigned =
+                        assignRowTracking(newSnapshotId, firstRowIdStart, deltaFiles);
+                nextRowIdStart = assigned.nextRowIdStart;
+                deltaFiles = assigned.assignedEntries;
             }
 
             // the added records subtract the deleted records from
@@ -1088,8 +1010,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitUser,
                 identifier,
                 commitKind.name());
-        if (strictModeLastSafeSnapshot != null) {
-            strictModeLastSafeSnapshot = newSnapshot.id();
+        if (strictModeChecker != null) {
+            strictModeChecker.update(newSnapshotId);
         }
         final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
         final List<ManifestEntry> finalDeltaFiles = deltaFiles;
@@ -1129,53 +1051,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         latest.nextRowId());
 
         return commitSnapshotImpl(newSnapshot, emptyList());
-    }
-
-    private long assignRowTrackingMeta(
-            long firstRowIdStart,
-            List<ManifestEntry> deltaFiles,
-            List<ManifestEntry> rowIdAssigned) {
-        if (deltaFiles.isEmpty()) {
-            return firstRowIdStart;
-        }
-        // assign row id for new files
-        long start = firstRowIdStart;
-        long blobStart = firstRowIdStart;
-        for (ManifestEntry entry : deltaFiles) {
-            checkArgument(
-                    entry.file().fileSource().isPresent(),
-                    "This is a bug, file source field for row-tracking table must present.");
-            if (entry.file().fileSource().get().equals(FileSource.APPEND)
-                    && entry.file().firstRowId() == null) {
-                if (isBlobFile(entry.file().fileName())) {
-                    if (blobStart >= start) {
-                        throw new IllegalStateException(
-                                String.format(
-                                        "This is a bug, blobStart %d should be less than start %d when assigning a blob entry file.",
-                                        blobStart, start));
-                    }
-                    long rowCount = entry.file().rowCount();
-                    rowIdAssigned.add(entry.assignFirstRowId(blobStart));
-                    blobStart += rowCount;
-                } else {
-                    long rowCount = entry.file().rowCount();
-                    rowIdAssigned.add(entry.assignFirstRowId(start));
-                    blobStart = start;
-                    start += rowCount;
-                }
-            } else {
-                // for compact file, do not assign first row id.
-                rowIdAssigned.add(entry);
-            }
-        }
-        return start;
-    }
-
-    private void assignSnapshotId(
-            long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
-        for (ManifestEntry entry : deltaFiles) {
-            snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
-        }
     }
 
     public void compactManifest() {

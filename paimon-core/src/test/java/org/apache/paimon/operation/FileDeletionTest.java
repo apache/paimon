@@ -77,7 +77,6 @@ import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
 import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
-import static org.apache.paimon.operation.commit.ConflictDetection.mustConflictCheck;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -931,7 +930,7 @@ public class FileDeletionTest {
                     Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
                     store.snapshotManager().latestSnapshot(),
-                    mustConflictCheck(),
+                    true,
                     null);
         }
     }

@@ -1966,15 +1966,20 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 SnapshotNotExistException.class,
                 () -> restCatalog.createTag(identifier, "my_tag_v3", 99999L, null, false));
 
-        // Test listTags
-        PagedList<String> tags = restCatalog.listTagsPaged(identifier, null, "my_tag");
+        // Test listTags for pageToken
+        PagedList<String> tags = restCatalog.listTagsPaged(identifier, 1, null, null);
+        tags = restCatalog.listTagsPaged(identifier, 1, tags.getNextPageToken(), null);
         assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
-        tags = restCatalog.listTagsPaged(identifier, null, null);
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
         assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag", "my_tag_v2");
+
+        // Test listTags for tagNamePrefix
+        tags = restCatalog.listTagsPaged(identifier, 1, null, "my_tag_v2");
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
 
         // Test deleteTag
         restCatalog.deleteTag(identifier, "my_tag");
-        tags = restCatalog.listTagsPaged(identifier, null, null);
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
         assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
 
         // Test deleteTag with non-existent tag
@@ -1988,7 +1993,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // Delete remaining tag
         restCatalog.deleteTag(identifier, "my_tag_v2");
-        tags = restCatalog.listTagsPaged(identifier, null, null);
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
         assertThat(tags.getElements()).isEmpty();
     }
 

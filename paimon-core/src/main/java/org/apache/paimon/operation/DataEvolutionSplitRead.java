@@ -165,7 +165,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 new Builder(
                         formatDiscover,
                         readRowType.getFields(),
-                        schema -> rowTypeWithRowTracking(schema.logicalRowType(), true).getFields(),
+                        // file has no row id and sequence number, they are in manifest entry
+                        schema ->
+                                rowTypeWithRowTracking(schema.logicalRowType(), true, true)
+                                        .getFields(),
                         null,
                         null,
                         null,

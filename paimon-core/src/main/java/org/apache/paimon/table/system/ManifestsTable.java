@@ -87,7 +87,9 @@ public class ManifestsTable implements ReadonlyTable {
                             new DataField(
                                     6,
                                     "max_partition_stats",
-                                    SerializationUtils.newStringType(true))));
+                                    SerializationUtils.newStringType(true)),
+                            new DataField(7, "min_row_id", new BigIntType(true)),
+                            new DataField(8, "max_row_id", new BigIntType(true))));
 
     private final FileStoreTable dataTable;
 
@@ -224,7 +226,9 @@ public class ManifestsTable implements ReadonlyTable {
                     manifestFileMeta.numDeletedFiles(),
                     manifestFileMeta.schemaId(),
                     partitionCastExecutor.cast(manifestFileMeta.partitionStats().minValues()),
-                    partitionCastExecutor.cast(manifestFileMeta.partitionStats().maxValues()));
+                    partitionCastExecutor.cast(manifestFileMeta.partitionStats().maxValues()),
+                    manifestFileMeta.minRowId(),
+                    manifestFileMeta.maxRowId());
         }
     }
 

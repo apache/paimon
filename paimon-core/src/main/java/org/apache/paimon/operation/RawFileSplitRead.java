@@ -183,7 +183,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         readRowType.getFields(),
                         schema -> {
                             if (rowTrackingEnabled) {
-                                return rowTypeWithRowTracking(schema.logicalRowType(), true)
+                                // maybe file has no row id and sequence number, but in manifest
+                                // entry
+                                return rowTypeWithRowTracking(schema.logicalRowType(), true, true)
                                         .getFields();
                             }
                             return schema.fields();

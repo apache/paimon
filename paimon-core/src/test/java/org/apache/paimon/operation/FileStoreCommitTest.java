@@ -84,7 +84,6 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
-import static org.apache.paimon.operation.commit.ConflictDetection.mustConflictCheck;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -1021,7 +1020,7 @@ public class FileStoreCommitTest {
                     Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
                     firstLatest,
-                    mustConflictCheck(),
+                    true,
                     null);
             // Compact
             commit.tryCommitOnce(
@@ -1034,7 +1033,7 @@ public class FileStoreCommitTest {
                     Collections.emptyMap(),
                     Snapshot.CommitKind.COMPACT,
                     store.snapshotManager().latestSnapshot(),
-                    mustConflictCheck(),
+                    true,
                     null);
         }
         long id = store.snapshotManager().latestSnapshot().id();

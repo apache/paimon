@@ -20,16 +20,19 @@ from typing import List, Optional, Union
 
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
-                                                DatabaseNotExistException,
-                                                TableAlreadyExistException,
-                                                TableNotExistException)
+from pypaimon.catalog.catalog_exception import (
+    DatabaseAlreadyExistException,
+    DatabaseNotExistException,
+    TableAlreadyExistException,
+    TableNotExistException
+)
 from pypaimon.catalog.database import Database
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -114,6 +117,28 @@ class FileSystemCatalog(Catalog):
     def get_table_path(self, identifier: Identifier) -> str:
         db_path = self.get_database_path(identifier.get_database_name())
         return f"{db_path}/{identifier.get_table_name()}"
+
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.get_table(identifier)
+        except TableNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+
+        table_path = self.get_table_path(identifier)
+        schema_manager = SchemaManager(self.file_io, table_path)
+        try:
+            schema_manager.commit_changes(changes)
+        except Exception as e:
+            raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
 
     def commit_snapshot(
             self,

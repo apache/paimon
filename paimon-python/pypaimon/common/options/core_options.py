@@ -33,6 +33,16 @@ class ExternalPathStrategy(str, Enum):
     SPECIFIC_FS = "specific-fs"
 
 
+class MergeEngine(str, Enum):
+    """
+    Specifies the merge engine for table with primary key.
+    """
+    DEDUPLICATE = "deduplicate"
+    PARTIAL_UPDATE = "partial-update"
+    AGGREGATE = "aggregation"
+    FIRST_ROW = "first-row"
+
+
 class CoreOptions:
     """Core options for Paimon tables."""
     # File format constants
@@ -143,6 +153,13 @@ class CoreOptions:
         .with_description("Define the data block size.")
     )
 
+    METADATA_STATS_MODE: ConfigOption[str] = (
+        ConfigOptions.key("metadata.stats-mode")
+        .string_type()
+        .default_value("none")
+        .with_description("Stats Mode, Python by default is none. Java is truncate(16).")
+    )
+
     BLOB_AS_DESCRIPTOR: ConfigOption[bool] = (
         ConfigOptions.key("blob-as-descriptor")
         .boolean_type()
@@ -205,6 +222,14 @@ class CoreOptions:
         .boolean_type()
         .default_value(False)
         .with_description("Whether to enable deletion vectors.")
+    )
+
+    MERGE_ENGINE: ConfigOption[MergeEngine] = (
+        ConfigOptions.key("merge-engine")
+        .enum_type(MergeEngine)
+        .default_value(MergeEngine.DEDUPLICATE)
+        .with_description("Specify the merge engine for table with primary key. "
+                          "Options: deduplicate, partial-update, aggregation, first-row.")
     )
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
@@ -299,6 +324,9 @@ class CoreOptions:
     def file_block_size(self, default=None):
         return self.options.get(CoreOptions.FILE_BLOCK_SIZE, default)
 
+    def metadata_stats_enabled(self, default=None):
+        return self.options.get(CoreOptions.METADATA_STATS_MODE, default) == "full"
+
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
@@ -347,6 +375,9 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def merge_engine(self, default=None):
+        return self.options.get(CoreOptions.MERGE_ENGINE, default)
 
     def data_file_external_paths(self, default=None):
         external_paths_str = self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS, default)

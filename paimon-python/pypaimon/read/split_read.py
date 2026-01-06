@@ -334,15 +334,15 @@ class RawFileSplitRead(SplitRead):
         read_fields = self._get_final_read_data_fields()
         # If the current file needs to be further divided for reading, use ShardBatchReader
         if file.file_name in self.split.shard_file_idx_map:
-            (start_row, end_row) = self.split.shard_file_idx_map[file.file_name]
-            if (start_row, end_row) == (-1, -1):
+            (start_pos, end_pos) = self.split.shard_file_idx_map[file.file_name]
+            if (start_pos, end_pos) == (-1, -1):
                 return None
             else:
                 file_batch_reader = ShardBatchReader(self.file_reader_supplier(
                     file=file,
                     for_merge_read=False,
                     read_fields=read_fields,
-                    row_tracking_enabled=True), start_row, end_row)
+                    row_tracking_enabled=True), start_pos, end_pos)
         else:
             file_batch_reader = self.file_reader_supplier(
                 file=file,
@@ -568,15 +568,15 @@ class DataEvolutionSplitRead(SplitRead):
         """Create a file reader for a single file."""
         # If the current file needs to be further divided for reading, use ShardBatchReader
         if file.file_name in self.split.shard_file_idx_map:
-            (begin_row, end_row) = self.split.shard_file_idx_map[file.file_name]
-            if (begin_row, end_row) == (-1, -1):
+            (begin_pos, end_pos) = self.split.shard_file_idx_map[file.file_name]
+            if (begin_pos, end_pos) == (-1, -1):
                 return None
             else:
                 return ShardBatchReader(self.file_reader_supplier(
                     file=file,
                     for_merge_read=False,
                     read_fields=read_fields,
-                    row_tracking_enabled=True), begin_row, end_row)
+                    row_tracking_enabled=True), begin_pos, end_pos)
         else:
             return self.file_reader_supplier(
                 file=file,

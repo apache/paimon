@@ -21,6 +21,7 @@ from typing import List, Optional, Union
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
@@ -53,6 +54,15 @@ class Catalog(ABC):
     @abstractmethod
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         """Create table with schema."""
+
+    @abstractmethod
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        """Alter table with schema changes."""
 
     def supports_version_management(self) -> bool:
         """

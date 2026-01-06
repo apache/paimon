@@ -18,7 +18,7 @@
 import logging
 from typing import Callable, Dict, List, Optional, Union
 
-from pypaimon.api.api_request import (AlterDatabaseRequest, CommitTableRequest,
+from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest, CommitTableRequest,
                                       CreateDatabaseRequest,
                                       CreateTableRequest, RenameTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
@@ -286,6 +286,17 @@ class RESTApi:
         request = RenameTableRequest(source_identifier, target_identifier)
         return self.client.post(
             self.resource_paths.rename_table(),
+            request,
+            self.rest_auth_function)
+
+    def alter_table(self, identifier: Identifier, changes: List):
+        database_name, table_name = self.__validate_identifier(identifier)
+        if not changes:
+            raise ValueError("Changes cannot be empty")
+
+        request = AlterTableRequest(changes)
+        return self.client.post(
+            self.resource_paths.table(database_name, table_name),
             request,
             self.rest_auth_function)
 

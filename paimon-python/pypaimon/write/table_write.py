@@ -68,6 +68,11 @@ class TableWrite:
         self.file_store_write.write_cols = write_cols
         return self
 
+    def write_raydata(self, dataset, overwrite=False, parallelism=1):
+        from pypaimon.write.ray_datasink import PaimonDatasink
+        datasink = PaimonDatasink(self.table, overwrite=overwrite)
+        dataset.write_datasink(datasink, concurrency=parallelism)
+
     def close(self):
         self.file_store_write.close()
 

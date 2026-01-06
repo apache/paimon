@@ -248,6 +248,17 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testManifestsTableWihRowId() {
+        sql(
+                "CREATE TABLE T (a INT, b INT) WITH ('data-evolution.enabled'='true', 'row-tracking.enabled'='true')");
+        sql("INSERT INTO T VALUES (1, 2), (3, 4)");
+        sql("INSERT INTO T VALUES (5, 6), (7, 8)");
+
+        List<Row> result = sql("SELECT min_row_id, max_row_id FROM T$manifests");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(0L, 1L), Row.of(2L, 3L));
+    }
+
+    @Test
     public void testSchemasTable() {
         sql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
@@ -611,6 +622,35 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         Row.of("dt=2020-01-02/hh=11"), Row.of("dt=2020-01-03/hh=11"));
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
+
+        sql(
+                "CREATE TABLE PartitionTableWithDVEnabled (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh) WITH ('deletion-vectors.enabled'='true', 'write-only'='true')");
+        sql("INSERT INTO PartitionTableWithDVEnabled select 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO PartitionTableWithDVEnabled select 2,2,'b','2020-01-02','11'");
+        sql("INSERT INTO PartitionTableWithDVEnabled select 3,3,'c','2020-01-03','11'");
+        result = sql("SHOW PARTITIONS PartitionTableWithDVEnabled");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-01/hh=10"),
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"));
+
+        result = sql("SHOW PARTITIONS PartitionTableWithDVEnabled partition (hh='11')");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-02/hh=11"), Row.of("dt=2020-01-03/hh=11"));
+
+        result =
+                sql(
+                        "SHOW PARTITIONS PartitionTableWithDVEnabled partition (dt='2020-01-02', hh='11')");
         assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
     }
 

@@ -163,19 +163,14 @@ public class ManifestEntryChanges {
     }
 
     public static List<BinaryRow> changedPartitions(
-            List<ManifestEntry> appendTableFiles,
-            List<ManifestEntry> compactTableFiles,
-            List<IndexManifestEntry> appendIndexFiles) {
+            List<ManifestEntry> dataFileChanges, List<IndexManifestEntry> indexFileChanges) {
         Set<BinaryRow> changedPartitions = new HashSet<>();
-        for (ManifestEntry appendTableFile : appendTableFiles) {
-            changedPartitions.add(appendTableFile.partition());
+        for (ManifestEntry file : dataFileChanges) {
+            changedPartitions.add(file.partition());
         }
-        for (ManifestEntry compactTableFile : compactTableFiles) {
-            changedPartitions.add(compactTableFile.partition());
-        }
-        for (IndexManifestEntry appendIndexFile : appendIndexFiles) {
-            if (appendIndexFile.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
-                changedPartitions.add(appendIndexFile.partition());
+        for (IndexManifestEntry file : indexFileChanges) {
+            if (file.indexFile().indexType().equals(DELETION_VECTORS_INDEX)) {
+                changedPartitions.add(file.partition());
             }
         }
         return new ArrayList<>(changedPartitions);
