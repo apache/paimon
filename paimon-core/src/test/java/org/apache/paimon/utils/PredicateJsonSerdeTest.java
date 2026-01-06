@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.IsNotNull;
+import org.apache.paimon.predicate.NullTransform;
 import org.apache.paimon.predicate.PartialMaskTransform;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.Transform;
@@ -65,6 +66,18 @@ class PredicateJsonSerdeTest {
 
         assertThat(parsed).isNotNull();
         assertThat(parsed).isInstanceOf(PartialMaskTransform.class);
+        assertThat(TransformJsonSerde.toJsonString(parsed)).isEqualTo(json);
+    }
+
+    @Test
+    void testNullTransformToJsonAndParseTransform() throws Exception {
+        Transform transform = new NullTransform(new FieldRef(0, "col1", DataTypes.INT()));
+
+        String json = TransformJsonSerde.toJsonString(transform);
+        Transform parsed = TransformJsonSerde.parse(json);
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed).isInstanceOf(NullTransform.class);
         assertThat(TransformJsonSerde.toJsonString(parsed)).isEqualTo(json);
     }
 

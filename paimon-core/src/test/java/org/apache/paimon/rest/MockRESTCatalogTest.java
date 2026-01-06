@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterThan;
 import org.apache.paimon.predicate.HashMaskTransform;
+import org.apache.paimon.predicate.NullTransform;
 import org.apache.paimon.predicate.PartialMaskTransform;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.TransformPredicate;
@@ -309,7 +310,9 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         catalog.createTable(
                 identifier,
                 new Schema(
-                        Collections.singletonList(new DataField(0, "col1", DataTypes.STRING())),
+                        Arrays.asList(
+                                new DataField(0, "col1", DataTypes.STRING()),
+                                new DataField(1, "col2", DataTypes.INT())),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
@@ -318,11 +321,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
         Table table = catalog.getTable(identifier);
 
-        // write two rows: "abcdef", "ghijkl"
+        // write two rows: ("abcdef", 1), ("ghijkl", 2)
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
-        write.write(GenericRow.of(BinaryString.fromString("abcdef")));
-        write.write(GenericRow.of(BinaryString.fromString("ghijkl")));
+        write.write(GenericRow.of(BinaryString.fromString("abcdef"), 1));
+        write.write(GenericRow.of(BinaryString.fromString("ghijkl"), 2));
         List<CommitMessage> messages = write.prepareCommit();
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(messages);
@@ -342,8 +345,14 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             RecordReader<InternalRow> reader = read.createReader(splits);
 
             List<String> actual = new ArrayList<>();
-            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            List<Integer> col2 = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        actual.add(row.getString(0).toString());
+                        col2.add(row.getInt(1));
+                    });
             assertThat(actual).containsExactly("****", "****");
+            assertThat(col2).containsExactly(1, 2);
         }
 
         {
@@ -363,8 +372,14 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             RecordReader<InternalRow> reader = read.createReader(splits);
 
             List<String> actual = new ArrayList<>();
-            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            List<Integer> col2 = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        actual.add(row.getString(0).toString());
+                        col2.add(row.getInt(1));
+                    });
             assertThat(actual).containsExactly("ab**ef", "gh**kl");
+            assertThat(col2).containsExactly(1, 2);
         }
 
         {
@@ -384,8 +399,14 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             RecordReader<InternalRow> reader = read.createReader(splits);
 
             List<String> actual = new ArrayList<>();
-            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            List<Integer> col2 = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        actual.add(row.getString(0).toString());
+                        col2.add(row.getInt(1));
+                    });
             assertThat(actual).containsExactly("MASK_abcdef_END", "MASK_ghijkl_END");
+            assertThat(col2).containsExactly(1, 2);
         }
 
         {
@@ -406,8 +427,14 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             RecordReader<InternalRow> reader = read.createReader(splits);
 
             List<String> actual = new ArrayList<>();
-            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            List<Integer> col2 = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        actual.add(row.getString(0).toString());
+                        col2.add(row.getInt(1));
+                    });
             assertThat(actual).containsExactly("PFX_abcdef_SFX", "PFX_ghijkl_SFX");
+            assertThat(col2).containsExactly(1, 2);
         }
 
         {
@@ -424,11 +451,40 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             RecordReader<InternalRow> reader = read.createReader(splits);
 
             List<String> actual = new ArrayList<>();
-            reader.forEachRemaining(row -> actual.add(row.getString(0).toString()));
+            List<Integer> col2 = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        actual.add(row.getString(0).toString());
+                        col2.add(row.getInt(1));
+                    });
             assertThat(actual)
                     .containsExactly(
                             "bef57ec7f53a6d40beb640a780a639c83bc29ac8a9816f1fc6c5c6dcd93c4721",
                             "54f6ee81b58accbc57adbceb0f50264897626060071dc9e92f897e7b373deb93");
+            assertThat(col2).containsExactly(1, 2);
+        }
+
+        {
+            // Mask col1 as NULL for any type
+            Transform nullMaskTransform =
+                    new NullTransform(new FieldRef(0, "col1", DataTypes.STRING()));
+            restCatalogServer.addTableColumnMasking(
+                    identifier, ImmutableMap.of("col1", nullMaskTransform));
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+
+            List<Boolean> isNull = new ArrayList<>();
+            List<Integer> col2 = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        isNull.add(row.isNullAt(0));
+                        col2.add(row.getInt(1));
+                    });
+            assertThat(isNull).containsExactly(true, true);
+            assertThat(col2).containsExactly(1, 2);
         }
     }
 

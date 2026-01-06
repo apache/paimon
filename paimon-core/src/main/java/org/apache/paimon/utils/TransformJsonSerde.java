@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.HashMaskTransform;
+import org.apache.paimon.predicate.NullTransform;
 import org.apache.paimon.predicate.PartialMaskTransform;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
@@ -57,6 +58,7 @@ public class TransformJsonSerde {
     private static final String TRANSFORM_TYPE_CAST = "cast";
     private static final String TRANSFORM_TYPE_MASK = "mask";
     private static final String TRANSFORM_TYPE_HASH = "hash";
+    private static final String TRANSFORM_TYPE_NULL = "null";
     private static final String TRANSFORM_TYPE_LITERAL = "literal";
 
     private static final String FIELD_INPUTS = "inputs";
@@ -151,6 +153,14 @@ public class TransformJsonSerde {
             return node;
         }
 
+        if (transform instanceof NullTransform) {
+            NullTransform nullTransform = (NullTransform) transform;
+            ObjectNode node = MAPPER.createObjectNode();
+            node.put(FIELD_TYPE, TRANSFORM_TYPE_NULL);
+            node.set(FIELD_FIELD, fieldRefToJsonNode(nullTransform.fieldRef()));
+            return node;
+        }
+
         throw new IllegalArgumentException(
                 "Unsupported transform type: " + transform.getClass().getName());
     }
@@ -203,6 +213,10 @@ public class TransformJsonSerde {
             String salt = optionalText(node, FIELD_SALT, null);
             return new HashMaskTransform(
                     fieldRef, algorithm, salt == null ? null : BinaryString.fromString(salt));
+        }
+        if (TRANSFORM_TYPE_NULL.equals(type)) {
+            FieldRef fieldRef = parseFieldRef(required(node, FIELD_FIELD));
+            return new NullTransform(fieldRef);
         }
         throw new IllegalArgumentException("Unsupported transform type: " + type);
     }
