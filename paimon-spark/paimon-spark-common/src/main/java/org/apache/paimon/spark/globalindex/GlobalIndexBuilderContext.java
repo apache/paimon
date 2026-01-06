@@ -27,6 +27,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Range;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -36,45 +39,57 @@ import java.io.Serializable;
  *
  * <p>This class is serializable to support Spark distributed execution. The partition is stored
  * both as a transient {@link BinaryRow} and as serialized bytes to ensure proper serialization
- * across executor nodes.
+ * across executor nodes. Partition info can be null if the actual index partition is dynamically
+ * extracted from data.
  */
 public class GlobalIndexBuilderContext implements Serializable {
 
     private final FileStoreTable table;
-    private final BinaryRowSerializer binaryRowSerializer;
-    private final byte[] partitionBytes;
+    @Nullable private final BinaryRowSerializer binaryRowSerializer;
+    @Nullable private final byte[] partitionBytes;
     private final RowType readType;
     private final DataField indexField;
     private final String indexType;
     private final long startOffset;
     private final Options options;
+    @Nullable private final Range fullRange;
 
     public GlobalIndexBuilderContext(
             FileStoreTable table,
-            BinaryRow partition,
+            @Nullable BinaryRow partition,
             RowType readType,
             DataField indexField,
             String indexType,
             long startOffset,
-            Options options) {
+            Options options,
+            @Nullable Range fullRange) {
         this.table = table;
         this.readType = readType;
         this.indexField = indexField;
         this.indexType = indexType;
         this.startOffset = startOffset;
         this.options = options;
+        this.fullRange = fullRange;
 
-        this.binaryRowSerializer = new BinaryRowSerializer(partition.getFieldCount());
-        try {
-            this.partitionBytes = binaryRowSerializer.serializeToBytes(partition);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        if (partition != null) {
+            this.binaryRowSerializer = new BinaryRowSerializer(partition.getFieldCount());
+            try {
+                this.partitionBytes = binaryRowSerializer.serializeToBytes(partition);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } else {
+            this.binaryRowSerializer = null;
+            this.partitionBytes = null;
         }
     }
 
+    @Nullable
     public BinaryRow partition() {
         try {
-            return binaryRowSerializer.deserializeFromBytes(partitionBytes);
+            return partitionBytes == null || binaryRowSerializer == null
+                    ? null
+                    : binaryRowSerializer.deserializeFromBytes(partitionBytes);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -108,5 +123,10 @@ public class GlobalIndexBuilderContext implements Serializable {
         FileIO fileIO = table.fileIO();
         IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
         return new GlobalIndexFileReadWrite(fileIO, indexPathFactory);
+    }
+
+    @Nullable
+    public Range fullRange() {
+        return fullRange;
     }
 }

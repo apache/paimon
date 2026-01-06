@@ -18,27 +18,27 @@
 
 package org.apache.paimon.spark.globalindex;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
-import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 
 /** User defined topology builder. */
 public interface GlobalIndexTopoBuilder {
 
     List<CommitMessage> buildIndex(
-            JavaSparkContext javaSparkContext,
+            SparkSession spark,
+            DataSourceV2Relation relation,
+            PartitionPredicate partitionPredicate,
             FileStoreTable table,
-            Map<BinaryRow, List<IndexedSplit>> preparedDS,
             String indexType,
             RowType readType,
             DataField indexField,

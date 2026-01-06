@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
 import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
@@ -36,11 +37,14 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.StringUtils;
@@ -164,33 +168,39 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         ProcedureUtils.putAllOptions(parsedOptions, optionString);
                         Options userOptions = Options.fromMap(parsedOptions);
                         Options tableOptions = new Options(table.options());
-                        long rowsPerShard =
-                                tableOptions
-                                        .getOptional(GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
-                                        .orElse(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.defaultValue());
-                        checkArgument(
-                                rowsPerShard > 0,
-                                "Option 'global-index.row-count-per-shard' must be greater than 0.");
-
-                        // Step 1: generate splits for each partition&&shard
-                        Map<BinaryRow, List<IndexedSplit>> splits =
-                                split(table, partitionPredicate, rowsPerShard);
 
                         List<CommitMessage> indexResults;
-                        // Step 2: build index by certain index system
-                        GlobalIndexTopoBuilder topoBuildr =
+                        // Step 1: build index by certain index system
+                        GlobalIndexTopoBuilder topoBuilder =
                                 GlobalIndexBuilderFactoryUtils.createTopoBuilder(indexType);
-                        if (topoBuildr != null) {
+                        System.out.println("Topo Builder in driver: " + topoBuilder);
+                        if (topoBuilder != null) {
+                            // do not need to prepare index shards for custom topo builder
                             indexResults =
-                                    topoBuildr.buildIndex(
-                                            new JavaSparkContext(spark().sparkContext()),
+                                    topoBuilder.buildIndex(
+                                            spark(),
+                                            relation,
+                                            partitionPredicate,
                                             table,
-                                            splits,
                                             indexType,
                                             readRowType,
                                             indexField,
                                             userOptions);
                         } else {
+                            long rowsPerShard =
+                                    tableOptions
+                                            .getOptional(GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
+                                            .orElse(
+                                                    GLOBAL_INDEX_ROW_COUNT_PER_SHARD
+                                                            .defaultValue());
+                            checkArgument(
+                                    rowsPerShard > 0,
+                                    "Option 'global-index.row-count-per-shard' must be greater than 0.");
+
+                            // generate splits for each partition&&shard
+                            Map<BinaryRow, List<IndexedSplit>> splits =
+                                    split(table, partitionPredicate, rowsPerShard);
+
                             indexResults =
                                     buildIndex(
                                             table,
@@ -201,7 +211,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                             userOptions);
                         }
 
-                        // Step 3: commit index meta to a new snapshot
+                        // Step 2: commit index meta to a new snapshot
                         commit(table, indexResults);
 
                         return new InternalRow[] {newInternalRow(true)};
@@ -241,7 +251,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 indexField,
                                 indexType,
                                 indexedSplit.rowRanges().get(0).from,
-                                options);
+                                options,
+                                null);
 
                 byte[] dsBytes = InstantiationUtil.serializeObject(indexedSplit);
                 taskList.add(Pair.of(builderContext, dsBytes));
@@ -264,8 +275,20 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                     GlobalIndexBuilder globalIndexBuilder =
                                             GlobalIndexBuilderFactoryUtils.createIndexBuilder(
                                                     builderContext);
-                                    return commitMessageSerializer.serialize(
-                                            globalIndexBuilder.build(split));
+                                    ReadBuilder builder = builderContext.table().newReadBuilder();
+                                    builder.withReadType(builderContext.readType());
+
+                                    try (RecordReader<org.apache.paimon.data.InternalRow>
+                                                    recordReader =
+                                                            builder.newRead().createReader(split);
+                                            CloseableIterator<org.apache.paimon.data.InternalRow>
+                                                    data = recordReader.toCloseableIterator()) {
+                                        List<CommitMessage> commitMessage =
+                                                globalIndexBuilder.build(data);
+                                        Preconditions.checkState(commitMessage.size() == 1);
+                                        return commitMessageSerializer.serialize(
+                                                commitMessage.get(0));
+                                    }
                                 })
                         .collect();
 
