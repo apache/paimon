@@ -32,6 +32,7 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.DefaultValueTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.GreaterThan;
@@ -485,6 +486,35 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                     });
             assertThat(isNull).containsExactly(true, true);
             assertThat(col2).containsExactly(1, 2);
+        }
+
+        {
+            // Mask columns as their type default values: col1 -> "", col2 -> 0
+            Transform defaultValueMaskCol1 =
+                    new DefaultValueTransform(new FieldRef(0, "col1", DataTypes.STRING()));
+            Transform defaultValueMaskCol2 =
+                    new DefaultValueTransform(new FieldRef(1, "col2", DataTypes.INT()));
+            restCatalogServer.addTableColumnMasking(
+                    identifier,
+                    ImmutableMap.of("col1", defaultValueMaskCol1, "col2", defaultValueMaskCol2));
+
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits = readBuilder.newScan().plan().splits();
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+
+            List<String> col1 = new ArrayList<>();
+            List<Integer> col2 = new ArrayList<>();
+            List<Boolean> col1IsNull = new ArrayList<>();
+            reader.forEachRemaining(
+                    row -> {
+                        col1IsNull.add(row.isNullAt(0));
+                        col1.add(row.getString(0).toString());
+                        col2.add(row.getInt(1));
+                    });
+            assertThat(col1IsNull).containsExactly(false, false);
+            assertThat(col1).containsExactly("", "");
+            assertThat(col2).containsExactly(0, 0);
         }
     }
 

@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.DefaultValueTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.NullTransform;
@@ -78,6 +79,18 @@ class PredicateJsonSerdeTest {
 
         assertThat(parsed).isNotNull();
         assertThat(parsed).isInstanceOf(NullTransform.class);
+        assertThat(TransformJsonSerde.toJsonString(parsed)).isEqualTo(json);
+    }
+
+    @Test
+    void testDefaultValueTransformToJsonAndParseTransform() throws Exception {
+        Transform transform = new DefaultValueTransform(new FieldRef(0, "col1", DataTypes.INT()));
+
+        String json = TransformJsonSerde.toJsonString(transform);
+        Transform parsed = TransformJsonSerde.parse(json);
+
+        assertThat(parsed).isNotNull();
+        assertThat(parsed).isInstanceOf(DefaultValueTransform.class);
         assertThat(TransformJsonSerde.toJsonString(parsed)).isEqualTo(json);
     }
 

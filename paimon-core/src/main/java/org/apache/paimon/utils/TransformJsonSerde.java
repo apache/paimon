@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.CastTransform;
 import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.DefaultValueTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
 import org.apache.paimon.predicate.HashMaskTransform;
@@ -59,6 +60,7 @@ public class TransformJsonSerde {
     private static final String TRANSFORM_TYPE_MASK = "mask";
     private static final String TRANSFORM_TYPE_HASH = "hash";
     private static final String TRANSFORM_TYPE_NULL = "null";
+    private static final String TRANSFORM_TYPE_DEFAULT = "default";
     private static final String TRANSFORM_TYPE_LITERAL = "literal";
 
     private static final String FIELD_INPUTS = "inputs";
@@ -160,6 +162,13 @@ public class TransformJsonSerde {
             node.set(FIELD_FIELD, fieldRefToJsonNode(nullTransform.fieldRef()));
             return node;
         }
+        if (transform instanceof DefaultValueTransform) {
+            DefaultValueTransform defaultValueTransform = (DefaultValueTransform) transform;
+            ObjectNode node = MAPPER.createObjectNode();
+            node.put(FIELD_TYPE, TRANSFORM_TYPE_DEFAULT);
+            node.set(FIELD_FIELD, fieldRefToJsonNode(defaultValueTransform.fieldRef()));
+            return node;
+        }
 
         throw new IllegalArgumentException(
                 "Unsupported transform type: " + transform.getClass().getName());
@@ -217,6 +226,10 @@ public class TransformJsonSerde {
         if (TRANSFORM_TYPE_NULL.equals(type)) {
             FieldRef fieldRef = parseFieldRef(required(node, FIELD_FIELD));
             return new NullTransform(fieldRef);
+        }
+        if (TRANSFORM_TYPE_DEFAULT.equals(type)) {
+            FieldRef fieldRef = parseFieldRef(required(node, FIELD_FIELD));
+            return new DefaultValueTransform(fieldRef);
         }
         throw new IllegalArgumentException("Unsupported transform type: " + type);
     }
