@@ -506,7 +506,7 @@ class AoReaderTest(unittest.TestCase):
             self.assertEqual(user_ids, expected_user_ids,
                              f"Iteration {test_iteration}: User IDs mismatch")
 
-            # Verify snapshot count  (should have num_threads snapshots)
+            # Verify snapshot count (should have num_threads snapshots)
             snapshot_manager = SnapshotManager(table)
             latest_snapshot = snapshot_manager.get_latest_snapshot()
             self.assertIsNotNone(latest_snapshot,
