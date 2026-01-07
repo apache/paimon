@@ -19,6 +19,7 @@
 package org.apache.paimon.append.cluster;
 
 import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
@@ -177,6 +178,11 @@ public class BucketedAppendClusterManager extends CompactFutureManager {
 
     @Override
     public void close() throws IOException {}
+
+    @VisibleForTesting
+    public BucketedAppendLevels levels() {
+        return levels;
+    }
 
     /** A {@link CompactTask} impl for clustering of append bucketed table. */
     public static class BucketedAppendClusterTask extends CompactTask {
