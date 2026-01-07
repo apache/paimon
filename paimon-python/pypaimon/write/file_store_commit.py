@@ -16,10 +16,13 @@
 # limitations under the License.
 ################################################################################
 
+import logging
+import random
 import time
 import uuid
-from typing import List
+from typing import List, Optional
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -34,6 +37,34 @@ from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
 from pypaimon.write.commit_message import CommitMessage
+
+logger = logging.getLogger(__name__)
+
+
+class CommitResult:
+    """Base class for commit results."""
+
+    def is_success(self) -> bool:
+        """Returns True if commit was successful."""
+        raise NotImplementedError
+
+
+class SuccessResult(CommitResult):
+    """Result indicating successful commit."""
+
+    def is_success(self) -> bool:
+        return True
+
+
+class RetryResult(CommitResult):
+
+    def __init__(self, latest_snapshot, base_data_files, exception: Optional[Exception] = None):
+        self.latest_snapshot = latest_snapshot
+        self.base_data_files = base_data_files
+        self.exception = exception
+
+    def is_success(self) -> bool:
+        return False
 
 
 class FileStoreCommit:
@@ -58,6 +89,11 @@ class FileStoreCommit:
         self.manifest_target_size = 8 * 1024 * 1024
         self.manifest_merge_min_count = 30
 
+        self.commit_max_retries = table.options.commit_max_retries()
+        self.commit_timeout = table.options.commit_timeout()
+        self.commit_min_retry_wait = table.options.commit_min_retry_wait()
+        self.commit_max_retry_wait = table.options.commit_max_retry_wait()
+
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
         if not commit_messages:
@@ -75,9 +111,11 @@ class FileStoreCommit:
                     file=file
                 ))
 
-        self._try_commit(commit_kind="APPEND",
-                         commit_entries=commit_entries,
-                         commit_identifier=commit_identifier)
+        self._try_commit(
+            commit_kind="APPEND",
+            commit_entries=commit_entries,
+            commit_identifier=commit_identifier
+        )
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -99,27 +137,93 @@ class FileStoreCommit:
                     raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
                                        f"in {msg.partition} does not belong to this partition")
 
-        commit_entries = []
-        current_entries = FullStartingScanner(self.table, partition_filter, None).plan_files()
-        for entry in current_entries:
-            entry.kind = 1
-            commit_entries.append(entry)
-        for msg in commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
-            for file in msg.new_files:
-                commit_entries.append(ManifestEntry(
-                    kind=0,
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
+        self._overwrite_partition_filter = partition_filter
+        self._overwrite_commit_messages = commit_messages
 
-        self._try_commit(commit_kind="OVERWRITE",
-                         commit_entries=commit_entries,
-                         commit_identifier=commit_identifier)
+        self._try_commit(
+            commit_kind="OVERWRITE",
+            commit_entries=None,  # Will be generated in _try_commit based on latest snapshot
+            commit_identifier=commit_identifier
+        )
 
     def _try_commit(self, commit_kind, commit_entries, commit_identifier):
+        import threading
+
+        retry_count = 0
+        retry_result = None
+        start_time_ms = int(time.time() * 1000)
+        thread_id = threading.current_thread().name
+        try:
+            while True:
+                latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+
+                if commit_kind == "OVERWRITE":
+                    commit_entries = self._generate_overwrite_entries(latest_snapshot)
+
+                result = self._try_commit_once(
+                    retry_result=retry_result,
+                    commit_kind=commit_kind,
+                    commit_entries=commit_entries,
+                    commit_identifier=commit_identifier,
+                    latest_snapshot=latest_snapshot
+                )
+
+                if result.is_success():
+                    logger.warning(
+                        f"Thread {thread_id}: commit success {latest_snapshot.id + 1 if latest_snapshot else 1} "
+                        f"after {retry_count} retries"
+                    )
+                    break
+
+                retry_result = result
+
+                elapsed_ms = int(time.time() * 1000) - start_time_ms
+                if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
+                    error_msg = (
+                        f"Thread {thread_id}: Commit failed after {elapsed_ms} millis with {retry_count} retries, "
+                        f"there maybe exist commit conflicts between multiple jobs."
+                    )
+                    logger.warning(
+                        f"Thread {thread_id}: thread commit failed {latest_snapshot.id + 1 if latest_snapshot else 1} "
+                        f"after {retry_count} retries"
+                    )
+                    if retry_result.exception:
+                        raise RuntimeError(error_msg) from retry_result.exception
+                    else:
+                        raise RuntimeError(error_msg)
+
+                self._commit_retry_wait(retry_count)
+                retry_count += 1
+        finally:
+            logger.warning(f"Thread {thread_id}: finally commit {result.is_success()}, {retry_count} retries")
+
+    def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
+                         commit_entries: List[ManifestEntry], commit_identifier: int,
+                         latest_snapshot: Optional[Snapshot]) -> CommitResult:
+        import threading
+        thread_id = threading.current_thread().name
+        start_time_ms = int(time.time() * 1000)
+
+        if retry_result is not None and latest_snapshot is not None:
+            start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
+            if retry_result.latest_snapshot is not None:
+                start_check_snapshot_id = retry_result.latest_snapshot.id + 1
+
+            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 1):
+                try:
+                    snapshot = self.snapshot_manager.snapshot(snapshot_id)
+                    if (snapshot.commit_user == self.commit_user and
+                            snapshot.commit_identifier == commit_identifier and
+                            snapshot.commit_kind == commit_kind):
+                        logger.info(
+                            f"Thread {thread_id}: Commit already completed (snapshot {snapshot_id}), "
+                            f"user: {self.commit_user}, identifier: {commit_identifier}"
+                        )
+                        return SuccessResult()
+                except Exception:
+                    # If snapshot doesn't exist, continue checking
+                    continue
+
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
@@ -130,7 +234,6 @@ class FileStoreCommit:
         deleted_file_count = 0
         delta_record_count = 0
         # process snapshot
-        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
 
         # Check if row tracking is enabled
@@ -155,50 +258,70 @@ class FileStoreCommit:
             else:
                 deleted_file_count += 1
                 delta_record_count -= entry.file.row_count
-        self.manifest_file_manager.write(new_manifest_file, commit_entries)
-        # TODO: implement noConflictsOrFail logic
-        partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
-        partition_min_stats = [min(col) for col in partition_columns]
-        partition_max_stats = [max(col) for col in partition_columns]
-        partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
-        if not all(count == 0 for count in partition_null_counts):
-            raise RuntimeError("Partition value should not be null")
-        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
-        new_manifest_list = ManifestFileMeta(
-            file_name=new_manifest_file,
-            file_size=self.table.file_io.get_file_size(manifest_file_path),
-            num_added_files=added_file_count,
-            num_deleted_files=deleted_file_count,
-            partition_stats=SimpleStats(
-                min_values=GenericRow(
-                    values=partition_min_stats,
-                    fields=self.table.partition_keys_fields
-                ),
-                max_values=GenericRow(
-                    values=partition_max_stats,
-                    fields=self.table.partition_keys_fields
-                ),
-                null_counts=partition_null_counts,
-            ),
-            schema_id=self.table.table_schema.id,
-        )
-        self.manifest_list_manager.write(delta_manifest_list, [new_manifest_list])
 
-        # process existing_manifest
-        total_record_count = 0
-        if latest_snapshot:
-            existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
-            previous_record_count = latest_snapshot.total_record_count
-            if previous_record_count:
-                total_record_count += previous_record_count
-        else:
-            existing_manifest_files = []
-        self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
+        created_manifest_file = None
+        created_delta_manifest_list = None
+        created_base_manifest_list = None
 
-        # process snapshot
+        try:
+            self.manifest_file_manager.write(new_manifest_file, commit_entries)
+            created_manifest_file = new_manifest_file
+
+            # TODO: implement noConflictsOrFail logic
+            partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
+            partition_min_stats = [min(col) for col in partition_columns]
+            partition_max_stats = [max(col) for col in partition_columns]
+            partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
+            if not all(count == 0 for count in partition_null_counts):
+                raise RuntimeError("Partition value should not be null")
+
+            manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
+            file_size = self.table.file_io.get_file_size(manifest_file_path)
+
+            new_manifest_list = ManifestFileMeta(
+                file_name=new_manifest_file,
+                file_size=file_size,
+                num_added_files=added_file_count,
+                num_deleted_files=deleted_file_count,
+                partition_stats=SimpleStats(
+                    min_values=GenericRow(
+                        values=partition_min_stats,
+                        fields=self.table.partition_keys_fields
+                    ),
+                    max_values=GenericRow(
+                        values=partition_max_stats,
+                        fields=self.table.partition_keys_fields
+                    ),
+                    null_counts=partition_null_counts,
+                ),
+                schema_id=self.table.table_schema.id,
+            )
+
+            self.manifest_list_manager.write(delta_manifest_list, [new_manifest_list])
+            created_delta_manifest_list = delta_manifest_list
+
+            # process existing_manifest
+            total_record_count = 0
+            if latest_snapshot:
+                existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+                previous_record_count = latest_snapshot.total_record_count
+                if previous_record_count:
+                    total_record_count += previous_record_count
+            else:
+                existing_manifest_files = []
+
+            self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
+            created_base_manifest_list = base_manifest_list
+
+        except Exception as e:
+            self._cleanup_preparation_failure(created_manifest_file, created_delta_manifest_list,
+                                              created_base_manifest_list)
+            logger.warning(f"Thread {thread_id}: Exception occurs when preparing snapshot: {e}", exc_info=True)
+            return RetryResult(latest_snapshot, [], e)
+
         total_record_count += delta_record_count
         snapshot_data = Snapshot(
-            version=3,
+            version=1,
             id=new_snapshot_id,
             schema_id=self.table.table_schema.id,
             base_manifest_list=base_manifest_list,
@@ -211,15 +334,116 @@ class FileStoreCommit:
             time_millis=int(time.time() * 1000),
             next_row_id=next_row_id,
         )
-
+        logger.warning(
+            f"Thread {thread_id}: generate snapshot {snapshot_data}."
+        )
         # Generate partition statistics for the commit
         statistics = self._generate_partition_statistics(commit_entries)
 
         # Use SnapshotCommit for atomic commit
-        with self.snapshot_commit:
-            success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
-            if not success:
-                raise RuntimeError(f"Failed to commit snapshot {new_snapshot_id}")
+        base_data_files = []  # Python doesn't have conflict detection, so base_data_files is empty
+
+        try:
+            with self.snapshot_commit:
+                success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
+                if not success:
+                    # Commit failed, clean up temporary files and retry
+                    commit_time_sec = (int(time.time() * 1000) - start_time_ms) / 1000
+                    logger.warning(
+                        f"Thread {thread_id}: Atomic commit failed for snapshot #{new_snapshot_id} by user {self.commit_user} "
+                        f"with identifier {commit_identifier} and kind {commit_kind} after {commit_time_sec}s. "
+                        f"Clean up and try again."
+                    )
+                    # self._cleanup_commit_failure(base_manifest_list, delta_manifest_list)
+                    self._cleanup_preparation_failure(created_manifest_file, created_delta_manifest_list,
+                                                      created_base_manifest_list)
+                    return RetryResult(latest_snapshot, base_data_files, None)
+        except Exception as e:
+            # Commit exception, not sure about the situation and should not clean up the files
+            logger.warning(f"Thread {thread_id}: Retry commit for exception: {e}", exc_info=True)
+            return RetryResult(latest_snapshot, base_data_files, e)
+
+        logger.warning(
+            f"Thread {thread_id}: Successfully commit snapshot {snapshot_data}."
+        )
+        return SuccessResult()
+
+    def _generate_overwrite_entries(self, latest_snapshot):
+        """Generate commit entries for OVERWRITE mode based on latest snapshot."""
+        entries = []
+        current_entries = FullStartingScanner(self.table, self._overwrite_partition_filter, None).plan_files()
+        for entry in current_entries:
+            entry.kind = 1  # DELETE
+            entries.append(entry)
+        for msg in self._overwrite_commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            for file in msg.new_files:
+                entries.append(ManifestEntry(
+                    kind=0,  # ADD
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file
+                ))
+        return entries
+
+    def _commit_retry_wait(self, retry_count: int):
+        import threading
+        thread_id = threading.get_ident()
+
+        retry_wait_ms = min(
+            self.commit_min_retry_wait * (2 ** retry_count),
+            self.commit_max_retry_wait
+        )
+
+        jitter_ms = random.randint(0, max(1, int(retry_wait_ms * 0.2)))
+        total_wait_ms = retry_wait_ms + jitter_ms
+
+        logger.debug(
+            f"Thread {thread_id}: Waiting {total_wait_ms}ms before retry (base: {retry_wait_ms}ms, jitter: {jitter_ms}ms)"
+        )
+        time.sleep(total_wait_ms / 1000.0)
+
+    def _cleanup_preparation_failure(self, manifest_file: Optional[str],
+                                     delta_manifest_list: Optional[str],
+                                     base_manifest_list: Optional[str]):
+        try:
+            manifest_path = self.manifest_list_manager.manifest_path
+
+            if delta_manifest_list:
+                try:
+                    manifest_files = self.manifest_list_manager.read(delta_manifest_list)
+                    for manifest_meta in manifest_files:
+                        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_meta.file_name}"
+                        self.table.file_io.delete_quietly(manifest_file_path)
+                except Exception:
+                    pass  # Ignore errors when reading/cleaning
+                delta_path = f"{manifest_path}/{delta_manifest_list}"
+                self.table.file_io.delete_quietly(delta_path)
+
+            if base_manifest_list:
+                base_path = f"{manifest_path}/{base_manifest_list}"
+                self.table.file_io.delete_quietly(base_path)
+
+            if manifest_file:
+                manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_file}"
+                self.table.file_io.delete_quietly(manifest_file_path)
+        except Exception as e:
+            logger.warning(f"Failed to clean up temporary files during preparation failure: {e}", exc_info=True)
+
+    def _cleanup_commit_failure(self, base_manifest_list: str, delta_manifest_list: str):
+        try:
+            manifest_path = self.manifest_list_manager.manifest_path
+
+            if base_manifest_list:
+                base_path = f"{manifest_path}/{base_manifest_list}"
+                self.table.file_io.delete_quietly(base_path)
+
+            if delta_manifest_list:
+                delta_path = f"{manifest_path}/{delta_manifest_list}"
+                self.table.file_io.delete_quietly(delta_path)
+        except Exception as e:
+            logger.warning(f"Failed to clean up temporary manifest files: {e}", exc_info=True)
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
@@ -240,6 +464,13 @@ class FileStoreCommit:
         """Close the FileStoreCommit and release resources."""
         if hasattr(self.snapshot_commit, 'close'):
             self.snapshot_commit.close()
+
+    def _generate_snapshot_id(self) -> int:
+        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+        if latest_snapshot:
+            return latest_snapshot.id + 1
+        else:
+            return 1
 
     def _generate_partition_statistics(self, commit_entries: List[ManifestEntry]) -> List[PartitionStatistics]:
         """

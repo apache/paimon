@@ -18,6 +18,9 @@
 import logging
 import os
 import subprocess
+import threading
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
@@ -37,9 +40,12 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
+    rename_lock = threading.Lock()
+
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
+        # self._rename_lock = threading.Lock()
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         if scheme in {"oss"}:
@@ -219,6 +225,8 @@ class FileIO:
             return False
 
     def delete(self, path: str, recursive: bool = False) -> bool:
+        import threading
+        thread_id = threading.current_thread().name
         try:
             path_str = self.to_filesystem_path(path)
             file_info = self.filesystem.get_file_info([path_str])[0]
@@ -231,7 +239,7 @@ class FileIO:
                 self.filesystem.delete_file(path_str)
             return True
         except Exception as e:
-            self.logger.warning(f"Failed to delete {path}: {e}")
+            self.logger.warning(f"Thread {thread_id}: Failed111 to delete {path}: {e}")
             return False
 
     def mkdirs(self, path: str) -> bool:
@@ -244,28 +252,36 @@ class FileIO:
             return False
 
     def rename(self, src: str, dst: str) -> bool:
-        try:
-            dst_str = self.to_filesystem_path(dst)
-            dst_parent = Path(dst_str).parent
-            if str(dst_parent) and not self.exists(str(dst_parent)):
-                self.mkdirs(str(dst_parent))
+        thread_id = threading.current_thread().name
 
-            src_str = self.to_filesystem_path(src)
-            self.filesystem.move(src_str, dst_str)
-            return True
-        except Exception as e:
-            self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
-            return False
+        with FileIO.rename_lock:
+            if self.exists(dst):
+                return False
+            try:
+                dst_str = self.to_filesystem_path(dst)
+                dst_parent = Path(dst_str).parent
+                if str(dst_parent) and not self.exists(str(dst_parent)):
+                    self.mkdirs(str(dst_parent))
+
+                src_str = self.to_filesystem_path(src)
+                self.filesystem.move(src_str, dst_str)
+                return True
+            except Exception as e:
+                self.logger.warning(f"Thread {thread_id}: Failed to rename {src} to {dst}: {e}")
+                return False
 
     def delete_quietly(self, path: str):
+        import threading
+        thread_id = threading.current_thread().name
+
         if self.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug(f"Ready to delete {path}")
+            self.logger.debug(f"Thread {thread_id}: Ready to delete {path}")
 
         try:
             if not self.delete(path, False) and self.exists(path):
-                self.logger.warning(f"Failed to delete file {path}")
+                self.logger.warning(f"Thread {thread_id}: Failed to delete file {path}")
         except Exception:
-            self.logger.warning(f"Exception occurs when deleting file {path}", exc_info=True)
+            self.logger.warning(f"Thread {thread_id}: Exception occurs when deleting file {path}", exc_info=True)
 
     def delete_files_quietly(self, files: List[str]):
         for file_path in files:
@@ -303,22 +319,40 @@ class FileIO:
             return input_stream.read().decode('utf-8')
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
-        temp_path = path + ".tmp"
+        import threading
+        thread_id = threading.current_thread().name
+        temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
+            # self.logger.warning(
+            #     f"Thread {thread_id}: try to commit snapshot {content},temp_path {temp_path}."
+            # )
             self.write_file(temp_path, content, False)
             success = self.rename(temp_path, path)
         finally:
             if not success:
+                self.logger.warning(
+                    f"Thread {thread_id}: delete quietly {content}."
+                )
                 self.delete_quietly(temp_path)
+            if success:
+                self.logger.warning(
+                    f"Thread {thread_id}: Successfully atomic commit snapshot {content}."
+                )
             return success
 
     def write_file(self, path: str, content: str, overwrite: bool = False):
+        import threading
+        thread_id = threading.current_thread().name
+
         if not overwrite and self.exists(path):
             raise FileExistsError(f"File {path} already exists and overwrite=False")
 
         with self.new_output_stream(path) as output_stream:
             output_stream.write(content.encode('utf-8'))
+        # self.logger.warning(
+        #     f"Thread {thread_id}: write snapshot {content}, temp_path {path}, {time.time()}"
+        # )
 
     def overwrite_file_utf8(self, path: str, content: str):
         with self.new_output_stream(path) as output_stream:

@@ -17,6 +17,7 @@
 ################################################################################
 
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -52,6 +53,10 @@ class AoReaderTest(unittest.TestCase):
             'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=cls.pa_schema)
+
+    # @classmethod
+    # def tearDownClass(cls):
+    #     shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_parquet_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -410,3 +415,107 @@ class AoReaderTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         return table_read.to_arrow(splits)
+
+    def test_read_table(self):
+        catalog = CatalogFactory.create({
+            'warehouse': '/private/var/folders/pz/3v5rtnsd4kb9wbyw3tdpqhhh0000gp/T/tmpvahj836i/warehouse'
+        })
+        table = catalog.get_table('default.test_concurrent_writes')
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        res = table_read.to_arrow(splits)
+        print(res)
+
+    def test_concurrent_writes_with_retry(self):
+        """Test concurrent writes to verify retry mechanism works correctly."""
+        import threading
+        import time
+
+        schema = Schema.from_pyarrow_schema(self.pa_schema)
+        self.catalog.create_table('default.test_concurrent_writes', schema, False)
+        table = self.catalog.get_table('default.test_concurrent_writes')
+
+        write_results = []
+        write_errors = []
+
+        def write_data(thread_id, start_user_id):
+            """Write data in a separate thread."""
+            try:
+                threading.current_thread().name= f"Thread-{thread_id}"
+                write_builder = table.new_batch_write_builder()
+                table_write = write_builder.new_write()
+                table_commit = write_builder.new_commit()
+
+                # Create unique data for this thread
+                data = {
+                    'user_id': list(range(start_user_id, start_user_id + 5)),
+                    'item_id': [1000 + i for i in range(start_user_id, start_user_id + 5)],
+                    'behavior': [f'thread{thread_id}_{i}' for i in range(5)],
+                    'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(5)],
+                }
+                pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+
+                table_write.write_arrow(pa_table)
+                commit_messages = table_write.prepare_commit()
+
+                # Add small random delay to increase chance of conflicts
+                # time.sleep(0.001 * thread_id)
+
+                table_commit.commit(commit_messages)
+                table_write.close()
+                table_commit.close()
+
+                write_results.append({
+                    'thread_id': thread_id,
+                    'start_user_id': start_user_id,
+                    'success': True
+                })
+            except Exception as e:
+                write_errors.append({
+                    'thread_id': thread_id,
+                    'error': str(e)
+                })
+
+        # Create and start multiple threads
+        threads = []
+        num_threads = 10
+        for i in range(num_threads):
+            thread = threading.Thread(
+                target=write_data,
+                args=(i, i * 10)
+            )
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Verify all writes succeeded (retry mechanism should handle conflicts)
+        self.assertEqual(len(write_results), num_threads,
+                         f"Expected {num_threads} successful writes, got {len(write_results)}. Errors: {write_errors}")
+        self.assertEqual(len(write_errors), 0,
+                         f"Expected no errors, but got: {write_errors}")
+
+        # Verify all data was written correctly
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+
+        # Should have 5 threads * 5 records each = 25 records
+        self.assertEqual(actual.num_rows, num_threads * 5)
+
+        # Verify user_ids are unique and in expected range
+        user_ids = actual.column('user_id').to_pylist()
+        expected_user_ids = []
+        for i in range(num_threads):
+            expected_user_ids.extend(range(i * 10, i * 10 + 5))
+        expected_user_ids.sort()
+
+        self.assertEqual(user_ids, expected_user_ids)
+
+        # Verify snapshot count (should have num_threads snapshots)
+        snapshot_manager = SnapshotManager(table)
+        latest_snapshot = snapshot_manager.get_latest_snapshot()
+        self.assertIsNotNone(latest_snapshot)
+        self.assertEqual(latest_snapshot.id, num_threads)
