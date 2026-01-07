@@ -52,57 +52,11 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Install native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libopenblas-dev \
-            liblapack-dev \
-            patchelf \
-            libgomp1 \
-            wget
-
-      - name: Install GCC 9
-        run: |
-          sudo apt-get install -y gcc-9 g++-9
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
-          gcc --version
-
-      - name: Install CMake 3.30.1
-        run: |
-          CMAKE_VERSION="3.30.1"
-          wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-          tar -xzf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
-          sudo mv cmake-${CMAKE_VERSION}-linux-x86_64 /opt/cmake
-          sudo ln -sf /opt/cmake/bin/cmake /usr/local/bin/cmake
-          cmake --version
-
-      - name: Install FAISS
-        run: |
-          git clone --depth 1 --branch v1.7.4 https://github.com/facebookresearch/faiss.git /tmp/faiss
-          cd /tmp/faiss
-          cmake -B build \
-            -DFAISS_ENABLE_GPU=OFF \
-            -DFAISS_ENABLE_PYTHON=OFF \
-            -DBUILD_TESTING=OFF \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j $(nproc)
-          sudo cmake --install build
-
-      - name: Build native library
-        run: |
-          cd paimon-faiss-jni
-          ./scripts/build-native.sh --clean --fat-lib
-
-      - name: List built libraries
-        run: |
-          echo "=== Built libraries ==="
-          ls -la paimon-faiss-jni/src/main/resources/linux/amd64/
-          echo ""
-          echo "=== Library dependencies ==="
-          ldd paimon-faiss-jni/src/main/resources/linux/amd64/libpaimon_faiss_jni.so || true
+      - name: Build FAISS native library
+        uses: ./.github/actions/build-faiss-native
+        with:
+          platform: linux-amd64
+          cmake-arch: x86_64
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
@@ -124,59 +78,11 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Install native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libopenblas-dev \
-            liblapack-dev \
-            patchelf \
-            libgomp1 \
-            wget
-
-      - name: Install GCC 9
-        run: |
-          sudo apt-get install -y gcc-9 g++-9 || sudo apt-get install -y gcc g++
-          if command -v gcc-9 &>/dev/null; then
-            sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
-            sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
-          fi
-          gcc --version
-
-      - name: Install CMake 3.30.1
-        run: |
-          CMAKE_VERSION="3.30.1"
-          wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-aarch64.tar.gz
-          tar -xzf cmake-${CMAKE_VERSION}-linux-aarch64.tar.gz
-          sudo mv cmake-${CMAKE_VERSION}-linux-aarch64 /opt/cmake
-          sudo ln -sf /opt/cmake/bin/cmake /usr/local/bin/cmake
-          cmake --version
-
-      - name: Install FAISS
-        run: |
-          git clone --depth 1 --branch v1.7.4 https://github.com/facebookresearch/faiss.git /tmp/faiss
-          cd /tmp/faiss
-          cmake -B build \
-            -DFAISS_ENABLE_GPU=OFF \
-            -DFAISS_ENABLE_PYTHON=OFF \
-            -DBUILD_TESTING=OFF \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j $(nproc)
-          sudo cmake --install build
-
-      - name: Build native library
-        run: |
-          cd paimon-faiss-jni
-          ./scripts/build-native.sh --clean --fat-lib
-
-      - name: List built libraries
-        run: |
-          echo "=== Built libraries ==="
-          ls -la paimon-faiss-jni/src/main/resources/linux/aarch64/
-          echo ""
-          echo "=== Library dependencies ==="
-          ldd paimon-faiss-jni/src/main/resources/linux/aarch64/libpaimon_faiss_jni.so || true
+      - name: Build FAISS native library
+        uses: ./.github/actions/build-faiss-native
+        with:
+          platform: linux-aarch64
+          cmake-arch: aarch64
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
@@ -198,22 +104,12 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Install dependencies
-        run: |
-          brew install cmake libomp openblas faiss
-
-      - name: Build native library
-        run: |
-          cd paimon-faiss-jni
-          ./scripts/build-native.sh --clean --fat-lib
-
-      - name: List built libraries
-        run: |
-          echo "=== Built libraries ==="
-          ls -la paimon-faiss-jni/src/main/resources/darwin/aarch64/
-          echo ""
-          echo "=== Library dependencies ==="
-          otool -L paimon-faiss-jni/src/main/resources/darwin/aarch64/libpaimon_faiss_jni.dylib || true
+      - name: Build FAISS native library
+        uses: ./.github/actions/build-faiss-native
+        with:
+          platform: darwin-aarch64
+          cmake-arch: aarch64
+          use-homebrew: 'true'
 
       - name: Upload native library
         uses: actions/upload-artifact@v4

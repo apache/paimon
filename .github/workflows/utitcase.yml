@@ -66,7 +66,7 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           
           # Exclude modules that have their own dedicated test workflows
-          TEST_MODULES="!paimon-e2e-tests,"
+          TEST_MODULES="!paimon-e2e-tests,!paimon-vector-e2e-test,!paimon-faiss-jni,!paimon-faiss,"
           for suffix in ut 3.5 3.4 3.3 3.2; do
             TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done

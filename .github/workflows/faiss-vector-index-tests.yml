@@ -52,16 +52,21 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Setup FAISS and build paimon-faiss
-        uses: ./.github/actions/setup-faiss
+      - name: Build FAISS native library
+        uses: ./.github/actions/build-faiss-native
+        with:
+          platform: linux-amd64
+          cmake-arch: x86_64
 
-      - name: List bundled libraries
+      - name: Build paimon-faiss-jni
+        shell: bash
         run: |
-          echo "=== Bundled libraries ==="
-          ls -la paimon-faiss-jni/src/main/resources/linux/amd64/
-          echo ""
-          echo "=== Library dependencies ==="
-          ldd paimon-faiss-jni/src/main/resources/linux/amd64/libpaimon_faiss_jni.so || true
+          mvn -B clean install -pl paimon-faiss-jni -am -DskipTests -Ppaimon-faiss-vector
+
+      - name: Build paimon-faiss
+        shell: bash
+        run: |
+          mvn -B clean install -pl paimon-faiss -am -DskipTests -Ppaimon-faiss-vector
 
       - name: Test paimon-faiss-jni
         timeout-minutes: 10

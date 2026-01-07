@@ -60,7 +60,6 @@ under the License.
         <module>paimon-flink</module>
         <module>paimon-docs</module>
         <module>paimon-e2e-tests</module>
-        <module>paimon-vector-e2e-test</module>
         <module>paimon-filesystems</module>
         <module>paimon-format</module>
         <module>paimon-lance</module>
@@ -528,6 +527,7 @@ under the License.
             <modules>
                 <module>paimon-faiss</module>
                 <module>paimon-faiss-jni</module>
+                <module>paimon-vector-e2e-test</module>
             </modules>
             <activation>
                 <activeByDefault>true</activeByDefault>
