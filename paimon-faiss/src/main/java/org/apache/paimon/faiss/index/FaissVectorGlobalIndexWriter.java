@@ -42,19 +42,28 @@ import java.util.List;
  *
  * <p>This implementation uses FAISS for efficient approximate nearest neighbor search with support
  * for multiple index types including Flat, HNSW, IVF, and IVF-PQ.
+ *
+ * <p>Vectors are added to the index in batches. When the current index reaches {@code sizePerIndex}
+ * vectors, it is serialized to a file and a new index is created.
  */
 public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
 
     private static final int VERSION = 1;
+    private static final int DEFAULT_BATCH_SIZE = 10000;
 
     private final GlobalIndexFileWriter fileWriter;
     private final FaissVectorIndexOptions options;
     private final int sizePerIndex;
+    private final int batchSize;
+    private final int dim;
     private final DataType fieldType;
 
     private long count = 0;
-    private final List<VectorEntry> vectorEntries;
+    private long currentIndexCount = 0;
+    private final List<VectorEntry> pendingBatch;
     private final List<ResultEntry> results;
+    private FaissIndex currentIndex;
+    private boolean trained = false;
 
     public FaissVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter, DataType fieldType, FaissVectorIndexOptions options) {
@@ -62,7 +71,9 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
         this.fieldType = fieldType;
         this.options = options;
         this.sizePerIndex = options.sizePerIndex();
-        this.vectorEntries = new ArrayList<>();
+        this.batchSize = Math.min(DEFAULT_BATCH_SIZE, sizePerIndex);
+        this.dim = options.dimension();
+        this.pendingBatch = new ArrayList<>(batchSize);
         this.results = new ArrayList<>();
 
         validateFieldType(fieldType);
@@ -92,22 +103,33 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
                     "Unsupported vector type: " + fieldData.getClass().getName());
         }
         checkDimension(vector);
-        vectorEntries.add(new VectorEntry(count, vector));
+        pendingBatch.add(new VectorEntry(count, vector));
         count++;
-        if (vectorEntries.size() >= sizePerIndex) {
-            try {
-                flush();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+
+        try {
+            // When batch is full, add to current index
+            if (pendingBatch.size() >= batchSize) {
+                addBatchToIndex();
             }
+            // When current index reaches sizePerIndex, flush to file
+            if (currentIndexCount >= sizePerIndex) {
+                flushCurrentIndex();
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
     @Override
     public List<ResultEntry> finish() {
         try {
-            if (!vectorEntries.isEmpty()) {
-                flush();
+            // Add any remaining pending batch to current index
+            if (!pendingBatch.isEmpty()) {
+                addBatchToIndex();
+            }
+            // Flush current index if it has data
+            if (currentIndex != null && currentIndexCount > 0) {
+                flushCurrentIndex();
             }
             return results;
         } catch (IOException e) {
@@ -115,60 +137,68 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
         }
     }
 
-    private void flush() throws IOException {
-        String fileName = fileWriter.newFileName(FaissVectorGlobalIndexerFactory.IDENTIFIER);
-        try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
-            buildIndex(vectorEntries, out);
+    private void addBatchToIndex() throws IOException {
+        if (pendingBatch.isEmpty()) {
+            return;
         }
-        results.add(new ResultEntry(fileName, count, null));
-        vectorEntries.clear();
+
+        // Create index if not exists
+        if (currentIndex == null) {
+            currentIndex = createIndex();
+            trained = false;
+        }
+
+        int n = pendingBatch.size();
+
+        // Train if necessary (for IVF-based indices) - only once per index
+        if (!trained && !currentIndex.isTrained()) {
+            int trainingSize = Math.min(n, options.trainingSize());
+            ByteBuffer trainingBuffer = FaissIndex.allocateVectorBuffer(trainingSize, dim);
+            FloatBuffer trainingFloatView = trainingBuffer.asFloatBuffer();
+            for (int i = 0; i < trainingSize; i++) {
+                float[] vector = pendingBatch.get(i).vector;
+                for (int j = 0; j < dim; j++) {
+                    trainingFloatView.put(i * dim + j, vector[j]);
+                }
+            }
+            currentIndex.train(trainingBuffer, trainingSize);
+            trained = true;
+        }
+
+        // Allocate buffers for this batch only
+        ByteBuffer vectorBuffer = FaissIndex.allocateVectorBuffer(n, dim);
+        ByteBuffer idBuffer = FaissIndex.allocateIdBuffer(n);
+        FloatBuffer floatView = vectorBuffer.asFloatBuffer();
+        LongBuffer longView = idBuffer.asLongBuffer();
+
+        // Fill buffers
+        for (int i = 0; i < n; i++) {
+            VectorEntry entry = pendingBatch.get(i);
+            float[] vector = entry.vector;
+            for (int j = 0; j < dim; j++) {
+                floatView.put(i * dim + j, vector[j]);
+            }
+            longView.put(i, entry.id);
+        }
+
+        // Add to index
+        currentIndex.addWithIds(vectorBuffer, idBuffer, n);
+        currentIndexCount += n;
+        pendingBatch.clear();
     }
 
-    private void buildIndex(List<VectorEntry> entries, OutputStream out) throws IOException {
-        int n = entries.size();
-        int dim = options.dimension();
+    private void flushCurrentIndex() throws IOException {
+        if (currentIndex == null || currentIndexCount == 0) {
+            return;
+        }
 
-        // Create the FAISS index based on configuration
-        FaissIndex index = createIndex();
-
-        try {
-            // Allocate direct buffers for zero-copy operations
-            ByteBuffer vectorBuffer = FaissIndex.allocateVectorBuffer(n, dim);
-            ByteBuffer idBuffer = FaissIndex.allocateIdBuffer(n);
-            FloatBuffer floatView = vectorBuffer.asFloatBuffer();
-            LongBuffer longView = idBuffer.asLongBuffer();
-
-            // Fill the buffers
-            for (int i = 0; i < n; i++) {
-                float[] vector = entries.get(i).vector;
-                for (int j = 0; j < dim; j++) {
-                    floatView.put(i * dim + j, vector[j]);
-                }
-                longView.put(i, entries.get(i).id);
-            }
-
-            // Train if necessary (for IVF-based indices)
-            if (!index.isTrained()) {
-                int trainingSize = Math.min(n, options.trainingSize());
-                ByteBuffer trainingBuffer = FaissIndex.allocateVectorBuffer(trainingSize, dim);
-                FloatBuffer trainingFloatView = trainingBuffer.asFloatBuffer();
-                for (int i = 0; i < trainingSize; i++) {
-                    float[] vector = entries.get(i).vector;
-                    for (int j = 0; j < dim; j++) {
-                        trainingFloatView.put(i * dim + j, vector[j]);
-                    }
-                }
-                index.train(trainingBuffer, trainingSize);
-            }
-
-            // Add vectors with IDs (zero-copy)
-            index.addWithIds(vectorBuffer, idBuffer, n);
-
-            // Serialize the index (zero-copy)
-            long serializeSize = index.serializeSize();
+        String fileName = fileWriter.newFileName(FaissVectorGlobalIndexerFactory.IDENTIFIER);
+        try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
+            // Serialize the index
+            long serializeSize = currentIndex.serializeSize();
             ByteBuffer serializeBuffer =
                     ByteBuffer.allocateDirect((int) serializeSize).order(ByteOrder.nativeOrder());
-            long bytesWritten = index.serialize(serializeBuffer);
+            long bytesWritten = currentIndex.serialize(serializeBuffer);
 
             // Write to output stream with metadata
             DataOutputStream dataOut = new DataOutputStream(out);
@@ -176,7 +206,7 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
             dataOut.writeInt(dim);
             dataOut.writeInt(options.metric().getValue());
             dataOut.writeInt(options.indexType().ordinal());
-            dataOut.writeLong(n);
+            dataOut.writeLong(currentIndexCount);
             dataOut.writeLong(bytesWritten);
 
             // Write serialized index data
@@ -185,9 +215,14 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
             serializeBuffer.get(indexData);
             dataOut.write(indexData);
             dataOut.flush();
-        } finally {
-            index.close();
         }
+        results.add(new ResultEntry(fileName, count, null));
+
+        // Close and reset
+        currentIndex.close();
+        currentIndex = null;
+        currentIndexCount = 0;
+        trained = false;
     }
 
     private FaissIndex createIndex() {

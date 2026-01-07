@@ -364,6 +364,119 @@ public class FaissVectorGlobalIndexTest {
         }
     }
 
+    @Test
+    public void testBatchWriteMultipleFiles() throws IOException {
+        int dimension = 8;
+        Options options = createDefaultOptions(dimension);
+        int sizePerIndex = 100;
+        options.setInteger("vector.size-per-index", sizePerIndex);
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        FaissVectorIndexOptions indexOptions = new FaissVectorIndexOptions(options);
+        FaissVectorGlobalIndexWriter writer =
+                new FaissVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+
+        // Write 350 vectors, should create 4 files (100 + 100 + 100 + 50)
+        int numVectors = 350;
+        List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
+        testVectors.forEach(writer::write);
+
+        List<ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(4);
+
+        // Verify files are created
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        for (ResultEntry result : results) {
+            Path filePath = new Path(indexPath, result.fileName());
+            assertThat(fileIO.exists(filePath)).isTrue();
+            assertThat(fileIO.getFileSize(filePath)).isGreaterThan(0);
+            metas.add(
+                    new GlobalIndexIOMeta(
+                            result.fileName(), fileIO.getFileSize(filePath), result.meta()));
+        }
+
+        // Search for vectors from different files
+        try (FaissVectorGlobalIndexReader reader =
+                new FaissVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+            // Search for vector in first file (index 0-99)
+            VectorSearch vectorSearch = new VectorSearch(testVectors.get(50), 3, fieldName);
+            GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch).get();
+            assertThat(searchResult).isNotNull();
+            assertThat(searchResult.results().getLongCardinality()).isGreaterThan(0);
+
+            // Search for vector in second file (index 100-199)
+            vectorSearch = new VectorSearch(testVectors.get(150), 3, fieldName);
+            searchResult = reader.visitVectorSearch(vectorSearch).get();
+            assertThat(searchResult).isNotNull();
+            assertThat(searchResult.results().getLongCardinality()).isGreaterThan(0);
+
+            // Search for vector in last file (index 300-349)
+            vectorSearch = new VectorSearch(testVectors.get(320), 3, fieldName);
+            searchResult = reader.visitVectorSearch(vectorSearch).get();
+            assertThat(searchResult).isNotNull();
+            assertThat(searchResult.results().getLongCardinality()).isGreaterThan(0);
+
+            // Verify that search returns vectors from the correct file
+            // The exact match should have rowId equal to the vector index
+            vectorSearch = new VectorSearch(testVectors.get(200), 1, fieldName);
+            FaissVectorSearchGlobalIndexResult result =
+                    (FaissVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
+            assertThat(containsRowId(result, 200)).isTrue();
+        }
+    }
+
+    @Test
+    public void testBatchWriteWithRemainder() throws IOException {
+        int dimension = 16;
+        Options options = createDefaultOptions(dimension);
+        int sizePerIndex = 50;
+        options.setInteger("vector.size-per-index", sizePerIndex);
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        FaissVectorIndexOptions indexOptions = new FaissVectorIndexOptions(options);
+        FaissVectorGlobalIndexWriter writer =
+                new FaissVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+
+        // Write 73 vectors: 50 in first file, 23 in second file
+        int numVectors = 73;
+        List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
+        testVectors.forEach(writer::write);
+
+        List<ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(2);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        for (ResultEntry result : results) {
+            metas.add(
+                    new GlobalIndexIOMeta(
+                            result.fileName(),
+                            fileIO.getFileSize(new Path(indexPath, result.fileName())),
+                            result.meta()));
+        }
+
+        try (FaissVectorGlobalIndexReader reader =
+                new FaissVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+            // Search for vector in the remainder file (second file)
+            VectorSearch vectorSearch = new VectorSearch(testVectors.get(60), 1, fieldName);
+            FaissVectorSearchGlobalIndexResult result =
+                    (FaissVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
+            assertThat(result).isNotNull();
+            assertThat(containsRowId(result, 60)).isTrue();
+
+            // Search for the last vector
+            vectorSearch = new VectorSearch(testVectors.get(72), 1, fieldName);
+            result =
+                    (FaissVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
+            assertThat(result).isNotNull();
+            assertThat(containsRowId(result, 72)).isTrue();
+        }
+    }
+
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger("vector.dim", dimension);
