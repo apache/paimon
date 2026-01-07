@@ -81,6 +81,10 @@ public class PartitionEntry {
         return lastFileCreationTime;
     }
 
+    public int bucketCount() {
+        return bucketCount;
+    }
+
     public PartitionEntry merge(PartitionEntry entry) {
         return new PartitionEntry(
                 partition,

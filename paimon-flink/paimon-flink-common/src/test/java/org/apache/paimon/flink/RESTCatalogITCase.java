@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.RESTToken;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -192,11 +193,12 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
 
     private void validateBucketCount(
             String databaseName, String tableName, Integer expectedBucketCount) throws Exception {
-        Catalog catalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
-        org.apache.paimon.catalog.Catalog paimonCatalog = ((FlinkCatalog) catalog).catalog();
-        List<org.apache.paimon.partition.Partition> partitions =
-                paimonCatalog.listPartitions(Identifier.create(databaseName, tableName));
-        assertThat(partitions).isNotEmpty();
-        assertThat(partitions.get(0).bucketCount()).isEqualTo(expectedBucketCount);
+        Catalog flinkCatalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
+        try (org.apache.paimon.catalog.Catalog catalog = ((FlinkCatalog) flinkCatalog).catalog()) {
+            List<Partition> partitions =
+                    catalog.listPartitions(Identifier.create(databaseName, tableName));
+            assertThat(partitions).isNotEmpty();
+            assertThat(partitions.get(0).bucketCount()).isEqualTo(expectedBucketCount);
+        }
     }
 }
