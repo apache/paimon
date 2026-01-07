@@ -18,57 +18,56 @@
 
 package org.apache.paimon.spark.globalindex;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Range;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** This is a class who truly build index file and generate index metas. */
-public abstract class GlobalIndexBuilder {
+/** Utils for global index build. */
+public class GlobalIndexBuilderUtils {
 
-    protected final GlobalIndexBuilderContext context;
-
-    protected GlobalIndexBuilder(GlobalIndexBuilderContext context) {
-        this.context = context;
-    }
-
-    public abstract List<CommitMessage> build(CloseableIterator<InternalRow> data)
-            throws IOException;
-
-    protected List<IndexFileMeta> convertToIndexMeta(
-            long rangeStart, long rangeEnd, List<ResultEntry> entries) throws IOException {
+    public static List<IndexFileMeta> toIndexFileMetas(
+            FileStoreTable table,
+            Range range,
+            int indexFieldId,
+            String indexType,
+            List<ResultEntry> entries)
+            throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
             String fileName = entry.fileName();
-            GlobalIndexFileReadWrite readWrite = context.globalIndexFileReadWrite();
+            GlobalIndexFileReadWrite readWrite = createGlobalIndexFileReadWrite(table);
             long fileSize = readWrite.fileSize(fileName);
             GlobalIndexMeta globalIndexMeta =
-                    new GlobalIndexMeta(
-                            rangeStart, rangeEnd, context.indexField().id(), null, entry.meta());
+                    new GlobalIndexMeta(range.from, range.to, indexFieldId, null, entry.meta());
             IndexFileMeta indexFileMeta =
                     new IndexFileMeta(
-                            context.indexType(),
-                            fileName,
-                            fileSize,
-                            entry.rowCount(),
-                            globalIndexMeta);
+                            indexType, fileName, fileSize, entry.rowCount(), globalIndexMeta);
             results.add(indexFileMeta);
         }
         return results;
     }
 
-    protected GlobalIndexWriter createIndexWriter() throws IOException {
-        GlobalIndexer globalIndexer =
-                GlobalIndexer.create(context.indexType(), context.indexField(), context.options());
-        return globalIndexer.createWriter(context.globalIndexFileReadWrite());
+    public static GlobalIndexWriter createIndexWriter(
+            FileStoreTable table, String indexType, DataField indexField, Options options)
+            throws IOException {
+        GlobalIndexer globalIndexer = GlobalIndexer.create(indexType, indexField, options);
+        return globalIndexer.createWriter(createGlobalIndexFileReadWrite(table));
+    }
+
+    private static GlobalIndexFileReadWrite createGlobalIndexFileReadWrite(FileStoreTable table) {
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+        return new GlobalIndexFileReadWrite(table.fileIO(), indexPathFactory);
     }
 }

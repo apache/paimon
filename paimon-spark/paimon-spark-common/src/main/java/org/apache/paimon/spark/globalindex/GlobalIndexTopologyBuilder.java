@@ -32,7 +32,9 @@ import java.io.IOException;
 import java.util.List;
 
 /** User defined topology builder. */
-public interface GlobalIndexTopoBuilder {
+public interface GlobalIndexTopologyBuilder {
+
+    String identifier();
 
     List<CommitMessage> buildIndex(
             SparkSession spark,

@@ -28,24 +28,25 @@ import java.util.Map;
 import java.util.ServiceLoader;
 
 /**
- * Utility class for loading {@link GlobalIndexBuilderFactory} implementations via Java's {@link
+ * Utility class for loading {@link GlobalIndexTopologyBuilder} implementations via Java's {@link
  * ServiceLoader} mechanism.
  *
  * <p>Factories are loaded once during class initialization and cached for subsequent lookups.
  */
-public class GlobalIndexBuilderFactoryUtils {
+public class GlobalIndexTopologyBuilderUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(GlobalIndexBuilderFactoryUtils.class);
+    private static final Logger LOG =
+            LoggerFactory.getLogger(GlobalIndexTopologyBuilderUtils.class);
 
-    private static final Map<String, GlobalIndexBuilderFactory> FACTORIES = new HashMap<>();
+    private static final Map<String, GlobalIndexTopologyBuilder> FACTORIES = new HashMap<>();
 
     static {
-        ServiceLoader<GlobalIndexBuilderFactory> serviceLoader =
-                ServiceLoader.load(GlobalIndexBuilderFactory.class);
+        ServiceLoader<GlobalIndexTopologyBuilder> serviceLoader =
+                ServiceLoader.load(GlobalIndexTopologyBuilder.class);
 
-        for (GlobalIndexBuilderFactory factory : serviceLoader) {
-            String identifier = factory.identifier();
-            if (FACTORIES.put(identifier, factory) != null) {
+        for (GlobalIndexTopologyBuilder builder : serviceLoader) {
+            String identifier = builder.identifier();
+            if (FACTORIES.put(identifier, builder) != null) {
                 LOG.warn(
                         "Found multiple GlobalIndexBuilderFactory implementations for type '{}'. "
                                 + "Using the last one loaded.",
@@ -54,20 +55,8 @@ public class GlobalIndexBuilderFactoryUtils {
         }
     }
 
-    public static GlobalIndexBuilder createIndexBuilder(GlobalIndexBuilderContext context) {
-        GlobalIndexBuilderFactory factory = FACTORIES.get(context.indexType());
-        if (factory == null) {
-            return new DefaultGlobalIndexBuilder(context);
-        }
-        return factory.create(context);
-    }
-
     @Nullable
-    public static GlobalIndexTopoBuilder createTopoBuilder(String indexType) {
-        GlobalIndexBuilderFactory factory = FACTORIES.get(indexType);
-        if (factory == null) {
-            return null;
-        }
-        return factory.createTopoBuilder();
+    public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType) {
+        return FACTORIES.get(indexType);
     }
 }

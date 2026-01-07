@@ -24,10 +24,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.SparkRow;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
-import org.apache.paimon.spark.globalindex.GlobalIndexTopoBuilder;
+import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
 import org.apache.paimon.spark.util.ScanPlanHelper$;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -56,8 +53,13 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
-/** The {@link GlobalIndexTopoBuilder} for BTree index. */
-public class BTreeIndexTopoBuilder implements GlobalIndexTopoBuilder {
+/** The {@link GlobalIndexTopologyBuilder} for BTree index. */
+public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
+
+    @Override
+    public String identifier() {
+        return "btree";
+    }
 
     @Override
     public List<CommitMessage> buildIndex(
@@ -78,8 +80,8 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopoBuilder {
         }
 
         List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
-        Range fullRange = calcRowRange(dataSplits);
-        if (dataSplits.isEmpty() || fullRange == null) {
+        Range range = calcRowRange(dataSplits);
+        if (dataSplits.isEmpty() || range == null) {
             return Collections.emptyList();
         }
 
@@ -121,9 +123,8 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopoBuilder {
                         .sortWithinPartitions(sortFields);
 
         // 3. write index for each partition & range
-        final GlobalIndexBuilderContext context =
-                new GlobalIndexBuilderContext(
-                        table, null, readType, indexField, indexType, 0, options, fullRange);
+        final BTreeGlobalIndexBuilder builder =
+                new BTreeGlobalIndexBuilder(table, readType, indexField, indexType, range, options);
         final RowType rowType =
                 SpecialFields.rowTypeWithRowId(table.rowType()).project(selectedColumns);
         JavaRDD<byte[]> written =
@@ -136,12 +137,8 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopoBuilder {
                                             CommitMessageSerializer commitMessageSerializer =
                                                     new CommitMessageSerializer();
 
-                                            GlobalIndexBuilder globalIndexBuilder =
-                                                    GlobalIndexBuilderFactoryUtils
-                                                            .createIndexBuilder(context);
-
                                             List<CommitMessage> commitMessages =
-                                                    globalIndexBuilder.build(
+                                                    builder.build(
                                                             CloseableIterator.adapterForIterator(
                                                                     iter));
                                             List<byte[]> messageBytes = new ArrayList<>();
@@ -173,10 +170,9 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopoBuilder {
         long end = Long.MIN_VALUE;
         for (DataSplit dataSplit : dataSplits) {
             for (DataFileMeta file : dataSplit.dataFiles()) {
-                if (file.firstRowId() != null) {
-                    start = Math.min(start, file.firstRowId());
-                    end = Math.max(end, file.firstRowId() + file.rowCount());
-                }
+                long firstRowId = file.nonNullFirstRowId();
+                start = Math.min(start, firstRowId);
+                end = Math.max(end, firstRowId + file.rowCount());
             }
         }
         return start == Long.MAX_VALUE ? null : new Range(start, end);

@@ -26,10 +26,9 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
-import org.apache.paimon.spark.globalindex.GlobalIndexTopoBuilder;
+import org.apache.paimon.spark.globalindex.DefaultGlobalIndexBuilder;
+import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
+import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilderUtils;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -44,7 +43,6 @@ import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.ProcedureUtils;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.StringUtils;
@@ -171,8 +169,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
                         List<CommitMessage> indexResults;
                         // Step 1: build index by certain index system
-                        GlobalIndexTopoBuilder topoBuilder =
-                                GlobalIndexBuilderFactoryUtils.createTopoBuilder(indexType);
+                        GlobalIndexTopologyBuilder topoBuilder =
+                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);
 
                         if (topoBuilder != null) {
                             // do not need to prepare index shards for custom topo builder
@@ -234,7 +232,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             Options options)
             throws IOException {
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
-        List<Pair<GlobalIndexBuilderContext, byte[]>> taskList = new ArrayList<>();
+        List<Pair<DefaultGlobalIndexBuilder, byte[]>> taskList = new ArrayList<>();
         for (Map.Entry<BinaryRow, List<IndexedSplit>> entry : preparedDS.entrySet()) {
             BinaryRow partition = entry.getKey();
             List<IndexedSplit> partitions = entry.getValue();
@@ -243,19 +241,18 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                 checkArgument(
                         indexedSplit.rowRanges().size() == 1,
                         "Each IndexedSplit should contain exactly one row range.");
-                GlobalIndexBuilderContext builderContext =
-                        new GlobalIndexBuilderContext(
+                DefaultGlobalIndexBuilder builder =
+                        new DefaultGlobalIndexBuilder(
                                 table,
                                 partition,
                                 readType,
                                 indexField,
                                 indexType,
-                                indexedSplit.rowRanges().get(0).from,
-                                options,
-                                null);
+                                indexedSplit.rowRanges().get(0),
+                                options);
 
                 byte[] dsBytes = InstantiationUtil.serializeObject(indexedSplit);
-                taskList.add(Pair.of(builderContext, dsBytes));
+                taskList.add(Pair.of(builder, dsBytes));
             }
         }
 
@@ -266,28 +263,22 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 pair -> {
                                     CommitMessageSerializer commitMessageSerializer =
                                             new CommitMessageSerializer();
-                                    GlobalIndexBuilderContext builderContext = pair.getLeft();
+                                    DefaultGlobalIndexBuilder indexBuilder = pair.getLeft();
                                     byte[] dataSplitBytes = pair.getRight();
                                     IndexedSplit split =
                                             InstantiationUtil.deserializeObject(
                                                     dataSplitBytes,
-                                                    GlobalIndexBuilder.class.getClassLoader());
-                                    GlobalIndexBuilder globalIndexBuilder =
-                                            GlobalIndexBuilderFactoryUtils.createIndexBuilder(
-                                                    builderContext);
-                                    ReadBuilder builder = builderContext.table().newReadBuilder();
-                                    builder.withReadType(builderContext.readType());
+                                                    IndexedSplit.class.getClassLoader());
+                                    ReadBuilder builder = indexBuilder.table().newReadBuilder();
+                                    builder.withReadType(indexBuilder.readType());
 
                                     try (RecordReader<org.apache.paimon.data.InternalRow>
                                                     recordReader =
                                                             builder.newRead().createReader(split);
                                             CloseableIterator<org.apache.paimon.data.InternalRow>
                                                     data = recordReader.toCloseableIterator()) {
-                                        List<CommitMessage> commitMessage =
-                                                globalIndexBuilder.build(data);
-                                        Preconditions.checkState(commitMessage.size() == 1);
-                                        return commitMessageSerializer.serialize(
-                                                commitMessage.get(0));
+                                        CommitMessage commitMessage = indexBuilder.build(data);
+                                        return commitMessageSerializer.serialize(commitMessage);
                                     }
                                 })
                         .collect();

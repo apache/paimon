@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.globalindex.btree;
+package org.apache.paimon.spark.globalindex;
 
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
@@ -30,12 +30,14 @@ import javax.annotation.Nullable;
 import java.util.List;
 
 /** The extractor to get partition, index field and row id from records. */
-public class IndexFieldsExtractor {
+public class RowIdIndexFieldsExtractor {
+
     private final Projection partitionProjection;
     private final InternalRow.FieldGetter indexFieldGetter;
     private final int rowIdPos;
 
-    public IndexFieldsExtractor(RowType readType, List<String> partitionKeys, String indexField) {
+    public RowIdIndexFieldsExtractor(
+            RowType readType, List<String> partitionKeys, String indexField) {
         this.partitionProjection = CodeGenUtils.newProjection(readType, partitionKeys);
         int indexFieldPos = readType.getFieldIndex(indexField);
         this.indexFieldGetter =
