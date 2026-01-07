@@ -155,7 +155,11 @@ class FileStoreCommit:
         thread_id = threading.current_thread().name
         try:
             while True:
-                latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+                try:
+                    latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+                except Exception:
+                    print("error===")
+                    continue
 
                 if commit_kind == "OVERWRITE":
                     commit_entries = self._generate_overwrite_entries(latest_snapshot)
@@ -194,6 +198,8 @@ class FileStoreCommit:
 
                 self._commit_retry_wait(retry_count)
                 retry_count += 1
+        except Exception as e:
+            logger.warning(f"Thread {thread_id}: _try_commit occurs when committing: {e}", exc_info=True)
         finally:
             logger.warning(f"Thread {thread_id}: finally commit {result.is_success()}, {retry_count} retries")
 
@@ -392,7 +398,7 @@ class FileStoreCommit:
         thread_id = threading.get_ident()
 
         retry_wait_ms = min(
-            self.commit_min_retry_wait * (2 ** retry_count),
+            self.commit_min_retry_wait * (2 ** retry_count * 8),
             self.commit_max_retry_wait
         )
 

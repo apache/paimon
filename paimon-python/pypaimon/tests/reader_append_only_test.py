@@ -430,92 +430,98 @@ class AoReaderTest(unittest.TestCase):
     def test_concurrent_writes_with_retry(self):
         """Test concurrent writes to verify retry mechanism works correctly."""
         import threading
-        import time
 
-        schema = Schema.from_pyarrow_schema(self.pa_schema)
-        self.catalog.create_table('default.test_concurrent_writes', schema, False)
-        table = self.catalog.get_table('default.test_concurrent_writes')
+        # Run the test 10 times to verify stability
+        iter_num = 5
+        for test_iteration in range(iter_num):
+            # Create a unique table for each iteration
+            table_name = f'default.test_concurrent_writes_{test_iteration}'
+            schema = Schema.from_pyarrow_schema(self.pa_schema)
+            self.catalog.create_table(table_name, schema, False)
+            table = self.catalog.get_table(table_name)
 
-        write_results = []
-        write_errors = []
+            write_results = []
+            write_errors = []
 
-        def write_data(thread_id, start_user_id):
-            """Write data in a separate thread."""
-            try:
-                threading.current_thread().name= f"Thread-{thread_id}"
-                write_builder = table.new_batch_write_builder()
-                table_write = write_builder.new_write()
-                table_commit = write_builder.new_commit()
+            def write_data(thread_id, start_user_id):
+                """Write data in a separate thread."""
+                try:
+                    threading.current_thread().name = f"Iter{test_iteration}-Thread-{thread_id}"
+                    write_builder = table.new_batch_write_builder()
+                    table_write = write_builder.new_write()
+                    table_commit = write_builder.new_commit()
 
-                # Create unique data for this thread
-                data = {
-                    'user_id': list(range(start_user_id, start_user_id + 5)),
-                    'item_id': [1000 + i for i in range(start_user_id, start_user_id + 5)],
-                    'behavior': [f'thread{thread_id}_{i}' for i in range(5)],
-                    'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(5)],
-                }
-                pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+                    # Create unique data for this thread
+                    data = {
+                        'user_id': list(range(start_user_id, start_user_id + 5)),
+                        'item_id': [1000 + i for i in range(start_user_id, start_user_id + 5)],
+                        'behavior': [f'thread{thread_id}_{i}' for i in range(5)],
+                        'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(5)],
+                    }
+                    pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
 
-                table_write.write_arrow(pa_table)
-                commit_messages = table_write.prepare_commit()
+                    table_write.write_arrow(pa_table)
+                    commit_messages = table_write.prepare_commit()
 
-                # Add small random delay to increase chance of conflicts
-                # time.sleep(0.001 * thread_id)
+                    table_commit.commit(commit_messages)
+                    table_write.close()
+                    table_commit.close()
 
-                table_commit.commit(commit_messages)
-                table_write.close()
-                table_commit.close()
+                    write_results.append({
+                        'thread_id': thread_id,
+                        'start_user_id': start_user_id,
+                        'success': True
+                    })
+                except Exception as e:
+                    write_errors.append({
+                        'thread_id': thread_id,
+                        'error': str(e)
+                    })
 
-                write_results.append({
-                    'thread_id': thread_id,
-                    'start_user_id': start_user_id,
-                    'success': True
-                })
-            except Exception as e:
-                write_errors.append({
-                    'thread_id': thread_id,
-                    'error': str(e)
-                })
+            # Create and start multiple threads
+            threads = []
+            num_threads = 200
+            for i in range(num_threads):
+                thread = threading.Thread(
+                    target=write_data,
+                    args=(i, i * 10)
+                )
+                threads.append(thread)
+                thread.start()
 
-        # Create and start multiple threads
-        threads = []
-        num_threads = 10
-        for i in range(num_threads):
-            thread = threading.Thread(
-                target=write_data,
-                args=(i, i * 10)
-            )
-            threads.append(thread)
-            thread.start()
+            # Wait for all threads to complete
+            for thread in threads:
+                thread.join()
 
-        # Wait for all threads to complete
-        for thread in threads:
-            thread.join()
+            # Verify all writes succeeded (retry mechanism should handle conflicts)
+            self.assertEqual(num_threads, len(write_results),
+                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, got {len(write_results)}. Errors: {write_errors}")
+            self.assertEqual(0, len(write_errors),
+                             f"Iteration {test_iteration}: Expected no errors, but got: {write_errors}")
 
-        # Verify all writes succeeded (retry mechanism should handle conflicts)
-        self.assertEqual(len(write_results), num_threads,
-                         f"Expected {num_threads} successful writes, got {len(write_results)}. Errors: {write_errors}")
-        self.assertEqual(len(write_errors), 0,
-                         f"Expected no errors, but got: {write_errors}")
+            read_builder = table.new_read_builder()
+            actual = self._read_test_table(read_builder).sort_by('user_id')
 
-        # Verify all data was written correctly
-        read_builder = table.new_read_builder()
-        actual = self._read_test_table(read_builder).sort_by('user_id')
+            # Verify data rows
+            self.assertEqual(num_threads * 5, actual.num_rows,
+                             f"Iteration {test_iteration}: Expected {num_threads * 5} rows")
 
-        # Should have 5 threads * 5 records each = 25 records
-        self.assertEqual(actual.num_rows, num_threads * 5)
+            # Verify user_id
+            user_ids = actual.column('user_id').to_pylist()
+            expected_user_ids = []
+            for i in range(num_threads):
+                expected_user_ids.extend(range(i * 10, i * 10 + 5))
+            expected_user_ids.sort()
 
-        # Verify user_ids are unique and in expected range
-        user_ids = actual.column('user_id').to_pylist()
-        expected_user_ids = []
-        for i in range(num_threads):
-            expected_user_ids.extend(range(i * 10, i * 10 + 5))
-        expected_user_ids.sort()
+            self.assertEqual(user_ids, expected_user_ids,
+                             f"Iteration {test_iteration}: User IDs mismatch")
 
-        self.assertEqual(user_ids, expected_user_ids)
+            # Verify snapshot count (should have num_threads snapshots)
+            snapshot_manager = SnapshotManager(table)
+            latest_snapshot = snapshot_manager.get_latest_snapshot()
+            self.assertIsNotNone(latest_snapshot,
+                                 f"Iteration {test_iteration}: Latest snapshot should not be None")
+            self.assertEqual(latest_snapshot.id, num_threads,
+                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, got {latest_snapshot.id}")
 
-        # Verify snapshot count (should have num_threads snapshots)
-        snapshot_manager = SnapshotManager(table)
-        latest_snapshot = snapshot_manager.get_latest_snapshot()
-        self.assertIsNotNone(latest_snapshot)
-        self.assertEqual(latest_snapshot.id, num_threads)
+            print(f"✓ Iteration {test_iteration + 1}/{iter_num} completed successfully")

@@ -248,7 +248,7 @@ class CoreOptions:
     COMMIT_MAX_RETRIES: ConfigOption[int] = (
         ConfigOptions.key("commit.max-retries")
         .int_type()
-        .default_value(10)
+        .default_value(50)
         .with_description("Maximum number of retries for commit operations.")
     )
 
@@ -431,7 +431,7 @@ class CoreOptions:
     def commit_timeout(self) -> int:
         timeout = self.options.get(CoreOptions.COMMIT_TIMEOUT)
         if timeout is None:
-            return sys.maxsize
+            return 9223372036854775807
         return int(timeout.total_seconds() * 1000)
 
     def commit_min_retry_wait(self) -> int:

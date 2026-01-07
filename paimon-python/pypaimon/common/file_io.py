@@ -331,14 +331,14 @@ class FileIO:
             success = self.rename(temp_path, path)
         finally:
             if not success:
-                self.logger.warning(
-                    f"Thread {thread_id}: delete quietly {content}."
-                )
+                # self.logger.warning(
+                #     f"Thread {thread_id}: delete quietly {content}."
+                # )
                 self.delete_quietly(temp_path)
-            if success:
-                self.logger.warning(
-                    f"Thread {thread_id}: Successfully atomic commit snapshot {content}."
-                )
+            # if success:
+            #     self.logger.warning(
+            #         f"Thread {thread_id}: Successfully atomic commit snapshot {content}."
+            #     )
             return success
 
     def write_file(self, path: str, content: str, overwrite: bool = False):
