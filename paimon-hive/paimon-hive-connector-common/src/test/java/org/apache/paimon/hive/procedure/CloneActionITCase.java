@@ -1014,7 +1014,7 @@ public class CloneActionITCase extends ActionITCaseBase {
 
     @Test
     public void testMigrateWithMetaOnly() throws Exception {
-        String format = "orc";
+        String format = "avro";
         String dbName = "hivedb" + StringUtils.randomNumericString(10);
         String tableName = "hivetable" + StringUtils.randomNumericString(10);
 
