@@ -44,6 +44,7 @@ public class PartitionStatistics implements Serializable {
     public static final String FIELD_FILE_SIZE_IN_BYTES = "fileSizeInBytes";
     public static final String FIELD_FILE_COUNT = "fileCount";
     public static final String FIELD_LAST_FILE_CREATION_TIME = "lastFileCreationTime";
+    public static final String FIELD_BUCKET_COUNT = "bucketCount";
 
     @JsonProperty(FIELD_SPEC)
     protected final Map<String, String> spec;
@@ -60,18 +61,23 @@ public class PartitionStatistics implements Serializable {
     @JsonProperty(FIELD_LAST_FILE_CREATION_TIME)
     protected final long lastFileCreationTime;
 
+    @JsonProperty(FIELD_BUCKET_COUNT)
+    protected final int bucketCount;
+
     @JsonCreator
     public PartitionStatistics(
             @JsonProperty(FIELD_SPEC) Map<String, String> spec,
             @JsonProperty(FIELD_RECORD_COUNT) long recordCount,
             @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
             @JsonProperty(FIELD_FILE_COUNT) long fileCount,
-            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime) {
+            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime,
+            @JsonProperty(FIELD_BUCKET_COUNT) int bucketCount) {
         this.spec = spec;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
         this.lastFileCreationTime = lastFileCreationTime;
+        this.bucketCount = bucketCount;
     }
 
     @JsonGetter(FIELD_SPEC)
@@ -99,6 +105,11 @@ public class PartitionStatistics implements Serializable {
         return lastFileCreationTime;
     }
 
+    @JsonGetter(FIELD_BUCKET_COUNT)
+    public int bucketCount() {
+        return bucketCount;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -112,12 +123,14 @@ public class PartitionStatistics implements Serializable {
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
-                && Objects.equals(spec, that.spec);
+                && Objects.equals(spec, that.spec)
+                && Objects.equals(bucketCount, that.bucketCount);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+        return Objects.hash(
+                spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime, bucketCount);
     }
 
     @Override
@@ -133,6 +146,8 @@ public class PartitionStatistics implements Serializable {
                 + fileCount
                 + ", lastFileCreationTime="
                 + lastFileCreationTime
+                + ", bucketCount="
+                + bucketCount
                 + '}';
     }
 }

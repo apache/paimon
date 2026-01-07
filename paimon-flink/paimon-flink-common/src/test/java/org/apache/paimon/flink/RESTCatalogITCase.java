@@ -151,4 +151,52 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         sql(String.format("DROP FUNCTION %s.%s", DATABASE_NAME, functionName));
         assertThat(catalog.functionExists(functionObjectPath)).isFalse();
     }
+
+    @Test
+    public void testBucketCountStatistics() throws Exception {
+        String fixedBucketTableName = "fixed_bucket_tbl";
+        sql(
+                String.format(
+                        "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='2', 'bucket-key'='a')",
+                        DATABASE_NAME, fixedBucketTableName));
+        sql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 10, 1), (2, 20, 1)",
+                        DATABASE_NAME, fixedBucketTableName));
+        validateBucketCount(DATABASE_NAME, fixedBucketTableName, 2);
+
+        String dynamicBucketTableName = "dynamic_bucket_tbl";
+        // enable metastore.partitioned-table to trigger
+        // org.apache.paimon.rest.RESTCatalogServer.partitionsApiHandle
+        sql(
+                String.format(
+                        "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='-1', 'metastore.partitioned-table' = 'true')",
+                        DATABASE_NAME, dynamicBucketTableName));
+        sql(
+                String.format(
+                        "INSERT INTO %s.dynamic_bucket_tbl VALUES (1, 10, 1), (2, 20, 1)",
+                        DATABASE_NAME));
+        validateBucketCount(DATABASE_NAME, "dynamic_bucket_tbl", 1);
+
+        String postponeBucketTableName = "postpone_bucket_tbl";
+        sql(
+                String.format(
+                        "CREATE TABLE %s.%s (a INT, b INT, p INT, PRIMARY KEY (p, a) NOT ENFORCED) PARTITIONED BY (p) WITH ('bucket'='-2')",
+                        DATABASE_NAME, postponeBucketTableName));
+        sql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 10, 1), (2, 20, 1)",
+                        DATABASE_NAME, postponeBucketTableName));
+        validateBucketCount(DATABASE_NAME, postponeBucketTableName, 1);
+    }
+
+    private void validateBucketCount(
+            String databaseName, String tableName, Integer expectedBucketCount) throws Exception {
+        Catalog catalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
+        org.apache.paimon.catalog.Catalog paimonCatalog = ((FlinkCatalog) catalog).catalog();
+        List<org.apache.paimon.partition.Partition> partitions =
+                paimonCatalog.listPartitions(Identifier.create(databaseName, tableName));
+        assertThat(partitions).isNotEmpty();
+        assertThat(partitions.get(0).bucketCount()).isEqualTo(expectedBucketCount);
+    }
 }

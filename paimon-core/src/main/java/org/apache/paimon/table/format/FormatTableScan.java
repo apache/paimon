@@ -107,7 +107,7 @@ public class FormatTableScan implements InnerTableScan {
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());
-            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L));
+            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L, -1));
         }
         return partitionEntries;
     }

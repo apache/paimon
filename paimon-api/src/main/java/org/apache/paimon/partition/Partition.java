@@ -81,13 +81,14 @@ public class Partition extends PartitionStatistics {
             @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
             @JsonProperty(FIELD_FILE_COUNT) long fileCount,
             @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime,
+            @JsonProperty(FIELD_BUCKET_COUNT) int bucketCount,
             @JsonProperty(FIELD_DONE) boolean done,
             @JsonProperty(FIELD_CREATED_AT) @Nullable Long createdAt,
             @JsonProperty(FIELD_CREATED_BY) @Nullable String createdBy,
             @JsonProperty(FIELD_UPDATED_AT) @Nullable Long updatedAt,
             @JsonProperty(FIELD_UPDATED_BY) @Nullable String updatedBy,
             @JsonProperty(FIELD_OPTIONS) @Nullable Map<String, String> options) {
-        super(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+        super(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime, bucketCount);
         this.done = done;
         this.createdAt = createdAt;
         this.createdBy = createdBy;
@@ -102,6 +103,7 @@ public class Partition extends PartitionStatistics {
             long fileSizeInBytes,
             long fileCount,
             long lastFileCreationTime,
+            int bucketCount,
             boolean done) {
         this(
                 spec,
@@ -109,6 +111,7 @@ public class Partition extends PartitionStatistics {
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime,
+                bucketCount,
                 done,
                 null,
                 null,
@@ -188,6 +191,8 @@ public class Partition extends PartitionStatistics {
                 + fileCount
                 + ", lastFileCreationTime="
                 + lastFileCreationTime
+                + ", bucketCount="
+                + bucketCount
                 + ", done="
                 + done
                 + ", createdAt="
