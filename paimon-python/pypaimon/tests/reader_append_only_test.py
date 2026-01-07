@@ -421,7 +421,7 @@ class AoReaderTest(unittest.TestCase):
         import threading
 
         # Run the test 10 times to verify stability
-        iter_num = 1
+        iter_num = 3
         for test_iteration in range(iter_num):
             # Create a unique table for each iteration
             table_name = f'default.test_concurrent_writes_{test_iteration}'
@@ -469,7 +469,7 @@ class AoReaderTest(unittest.TestCase):
 
             # Create and start multiple threads
             threads = []
-            num_threads = 200
+            num_threads = 100
             for i in range(num_threads):
                 thread = threading.Thread(
                     target=write_data,
