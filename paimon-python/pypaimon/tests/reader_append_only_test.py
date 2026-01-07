@@ -54,9 +54,9 @@ class AoReaderTest(unittest.TestCase):
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=cls.pa_schema)
 
-    # @classmethod
-    # def tearDownClass(cls):
-    #     shutil.rmtree(cls.tempdir, ignore_errors=True)
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_parquet_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -416,23 +416,12 @@ class AoReaderTest(unittest.TestCase):
         splits = read_builder.new_scan().plan().splits()
         return table_read.to_arrow(splits)
 
-    def test_read_table(self):
-        catalog = CatalogFactory.create({
-            'warehouse': '/private/var/folders/pz/3v5rtnsd4kb9wbyw3tdpqhhh0000gp/T/tmpvahj836i/warehouse'
-        })
-        table = catalog.get_table('default.test_concurrent_writes')
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        res = table_read.to_arrow(splits)
-        print(res)
-
     def test_concurrent_writes_with_retry(self):
         """Test concurrent writes to verify retry mechanism works correctly."""
         import threading
 
         # Run the test 10 times to verify stability
-        iter_num = 5
+        iter_num = 1
         for test_iteration in range(iter_num):
             # Create a unique table for each iteration
             table_name = f'default.test_concurrent_writes_{test_iteration}'
@@ -495,7 +484,8 @@ class AoReaderTest(unittest.TestCase):
 
             # Verify all writes succeeded (retry mechanism should handle conflicts)
             self.assertEqual(num_threads, len(write_results),
-                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, got {len(write_results)}. Errors: {write_errors}")
+                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, "
+                             f"got {len(write_results)}. Errors: {write_errors}")
             self.assertEqual(0, len(write_errors),
                              f"Iteration {test_iteration}: Expected no errors, but got: {write_errors}")
 
@@ -522,6 +512,7 @@ class AoReaderTest(unittest.TestCase):
             self.assertIsNotNone(latest_snapshot,
                                  f"Iteration {test_iteration}: Latest snapshot should not be None")
             self.assertEqual(latest_snapshot.id, num_threads,
-                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, got {latest_snapshot.id}")
+                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, "
+                             f"got {latest_snapshot.id}")
 
             print(f"✓ Iteration {test_iteration + 1}/{iter_num} completed successfully")

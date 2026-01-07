@@ -19,7 +19,6 @@ import logging
 import os
 import subprocess
 import threading
-import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,7 +26,7 @@ from urllib.parse import splitport, urlparse
 
 import pyarrow
 from packaging.version import parse
-from pyarrow._fs import FileSystem
+from pyarrow._fs import FileSystem, LocalFileSystem
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
@@ -253,22 +252,26 @@ class FileIO:
 
     def rename(self, src: str, dst: str) -> bool:
         thread_id = threading.current_thread().name
+        try:
+            dst_str = self.to_filesystem_path(dst)
+            dst_parent = Path(dst_str).parent
+            if str(dst_parent) and not self.exists(str(dst_parent)):
+                self.mkdirs(str(dst_parent))
 
-        with FileIO.rename_lock:
-            if self.exists(dst):
-                return False
-            try:
-                dst_str = self.to_filesystem_path(dst)
-                dst_parent = Path(dst_str).parent
-                if str(dst_parent) and not self.exists(str(dst_parent)):
-                    self.mkdirs(str(dst_parent))
-
-                src_str = self.to_filesystem_path(src)
+            src_str = self.to_filesystem_path(src)
+            if isinstance(self.filesystem, LocalFileSystem):
+                if self.exists(dst):
+                    return False
+                with FileIO.rename_lock:
+                    if self.exists(dst):
+                        return False
+                    self.filesystem.move(src_str, dst_str)
+            else:
                 self.filesystem.move(src_str, dst_str)
-                return True
-            except Exception as e:
-                self.logger.warning(f"Thread {thread_id}: Failed to rename {src} to {dst}: {e}")
-                return False
+            return True
+        except Exception as e:
+            self.logger.warning(f"Thread {thread_id}: Failed to rename {src} to {dst}: {e}")
+            return False
 
     def delete_quietly(self, path: str):
         import threading
@@ -319,8 +322,8 @@ class FileIO:
             return input_stream.read().decode('utf-8')
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
-        import threading
-        thread_id = threading.current_thread().name
+        # import threading
+        # thread_id = threading.current_thread().name
         temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
@@ -342,8 +345,8 @@ class FileIO:
             return success
 
     def write_file(self, path: str, content: str, overwrite: bool = False):
-        import threading
-        thread_id = threading.current_thread().name
+        # import threading
+        # thread_id = threading.current_thread().name
 
         if not overwrite and self.exists(path):
             raise FileExistsError(f"File {path} already exists and overwrite=False")

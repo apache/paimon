@@ -428,7 +428,7 @@ class PkReaderTest(unittest.TestCase):
         import threading
 
         # Run the test 3 times to verify stability
-        iter_num=3
+        iter_num = 3
         for test_iteration in range(iter_num):
             # Create a unique table for each iteration
             table_name = f'default.test_pk_concurrent_writes_{test_iteration}'
@@ -494,7 +494,8 @@ class PkReaderTest(unittest.TestCase):
 
             # Verify all writes succeeded (retry mechanism should handle conflicts)
             self.assertEqual(num_threads, len(write_results),
-                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, got {len(write_results)}. Errors: {write_errors}")
+                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, "
+                             f"got {len(write_results)}. Errors: {write_errors}")
             self.assertEqual(0, len(write_errors),
                              f"Iteration {test_iteration}: Expected no errors, but got: {write_errors}")
 
@@ -521,6 +522,7 @@ class PkReaderTest(unittest.TestCase):
             self.assertIsNotNone(latest_snapshot,
                                  f"Iteration {test_iteration}: Latest snapshot should not be None")
             self.assertEqual(latest_snapshot.id, num_threads,
-                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, got {latest_snapshot.id}")
+                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, "
+                             f"got {latest_snapshot.id}")
 
             print(f"✓ PK Table Iteration {test_iteration + 1}/{iter_num} completed successfully")

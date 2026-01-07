@@ -431,7 +431,7 @@ class CoreOptions:
     def commit_timeout(self) -> int:
         timeout = self.options.get(CoreOptions.COMMIT_TIMEOUT)
         if timeout is None:
-            return 9223372036854775807
+            return sys.maxsize
         return int(timeout.total_seconds() * 1000)
 
     def commit_min_retry_wait(self) -> int:

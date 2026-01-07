@@ -22,7 +22,6 @@ import time
 import uuid
 from typing import List, Optional
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -155,11 +154,7 @@ class FileStoreCommit:
         thread_id = threading.current_thread().name
         try:
             while True:
-                try:
-                    latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-                except Exception:
-                    print("error===")
-                    continue
+                latest_snapshot = self.snapshot_manager.get_latest_snapshot()
 
                 if commit_kind == "OVERWRITE":
                     commit_entries = self._generate_overwrite_entries(latest_snapshot)
@@ -215,20 +210,16 @@ class FileStoreCommit:
             if retry_result.latest_snapshot is not None:
                 start_check_snapshot_id = retry_result.latest_snapshot.id + 1
 
-            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 1):
-                try:
-                    snapshot = self.snapshot_manager.snapshot(snapshot_id)
-                    if (snapshot.commit_user == self.commit_user and
-                            snapshot.commit_identifier == commit_identifier and
-                            snapshot.commit_kind == commit_kind):
-                        logger.info(
-                            f"Thread {thread_id}: Commit already completed (snapshot {snapshot_id}), "
-                            f"user: {self.commit_user}, identifier: {commit_identifier}"
-                        )
-                        return SuccessResult()
-                except Exception:
-                    # If snapshot doesn't exist, continue checking
-                    continue
+            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 2):
+                snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+                if (snapshot and snapshot.commit_user == self.commit_user and
+                        snapshot.commit_identifier == commit_identifier and
+                        snapshot.commit_kind == commit_kind):
+                    logger.info(
+                        f"Thread {thread_id}: Commit already completed (snapshot {snapshot_id}), "
+                        f"user: {self.commit_user}, identifier: {commit_identifier}"
+                    )
+                    return SuccessResult()
 
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
@@ -356,7 +347,8 @@ class FileStoreCommit:
                     # Commit failed, clean up temporary files and retry
                     commit_time_sec = (int(time.time() * 1000) - start_time_ms) / 1000
                     logger.warning(
-                        f"Thread {thread_id}: Atomic commit failed for snapshot #{new_snapshot_id} by user {self.commit_user} "
+                        f"Thread {thread_id}: Atomic commit failed for snapshot #{new_snapshot_id} "
+                        f"by user {self.commit_user} "
                         f"with identifier {commit_identifier} and kind {commit_kind} after {commit_time_sec}s. "
                         f"Clean up and try again."
                     )
@@ -370,7 +362,9 @@ class FileStoreCommit:
             return RetryResult(latest_snapshot, base_data_files, e)
 
         logger.warning(
-            f"Thread {thread_id}: Successfully commit snapshot {snapshot_data}."
+            f"Thread {thread_id}: Successfully commit snapshot {new_snapshot_id} to table {self.table.identifier} "
+            f"by user {self.commit_user} "
+            + f"with identifier {commit_identifier} and kind {commit_kind}."
         )
         return SuccessResult()
 
@@ -398,7 +392,7 @@ class FileStoreCommit:
         thread_id = threading.get_ident()
 
         retry_wait_ms = min(
-            self.commit_min_retry_wait * (2 ** retry_count * 8),
+            self.commit_min_retry_wait * (2 ** retry_count),
             self.commit_max_retry_wait
         )
 
@@ -406,7 +400,8 @@ class FileStoreCommit:
         total_wait_ms = retry_wait_ms + jitter_ms
 
         logger.debug(
-            f"Thread {thread_id}: Waiting {total_wait_ms}ms before retry (base: {retry_wait_ms}ms, jitter: {jitter_ms}ms)"
+            f"Thread {thread_id}: Waiting {total_wait_ms}ms before retry (base: {retry_wait_ms}ms, "
+            f"jitter: {jitter_ms}ms)"
         )
         time.sleep(total_wait_ms / 1000.0)
 

@@ -79,4 +79,3 @@ def parse_duration(text: str) -> int:
         raise ValueError(f"Duration cannot be negative: {text}")
 
     return result_ms_int
-
