@@ -27,7 +27,9 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
+from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
+from pypaimon.table.row.row_kind import RowKind
 
 
 def _random_format():
@@ -332,3 +334,22 @@ class BinaryRowTest(unittest.TestCase):
                 [0],
             )
         starting_scanner.manifest_file_manager.write(manifest_files[0].file_name, manifest_entries)
+
+    def test_binary_row_with_empty_actual_data(self):
+        empty_data = b''
+        binary_row = BinaryRow(empty_data, [])
+        self.assertEqual(binary_row.arity, 0)
+        self.assertEqual(binary_row.actual_data, b'')
+        self.assertEqual(binary_row.get_row_kind(), RowKind.INSERT)
+        
+        arity_zero_data = (0).to_bytes(4, 'big')  # b'\x00\x00\x00\x00'
+        binary_row = BinaryRow(arity_zero_data, [])
+        self.assertEqual(binary_row.arity, 0)
+        self.assertEqual(binary_row.actual_data, b'')
+        self.assertEqual(binary_row.get_row_kind(), RowKind.INSERT)
+        
+        normal_empty_row = (0).to_bytes(4, 'big') + b'\x00' * 8  # 12 bytes total
+        binary_row = BinaryRow(normal_empty_row, [])
+        self.assertEqual(binary_row.arity, 0)
+        self.assertEqual(len(binary_row.actual_data), 8)
+        self.assertEqual(binary_row.get_row_kind(), RowKind.INSERT)

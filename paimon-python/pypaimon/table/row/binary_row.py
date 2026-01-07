@@ -31,11 +31,19 @@ class BinaryRow(InternalRow):
         Initialize BinaryRow with raw binary data and field definitions.
         """
         self.data = data
-        self.arity = int.from_bytes(data[:4], 'big')
-        # Skip the arity prefix (4 bytes) if present
-        self.actual_data = data[4:] if len(data) >= 4 else data
+        if len(data) < 4:
+            self.arity = 0
+            self.actual_data = b''
+        else:
+            self.arity = int.from_bytes(data[:4], 'big')
+            self.actual_data = data[4:] if len(data) >= 4 else data
+        
         self.fields = fields
-        self.row_kind = RowKind(self.actual_data[0])
+        
+        if len(self.actual_data) == 0:
+            self.row_kind = RowKind.INSERT
+        else:
+            self.row_kind = RowKind(self.actual_data[0])
 
     def get_field(self, index: int) -> Any:
         from pypaimon.table.row.generic_row import GenericRowDeserializer
