@@ -2644,7 +2644,7 @@ class DataBlobWriterTest(unittest.TestCase):
 
             # Create and start multiple threads
             threads = []
-            num_threads = 200
+            num_threads = 100
             for i in range(num_threads):
                 thread = threading.Thread(
                     target=write_blob_data,

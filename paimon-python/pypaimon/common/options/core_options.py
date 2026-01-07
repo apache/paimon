@@ -248,7 +248,7 @@ class CoreOptions:
     COMMIT_MAX_RETRIES: ConfigOption[int] = (
         ConfigOptions.key("commit.max-retries")
         .int_type()
-        .default_value(50)
+        .default_value(10)
         .with_description("Maximum number of retries for commit operations.")
     )
 
