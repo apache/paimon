@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 
 import org.apache.spark.api.java.JavaRDD;
@@ -123,8 +124,10 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         .sortWithinPartitions(sortFields);
 
         // 3. write index for each partition & range
-        final BTreeGlobalIndexBuilder builder =
-                new BTreeGlobalIndexBuilder(table, readType, indexField, indexType, range, options);
+        final byte[] builderBytes =
+                InstantiationUtil.serializeObject(
+                        new BTreeGlobalIndexBuilder(
+                                table, readType, indexField, indexType, range, options));
         final RowType rowType =
                 SpecialFields.rowTypeWithRowId(table.rowType()).project(selectedColumns);
         JavaRDD<byte[]> written =
@@ -136,7 +139,11 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                         iter -> {
                                             CommitMessageSerializer commitMessageSerializer =
                                                     new CommitMessageSerializer();
-
+                                            BTreeGlobalIndexBuilder builder =
+                                                    InstantiationUtil.deserializeObject(
+                                                            builderBytes,
+                                                            BTreeGlobalIndexBuilder.class
+                                                                    .getClassLoader());
                                             List<CommitMessage> commitMessages =
                                                     builder.build(
                                                             CloseableIterator.adapterForIterator(

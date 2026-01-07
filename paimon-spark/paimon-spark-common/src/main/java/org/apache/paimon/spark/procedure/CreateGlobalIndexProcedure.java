@@ -232,7 +232,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             Options options)
             throws IOException {
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
-        List<Pair<DefaultGlobalIndexBuilder, byte[]>> taskList = new ArrayList<>();
+        List<Pair<byte[], byte[]>> taskList = new ArrayList<>();
         for (Map.Entry<BinaryRow, List<IndexedSplit>> entry : preparedDS.entrySet()) {
             BinaryRow partition = entry.getKey();
             List<IndexedSplit> partitions = entry.getValue();
@@ -251,8 +251,9 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 indexedSplit.rowRanges().get(0),
                                 options);
 
-                byte[] dsBytes = InstantiationUtil.serializeObject(indexedSplit);
-                taskList.add(Pair.of(builder, dsBytes));
+                byte[] builderBytes = InstantiationUtil.serializeObject(builder);
+                byte[] splitBytes = InstantiationUtil.serializeObject(indexedSplit);
+                taskList.add(Pair.of(builderBytes, splitBytes));
             }
         }
 
@@ -263,12 +264,15 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 pair -> {
                                     CommitMessageSerializer commitMessageSerializer =
                                             new CommitMessageSerializer();
-                                    DefaultGlobalIndexBuilder indexBuilder = pair.getLeft();
+                                    ClassLoader classLoader =
+                                            DefaultGlobalIndexBuilder.class.getClassLoader();
+                                    DefaultGlobalIndexBuilder indexBuilder =
+                                            InstantiationUtil.deserializeObject(
+                                                    pair.getLeft(), classLoader);
                                     byte[] dataSplitBytes = pair.getRight();
                                     IndexedSplit split =
                                             InstantiationUtil.deserializeObject(
-                                                    dataSplitBytes,
-                                                    IndexedSplit.class.getClassLoader());
+                                                    dataSplitBytes, classLoader);
                                     ReadBuilder builder = indexBuilder.table().newReadBuilder();
                                     builder.withReadType(indexBuilder.readType());
 
