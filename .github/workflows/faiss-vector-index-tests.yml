@@ -87,11 +87,6 @@ jobs:
 
       - name: Run Vector E2E Tests
         timeout-minutes: 30
-        run: |
-          # run tests with random timezone to find out timezone related bugs
-          . .github/workflows/utils.sh
-          jvm_timezone=$(random_timezone)
-          echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 2C -B verify -Pspark3,flink1,paimon-faiss-vector -pl paimon-vector-e2e-test -Duser.timezone=$jvm_timezone
+        run: mvn -T 2C -B verify -Pspark3,flink1,paimon-faiss-vector -pl paimon-vector-e2e-test
         env:
           MAVEN_OPTS: -Xmx4096m

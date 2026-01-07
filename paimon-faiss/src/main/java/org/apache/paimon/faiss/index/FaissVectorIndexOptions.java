@@ -68,7 +68,7 @@ public class FaissVectorIndexOptions {
     public static final ConfigOption<Integer> VECTOR_NLIST =
             ConfigOptions.key("vector.nlist")
                     .intType()
-                    .defaultValue(100)
+                    .defaultValue(4096)
                     .withDescription("The number of inverted lists (clusters) for IVF index");
 
     public static final ConfigOption<Integer> VECTOR_NPROBE =
@@ -92,14 +92,22 @@ public class FaissVectorIndexOptions {
     public static final ConfigOption<Integer> VECTOR_SIZE_PER_INDEX =
             ConfigOptions.key("vector.size-per-index")
                     .intType()
-                    .defaultValue(10000)
+                    .defaultValue(200_0000)
                     .withDescription("The size of vectors stored in each vector index file");
 
     public static final ConfigOption<Integer> VECTOR_TRAINING_SIZE =
             ConfigOptions.key("vector.training-size")
                     .intType()
-                    .defaultValue(10000)
+                    .defaultValue(50_0000)
                     .withDescription("The number of vectors to use for training IVF-based indices");
+
+    public static final ConfigOption<Integer> VECTOR_SEARCH_FACTOR =
+            ConfigOptions.key("vector.search-factor")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "The multiplier for the search limit when filtering is applied. "
+                                    + "This is used to fetch more results to ensure enough records after filtering.");
 
     private final int dimension;
     private final FaissVectorMetric metric;
@@ -113,6 +121,7 @@ public class FaissVectorIndexOptions {
     private final int pqNbits;
     private final int sizePerIndex;
     private final int trainingSize;
+    private final int searchFactor;
 
     public FaissVectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
@@ -130,6 +139,7 @@ public class FaissVectorIndexOptions {
                         ? options.get(VECTOR_SIZE_PER_INDEX)
                         : VECTOR_SIZE_PER_INDEX.defaultValue();
         this.trainingSize = options.get(VECTOR_TRAINING_SIZE);
+        this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
     }
 
     public int dimension() {
@@ -178,5 +188,9 @@ public class FaissVectorIndexOptions {
 
     public int trainingSize() {
         return trainingSize;
+    }
+
+    public int searchFactor() {
+        return searchFactor;
     }
 }

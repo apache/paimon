@@ -25,6 +25,8 @@
 extern "C" {
 #endif
 
+// ==================== Index Factory ====================
+
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    indexFactoryCreate
@@ -32,6 +34,8 @@ extern "C" {
  */
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexFactoryCreate
   (JNIEnv *, jclass, jint, jstring, jint);
+
+// ==================== Index Operations ====================
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
@@ -75,27 +79,37 @@ JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_indexGetMetricTy
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
+ * Method:    indexReset
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReset
+  (JNIEnv *, jclass, jlong);
+
+// ==================== Zero-Copy Vector Operations ====================
+
+/*
+ * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    indexTrain
- * Signature: (JJ[F)V
+ * Signature: (JJLjava/nio/ByteBuffer;)V
  */
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexTrain
-  (JNIEnv *, jclass, jlong, jlong, jfloatArray);
+  (JNIEnv *, jclass, jlong, jlong, jobject);
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    indexAdd
- * Signature: (JJ[F)V
+ * Signature: (JJLjava/nio/ByteBuffer;)V
  */
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexAdd
-  (JNIEnv *, jclass, jlong, jlong, jfloatArray);
+  (JNIEnv *, jclass, jlong, jlong, jobject);
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    indexAddWithIds
- * Signature: (JJ[F[J)V
+ * Signature: (JJLjava/nio/ByteBuffer;Ljava/nio/ByteBuffer;)V
  */
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexAddWithIds
-  (JNIEnv *, jclass, jlong, jlong, jfloatArray, jlongArray);
+  (JNIEnv *, jclass, jlong, jlong, jobject, jobject);
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
@@ -108,26 +122,20 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSearch
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    indexRangeSearch
- * Signature: (JJ[FF)J
+ * Signature: (JJLjava/nio/ByteBuffer;F)J
  */
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexRangeSearch
-  (JNIEnv *, jclass, jlong, jlong, jfloatArray, jfloat);
+  (JNIEnv *, jclass, jlong, jlong, jobject, jfloat);
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    indexRemoveIds
- * Signature: (J[J)J
+ * Signature: (JJLjava/nio/ByteBuffer;)J
  */
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexRemoveIds
-  (JNIEnv *, jclass, jlong, jlongArray);
+  (JNIEnv *, jclass, jlong, jlong, jobject);
 
-/*
- * Class:     org_apache_paimon_faiss_FaissNative
- * Method:    indexReset
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReset
-  (JNIEnv *, jclass, jlong);
+// ==================== Index I/O ====================
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
@@ -145,21 +153,33 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexWriteToFile
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReadFromFile
   (JNIEnv *, jclass, jstring);
 
+// ==================== Zero-Copy Serialization ====================
+
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
- * Method:    indexSerialize
- * Signature: (J)[B
+ * Method:    indexSerializeSize
+ * Signature: (J)J
  */
-JNIEXPORT jbyteArray JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSerialize
+JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSerializeSize
   (JNIEnv *, jclass, jlong);
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
+ * Method:    indexSerialize
+ * Signature: (JLjava/nio/ByteBuffer;)J
+ */
+JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSerialize
+  (JNIEnv *, jclass, jlong, jobject);
+
+/*
+ * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    indexDeserialize
- * Signature: ([B)J
+ * Signature: ([BJ)J
  */
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexDeserialize
-  (JNIEnv *, jclass, jbyteArray);
+  (JNIEnv *, jclass, jbyteArray, jlong);
+
+// ==================== Range Search Result ====================
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
@@ -171,27 +191,45 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResul
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
- * Method:    rangeSearchResultGetLimits
- * Signature: (J)[J
+ * Method:    rangeSearchResultGetTotalSize
+ * Signature: (J)J
  */
-JNIEXPORT jlongArray JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLimits
+JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetTotalSize
   (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     org_apache_paimon_faiss_FaissNative
+ * Method:    rangeSearchResultGetNumQueries
+ * Signature: (J)I
+ */
+JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetNumQueries
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     org_apache_paimon_faiss_FaissNative
+ * Method:    rangeSearchResultGetLimits
+ * Signature: (JLjava/nio/ByteBuffer;)V
+ */
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLimits
+  (JNIEnv *, jclass, jlong, jobject);
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    rangeSearchResultGetLabels
- * Signature: (J)[J
+ * Signature: (JLjava/nio/ByteBuffer;)V
  */
-JNIEXPORT jlongArray JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLabels
-  (JNIEnv *, jclass, jlong);
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLabels
+  (JNIEnv *, jclass, jlong, jobject);
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    rangeSearchResultGetDistances
- * Signature: (J)[F
+ * Signature: (JLjava/nio/ByteBuffer;)V
  */
-JNIEXPORT jfloatArray JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetDistances
-  (JNIEnv *, jclass, jlong);
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetDistances
+  (JNIEnv *, jclass, jlong, jobject);
+
+// ==================== IVF Index Specific ====================
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
@@ -217,6 +255,8 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_ivfSetNprobe
 JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_ivfGetNlist
   (JNIEnv *, jclass, jlong);
 
+// ==================== HNSW Index Specific ====================
+
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
  * Method:    hnswGetEfSearch
@@ -240,6 +280,16 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswSetEfSearch
  */
 JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswGetEfConstruction
   (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     org_apache_paimon_faiss_FaissNative
+ * Method:    hnswSetEfConstruction
+ * Signature: (JI)V
+ */
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswSetEfConstruction
+  (JNIEnv *, jclass, jlong, jint);
+
+// ==================== Utility ====================
 
 /*
  * Class:     org_apache_paimon_faiss_FaissNative
@@ -270,4 +320,3 @@ JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_getNumThreads
 #endif
 
 #endif /* PAIMON_FAISS_JNI_H */
-

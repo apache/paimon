@@ -25,14 +25,15 @@ import org.apache.paimon.faiss.IndexIVF;
 import org.apache.paimon.faiss.MetricType;
 
 import java.io.Closeable;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
- * A wrapper class for FAISS index that manages the native index pointer.
+ * A wrapper class for FAISS index with zero-copy support.
  *
- * <p>This class provides a safe Java API for interacting with native FAISS indices, including
- * automatic resource management through the {@link Closeable} interface.
- *
- * <p>This implementation uses the paimon-faiss-jni library for native FAISS bindings.
+ * <p>This class provides a safe Java API for interacting with native FAISS indices using direct
+ * ByteBuffers for zero-copy data transfer. This eliminates memory duplication and improves
+ * performance for large-scale vector operations.
  */
 public class FaissIndex implements Closeable {
 
@@ -75,9 +76,10 @@ public class FaissIndex implements Closeable {
     public static FaissIndex createHnswIndex(
             int dimension, int m, int efConstruction, FaissVectorMetric metric) {
         MetricType metricType = toMetricType(metric);
-        // Use IDMap2 wrapper to support addWithIds and get efConstruction
         String description = String.format("IDMap2,HNSW%d", m);
         Index index = IndexFactory.create(dimension, description, metricType);
+        // Set efConstruction before adding any vectors
+        IndexHNSW.setEfConstruction(index, efConstruction);
         return new FaissIndex(index, dimension, metric, FaissIndexType.HNSW);
     }
 
@@ -115,89 +117,84 @@ public class FaissIndex implements Closeable {
     }
 
     /**
-     * Load an index from serialized data.
+     * Load an index from a byte array.
      *
      * @param data the serialized index data
      * @return the loaded index
      */
     public static FaissIndex fromBytes(byte[] data) {
         Index index = Index.deserialize(data);
-        int dimension = index.getDimension();
-        // Note: metric and type are not stored in serialized form, use defaults
-        return new FaissIndex(index, dimension, FaissVectorMetric.L2, FaissIndexType.UNKNOWN);
+        return new FaissIndex(
+                index, index.getDimension(), FaissVectorMetric.L2, FaissIndexType.UNKNOWN);
     }
 
     /**
-     * Add vectors to the index.
+     * Search for k nearest neighbors.
      *
-     * @param vectors the vectors to add (each row is a vector)
+     * @param queryVectors array containing query vectors (n * dimension floats)
+     * @param n the number of queries
+     * @param k the number of nearest neighbors
+     * @param distances output array for distances (n * k floats)
+     * @param labels output array for labels (n * k longs)
      */
-    public void add(float[][] vectors) {
+    public void search(float[] queryVectors, int n, int k, float[] distances, long[] labels) {
         ensureOpen();
-        if (vectors.length == 0) {
-            return;
-        }
-        float[] flattened = flatten(vectors);
-        index.add(flattened);
-    }
-
-    /**
-     * Add vectors with IDs to the index.
-     *
-     * @param vectors the vectors to add (each row is a vector)
-     * @param ids the IDs for the vectors
-     */
-    public void addWithIds(float[][] vectors, long[] ids) {
-        ensureOpen();
-        if (vectors.length == 0) {
-            return;
-        }
-        if (vectors.length != ids.length) {
+        if (queryVectors.length < n * dimension) {
             throw new IllegalArgumentException(
-                    "Number of vectors and IDs must match: "
-                            + vectors.length
-                            + " vs "
-                            + ids.length);
+                    "Query vectors array too small: required "
+                            + (n * dimension)
+                            + ", got "
+                            + queryVectors.length);
         }
-        float[] flattened = flatten(vectors);
-        index.addWithIds(flattened, ids);
-    }
-
-    /**
-     * Add a single vector to the index.
-     *
-     * @param vector the vector to add
-     */
-    public void add(float[] vector) {
-        ensureOpen();
-        checkDimension(vector);
-        index.addSingle(vector);
-    }
-
-    /**
-     * Add a single vector with ID to the index.
-     *
-     * @param vector the vector to add
-     * @param id the ID for the vector
-     */
-    public void addWithId(float[] vector, long id) {
-        ensureOpen();
-        checkDimension(vector);
-        index.addWithIds(vector, new long[] {id});
-    }
-
-    /**
-     * Train the index (required for IVF-based indices).
-     *
-     * @param trainingVectors the training vectors
-     */
-    public void train(float[][] trainingVectors) {
-        ensureOpen();
-        if (trainingVectors.length == 0) {
-            return;
+        if (distances.length < n * k) {
+            throw new IllegalArgumentException(
+                    "Distances array too small: required " + (n * k) + ", got " + distances.length);
         }
-        float[] flattened = flatten(trainingVectors);
-        index.train(flattened);
+        if (labels.length < n * k) {
+            throw new IllegalArgumentException(
+                    "Labels array too small: required " + (n * k) + ", got " + labels.length);
+        }
+        index.search(n, queryVectors, k, distances, labels);
+    }
+
+    /**
+     * Train the index (zero-copy).
+     *
+     * <p>Required for IVF-based indices before adding vectors.
+     *
+     * @param vectorBuffer direct ByteBuffer containing training vectors (n * dimension floats)
+     * @param n the number of training vectors
+     */
+    public void train(ByteBuffer vectorBuffer, int n) {
+        ensureOpen();
+        validateVectorBuffer(vectorBuffer, n);
+        index.train(n, vectorBuffer);
+    }
+
+    /**
+     * Add vectors to the index (zero-copy).
+     *
+     * @param vectorBuffer direct ByteBuffer containing vectors (n * dimension floats)
+     * @param n the number of vectors
+     */
+    public void add(ByteBuffer vectorBuffer, int n) {
+        ensureOpen();
+        validateVectorBuffer(vectorBuffer, n);
+        index.add(n, vectorBuffer);
+    }
+
+    /**
+     * Add vectors with IDs to the index (zero-copy).
+     *
+     * @param vectorBuffer direct ByteBuffer containing vectors (n * dimension floats)
+     * @param idBuffer direct ByteBuffer containing IDs (n longs)
+     * @param n the number of vectors
+     */
+    public void addWithIds(ByteBuffer vectorBuffer, ByteBuffer idBuffer, int n) {
+        ensureOpen();
+        validateVectorBuffer(vectorBuffer, n);
+        validateIdBuffer(idBuffer, n);
+        index.addWithIds(n, vectorBuffer, idBuffer);
     }
 
     /**
@@ -211,35 +208,22 @@ public class FaissIndex implements Closeable {
     }
 
     /**
-     * Search for k nearest neighbors.
+     * Get the number of vectors in the index.
      *
-     * @param queries the query vectors
-     * @param k the number of nearest neighbors to return
-     * @return search results containing distances and IDs
+     * @return the number of vectors
      */
-    public SearchResult search(float[][] queries, int k) {
+    public long size() {
         ensureOpen();
-        if (queries.length == 0) {
-            return new SearchResult(new float[0], new long[0], 0, k);
-        }
-        float[] flattened = flatten(queries);
-        org.apache.paimon.faiss.SearchResult result = index.search(flattened, k);
-        return new SearchResult(result.getDistances(), result.getLabels(), queries.length, k);
+        return index.getCount();
     }
 
-    /**
-     * Search for k nearest neighbors for a single query.
-     *
-     * @param query the query vector
-     * @param k the number of nearest neighbors to return
-     * @return search results containing distances and IDs
-     */
-    public SearchResult search(float[] query, int k) {
+    /** Reset the index (remove all vectors). */
+    public void reset() {
         ensureOpen();
-        checkDimension(query);
-        org.apache.paimon.faiss.SearchResult result = index.searchSingle(query, k);
-        return new SearchResult(result.getDistances(), result.getLabels(), 1, k);
+        index.reset();
     }
+
+    // ==================== Index Configuration ====================
 
     /**
      * Set HNSW search parameter efSearch.
@@ -261,15 +245,7 @@ public class FaissIndex implements Closeable {
         IndexIVF.setNprobe(index, nprobe);
     }
 
-    /**
-     * Get the number of vectors in the index.
-     *
-     * @return the number of vectors
-     */
-    public long size() {
-        ensureOpen();
-        return index.getCount();
-    }
+    // ==================== Index Properties ====================
 
     /**
      * Get the dimension of vectors in the index.
@@ -298,31 +274,83 @@ public class FaissIndex implements Closeable {
         return indexType;
     }
 
+    // ==================== Serialization ====================
+
     /**
-     * Serialize the index to a byte array.
+     * Get the size in bytes needed to serialize this index.
      *
-     * @return the serialized index
+     * @return the serialization size
      */
-    public byte[] toBytes() {
+    public long serializeSize() {
         ensureOpen();
-        return index.serialize();
+        return index.serializeSize();
     }
 
-    /** Reset the index (remove all vectors). */
-    public void reset() {
+    /**
+     * Serialize the index to a direct ByteBuffer (zero-copy).
+     *
+     * @param buffer direct ByteBuffer to write to (must have sufficient capacity)
+     * @return the number of bytes written
+     */
+    public long serialize(ByteBuffer buffer) {
         ensureOpen();
-        index.reset();
+        if (!buffer.isDirect()) {
+            throw new IllegalArgumentException("Buffer must be a direct buffer");
+        }
+        return index.serialize(buffer);
     }
 
-    @Override
-    public void close() {
-        if (!closed) {
-            synchronized (this) {
-                if (!closed) {
-                    index.close();
-                    closed = true;
-                }
-            }
+    // ==================== Buffer Allocation Utilities ====================
+
+    /**
+     * Allocate a direct ByteBuffer suitable for vector data.
+     *
+     * @param numVectors number of vectors
+     * @param dimension vector dimension
+     * @return a direct ByteBuffer in native byte order
+     */
+    public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {
+        return ByteBuffer.allocateDirect(numVectors * dimension * Float.BYTES)
+                .order(ByteOrder.nativeOrder());
+    }
+
+    /**
+     * Allocate a direct ByteBuffer suitable for ID data.
+     *
+     * @param numIds number of IDs
+     * @return a direct ByteBuffer in native byte order
+     */
+    public static ByteBuffer allocateIdBuffer(int numIds) {
+        return ByteBuffer.allocateDirect(numIds * Long.BYTES).order(ByteOrder.nativeOrder());
+    }
+
+    // ==================== Internal Methods ====================
+
+    private void validateVectorBuffer(ByteBuffer buffer, int numVectors) {
+        if (!buffer.isDirect()) {
+            throw new IllegalArgumentException("Vector buffer must be a direct buffer");
+        }
+        int requiredBytes = numVectors * dimension * Float.BYTES;
+        if (buffer.capacity() < requiredBytes) {
+            throw new IllegalArgumentException(
+                    "Vector buffer too small: required "
+                            + requiredBytes
+                            + " bytes, got "
+                            + buffer.capacity());
+        }
+    }
+
+    private void validateIdBuffer(ByteBuffer buffer, int numIds) {
+        if (!buffer.isDirect()) {
+            throw new IllegalArgumentException("ID buffer must be a direct buffer");
+        }
+        int requiredBytes = numIds * Long.BYTES;
+        if (buffer.capacity() < requiredBytes) {
+            throw new IllegalArgumentException(
+                    "ID buffer too small: required "
+                            + requiredBytes
+                            + " bytes, got "
+                            + buffer.capacity());
         }
     }
 
@@ -330,32 +358,6 @@ public class FaissIndex implements Closeable {
         if (closed) {
             throw new IllegalStateException("Index has been closed");
         }
-    }
-
-    private void checkDimension(float[] vector) {
-        if (vector.length != dimension) {
-            throw new IllegalArgumentException(
-                    "Vector dimension mismatch: expected " + dimension + ", got " + vector.length);
-        }
-    }
-
-    private float[] flatten(float[][] vectors) {
-        int n = vectors.length;
-        int d = vectors[0].length;
-        float[] result = new float[n * d];
-        for (int i = 0; i < n; i++) {
-            if (vectors[i].length != d) {
-                throw new IllegalArgumentException(
-                        "All vectors must have the same dimension: expected "
-                                + d
-                                + ", got "
-                                + vectors[i].length
-                                + " at index "
-                                + i);
-            }
-            System.arraycopy(vectors[i], 0, result, i * d, d);
-        }
-        return result;
     }
 
     private static MetricType toMetricType(FaissVectorMetric metric) {
@@ -369,58 +371,15 @@ public class FaissIndex implements Closeable {
         }
     }
 
-    /** Result of a search operation. */
-    public static class SearchResult {
-        private final float[] distances;
-        private final long[] labels;
-        private final int numQueries;
-        private final int k;
-
-        public SearchResult(float[] distances, long[] labels, int numQueries, int k) {
-            this.distances = distances;
-            this.labels = labels;
-            this.numQueries = numQueries;
-            this.k = k;
-        }
-
-        public float[] getDistances() {
-            return distances;
-        }
-
-        public long[] getLabels() {
-            return labels;
-        }
-
-        public int getNumQueries() {
-            return numQueries;
-        }
-
-        public int getK() {
-            return k;
-        }
-
-        /**
-         * Get distances for a specific query.
-         *
-         * @param queryIndex the query index
-         * @return the distances for that query
-         */
-        public float[] getDistancesForQuery(int queryIndex) {
-            float[] result = new float[k];
-            System.arraycopy(distances, queryIndex * k, result, 0, k);
-            return result;
-        }
-
-        /**
-         * Get labels for a specific query.
-         *
-         * @param queryIndex the query index
-         * @return the labels for that query
-         */
-        public long[] getLabelsForQuery(int queryIndex) {
-            long[] result = new long[k];
-            System.arraycopy(labels, queryIndex * k, result, 0, k);
-            return result;
+    @Override
+    public void close() {
+        if (!closed) {
+            synchronized (this) {
+                if (!closed) {
+                    index.close();
+                    closed = true;
+                }
+            }
         }
     }
 }

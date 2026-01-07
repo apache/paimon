@@ -18,21 +18,28 @@
 
 package org.apache.paimon.faiss;
 
-import java.util.Arrays;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.LongBuffer;
 
 /**
- * Result of a range search operation.
+ * Result of a range search operation with zero-copy support.
  *
  * <p>Unlike k-NN search which returns a fixed number of neighbors per query, range search returns
  * all neighbors within a given radius, which can vary per query.
+ *
+ * <p>This class uses direct ByteBuffers to avoid memory copies when retrieving results from native
+ * code.
  */
 public class RangeSearchResult implements AutoCloseable {
 
     private long nativeHandle;
     private final int numQueries;
-    private long[] limits;
-    private long[] labels;
-    private float[] distances;
+    private ByteBuffer limitsBuffer;
+    private ByteBuffer labelsBuffer;
+    private ByteBuffer distancesBuffer;
+    private long totalSize = -1;
 
     /**
      * Create a new RangeSearchResult from a native handle.
@@ -65,7 +72,8 @@ public class RangeSearchResult implements AutoCloseable {
         if (queryIndex < 0 || queryIndex >= numQueries) {
             throw new IndexOutOfBoundsException("Query index out of bounds: " + queryIndex);
         }
-        return limits[queryIndex + 1] - limits[queryIndex];
+        LongBuffer limits = limitsBuffer.asLongBuffer();
+        return limits.get(queryIndex + 1) - limits.get(queryIndex);
     }
 
     /**
@@ -74,8 +82,46 @@ public class RangeSearchResult implements AutoCloseable {
      * @return the total number of results
      */
     public long getTotalResultCount() {
+        if (totalSize < 0 && nativeHandle != 0) {
+            totalSize = FaissNative.rangeSearchResultGetTotalSize(nativeHandle);
+        }
+        return totalSize;
+    }
+
+    /**
+     * Get the limits buffer containing the start/end indices for each query.
+     *
+     * <p>The limits buffer has (numQueries + 1) longs. For query i, results are in the range
+     * [limits[i], limits[i+1]).
+     *
+     * @return the limits buffer as a LongBuffer view
+     */
+    public LongBuffer getLimitsBuffer() {
         ensureLimitsLoaded();
-        return limits[numQueries];
+        limitsBuffer.rewind();
+        return limitsBuffer.asLongBuffer();
+    }
+
+    /**
+     * Get the labels buffer containing all result labels.
+     *
+     * @return the labels buffer as a LongBuffer view
+     */
+    public LongBuffer getLabelsBuffer() {
+        ensureFullyLoaded();
+        labelsBuffer.rewind();
+        return labelsBuffer.asLongBuffer();
+    }
+
+    /**
+     * Get the distances buffer containing all result distances.
+     *
+     * @return the distances buffer as a FloatBuffer view
+     */
+    public FloatBuffer getDistancesBuffer() {
+        ensureFullyLoaded();
+        distancesBuffer.rewind();
+        return distancesBuffer.asFloatBuffer();
     }
 
     /**
@@ -89,9 +135,16 @@ public class RangeSearchResult implements AutoCloseable {
         if (queryIndex < 0 || queryIndex >= numQueries) {
             throw new IndexOutOfBoundsException("Query index out of bounds: " + queryIndex);
         }
-        int start = (int) limits[queryIndex];
-        int end = (int) limits[queryIndex + 1];
-        return Arrays.copyOfRange(labels, start, end);
+        LongBuffer limits = limitsBuffer.asLongBuffer();
+        int start = (int) limits.get(queryIndex);
+        int end = (int) limits.get(queryIndex + 1);
+        int count = end - start;
+
+        long[] result = new long[count];
+        LongBuffer labels = labelsBuffer.asLongBuffer();
+        labels.position(start);
+        labels.get(result);
+        return result;
     }
 
     /**
@@ -105,42 +158,39 @@ public class RangeSearchResult implements AutoCloseable {
         if (queryIndex < 0 || queryIndex >= numQueries) {
             throw new IndexOutOfBoundsException("Query index out of bounds: " + queryIndex);
         }
-        int start = (int) limits[queryIndex];
-        int end = (int) limits[queryIndex + 1];
-        return Arrays.copyOfRange(distances, start, end);
-    }
+        LongBuffer limits = limitsBuffer.asLongBuffer();
+        int start = (int) limits.get(queryIndex);
+        int end = (int) limits.get(queryIndex + 1);
+        int count = end - start;
 
-    /**
-     * Get all labels as a flat array.
-     *
-     * @return all labels
-     */
-    public long[] getAllLabels() {
-        ensureFullyLoaded();
-        return labels;
-    }
-
-    /**
-     * Get all distances as a flat array.
-     *
-     * @return all distances
-     */
-    public float[] getAllDistances() {
-        ensureFullyLoaded();
-        return distances;
+        float[] result = new float[count];
+        FloatBuffer distances = distancesBuffer.asFloatBuffer();
+        distances.position(start);
+        distances.get(result);
+        return result;
     }
 
     private void ensureLimitsLoaded() {
-        if (limits == null && nativeHandle != 0) {
-            limits = FaissNative.rangeSearchResultGetLimits(nativeHandle);
+        if (limitsBuffer == null && nativeHandle != 0) {
+            limitsBuffer =
+                    ByteBuffer.allocateDirect((numQueries + 1) * Long.BYTES)
+                            .order(ByteOrder.nativeOrder());
+            FaissNative.rangeSearchResultGetLimits(nativeHandle, limitsBuffer);
         }
     }
 
     private void ensureFullyLoaded() {
         ensureLimitsLoaded();
-        if (labels == null && nativeHandle != 0) {
-            labels = FaissNative.rangeSearchResultGetLabels(nativeHandle);
-            distances = FaissNative.rangeSearchResultGetDistances(nativeHandle);
+        if (labelsBuffer == null && nativeHandle != 0) {
+            long total = getTotalResultCount();
+            labelsBuffer =
+                    ByteBuffer.allocateDirect((int) total * Long.BYTES)
+                            .order(ByteOrder.nativeOrder());
+            distancesBuffer =
+                    ByteBuffer.allocateDirect((int) total * Float.BYTES)
+                            .order(ByteOrder.nativeOrder());
+            FaissNative.rangeSearchResultGetLabels(nativeHandle, labelsBuffer);
+            FaissNative.rangeSearchResultGetDistances(nativeHandle, distancesBuffer);
         }
     }
 

@@ -22,6 +22,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
 import java.nio.file.Path;
 import java.util.Random;
 
@@ -51,28 +54,28 @@ class IndexTest {
             assertTrue(index.isTrained());
             assertEquals(MetricType.L2, index.getMetricType());
 
-            // Add vectors
-            float[] vectors = generateRandomVectors(NUM_VECTORS, DIMENSION);
-            index.add(vectors);
+            // Add vectors using zero-copy API
+            ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
+            index.add(NUM_VECTORS, vectorBuffer);
             assertEquals(NUM_VECTORS, index.getCount());
 
-            // Search
-            float[] query = generateRandomVectors(1, DIMENSION);
-            SearchResult result = index.searchSingle(query, K);
+            // Search using array API
+            float[] queryVectors = createQueryVectors(1, DIMENSION);
+            float[] distances = new float[K];
+            long[] labels = new long[K];
 
-            assertEquals(1, result.getNumQueries());
-            assertEquals(K, result.getK());
-            assertEquals(K, result.getLabelsForQuery(0).length);
-            assertEquals(K, result.getDistancesForQuery(0).length);
+            index.search(1, queryVectors, K, distances, labels);
 
             // Verify labels are in valid range
-            for (long label : result.getLabels()) {
-                assertTrue(label >= 0 && label < NUM_VECTORS, "Label " + label + " out of range");
+            for (int i = 0; i < K; i++) {
+                assertTrue(
+                        labels[i] >= 0 && labels[i] < NUM_VECTORS,
+                        "Label " + labels[i] + " out of range");
             }
 
             // Verify distances are non-negative for L2
-            for (float distance : result.getDistances()) {
-                assertTrue(distance >= 0, "Distance should be non-negative for L2");
+            for (int i = 0; i < K; i++) {
+                assertTrue(distances[i] >= 0, "Distance should be non-negative for L2");
             }
         }
     }
@@ -80,21 +83,25 @@ class IndexTest {
     @Test
     void testFlatIndexWithIds() {
         try (Index index = IndexFactory.createFlatWithIds(DIMENSION, MetricType.L2)) {
-            float[] vectors = generateRandomVectors(NUM_VECTORS, DIMENSION);
-            long[] ids = new long[NUM_VECTORS];
+            ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
+            ByteBuffer idBuffer = Index.allocateIdBuffer(NUM_VECTORS);
+            idBuffer.asLongBuffer();
             for (int i = 0; i < NUM_VECTORS; i++) {
-                ids[i] = i * 100; // Use custom IDs
+                idBuffer.putLong(i * Long.BYTES, i * 100L); // Use custom IDs
             }
 
-            index.addWithIds(vectors, ids);
+            index.addWithIds(NUM_VECTORS, vectorBuffer, idBuffer);
             assertEquals(NUM_VECTORS, index.getCount());
 
             // Search should return our custom IDs
-            float[] query = generateRandomVectors(1, DIMENSION);
-            SearchResult result = index.searchSingle(query, K);
+            float[] queryVectors = createQueryVectors(1, DIMENSION);
+            float[] distances = new float[K];
+            long[] labels = new long[K];
 
-            for (long label : result.getLabels()) {
-                assertTrue(label % 100 == 0, "Label should be a multiple of 100");
+            index.search(1, queryVectors, K, distances, labels);
+
+            for (int i = 0; i < K; i++) {
+                assertTrue(labels[i] % 100 == 0, "Label should be a multiple of 100");
             }
         }
     }
@@ -102,24 +109,23 @@ class IndexTest {
     @Test
     void testBatchSearch() {
         try (Index index = IndexFactory.createFlat(DIMENSION)) {
-            float[] vectors = generateRandomVectors(NUM_VECTORS, DIMENSION);
-            index.add(vectors);
+            ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
+            index.add(NUM_VECTORS, vectorBuffer);
 
             int numQueries = 5;
-            float[] queries = generateRandomVectors(numQueries, DIMENSION);
-            SearchResult result = index.search(queries, K);
+            float[] queryVectors = createQueryVectors(numQueries, DIMENSION);
+            float[] distances = new float[numQueries * K];
+            long[] labels = new long[numQueries * K];
 
-            assertEquals(numQueries, result.getNumQueries());
-            assertEquals(K, result.getK());
-            assertEquals(numQueries * K, result.getLabels().length);
-            assertEquals(numQueries * K, result.getDistances().length);
+            index.search(numQueries, queryVectors, K, distances, labels);
 
-            // Test per-query accessors
+            // Read results for each query
             for (int q = 0; q < numQueries; q++) {
-                long[] labels = result.getLabelsForQuery(q);
-                float[] distances = result.getDistancesForQuery(q);
-                assertEquals(K, labels.length);
-                assertEquals(K, distances.length);
+                for (int n = 0; n < K; n++) {
+                    int idx = q * K + n;
+                    assertTrue(labels[idx] >= 0 && labels[idx] < NUM_VECTORS);
+                    assertTrue(distances[idx] >= 0);
+                }
             }
         }
     }
@@ -129,14 +135,16 @@ class IndexTest {
         try (Index index = IndexFactory.createFlat(DIMENSION, MetricType.INNER_PRODUCT)) {
             assertEquals(MetricType.INNER_PRODUCT, index.getMetricType());
 
-            float[] vectors = generateRandomVectors(NUM_VECTORS, DIMENSION);
-            index.add(vectors);
+            ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
+            index.add(NUM_VECTORS, vectorBuffer);
 
-            float[] query = generateRandomVectors(1, DIMENSION);
-            SearchResult result = index.searchSingle(query, K);
+            float[] queryVectors = createQueryVectors(1, DIMENSION);
+            float[] distances = new float[K];
+            long[] labels = new long[K];
+
+            index.search(1, queryVectors, K, distances, labels);
 
             // For inner product, higher is better, so first result should have highest score
-            float[] distances = result.getDistancesForQuery(0);
             for (int i = 1; i < K; i++) {
                 assertTrue(
                         distances[i - 1] >= distances[i],
@@ -148,29 +156,32 @@ class IndexTest {
     @Test
     void testIndexReset() {
         try (Index index = IndexFactory.createFlat(DIMENSION)) {
-            float[] vectors = generateRandomVectors(100, DIMENSION);
-            index.add(vectors);
+            ByteBuffer vectorBuffer = createVectorBuffer(100, DIMENSION);
+            index.add(100, vectorBuffer);
             assertEquals(100, index.getCount());
 
             index.reset();
             assertEquals(0, index.getCount());
 
             // Can add again after reset
-            index.add(vectors);
+            index.add(100, vectorBuffer);
             assertEquals(100, index.getCount());
         }
     }
 
     @Test
     void testIndexSerialization(@TempDir Path tempDir) {
-        float[] vectors = generateRandomVectors(NUM_VECTORS, DIMENSION);
-        float[] query = generateRandomVectors(1, DIMENSION);
-        SearchResult originalResult;
+        ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
+        float[] queryVectors = createQueryVectors(1, DIMENSION);
+        long[] originalLabels = new long[K];
+        float[] originalDistances = new float[K];
 
         // Create and populate index
         try (Index index = IndexFactory.createFlat(DIMENSION)) {
-            index.add(vectors);
-            originalResult = index.searchSingle(query, K);
+            index.add(NUM_VECTORS, vectorBuffer);
+
+            // Perform search and save original results
+            index.search(1, queryVectors, K, originalDistances, originalLabels);
 
             // Test file I/O
             File indexFile = tempDir.resolve("test.index").toFile();
@@ -180,24 +191,41 @@ class IndexTest {
                 assertEquals(DIMENSION, loadedIndex.getDimension());
                 assertEquals(NUM_VECTORS, loadedIndex.getCount());
 
-                SearchResult loadedResult = loadedIndex.searchSingle(query, K);
-                assertArrayEquals(originalResult.getLabels(), loadedResult.getLabels());
+                float[] loadedDistances = new float[K];
+                long[] loadedLabels = new long[K];
+                loadedIndex.search(1, queryVectors, K, loadedDistances, loadedLabels);
+
+                assertArrayEquals(originalLabels, loadedLabels);
             }
         }
 
-        // Test byte array serialization
+        // Test ByteBuffer serialization (zero-copy for write) and byte[] deserialization
         try (Index index = IndexFactory.createFlat(DIMENSION)) {
-            index.add(vectors);
-            byte[] serialized = index.serialize();
-            assertNotNull(serialized);
-            assertTrue(serialized.length > 0);
+            index.add(NUM_VECTORS, vectorBuffer);
 
-            try (Index deserializedIndex = Index.deserialize(serialized)) {
+            long serializeSize = index.serializeSize();
+            assertTrue(serializeSize > 0);
+
+            ByteBuffer serialized =
+                    ByteBuffer.allocateDirect((int) serializeSize).order(ByteOrder.nativeOrder());
+            long bytesWritten = index.serialize(serialized);
+            assertEquals(serializeSize, bytesWritten);
+
+            // Convert to byte array for deserialization
+            serialized.rewind();
+            byte[] serializedBytes = new byte[(int) bytesWritten];
+            serialized.get(serializedBytes);
+
+            try (Index deserializedIndex = Index.deserialize(serializedBytes)) {
                 assertEquals(DIMENSION, deserializedIndex.getDimension());
                 assertEquals(NUM_VECTORS, deserializedIndex.getCount());
 
-                SearchResult deserializedResult = deserializedIndex.searchSingle(query, K);
-                assertArrayEquals(originalResult.getLabels(), deserializedResult.getLabels());
+                float[] deserializedDistances = new float[K];
+                long[] deserializedLabels = new long[K];
+                deserializedIndex.search(
+                        1, queryVectors, K, deserializedDistances, deserializedLabels);
+
+                assertArrayEquals(originalLabels, deserializedLabels);
             }
         }
     }
@@ -220,8 +248,8 @@ class IndexTest {
         try (Index index = IndexFactory.createHNSW(DIMENSION, 32, MetricType.L2)) {
             assertTrue(index.isTrained()); // HNSW doesn't need training
 
-            float[] vectors = generateRandomVectors(NUM_VECTORS, DIMENSION);
-            index.add(vectors);
+            ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
+            index.add(NUM_VECTORS, vectorBuffer);
 
             // Get and set efSearch
             int efSearch = IndexHNSW.getEfSearch(index);
@@ -231,9 +259,15 @@ class IndexTest {
             assertEquals(64, IndexHNSW.getEfSearch(index));
 
             // Search
-            float[] query = generateRandomVectors(1, DIMENSION);
-            SearchResult result = index.searchSingle(query, K);
-            assertEquals(K, result.getLabels().length);
+            float[] queryVectors = createQueryVectors(1, DIMENSION);
+            float[] distances = new float[K];
+            long[] labels = new long[K];
+
+            index.search(1, queryVectors, K, distances, labels);
+
+            for (int i = 0; i < K; i++) {
+                assertTrue(labels[i] >= 0);
+            }
         }
     }
 
@@ -259,13 +293,24 @@ class IndexTest {
                     IndexFactory.create(DIMENSION, null, MetricType.L2);
                 });
 
-        // Test vector dimension mismatch
+        // Test buffer validation - wrong size buffer
         try (Index index = IndexFactory.createFlat(DIMENSION)) {
-            float[] wrongDimVectors = new float[10]; // Wrong size
+            ByteBuffer wrongSizeBuffer =
+                    ByteBuffer.allocateDirect(10).order(ByteOrder.nativeOrder());
             assertThrows(
                     IllegalArgumentException.class,
                     () -> {
-                        index.addSingle(wrongDimVectors);
+                        index.add(1, wrongSizeBuffer); // Buffer too small for 1 vector
+                    });
+        }
+
+        // Test non-direct buffer
+        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+            ByteBuffer heapBuffer = ByteBuffer.allocate(DIMENSION * Float.BYTES);
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> {
+                        index.add(1, heapBuffer); // Not a direct buffer
                     });
         }
 
@@ -280,42 +325,63 @@ class IndexTest {
     }
 
     @Test
-    void testSearchResultAccessors() {
+    void testSearchResultArrays() {
         try (Index index = IndexFactory.createFlat(DIMENSION)) {
-            float[] vectors = generateRandomVectors(100, DIMENSION);
-            index.add(vectors);
+            ByteBuffer vectorBuffer = createVectorBuffer(100, DIMENSION);
+            index.add(100, vectorBuffer);
 
-            float[] queries = generateRandomVectors(3, DIMENSION);
-            SearchResult result = index.search(queries, 5);
+            int numQueries = 3;
+            int k = 5;
+            float[] queryVectors = createQueryVectors(numQueries, DIMENSION);
+            float[] distances = new float[numQueries * k];
+            long[] labels = new long[numQueries * k];
 
-            // Test individual accessors
-            for (int q = 0; q < 3; q++) {
-                for (int n = 0; n < 5; n++) {
-                    long label = result.getLabel(q, n);
-                    float distance = result.getDistance(q, n);
-                    assertTrue(label >= 0 && label < 100);
-                    assertTrue(distance >= 0);
+            index.search(numQueries, queryVectors, k, distances, labels);
+
+            // Test reading individual results
+            for (int q = 0; q < numQueries; q++) {
+                for (int n = 0; n < k; n++) {
+                    int idx = q * k + n;
+                    assertTrue(labels[idx] >= 0 && labels[idx] < 100);
+                    assertTrue(distances[idx] >= 0);
                 }
             }
-
-            // Test out of bounds
-            assertThrows(
-                    IndexOutOfBoundsException.class,
-                    () -> {
-                        result.getLabel(10, 0);
-                    });
-            assertThrows(
-                    IndexOutOfBoundsException.class,
-                    () -> {
-                        result.getLabel(0, 10);
-                    });
         }
     }
 
-    private float[] generateRandomVectors(int n, int d) {
+    @Test
+    void testBufferAllocationHelpers() {
+        // Test vector buffer allocation
+        ByteBuffer vectorBuffer = Index.allocateVectorBuffer(10, DIMENSION);
+        assertTrue(vectorBuffer.isDirect());
+        assertEquals(ByteOrder.nativeOrder(), vectorBuffer.order());
+        assertEquals(10 * DIMENSION * Float.BYTES, vectorBuffer.capacity());
+
+        // Test ID buffer allocation
+        ByteBuffer idBuffer = Index.allocateIdBuffer(10);
+        assertTrue(idBuffer.isDirect());
+        assertEquals(ByteOrder.nativeOrder(), idBuffer.order());
+        assertEquals(10 * Long.BYTES, idBuffer.capacity());
+    }
+
+    /** Create a direct ByteBuffer with random vectors. */
+    private ByteBuffer createVectorBuffer(int n, int d) {
+        ByteBuffer buffer = Index.allocateVectorBuffer(n, d);
+        FloatBuffer floatView = buffer.asFloatBuffer();
+
         Random random = new Random(42);
+        for (int i = 0; i < n * d; i++) {
+            floatView.put(i, random.nextFloat());
+        }
+
+        return buffer;
+    }
+
+    /** Create a float array with random query vectors. */
+    private float[] createQueryVectors(int n, int d) {
         float[] vectors = new float[n * d];
-        for (int i = 0; i < vectors.length; i++) {
+        Random random = new Random(42);
+        for (int i = 0; i < n * d; i++) {
             vectors[i] = random.nextFloat();
         }
         return vectors;

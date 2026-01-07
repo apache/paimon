@@ -97,8 +97,11 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         // we have enough after filtering. Use a multiplier based on index size.
         int searchK = limit;
         if (includeRowIds != null) {
-            // Fetch more results when filtering - up to 10x the limit or all filtered IDs
-            searchK = Math.max(limit * 10, (int) includeRowIds.getLongCardinality());
+            // Fetch more results when filtering - up to searchFactor * limit or all filtered IDs
+            searchK =
+                    Math.max(
+                            limit * options.searchFactor(),
+                            (int) includeRowIds.getLongCardinality());
         }
 
         for (FaissIndex index : indices) {
@@ -111,9 +114,12 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
                 continue;
             }
 
-            FaissIndex.SearchResult searchResult = index.search(queryVector, effectiveK);
-            float[] distances = searchResult.getDistancesForQuery(0);
-            long[] labels = searchResult.getLabelsForQuery(0);
+            // Allocate result arrays
+            float[] distances = new float[effectiveK];
+            long[] labels = new long[effectiveK];
+
+            // Perform search
+            index.search(queryVector, 1, effectiveK, distances, labels);
 
             for (int i = 0; i < effectiveK; i++) {
                 long rowId = labels[i];
@@ -216,13 +222,15 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
             throw new IOException("Unsupported FAISS index version: " + version);
         }
 
-        int dim = dataIn.readInt();
-        int metricValue = dataIn.readInt();
-        int indexTypeOrdinal = dataIn.readInt();
-        long numVectors = dataIn.readLong();
-        int indexDataLength = dataIn.readInt();
+        // Read header fields (required for file format compatibility)
+        dataIn.readInt(); // dim
+        dataIn.readInt(); // metricValue
+        dataIn.readInt(); // indexTypeOrdinal
+        dataIn.readLong(); // numVectors
+        long indexDataLength = dataIn.readLong();
 
-        byte[] indexData = new byte[indexDataLength];
+        // Read index data
+        byte[] indexData = new byte[(int) indexDataLength];
         dataIn.readFully(indexData);
 
         return FaissIndex.fromBytes(indexData);

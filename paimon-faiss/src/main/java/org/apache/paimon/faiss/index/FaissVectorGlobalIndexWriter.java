@@ -30,6 +30,10 @@ import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.FloatBuffer;
+import java.nio.LongBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -128,27 +132,43 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
         FaissIndex index = createIndex();
 
         try {
-            // Prepare vectors and IDs
-            float[][] vectors = new float[n][dim];
-            long[] ids = new long[n];
+            // Allocate direct buffers for zero-copy operations
+            ByteBuffer vectorBuffer = FaissIndex.allocateVectorBuffer(n, dim);
+            ByteBuffer idBuffer = FaissIndex.allocateIdBuffer(n);
+            FloatBuffer floatView = vectorBuffer.asFloatBuffer();
+            LongBuffer longView = idBuffer.asLongBuffer();
+
+            // Fill the buffers
             for (int i = 0; i < n; i++) {
-                vectors[i] = entries.get(i).vector;
-                ids[i] = entries.get(i).id;
+                float[] vector = entries.get(i).vector;
+                for (int j = 0; j < dim; j++) {
+                    floatView.put(i * dim + j, vector[j]);
+                }
+                longView.put(i, entries.get(i).id);
             }
 
             // Train if necessary (for IVF-based indices)
             if (!index.isTrained()) {
                 int trainingSize = Math.min(n, options.trainingSize());
-                float[][] trainingVectors = new float[trainingSize][dim];
-                System.arraycopy(vectors, 0, trainingVectors, 0, trainingSize);
-                index.train(trainingVectors);
+                ByteBuffer trainingBuffer = FaissIndex.allocateVectorBuffer(trainingSize, dim);
+                FloatBuffer trainingFloatView = trainingBuffer.asFloatBuffer();
+                for (int i = 0; i < trainingSize; i++) {
+                    float[] vector = entries.get(i).vector;
+                    for (int j = 0; j < dim; j++) {
+                        trainingFloatView.put(i * dim + j, vector[j]);
+                    }
+                }
+                index.train(trainingBuffer, trainingSize);
             }
 
-            // Add vectors with IDs
-            index.addWithIds(vectors, ids);
+            // Add vectors with IDs (zero-copy)
+            index.addWithIds(vectorBuffer, idBuffer, n);
 
-            // Serialize the index
-            byte[] indexData = index.toBytes();
+            // Serialize the index (zero-copy)
+            long serializeSize = index.serializeSize();
+            ByteBuffer serializeBuffer =
+                    ByteBuffer.allocateDirect((int) serializeSize).order(ByteOrder.nativeOrder());
+            long bytesWritten = index.serialize(serializeBuffer);
 
             // Write to output stream with metadata
             DataOutputStream dataOut = new DataOutputStream(out);
@@ -157,7 +177,12 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
             dataOut.writeInt(options.metric().getValue());
             dataOut.writeInt(options.indexType().ordinal());
             dataOut.writeLong(n);
-            dataOut.writeInt(indexData.length);
+            dataOut.writeLong(bytesWritten);
+
+            // Write serialized index data
+            byte[] indexData = new byte[(int) bytesWritten];
+            serializeBuffer.rewind();
+            serializeBuffer.get(indexData);
             dataOut.write(indexData);
             dataOut.flush();
         } finally {

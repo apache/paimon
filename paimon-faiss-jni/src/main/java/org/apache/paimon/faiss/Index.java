@@ -19,22 +19,15 @@
 package org.apache.paimon.faiss;
 
 import java.io.File;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /**
- * A Faiss index for similarity search.
+ * A Faiss index for similarity search with zero-copy support.
  *
  * <p>This class wraps a native Faiss index and provides methods for adding vectors, searching for
- * nearest neighbors, and managing the index.
- *
- * <p>Index instances must be closed when no longer needed to free native resources. It is
- * recommended to use try-with-resources:
- *
- * <pre>{@code
- * try (Index index = IndexFactory.create(128, "Flat", MetricType.L2)) {
- *     index.add(vectors);
- *     SearchResult result = index.search(queries, 10);
- * }
- * }</pre>
+ * nearest neighbors, and managing the index. All vector operations use direct ByteBuffers for
+ * zero-copy data transfer between Java and native code.
  *
  * <p>Thread Safety: Index instances are NOT thread-safe. External synchronization is required if an
  * index is accessed from multiple threads.
@@ -105,147 +98,112 @@ public class Index implements AutoCloseable {
         return MetricType.fromValue(FaissNative.indexGetMetricType(nativeHandle));
     }
 
+    // ==================== Zero-Copy Vector Operations ====================
+
     /**
-     * Train the index on a set of training vectors.
+     * Train the index on a set of training vectors (zero-copy).
      *
      * <p>This is required for some index types (like IVF) before adding vectors. For flat indexes,
      * this is a no-op.
      *
-     * @param vectors the training vectors (n * dimension floats)
+     * @param n the number of training vectors
+     * @param vectorBuffer direct ByteBuffer containing training vectors (n * dimension floats)
      */
-    public void train(float[] vectors) {
+    public void train(long n, ByteBuffer vectorBuffer) {
         checkNotClosed();
-        if (vectors.length % dimension != 0) {
-            throw new IllegalArgumentException(
-                    "Vector array length must be a multiple of dimension " + dimension);
-        }
-        long n = vectors.length / dimension;
-        FaissNative.indexTrain(nativeHandle, n, vectors);
+        validateDirectBuffer(vectorBuffer, n * dimension * Float.BYTES, "vector");
+        FaissNative.indexTrain(nativeHandle, n, vectorBuffer);
     }
 
     /**
-     * Add vectors to the index.
+     * Add vectors to the index (zero-copy).
      *
      * <p>The vectors are assigned sequential IDs starting from the current count.
      *
-     * @param vectors the vectors to add (n * dimension floats)
+     * @param n the number of vectors to add
+     * @param vectorBuffer direct ByteBuffer containing vectors (n * dimension floats)
      */
-    public void add(float[] vectors) {
+    public void add(long n, ByteBuffer vectorBuffer) {
         checkNotClosed();
-        if (vectors.length % dimension != 0) {
-            throw new IllegalArgumentException(
-                    "Vector array length must be a multiple of dimension " + dimension);
-        }
-        long n = vectors.length / dimension;
-        FaissNative.indexAdd(nativeHandle, n, vectors);
+        validateDirectBuffer(vectorBuffer, n * dimension * Float.BYTES, "vector");
+        FaissNative.indexAdd(nativeHandle, n, vectorBuffer);
     }
 
     /**
-     * Add a single vector to the index.
-     *
-     * @param vector the vector to add (dimension floats)
-     */
-    public void addSingle(float[] vector) {
-        checkNotClosed();
-        if (vector.length != dimension) {
-            throw new IllegalArgumentException(
-                    "Vector length must equal dimension " + dimension + ", got " + vector.length);
-        }
-        FaissNative.indexAdd(nativeHandle, 1, vector);
-    }
-
-    /**
-     * Add vectors with explicit IDs to the index.
+     * Add vectors with explicit IDs to the index (zero-copy).
      *
      * <p>Note: Not all index types support this operation. Flat indexes and IndexIDMap wrapped
      * indexes support it.
      *
-     * @param vectors the vectors to add (n * dimension floats)
-     * @param ids the IDs for the vectors (n longs)
+     * @param n the number of vectors to add
+     * @param vectorBuffer direct ByteBuffer containing vectors (n * dimension floats)
+     * @param idBuffer direct ByteBuffer containing IDs (n longs)
      */
-    public void addWithIds(float[] vectors, long[] ids) {
+    public void addWithIds(long n, ByteBuffer vectorBuffer, ByteBuffer idBuffer) {
         checkNotClosed();
-        if (vectors.length % dimension != 0) {
-            throw new IllegalArgumentException(
-                    "Vector array length must be a multiple of dimension " + dimension);
-        }
-        long n = vectors.length / dimension;
-        if (ids.length != n) {
-            throw new IllegalArgumentException(
-                    "Number of IDs (" + ids.length + ") must match number of vectors (" + n + ")");
-        }
-        FaissNative.indexAddWithIds(nativeHandle, n, vectors, ids);
+        validateDirectBuffer(vectorBuffer, n * dimension * Float.BYTES, "vector");
+        validateDirectBuffer(idBuffer, n * Long.BYTES, "id");
+        FaissNative.indexAddWithIds(nativeHandle, n, vectorBuffer, idBuffer);
     }
 
     /**
      * Search for the k nearest neighbors of query vectors.
      *
-     * @param queries the query vectors (n * dimension floats)
+     * @param n the number of query vectors
+     * @param queryVectors array containing query vectors (n * dimension floats)
      * @param k the number of nearest neighbors to find
-     * @return the search result containing labels and distances
+     * @param distances output array for distances (n * k floats)
+     * @param labels output array for labels (n * k longs)
      */
-    public SearchResult search(float[] queries, int k) {
+    public void search(long n, float[] queryVectors, int k, float[] distances, long[] labels) {
         checkNotClosed();
-        if (queries.length % dimension != 0) {
+        if (queryVectors.length < n * dimension) {
             throw new IllegalArgumentException(
-                    "Query array length must be a multiple of dimension " + dimension);
+                    "Query vectors array too small: required "
+                            + (n * dimension)
+                            + ", got "
+                            + queryVectors.length);
         }
-        int n = queries.length / dimension;
-        long[] labels = new long[n * k];
-        float[] distances = new float[n * k];
-        FaissNative.indexSearch(nativeHandle, n, queries, k, distances, labels);
-        return new SearchResult(n, k, labels, distances);
+        if (distances.length < n * k) {
+            throw new IllegalArgumentException(
+                    "Distances array too small: required " + (n * k) + ", got " + distances.length);
+        }
+        if (labels.length < n * k) {
+            throw new IllegalArgumentException(
+                    "Labels array too small: required " + (n * k) + ", got " + labels.length);
+        }
+        FaissNative.indexSearch(nativeHandle, n, queryVectors, k, distances, labels);
     }
 
     /**
-     * Search for a single query vector.
+     * Search for all neighbors within a given radius (zero-copy).
      *
-     * @param query the query vector (dimension floats)
-     * @param k the number of nearest neighbors to find
-     * @return the search result
-     */
-    public SearchResult searchSingle(float[] query, int k) {
-        checkNotClosed();
-        if (query.length != dimension) {
-            throw new IllegalArgumentException(
-                    "Query length must equal dimension " + dimension + ", got " + query.length);
-        }
-        long[] labels = new long[k];
-        float[] distances = new float[k];
-        FaissNative.indexSearch(nativeHandle, 1, query, k, distances, labels);
-        return new SearchResult(1, k, labels, distances);
-    }
-
-    /**
-     * Search for all neighbors within a given radius.
-     *
-     * @param queries the query vectors (n * dimension floats)
+     * @param n the number of query vectors
+     * @param queryBuffer direct ByteBuffer containing query vectors (n * dimension floats)
      * @param radius the search radius
      * @return the range search result
      */
-    public RangeSearchResult rangeSearch(float[] queries, float radius) {
+    public RangeSearchResult rangeSearch(long n, ByteBuffer queryBuffer, float radius) {
         checkNotClosed();
-        if (queries.length % dimension != 0) {
-            throw new IllegalArgumentException(
-                    "Query array length must be a multiple of dimension " + dimension);
-        }
-        int n = queries.length / dimension;
-        long resultHandle = FaissNative.indexRangeSearch(nativeHandle, n, queries, radius);
-        return new RangeSearchResult(resultHandle, n);
+        validateDirectBuffer(queryBuffer, n * dimension * Float.BYTES, "query");
+        long resultHandle = FaissNative.indexRangeSearch(nativeHandle, n, queryBuffer, radius);
+        return new RangeSearchResult(resultHandle, (int) n);
     }
 
     /**
-     * Remove vectors by their IDs.
+     * Remove vectors by their IDs (zero-copy).
      *
      * <p>Note: Not all index types support removal. Check Faiss documentation for details on which
      * index types support this operation.
      *
-     * @param ids the IDs of vectors to remove
+     * @param n the number of IDs
+     * @param idBuffer direct ByteBuffer containing IDs to remove (n longs)
      * @return the number of vectors actually removed
      */
-    public long removeIds(long[] ids) {
+    public long removeIds(long n, ByteBuffer idBuffer) {
         checkNotClosed();
-        return FaissNative.indexRemoveIds(nativeHandle, ids);
+        validateDirectBuffer(idBuffer, n * Long.BYTES, "id");
+        return FaissNative.indexRemoveIds(nativeHandle, n, idBuffer);
     }
 
     /** Reset the index (remove all vectors). */
@@ -253,6 +211,8 @@ public class Index implements AutoCloseable {
         checkNotClosed();
         FaissNative.indexReset(nativeHandle);
     }
+
+    // ==================== Index I/O ====================
 
     /**
      * Write the index to a file.
@@ -296,25 +256,79 @@ public class Index implements AutoCloseable {
     }
 
     /**
-     * Serialize the index to a byte array.
+     * Get the size in bytes needed to serialize this index.
      *
-     * @return the serialized bytes
+     * @return the serialization size
      */
-    public byte[] serialize() {
+    public long serializeSize() {
         checkNotClosed();
-        return FaissNative.indexSerialize(nativeHandle);
+        return FaissNative.indexSerializeSize(nativeHandle);
+    }
+
+    /**
+     * Serialize the index to a direct ByteBuffer (zero-copy).
+     *
+     * @param buffer direct ByteBuffer to write to (must have sufficient capacity)
+     * @return the number of bytes written
+     */
+    public long serialize(ByteBuffer buffer) {
+        checkNotClosed();
+        if (!buffer.isDirect()) {
+            throw new IllegalArgumentException("Buffer must be a direct buffer");
+        }
+        return FaissNative.indexSerialize(nativeHandle, buffer);
     }
 
     /**
      * Deserialize an index from a byte array.
      *
-     * @param data the serialized bytes
+     * @param data the serialized index data
      * @return the deserialized index
      */
     public static Index deserialize(byte[] data) {
-        long handle = FaissNative.indexDeserialize(data);
+        long handle = FaissNative.indexDeserialize(data, data.length);
         int dimension = FaissNative.indexGetDimension(handle);
         return new Index(handle, dimension);
+    }
+
+    // ==================== Buffer Allocation Utilities ====================
+
+    /**
+     * Allocate a direct ByteBuffer suitable for vector data.
+     *
+     * @param numVectors number of vectors
+     * @param dimension vector dimension
+     * @return a direct ByteBuffer in native byte order
+     */
+    public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {
+        return ByteBuffer.allocateDirect(numVectors * dimension * Float.BYTES)
+                .order(ByteOrder.nativeOrder());
+    }
+
+    /**
+     * Allocate a direct ByteBuffer suitable for ID data.
+     *
+     * @param numIds number of IDs
+     * @return a direct ByteBuffer in native byte order
+     */
+    public static ByteBuffer allocateIdBuffer(int numIds) {
+        return ByteBuffer.allocateDirect(numIds * Long.BYTES).order(ByteOrder.nativeOrder());
+    }
+
+    // ==================== Internal Methods ====================
+
+    private void validateDirectBuffer(ByteBuffer buffer, long requiredBytes, String name) {
+        if (!buffer.isDirect()) {
+            throw new IllegalArgumentException(name + " buffer must be a direct buffer");
+        }
+        if (buffer.capacity() < requiredBytes) {
+            throw new IllegalArgumentException(
+                    name
+                            + " buffer too small: required "
+                            + requiredBytes
+                            + " bytes, got "
+                            + buffer.capacity());
+        }
     }
 
     /**

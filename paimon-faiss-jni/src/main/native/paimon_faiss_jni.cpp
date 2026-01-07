@@ -112,6 +112,16 @@ static faiss::IndexHNSW* getIndexHNSW(jlong handle) {
     throw std::runtime_error("Index is not an HNSW index");
 }
 
+// Helper to get direct buffer address with validation
+static void* getDirectBufferAddress(JNIEnv* env, jobject buffer, const char* name) {
+    void* addr = env->GetDirectBufferAddress(buffer);
+    if (addr == nullptr) {
+        std::string msg = std::string(name) + " buffer is not a direct buffer or address is unavailable";
+        throw std::runtime_error(msg);
+    }
+    return addr;
+}
+
 // Range search result wrapper
 struct RangeSearchResultWrapper {
     faiss::RangeSearchResult result;
@@ -175,107 +185,110 @@ JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_indexGetMetricTy
     return 0;
 }
 
-JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexTrain
-  (JNIEnv* env, jclass, jlong handle, jlong n, jfloatArray vectors) {
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReset
+  (JNIEnv* env, jclass, jlong handle) {
     FAISS_TRY
-        jfloat* vectorData = env->GetFloatArrayElements(vectors, nullptr);
+        getIndex(handle)->reset();
+    FAISS_CATCH(env)
+}
+
+// ==================== Zero-Copy Vector Operations ====================
+
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexTrain
+  (JNIEnv* env, jclass, jlong handle, jlong n, jobject vectorBuffer) {
+    FAISS_TRY
+        float* vectorData = static_cast<float*>(getDirectBufferAddress(env, vectorBuffer, "vector"));
         getIndex(handle)->train(n, vectorData);
-        env->ReleaseFloatArrayElements(vectors, vectorData, JNI_ABORT);
     FAISS_CATCH(env)
 }
 
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexAdd
-  (JNIEnv* env, jclass, jlong handle, jlong n, jfloatArray vectors) {
+  (JNIEnv* env, jclass, jlong handle, jlong n, jobject vectorBuffer) {
     FAISS_TRY
-        jfloat* vectorData = env->GetFloatArrayElements(vectors, nullptr);
+        float* vectorData = static_cast<float*>(getDirectBufferAddress(env, vectorBuffer, "vector"));
         getIndex(handle)->add(n, vectorData);
-        env->ReleaseFloatArrayElements(vectors, vectorData, JNI_ABORT);
     FAISS_CATCH(env)
 }
 
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexAddWithIds
-  (JNIEnv* env, jclass, jlong handle, jlong n, jfloatArray vectors, jlongArray ids) {
+  (JNIEnv* env, jclass, jlong handle, jlong n, jobject vectorBuffer, jobject idBuffer) {
     FAISS_TRY
-        jfloat* vectorData = env->GetFloatArrayElements(vectors, nullptr);
-        jlong* idData = env->GetLongArrayElements(ids, nullptr);
+        float* vectorData = static_cast<float*>(getDirectBufferAddress(env, vectorBuffer, "vector"));
+        int64_t* idData = static_cast<int64_t*>(getDirectBufferAddress(env, idBuffer, "id"));
         
-        // Convert jlong to faiss::idx_t if needed
-        std::vector<faiss::idx_t> faissIds(n);
-        for (jlong i = 0; i < n; i++) {
-            faissIds[i] = static_cast<faiss::idx_t>(idData[i]);
+        // Convert to faiss::idx_t if size differs
+        if (sizeof(faiss::idx_t) == sizeof(int64_t)) {
+            getIndex(handle)->add_with_ids(n, vectorData, reinterpret_cast<faiss::idx_t*>(idData));
+        } else {
+            std::vector<faiss::idx_t> faissIds(n);
+            for (jlong i = 0; i < n; i++) {
+                faissIds[i] = static_cast<faiss::idx_t>(idData[i]);
+            }
+            getIndex(handle)->add_with_ids(n, vectorData, faissIds.data());
         }
-        
-        getIndex(handle)->add_with_ids(n, vectorData, faissIds.data());
-        
-        env->ReleaseFloatArrayElements(vectors, vectorData, JNI_ABORT);
-        env->ReleaseLongArrayElements(ids, idData, JNI_ABORT);
     FAISS_CATCH(env)
 }
 
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSearch
-  (JNIEnv* env, jclass, jlong handle, jlong n, jfloatArray queries, jint k,
+  (JNIEnv* env, jclass, jlong handle, jlong n, jfloatArray queryVectors, jint k,
    jfloatArray distances, jlongArray labels) {
     FAISS_TRY
-        jfloat* queryData = env->GetFloatArrayElements(queries, nullptr);
-        jfloat* distData = env->GetFloatArrayElements(distances, nullptr);
-        jlong* labelData = env->GetLongArrayElements(labels, nullptr);
-        
-        // Use temporary vectors for faiss
-        std::vector<faiss::idx_t> faissLabels(n * k);
-        
-        getIndex(handle)->search(n, queryData, k, distData, faissLabels.data());
-        
-        // Copy labels back
-        for (jlong i = 0; i < n * k; i++) {
-            labelData[i] = static_cast<jlong>(faissLabels[i]);
+        // Get query vectors
+        jfloat* queryData = env->GetFloatArrayElements(queryVectors, nullptr);
+        if (queryData == nullptr) {
+            throw std::runtime_error("Failed to get query vectors");
         }
         
-        env->ReleaseFloatArrayElements(queries, queryData, JNI_ABORT);
-        env->ReleaseFloatArrayElements(distances, distData, 0);
-        env->ReleaseLongArrayElements(labels, labelData, 0);
+        // Allocate temporary arrays for results
+        std::vector<float> distTemp(n * k);
+        std::vector<faiss::idx_t> labelTemp(n * k);
+        
+        // Perform search
+        getIndex(handle)->search(n, queryData, k, distTemp.data(), labelTemp.data());
+        
+        // Release query array
+        env->ReleaseFloatArrayElements(queryVectors, queryData, JNI_ABORT);
+        
+        // Copy results to output arrays
+        env->SetFloatArrayRegion(distances, 0, n * k, distTemp.data());
+        
+        // Convert labels to jlong
+        std::vector<jlong> jlongLabels(n * k);
+        for (jlong i = 0; i < n * k; i++) {
+            jlongLabels[i] = static_cast<jlong>(labelTemp[i]);
+        }
+        env->SetLongArrayRegion(labels, 0, n * k, jlongLabels.data());
     FAISS_CATCH(env)
 }
 
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexRangeSearch
-  (JNIEnv* env, jclass, jlong handle, jlong n, jfloatArray queries, jfloat radius) {
+  (JNIEnv* env, jclass, jlong handle, jlong n, jobject queryBuffer, jfloat radius) {
     FAISS_TRY
-        jfloat* queryData = env->GetFloatArrayElements(queries, nullptr);
+        float* queryData = static_cast<float*>(getDirectBufferAddress(env, queryBuffer, "query"));
         
         RangeSearchResultWrapper* wrapper = new RangeSearchResultWrapper(static_cast<int>(n));
         getIndex(handle)->range_search(n, queryData, radius, &wrapper->result);
         
-        env->ReleaseFloatArrayElements(queries, queryData, JNI_ABORT);
         return reinterpret_cast<jlong>(wrapper);
     FAISS_CATCH(env)
     return 0;
 }
 
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexRemoveIds
-  (JNIEnv* env, jclass, jlong handle, jlongArray ids) {
+  (JNIEnv* env, jclass, jlong handle, jlong n, jobject idBuffer) {
     FAISS_TRY
-        jsize n = env->GetArrayLength(ids);
-        jlong* idData = env->GetLongArrayElements(ids, nullptr);
+        int64_t* idData = static_cast<int64_t*>(getDirectBufferAddress(env, idBuffer, "id"));
         
         // Create ID selector
         std::vector<faiss::idx_t> faissIds(n);
-        for (jsize i = 0; i < n; i++) {
+        for (jlong i = 0; i < n; i++) {
             faissIds[i] = static_cast<faiss::idx_t>(idData[i]);
         }
         faiss::IDSelectorArray selector(n, faissIds.data());
         
-        jlong removed = static_cast<jlong>(getIndex(handle)->remove_ids(selector));
-        
-        env->ReleaseLongArrayElements(ids, idData, JNI_ABORT);
-        return removed;
+        return static_cast<jlong>(getIndex(handle)->remove_ids(selector));
     FAISS_CATCH(env)
     return 0;
-}
-
-JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReset
-  (JNIEnv* env, jclass, jlong handle) {
-    FAISS_TRY
-        getIndex(handle)->reset();
-    FAISS_CATCH(env)
 }
 
 // ==================== Index I/O ====================
@@ -298,33 +311,52 @@ JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReadFromFi
     return 0;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSerialize
+// ==================== Zero-Copy Serialization ====================
+
+JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSerializeSize
   (JNIEnv* env, jclass, jlong handle) {
     FAISS_TRY
         faiss::VectorIOWriter writer;
         faiss::write_index(getIndex(handle), &writer);
-        
-        jbyteArray result = env->NewByteArray(static_cast<jsize>(writer.data.size()));
-        env->SetByteArrayRegion(result, 0, static_cast<jsize>(writer.data.size()),
-                                reinterpret_cast<const jbyte*>(writer.data.data()));
-        return result;
+        return static_cast<jlong>(writer.data.size());
     FAISS_CATCH(env)
-    return nullptr;
+    return 0;
+}
+
+JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSerialize
+  (JNIEnv* env, jclass, jlong handle, jobject buffer) {
+    FAISS_TRY
+        void* bufferData = getDirectBufferAddress(env, buffer, "output");
+        
+        faiss::VectorIOWriter writer;
+        faiss::write_index(getIndex(handle), &writer);
+        
+        jlong capacity = env->GetDirectBufferCapacity(buffer);
+        if (static_cast<size_t>(capacity) < writer.data.size()) {
+            throw std::runtime_error("Buffer too small for serialized index");
+        }
+        
+        memcpy(bufferData, writer.data.data(), writer.data.size());
+        return static_cast<jlong>(writer.data.size());
+    FAISS_CATCH(env)
+    return 0;
 }
 
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexDeserialize
-  (JNIEnv* env, jclass, jbyteArray data) {
+  (JNIEnv* env, jclass, jbyteArray data, jlong length) {
     FAISS_TRY
-        jsize length = env->GetArrayLength(data);
-        jbyte* bytes = env->GetByteArrayElements(data, nullptr);
+        jbyte* dataPtr = env->GetByteArrayElements(data, nullptr);
+        if (dataPtr == nullptr) {
+            throw std::runtime_error("Failed to get byte array elements");
+        }
         
         faiss::VectorIOReader reader;
         reader.data.resize(length);
-        memcpy(reader.data.data(), bytes, length);
+        memcpy(reader.data.data(), dataPtr, length);
+        
+        env->ReleaseByteArrayElements(data, dataPtr, JNI_ABORT);
         
         faiss::Index* index = faiss::read_index(&reader);
-        
-        env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
         return reinterpret_cast<jlong>(index);
     FAISS_CATCH(env)
     return 0;
@@ -339,50 +371,58 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResul
     FAISS_CATCH(env)
 }
 
-JNIEXPORT jlongArray JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLimits
+JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetTotalSize
   (JNIEnv* env, jclass, jlong handle) {
     FAISS_TRY
         RangeSearchResultWrapper* wrapper = reinterpret_cast<RangeSearchResultWrapper*>(handle);
-        jsize n = wrapper->nq + 1;
-        jlongArray result = env->NewLongArray(n);
-        
-        std::vector<jlong> limits(n);
-        for (jsize i = 0; i < n; i++) {
-            limits[i] = static_cast<jlong>(wrapper->result.lims[i]);
-        }
-        env->SetLongArrayRegion(result, 0, n, limits.data());
-        return result;
+        return static_cast<jlong>(wrapper->result.lims[wrapper->nq]);
     FAISS_CATCH(env)
-    return nullptr;
+    return 0;
 }
 
-JNIEXPORT jlongArray JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLabels
+JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetNumQueries
   (JNIEnv* env, jclass, jlong handle) {
     FAISS_TRY
         RangeSearchResultWrapper* wrapper = reinterpret_cast<RangeSearchResultWrapper*>(handle);
-        jsize n = static_cast<jsize>(wrapper->result.lims[wrapper->nq]);
-        jlongArray result = env->NewLongArray(n);
-        
-        std::vector<jlong> labels(n);
-        for (jsize i = 0; i < n; i++) {
-            labels[i] = static_cast<jlong>(wrapper->result.labels[i]);
-        }
-        env->SetLongArrayRegion(result, 0, n, labels.data());
-        return result;
+        return static_cast<jint>(wrapper->nq);
     FAISS_CATCH(env)
-    return nullptr;
+    return 0;
 }
 
-JNIEXPORT jfloatArray JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetDistances
-  (JNIEnv* env, jclass, jlong handle) {
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLimits
+  (JNIEnv* env, jclass, jlong handle, jobject limitsBuffer) {
     FAISS_TRY
         RangeSearchResultWrapper* wrapper = reinterpret_cast<RangeSearchResultWrapper*>(handle);
-        jsize n = static_cast<jsize>(wrapper->result.lims[wrapper->nq]);
-        jfloatArray result = env->NewFloatArray(n);
-        env->SetFloatArrayRegion(result, 0, n, wrapper->result.distances);
-        return result;
+        int64_t* limitsData = static_cast<int64_t*>(getDirectBufferAddress(env, limitsBuffer, "limits"));
+        
+        for (int i = 0; i <= wrapper->nq; i++) {
+            limitsData[i] = static_cast<int64_t>(wrapper->result.lims[i]);
+        }
     FAISS_CATCH(env)
-    return nullptr;
+}
+
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetLabels
+  (JNIEnv* env, jclass, jlong handle, jobject labelsBuffer) {
+    FAISS_TRY
+        RangeSearchResultWrapper* wrapper = reinterpret_cast<RangeSearchResultWrapper*>(handle);
+        int64_t* labelsData = static_cast<int64_t*>(getDirectBufferAddress(env, labelsBuffer, "labels"));
+        
+        size_t total = wrapper->result.lims[wrapper->nq];
+        for (size_t i = 0; i < total; i++) {
+            labelsData[i] = static_cast<int64_t>(wrapper->result.labels[i]);
+        }
+    FAISS_CATCH(env)
+}
+
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultGetDistances
+  (JNIEnv* env, jclass, jlong handle, jobject distancesBuffer) {
+    FAISS_TRY
+        RangeSearchResultWrapper* wrapper = reinterpret_cast<RangeSearchResultWrapper*>(handle);
+        float* distData = static_cast<float*>(getDirectBufferAddress(env, distancesBuffer, "distances"));
+        
+        size_t total = wrapper->result.lims[wrapper->nq];
+        memcpy(distData, wrapper->result.distances, total * sizeof(float));
+    FAISS_CATCH(env)
 }
 
 // ==================== IVF Index Specific ====================
@@ -435,6 +475,13 @@ JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswGetEfConstru
     return 0;
 }
 
+JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswSetEfConstruction
+  (JNIEnv* env, jclass, jlong handle, jint efConstruction) {
+    FAISS_TRY
+        getIndexHNSW(handle)->hnsw.efConstruction = static_cast<int>(efConstruction);
+    FAISS_CATCH(env)
+}
+
 // ==================== Utility ====================
 
 JNIEXPORT jstring JNICALL Java_org_apache_paimon_faiss_FaissNative_getVersion
@@ -461,4 +508,3 @@ JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_getNumThreads
     return 1;
 #endif
 }
-

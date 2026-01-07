@@ -32,18 +32,6 @@ package org.apache.paimon.faiss;
  *   <li>{@code efSearch} - The size of the dynamic candidate list during search. Higher values
  *       increase search accuracy at the cost of speed.
  * </ul>
- *
- * <p>Example usage:
- *
- * <pre>{@code
- * Index index = IndexFactory.createHNSW(128, 32, MetricType.L2);
- * index.add(vectors);
- *
- * // Increase efSearch for more accurate results
- * IndexHNSW.setEfSearch(index, 64);
- *
- * SearchResult result = index.search(queries, 10);
- * }</pre>
  */
 public final class IndexHNSW {
 
@@ -94,5 +82,25 @@ public final class IndexHNSW {
      */
     public static int getEfConstruction(Index index) {
         return FaissNative.hnswGetEfConstruction(index.getNativeHandle());
+    }
+
+    /**
+     * Set the efConstruction parameter.
+     *
+     * <p>This controls the size of the dynamic candidate list during construction. It must be set
+     * before adding any vectors to the index. Higher values give more accurate results but slower
+     * construction. Typical values range from 40 to 400.
+     *
+     * @param index the HNSW index
+     * @param efConstruction the efConstruction value
+     * @throws IllegalArgumentException if the index is not an HNSW index or efConstruction is not
+     *     positive
+     */
+    public static void setEfConstruction(Index index, int efConstruction) {
+        if (efConstruction <= 0) {
+            throw new IllegalArgumentException(
+                    "efConstruction must be positive: " + efConstruction);
+        }
+        FaissNative.hnswSetEfConstruction(index.getNativeHandle(), efConstruction);
     }
 }
