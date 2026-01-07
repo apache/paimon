@@ -54,6 +54,8 @@ import static org.apache.paimon.spark.globalindex.GlobalIndexBuilderUtils.toInde
  */
 public class BTreeGlobalIndexBuilder implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
     private static final double FLOATING = 1.2;
 
     private final FileStoreTable table;

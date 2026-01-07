@@ -22,37 +22,59 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.List;
 
 /** The extractor to get partition, index field and row id from records. */
-public class RowIdIndexFieldsExtractor {
+public class RowIdIndexFieldsExtractor implements Serializable {
 
-    private final Projection partitionProjection;
-    private final InternalRow.FieldGetter indexFieldGetter;
+    private static final long serialVersionUID = 1L;
+
     private final int rowIdPos;
+    private final RowType readType;
+    private final List<String> partitionKeys;
+    private final String indexField;
+
+    private transient Projection lazyPartitionProjection;
+    private transient FieldGetter lazyIndexFieldGetter;
 
     public RowIdIndexFieldsExtractor(
             RowType readType, List<String> partitionKeys, String indexField) {
-        this.partitionProjection = CodeGenUtils.newProjection(readType, partitionKeys);
-        int indexFieldPos = readType.getFieldIndex(indexField);
-        this.indexFieldGetter =
-                InternalRow.createFieldGetter(readType.getTypeAt(indexFieldPos), indexFieldPos);
+        this.readType = readType;
+        this.partitionKeys = partitionKeys;
+        this.indexField = indexField;
         this.rowIdPos = readType.getFieldIndex(SpecialFields.ROW_ID.name());
     }
 
+    private Projection partitionProjection() {
+        if (lazyPartitionProjection == null) {
+            lazyPartitionProjection = CodeGenUtils.newProjection(readType, partitionKeys);
+        }
+        return lazyPartitionProjection;
+    }
+
+    private FieldGetter indexFieldGetter() {
+        if (lazyIndexFieldGetter == null) {
+            int indexFieldPos = readType.getFieldIndex(indexField);
+            lazyIndexFieldGetter =
+                    InternalRow.createFieldGetter(readType.getTypeAt(indexFieldPos), indexFieldPos);
+        }
+        return lazyIndexFieldGetter;
+    }
+
     public BinaryRow extractPartition(InternalRow record) {
-        // projection will reuse returning record, copy is necessary
-        return partitionProjection.apply(record).copy();
+        return partitionProjection().apply(record).copy();
     }
 
     @Nullable
     public Object extractIndexField(InternalRow record) {
-        return indexFieldGetter.getFieldOrNull(record);
+        return indexFieldGetter().getFieldOrNull(record);
     }
 
     public Long extractRowId(InternalRow record) {

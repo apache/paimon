@@ -45,6 +45,8 @@ import static org.apache.paimon.spark.globalindex.GlobalIndexBuilderUtils.toInde
 /** Default global index builder. */
 public class DefaultGlobalIndexBuilder implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
     private final FileStoreTable table;
     private final BinaryRow partition;
     private final RowType readType;
