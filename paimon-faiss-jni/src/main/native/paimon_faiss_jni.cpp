@@ -439,8 +439,8 @@ JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswGetEfConstru
 
 JNIEXPORT jstring JNICALL Java_org_apache_paimon_faiss_FaissNative_getVersion
   (JNIEnv* env, jclass) {
-    // Faiss doesn't have a built-in version function, so we return our binding version
-    return env->NewStringUTF("1.7.4");
+    // Return FAISS version defined in CMakeLists.txt
+    return env->NewStringUTF(FAISS_VERSION);
 }
 
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_setNumThreads

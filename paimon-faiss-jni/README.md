@@ -13,7 +13,7 @@ Paimon Faiss JNI provides a high-performance Java API for Faiss, following a sim
 ## Features
 
 - **Multiple Index Types**: Flat, IVF, HNSW, PQ, and more
-- **Cross-Platform**: Supports Linux (x86_64, aarch64), macOS (x86_64, aarch64), and Windows (x86_64)
+- **Cross-Platform**: Supports Linux (x86_64, aarch64) and macOS (aarch64)
 - **Fat JAR**: All native libraries bundled in a single JAR
 - **Automatic Native Library Loading**: No manual library path configuration required
 - **Thread-Safe Loading**: Safe for use in multi-threaded applications

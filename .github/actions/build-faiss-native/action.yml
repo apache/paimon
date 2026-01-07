@@ -7,6 +7,10 @@ inputs:
   cmake-arch:
     description: 'CMake architecture (x86_64 or aarch64)'
     required: true
+  faiss-version:
+    description: 'FAISS version to build (e.g., 1.7.4)'
+    required: false
+    default: '1.7.4'
   use-homebrew:
     description: 'Whether to use Homebrew for dependencies (macOS)'
     required: false
@@ -54,7 +58,7 @@ runs:
       if: inputs.use-homebrew == 'false'
       shell: bash
       run: |
-        git clone --depth 1 --branch v1.7.4 https://github.com/facebookresearch/faiss.git /tmp/faiss
+        git clone --depth 1 --branch v${{ inputs.faiss-version }} https://github.com/facebookresearch/faiss.git /tmp/faiss
         cd /tmp/faiss
         cmake -B build \
           -DFAISS_ENABLE_GPU=OFF \
@@ -74,7 +78,7 @@ runs:
       shell: bash
       run: |
         cd paimon-faiss-jni
-        ./scripts/build-native.sh --clean --fat-lib
+        ./scripts/build-native.sh --clean --fat-lib --faiss-version ${{ inputs.faiss-version }}
 
     - name: List built libraries (Linux)
       if: inputs.use-homebrew == 'false' && inputs.platform == 'linux-amd64'

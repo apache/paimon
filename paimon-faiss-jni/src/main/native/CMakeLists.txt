@@ -17,6 +17,10 @@
 cmake_minimum_required(VERSION 3.30.1)
 project(paimon_faiss_jni VERSION 0.1.0 LANGUAGES CXX)
 
+# FAISS version
+set(FAISS_VERSION "1.7.4" CACHE STRING "FAISS library version")
+add_definitions(-DFAISS_VERSION="${FAISS_VERSION}")
+
 # Check GCC version (must be >= 9.3.0)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.3.0")

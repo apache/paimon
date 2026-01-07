@@ -27,11 +27,16 @@ BUILD_DIR="$PROJECT_DIR/build/native"
 OPT_LEVEL="generic"
 CLEAN=false
 FAT_LIB=true  # Default to fat lib
+FAISS_VERSION="1.7.4"  # Default FAISS version
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --opt-level)
             OPT_LEVEL="$2"
+            shift 2
+            ;;
+        --faiss-version)
+            FAISS_VERSION="$2"
             shift 2
             ;;
         --clean)
@@ -50,19 +55,20 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [options]"
             echo ""
             echo "Options:"
-            echo "  --opt-level LEVEL   Optimization level: generic, avx2, avx512 (default: generic)"
-            echo "  --fat-lib           Build fat library with all dependencies (default: enabled)"
-            echo "  --no-fat-lib        Build without bundling dependencies"
-            echo "  --clean             Clean build directory before building"
-            echo "  --help              Show this help message"
+            echo "  --opt-level LEVEL      Optimization level: generic, avx2, avx512 (default: generic)"
+            echo "  --faiss-version VER    FAISS version to use (default: 1.7.4)"
+            echo "  --fat-lib              Build fat library with all dependencies (default: enabled)"
+            echo "  --no-fat-lib           Build without bundling dependencies"
+            echo "  --clean                Clean build directory before building"
+            echo "  --help                 Show this help message"
             echo ""
             echo "Environment variables:"
-            echo "  FAISS_ROOT          Path to Faiss installation"
-            echo "  JAVA_HOME           Path to Java installation"
-            echo "  OPENBLAS_ROOT       Path to OpenBLAS installation"
+            echo "  FAISS_ROOT             Path to Faiss installation"
+            echo "  JAVA_HOME              Path to Java installation"
+            echo "  OPENBLAS_ROOT          Path to OpenBLAS installation"
             echo ""
             echo "Example:"
-            echo "  FAISS_ROOT=/opt/faiss $0 --clean --fat-lib"
+            echo "  FAISS_ROOT=/opt/faiss $0 --clean --fat-lib --faiss-version 1.8.0"
             exit 0
             ;;
         *)
@@ -75,6 +81,7 @@ done
 echo "================================================"
 echo "Building Paimon Faiss JNI - Native Library"
 echo "================================================"
+echo "FAISS version: $FAISS_VERSION"
 echo "Optimization level: $OPT_LEVEL"
 echo "Fat library: $FAT_LIB"
 echo ""
@@ -136,6 +143,7 @@ echo "Configuring with CMake..."
 
 CMAKE_ARGS=(
     -DCMAKE_BUILD_TYPE=Release
+    -DFAISS_VERSION="$FAISS_VERSION"
     -DFAISS_OPT_LEVEL="$OPT_LEVEL"
     -DBUILD_FAT_LIB="$FAT_LIB"
 )

@@ -346,15 +346,6 @@ public class Index implements AutoCloseable {
     }
 
     @Override
-    protected void finalize() throws Throwable {
-        try {
-            close();
-        } finally {
-            super.finalize();
-        }
-    }
-
-    @Override
     public String toString() {
         if (closed) {
             return "Index[closed]";

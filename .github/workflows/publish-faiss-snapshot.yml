@@ -188,13 +188,3 @@ jobs:
           
           rm $tmp_settings
 
-      - name: Upload packaged JARs
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: faiss-jars
-          path: |
-            paimon-faiss-jni/target/*.jar
-            paimon-faiss/target/*.jar
-          retention-days: 7
-
