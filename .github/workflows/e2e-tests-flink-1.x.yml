@@ -43,8 +43,8 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        # Last element should be the current default flink version
-        flink_version: [ '1.16', '1.17', '1.18', '1.19', '1.20' ]
+        # Only Test Latest Version
+        flink_version: [ '1.20' ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

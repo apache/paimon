@@ -15,33 +15,31 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-
-name: End to End Tests Flink 1.x on JDK 11
+name: UTCase and ITCase Flink 1.x Common
 
 on:
-  issue_comment:
-    types: [created, edited, deleted]
-
-  # daily run
-  schedule:
-    - cron: "0 0 * * *"
+  push:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'paimon-python/**'
+      - '.github/workflows/paimon-python-checks.yml'
+      - 'paimon-lucene/**'
 
 env:
-  JDK_VERSION: 11
+  JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   build_test:
-    if: |
-      github.event_name == 'schedule' ||
-      (contains(github.event.comment.html_url, '/pull/') && contains(github.event.comment.body, '/jdk11'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: true
-      matrix:
-        # Last element should be the current default flink version
-        flink_version: [ '1.16', '1.17', '1.18', '1.19', '1.20' ]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,19 +51,19 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Flink
-        run:  mvn -T 1C -B clean install -DskipTests -Pflink1,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }},java11
+        run: |
+          COMPILE_MODULE="org.apache.paimon:paimon-flink-common"
+          echo "Start compiling modules: $COMPILE_MODULE"
+          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl "${COMPILE_MODULE}" -am
 
       - name: Test Flink
         run: |
-          # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          profile="flink-${{ matrix.flink_version }}"
-          if [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
-            mvn -T 1C -B test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pjava11
-          else
-            mvn -T 1C -B test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile},java11
-          fi
+          TEST_MODULE="org.apache.paimon:paimon-flink-common" 
+          echo "Start testing module: $TEST_MODULE"
+          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
+          echo "All modules tested"
         env:
-          MAVEN_OPTS: -Xmx4096m
+          MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2

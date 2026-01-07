@@ -15,7 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-name: UTCase and ITCase Flink 1.x
+name: UTCase and ITCase Flink 1.x Others
 
 on:
   push:
@@ -39,10 +39,6 @@ jobs:
   build_test:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: true
-      matrix:
-        flink_version: ['common', 'cdc', '1.16', '1.17', '1.18', '1.19', '1.20']
 
     steps:
       - name: Checkout code
@@ -56,18 +52,18 @@ jobs:
 
       - name: Build Flink
         run: |
-          COMPILE_MODULE="org.apache.paimon:paimon-flink-${{ matrix.flink_version }}"
-          echo "Start compiling modules: $COMPILE_MODULE"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl "${COMPILE_MODULE}" -am
+          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
 
       - name: Test Flink
         run: |
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          TEST_MODULE="org.apache.paimon:paimon-flink-${{ matrix.flink_version }}" 
-          echo "Start testing module: $TEST_MODULE"
-          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
-          echo "All modules tested"
+          test_modules=""
+          for suffix in cdc 1.16 1.17 1.18 1.19 1.20; do
+          test_modules+="org.apache.paimon:paimon-flink-${suffix},"
+          done
+          test_modules="${test_modules%,}"
+          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2
