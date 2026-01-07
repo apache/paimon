@@ -292,6 +292,15 @@ public class FlinkConnectorOptions {
                                     + "cache refreshing is forbidden. Blacklist format is start1->end1,start2->end2,... , "
                                     + "and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.");
 
+    public static final ConfigOption<Integer> LOOKUP_REFRESH_FULL_LOAD_THRESHOLD =
+            ConfigOptions.key("lookup.refresh.full-load-threshold")
+                    .intType()
+                    .defaultValue(Integer.MAX_VALUE)
+                    .withDescription(
+                            "If the pending snapshot count exceeds this threshold, lookup table will discard incremental updates "
+                                    + "and refresh the entire table from the latest snapshot. This can improve performance when there are many snapshots pending. "
+                                    + "Set to a reasonable value (e.g., 10) to enable this optimization. Default is Integer.MAX_VALUE (disabled). ");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()
