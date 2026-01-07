@@ -45,7 +45,7 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
     private final DataType dataType;
 
     public KafkaMetadataConverter(String fieldName, DataType dataType) {
-        this.fieldName = fieldName;
+        this.fieldName = KAFKA_METADATA_COLUMN_PREFIX + fieldName;
         this.dataType = dataType;
     }
 
@@ -68,7 +68,6 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
 
     @Override
     public String columnName() {
-        //return KAFKA_METADATA_COLUMN_PREFIX + this.fieldName;
         return this.fieldName;
     }
 
@@ -109,7 +108,7 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
 
         @Override
         public String read(CdcSourceRecord record) {
-            Object timestamp = record.getMetadata("timestamp");
+            Object timestamp = record.getMetadata(KAFKA_METADATA_COLUMN_PREFIX + "timestamp");
             if (timestamp instanceof Long) {
                 return DateTimeUtils.formatTimestamp(
                         Timestamp.fromEpochMillis((Long) timestamp), TimeZone.getDefault(), 3);

@@ -72,7 +72,7 @@ public class KafkaMetadataConverterTest {
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("partition", 5);
+        metadata.put("__kafka_partition", 5);
         CdcSourceRecord record = new CdcSourceRecord("topic", null, "value", metadata);
         assertThat(converter.read(record)).isEqualTo("5");
 
@@ -92,7 +92,7 @@ public class KafkaMetadataConverterTest {
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("offset", 12345L);
+        metadata.put("__kafka_offset", 12345L);
         CdcSourceRecord record = new CdcSourceRecord("topic", null, "value", metadata);
         assertThat(converter.read(record)).isEqualTo("12345");
 
@@ -112,7 +112,7 @@ public class KafkaMetadataConverterTest {
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("timestamp", 1640995200000L); // 2022-01-01 00:00:00 UTC
+        metadata.put("__kafka_timestamp", 1640995200000L); // 2022-01-01 00:00:00 UTC
         CdcSourceRecord record = new CdcSourceRecord("topic", null, "value", metadata);
         String result = converter.read(record);
         assertThat(result).isNotNull();
@@ -124,7 +124,7 @@ public class KafkaMetadataConverterTest {
 
         // Test with non-Long timestamp
         Map<String, Object> invalidMetadata = new HashMap<>();
-        invalidMetadata.put("timestamp", "not-a-long");
+        invalidMetadata.put("__kafka_timestamp", "not-a-long");
         CdcSourceRecord recordWithInvalidTimestamp =
                 new CdcSourceRecord("topic", null, "value", invalidMetadata);
         assertThat(converter.read(recordWithInvalidTimestamp)).isNull();
@@ -141,17 +141,17 @@ public class KafkaMetadataConverterTest {
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("timestamp_type", "CreateTime");
+        metadata.put("__kafka_timestamp_type", "CreateTime");
         CdcSourceRecord record = new CdcSourceRecord("topic", null, "value", metadata);
         assertThat(converter.read(record)).isEqualTo("CreateTime");
 
         // Test with LogAppendTime
-        metadata.put("timestamp_type", "LogAppendTime");
+        metadata.put("__kafka_timestamp_type", "LogAppendTime");
         CdcSourceRecord recordLogAppend = new CdcSourceRecord("topic", null, "value", metadata);
         assertThat(converter.read(recordLogAppend)).isEqualTo("LogAppendTime");
 
         // Test with NoTimestampType
-        metadata.put("timestamp_type", "NoTimestampType");
+        metadata.put("__kafka_timestamp_type", "NoTimestampType");
         CdcSourceRecord recordNoTimestamp = new CdcSourceRecord("topic", null, "value", metadata);
         assertThat(converter.read(recordNoTimestamp)).isEqualTo("NoTimestampType");
 
@@ -164,11 +164,11 @@ public class KafkaMetadataConverterTest {
     public void testAllConvertersWithCompleteMetadata() {
         // Create a CdcSourceRecord with all Kafka metadata
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("topic", "my-topic");
-        metadata.put("partition", 3);
-        metadata.put("offset", 9876L);
-        metadata.put("timestamp", 1640995200000L);
-        metadata.put("timestamp_type", "CreateTime");
+        metadata.put("__kafka_topic", "my-topic");
+        metadata.put("__kafka_partition", 3);
+        metadata.put("__kafka_offset", 9876L);
+        metadata.put("__kafka_timestamp", 1640995200000L);
+        metadata.put("__kafka_timestamp_type", "CreateTime");
 
         CdcSourceRecord record = new CdcSourceRecord("my-topic", "key", "value", metadata);
 
