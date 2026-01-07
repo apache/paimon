@@ -51,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -102,7 +103,7 @@ public class ConflictDetection {
         this.partitionExpire = partitionExpire;
     }
 
-    public void checkNoConflictsOrFail(
+    public Optional<RuntimeException> checkConflicts(
             Snapshot snapshot,
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
@@ -126,14 +127,20 @@ public class ConflictDetection {
                 deltaEntries =
                         buildDeltaEntriesWithDV(baseEntries, deltaEntries, deltaIndexEntries);
             } catch (Throwable e) {
-                throw conflictException(commitUser, baseEntries, deltaEntries).apply(e);
+                return Optional.of(
+                        conflictException(commitUser, baseEntries, deltaEntries).apply(e));
             }
         }
 
         List<SimpleFileEntry> allEntries = new ArrayList<>(baseEntries);
         allEntries.addAll(deltaEntries);
 
-        checkBucketKeepSame(baseEntries, deltaEntries, commitKind, allEntries, baseCommitUser);
+        Optional<RuntimeException> exception =
+                checkBucketKeepSame(
+                        baseEntries, deltaEntries, commitKind, allEntries, baseCommitUser);
+        if (exception.isPresent()) {
+            return exception;
+        }
 
         Function<Throwable, RuntimeException> conflictException =
                 conflictException(baseCommitUser, baseEntries, deltaEntries);
@@ -151,21 +158,24 @@ public class ConflictDetection {
             // merge manifest entries and also check if the files we want to delete are still there
             mergedEntries = FileEntry.mergeEntries(allEntries);
         } catch (Throwable e) {
-            throw conflictException.apply(e);
+            return Optional.of(conflictException.apply(e));
         }
 
-        checkNoDeleteInMergedEntries(mergedEntries, conflictException);
-        checkKeyRangeNoConflicts(baseEntries, deltaEntries, mergedEntries, baseCommitUser);
+        exception = checkDeleteInEntries(mergedEntries, conflictException);
+        if (exception.isPresent()) {
+            return exception;
+        }
+        return checkKeyRange(baseEntries, deltaEntries, mergedEntries, baseCommitUser);
     }
 
-    private void checkBucketKeepSame(
+    private Optional<RuntimeException> checkBucketKeepSame(
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             CommitKind commitKind,
             List<SimpleFileEntry> allEntries,
             String baseCommitUser) {
         if (commitKind == CommitKind.OVERWRITE) {
-            return;
+            return Optional.empty();
         }
 
         // total buckets within the same partition should remain the same
@@ -199,18 +209,19 @@ public class ConflictDetection {
                             deltaEntries,
                             null);
             LOG.warn("", conflictException.getLeft());
-            throw conflictException.getRight();
+            return Optional.of(conflictException.getRight());
         }
+        return Optional.empty();
     }
 
-    private void checkKeyRangeNoConflicts(
+    private Optional<RuntimeException> checkKeyRange(
             List<SimpleFileEntry> baseEntries,
             List<SimpleFileEntry> deltaEntries,
             Collection<SimpleFileEntry> mergedEntries,
             String baseCommitUser) {
         // fast exit for file store without keys
         if (keyComparator == null) {
-            return;
+            return Optional.empty();
         }
 
         // group entries by partitions, buckets and levels
@@ -244,10 +255,11 @@ public class ConflictDetection {
                                     null);
 
                     LOG.warn("", conflictException.getLeft());
-                    throw conflictException.getRight();
+                    return Optional.of(conflictException.getRight());
                 }
             }
         }
+        return Optional.empty();
     }
 
     private Function<Throwable, RuntimeException> conflictException(
@@ -271,7 +283,7 @@ public class ConflictDetection {
         return deletionVectorsEnabled && bucketMode.equals(BucketMode.BUCKET_UNAWARE);
     }
 
-    private void checkNoDeleteInMergedEntries(
+    private Optional<RuntimeException> checkDeleteInEntries(
             Collection<SimpleFileEntry> mergedEntries,
             Function<Throwable, RuntimeException> exceptionFunction) {
         try {
@@ -283,12 +295,17 @@ public class ConflictDetection {
                         tableName);
             }
         } catch (Throwable e) {
-            assertConflictForPartitionExpire(mergedEntries);
-            throw exceptionFunction.apply(e);
+            Optional<RuntimeException> exception = assertConflictForPartitionExpire(mergedEntries);
+            if (exception.isPresent()) {
+                return exception;
+            }
+            return Optional.of(exceptionFunction.apply(e));
         }
+        return Optional.empty();
     }
 
-    private void assertConflictForPartitionExpire(Collection<SimpleFileEntry> mergedEntries) {
+    private Optional<RuntimeException> assertConflictForPartitionExpire(
+            Collection<SimpleFileEntry> mergedEntries) {
         if (partitionExpire != null && partitionExpire.isValueExpiration()) {
             Set<BinaryRow> deletedPartitions = new HashSet<>();
             for (SimpleFileEntry entry : mergedEntries) {
@@ -304,13 +321,15 @@ public class ConflictDetection {
                                                 partToSimpleString(
                                                         partitionType, partition, "-", 200))
                                 .collect(Collectors.toList());
-                throw new RuntimeException(
-                        "You are writing data to expired partitions, and you can filter this data to avoid job failover."
-                                + " Otherwise, continuous expired records will cause the job to failover restart continuously."
-                                + " Expired partitions are: "
-                                + expiredPartitions);
+                return Optional.of(
+                        new RuntimeException(
+                                "You are writing data to expired partitions, and you can filter this data to avoid job failover."
+                                        + " Otherwise, continuous expired records will cause the job to failover restart continuously."
+                                        + " Expired partitions are: "
+                                        + expiredPartitions));
             }
         }
+        return Optional.empty();
     }
 
     static List<SimpleFileEntry> buildBaseEntriesWithDV(

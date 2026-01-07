@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.tag.SnapshotLoaderImpl;
@@ -110,6 +111,21 @@ public class CatalogEnvironment implements Serializable {
             snapshotCommit = new RenamingSnapshotCommit(snapshotManager, lock);
         }
         return snapshotCommit;
+    }
+
+    @Nullable
+    public TableRollback catalogTableRollback() {
+        if (catalogLoader != null && supportsVersionManagement) {
+            Catalog catalog = catalogLoader.load();
+            return (instant, fromSnapshot) -> {
+                try {
+                    catalog.rollbackTo(identifier, instant, fromSnapshot);
+                } catch (Catalog.TableNotExistException e) {
+                    throw new RuntimeException(e);
+                }
+            };
+        }
+        return null;
     }
 
     @Nullable
