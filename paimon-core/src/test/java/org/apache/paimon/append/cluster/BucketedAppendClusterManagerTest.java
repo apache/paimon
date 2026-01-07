@@ -142,6 +142,7 @@ public class BucketedAppendClusterManagerTest {
                         .column("f2", DataTypes.INT())
                         .option("bucket", "1")
                         .option("bucket-key", "f0")
+                        .option("compaction.min.file-num", "10")
                         .option("clustering.columns", "f1,f2")
                         .option("clustering.strategy", "zorder")
                         .build();
