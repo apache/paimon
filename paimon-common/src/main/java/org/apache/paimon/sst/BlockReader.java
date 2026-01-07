@@ -19,69 +19,88 @@
 package org.apache.paimon.sst;
 
 import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.memory.MemorySliceInput;
 
 import java.util.Comparator;
 
 import static org.apache.paimon.sst.BlockAlignedType.ALIGNED;
 
 /** Reader for a block. */
-public class BlockReader {
+public abstract class BlockReader {
+
     private final MemorySlice block;
+    private final int recordCount;
     private final Comparator<MemorySlice> comparator;
 
-    public BlockReader(MemorySlice block, Comparator<MemorySlice> comparator) {
+    private BlockReader(MemorySlice block, int recordCount, Comparator<MemorySlice> comparator) {
         this.block = block;
+        this.recordCount = recordCount;
         this.comparator = comparator;
     }
 
-    public long size() {
-        return block.length();
+    public MemorySliceInput blockInput() {
+        return block.toInput();
+    }
+
+    public int recordCount() {
+        return recordCount;
+    }
+
+    public Comparator<MemorySlice> comparator() {
+        return comparator;
     }
 
     public BlockIterator iterator() {
+        return new BlockIterator(this);
+    }
+
+    /** Seek to slice position from record position. */
+    public abstract int seekTo(int recordPosition);
+
+    public static BlockReader create(MemorySlice block, Comparator<MemorySlice> comparator) {
         BlockAlignedType alignedType =
                 BlockAlignedType.fromByte(block.readByte(block.length() - 1));
         int intValue = block.readInt(block.length() - 5);
         if (alignedType == ALIGNED) {
-            return new AlignedIterator(block.slice(0, block.length() - 5), intValue, comparator);
+            return new AlignedBlockReader(block.slice(0, block.length() - 5), intValue, comparator);
         } else {
             int indexLength = intValue * 4;
             int indexOffset = block.length() - 5 - indexLength;
             MemorySlice data = block.slice(0, indexOffset);
             MemorySlice index = block.slice(indexOffset, indexLength);
-            return new UnalignedIterator(data, index, comparator);
+            return new UnalignedBlockReader(data, index, comparator);
         }
     }
 
-    private static class AlignedIterator extends BlockIterator {
+    private static class AlignedBlockReader extends BlockReader {
 
         private final int recordSize;
 
-        public AlignedIterator(
+        public AlignedBlockReader(
                 MemorySlice data, int recordSize, Comparator<MemorySlice> comparator) {
-            super(data.toInput(), data.length() / recordSize, comparator);
+            super(data, data.length() / recordSize, comparator);
             this.recordSize = recordSize;
         }
 
         @Override
-        public void seekTo(int recordPosition) {
-            data.setPosition(recordPosition * recordSize);
+        public int seekTo(int recordPosition) {
+            return recordPosition * recordSize;
         }
     }
 
-    private static class UnalignedIterator extends BlockIterator {
+    private static class UnalignedBlockReader extends BlockReader {
 
         private final MemorySlice index;
 
-        public UnalignedIterator(
+        public UnalignedBlockReader(
                 MemorySlice data, MemorySlice index, Comparator<MemorySlice> comparator) {
-            super(data.toInput(), index.length() / 4, comparator);
+            super(data, index.length() / 4, comparator);
             this.index = index;
         }
 
         @Override
-        public void seekTo(int recordPosition) {
-            data.setPosition(index.readInt(recordPosition * 4));
+        public int seekTo(int recordPosition) {
+            return index.readInt(recordPosition * 4);
         }
     }
 }

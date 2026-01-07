@@ -48,4 +48,8 @@ public enum LuceneVectorMetric {
     public VectorSimilarityFunction vectorSimilarityFunction() {
         return vectorSimilarityFunction;
     }
+
+    public static LuceneVectorMetric fromString(String name) {
+        return valueOf(name.toUpperCase());
+    }
 }

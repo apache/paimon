@@ -192,7 +192,9 @@ public class ReadTable {
         // 3. Distribute these splits to different tasks
 
         // 4. Read a split in task
-        TableRead read = readBuilder.newRead();
+        // You can use executeFilter to do filter per record.
+        // By default, only capable of performing coarse-grained filtering.
+        TableRead read = readBuilder.newRead().executeFilter();
         RecordReader<InternalRow> reader = read.createReader(splits);
         reader.forEachRemaining(System.out::println);
     }
@@ -304,7 +306,9 @@ public class StreamReadTable {
             // can be restored in scan.restore(state) after fail over
 
             // 3. Read a split in task
-            TableRead read = readBuilder.newRead();
+            // You can use executeFilter to do filter per record.
+            // By default, only capable of performing coarse-grained filtering.
+            TableRead read = readBuilder.newRead().executeFilter();
             RecordReader<InternalRow> reader = read.createReader(splits);
             reader.forEachRemaining(System.out::println);
 

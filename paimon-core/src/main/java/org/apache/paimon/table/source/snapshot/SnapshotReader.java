@@ -116,6 +116,8 @@ public interface SnapshotReader {
 
     SnapshotReader withReadType(RowType readType);
 
+    SnapshotReader withLimit(int limit);
+
     /** Get splits plan from snapshot. */
     Plan read();
 

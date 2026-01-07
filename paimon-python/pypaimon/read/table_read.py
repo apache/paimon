@@ -15,12 +15,11 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
@@ -129,8 +128,30 @@ class TableRead:
         con.register(table_name, self.to_arrow(splits))
         return con
 
-    def to_ray(self, splits: List[Split], parallelism: int = 1) -> "ray.data.dataset.Dataset":
-        """Convert Paimon table data to Ray Dataset."""
+    def to_ray(
+        self,
+        splits: List[Split],
+        *,
+        ray_remote_args: Optional[Dict[str, Any]] = None,
+        concurrency: Optional[int] = None,
+        override_num_blocks: Optional[int] = None,
+        **read_args,
+    ) -> "ray.data.dataset.Dataset":
+        """Convert Paimon table data to Ray Dataset.
+        Args:
+            splits: List of splits to read from the Paimon table.
+            ray_remote_args: Optional kwargs passed to :func:`ray.remote` in read tasks.
+                For example, ``{"num_cpus": 2, "max_retries": 3}``.
+            concurrency: Optional max number of Ray tasks to run concurrently.
+                By default, dynamically decided based on available resources.
+            override_num_blocks: Optional override for the number of output blocks.
+                You needn't manually set this in most cases.
+            **read_args: Additional kwargs passed to the datasource.
+                For example, ``per_task_row_limit`` (Ray 2.52.0+).
+        
+        See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
+        for details.
+        """
         import ray
 
         if not splits:
@@ -141,18 +162,18 @@ class TableRead:
             )
             return ray.data.from_arrow(empty_table)
 
-        # Validate parallelism parameter
-        if parallelism < 1:
-            raise ValueError(f"parallelism must be at least 1, got {parallelism}")
+        if override_num_blocks is not None and override_num_blocks < 1:
+            raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
 
-        if parallelism == 1:
-            # Single-task read (simple mode)
-            return ray.data.from_arrow(self.to_arrow(splits))
-        else:
-            # Distributed read with specified parallelism
-            from pypaimon.read.ray_datasource import PaimonDatasource
-            datasource = PaimonDatasource(self, splits)
-            return ray.data.read_datasource(datasource, parallelism=parallelism)
+        from pypaimon.read.ray_datasource import PaimonDatasource
+        datasource = PaimonDatasource(self, splits)
+        return ray.data.read_datasource(
+            datasource,
+            ray_remote_args=ray_remote_args,
+            concurrency=concurrency,
+            override_num_blocks=override_num_blocks,
+            **read_args
+        )
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:
@@ -163,7 +184,7 @@ class TableRead:
                 split=split,
                 row_tracking_enabled=False
             )
-        elif self.table.options.get(CoreOptions.DATA_EVOLUTION_ENABLED, 'false').lower() == 'true':
+        elif self.table.options.data_evolution_enabled():
             return DataEvolutionSplitRead(
                 table=self.table,
                 predicate=self.predicate,
@@ -177,7 +198,7 @@ class TableRead:
                 predicate=self.predicate,
                 read_type=self.read_type,
                 split=split,
-                row_tracking_enabled=self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
+                row_tracking_enabled=self.table.options.row_tracking_enabled()
             )
 
     @staticmethod

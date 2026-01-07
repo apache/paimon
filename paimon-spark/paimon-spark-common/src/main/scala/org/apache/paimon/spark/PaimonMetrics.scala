@@ -25,6 +25,7 @@ object PaimonMetrics {
   // scan metrics
   val NUM_SPLITS = "numSplits"
   val PARTITION_SIZE = "partitionSize"
+  val READ_BATCH_TIME = "readBatchTime"
   val PLANNING_DURATION = "planningDuration"
   val SCANNED_SNAPSHOT_ID = "scannedSnapshotId"
   val SCANNED_MANIFESTS = "scannedManifests"
@@ -106,6 +107,15 @@ case class PaimonPartitionSizeMetric() extends PaimonSizeSummaryMetric {
 
 case class PaimonPartitionSizeTaskMetric(override val value: Long) extends PaimonTaskMetric {
   override def name(): String = PaimonMetrics.PARTITION_SIZE
+}
+
+case class PaimonReadBatchTimeMetric() extends PaimonTimingSummaryMetric {
+  override def name(): String = PaimonMetrics.READ_BATCH_TIME
+  override def description0(): String = "read batch time"
+}
+
+case class PaimonReadBatchTimeTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.READ_BATCH_TIME
 }
 
 case class PaimonPlanningDurationMetric() extends PaimonTimingSumMetric {

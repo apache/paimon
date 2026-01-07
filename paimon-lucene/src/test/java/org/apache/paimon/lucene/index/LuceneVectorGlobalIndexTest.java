@@ -20,17 +20,21 @@ package org.apache.paimon.lucene.index;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,10 +42,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 
@@ -56,6 +60,7 @@ public class LuceneVectorGlobalIndexTest {
     private FileIO fileIO;
     private Path indexPath;
     private DataType vectorType;
+    private final String fieldName = "vec";
 
     @BeforeEach
     public void setup() {
@@ -79,14 +84,24 @@ public class LuceneVectorGlobalIndexTest {
             }
 
             @Override
-            public OutputStream newOutputStream(String fileName) throws IOException {
+            public PositionOutputStream newOutputStream(String fileName) throws IOException {
                 return fileIO.newOutputStream(new Path(path, fileName), false);
             }
         };
     }
 
     private GlobalIndexFileReader createFileReader(Path path) {
-        return fileName -> fileIO.newInputStream(new Path(path, fileName));
+        return new GlobalIndexFileReader() {
+            @Override
+            public SeekableInputStream getInputStream(String fileName) throws IOException {
+                return fileIO.newInputStream(new Path(path, fileName));
+            }
+
+            @Override
+            public Path filePath(String fileName) {
+                return new Path(path, fileName);
+            }
+        };
     }
 
     @Test
@@ -99,32 +114,32 @@ public class LuceneVectorGlobalIndexTest {
         for (String metric : metrics) {
             Options options = createDefaultOptions(dimension);
             options.setString("vector.metric", metric);
-
+            LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
             Path metricIndexPath = new Path(indexPath, metric.toLowerCase());
             GlobalIndexFileWriter fileWriter = createFileWriter(metricIndexPath);
             LuceneVectorGlobalIndexWriter writer =
-                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
             testVectors.forEach(writer::write);
 
-            List<GlobalIndexWriter.ResultEntry> results = writer.finish();
+            List<ResultEntry> results = writer.finish();
             assertThat(results).hasSize(1);
 
-            GlobalIndexWriter.ResultEntry result = results.get(0);
+            ResultEntry result = results.get(0);
             GlobalIndexFileReader fileReader = createFileReader(metricIndexPath);
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(metricIndexPath, result.fileName())),
-                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
-                    new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 3);
-                assertThat(searchResult).isNotNull();
+                    new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
+                VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 3, fieldName);
+                Optional<GlobalIndexResult> searchResult = reader.visitVectorSearch(vectorSearch);
+                assertThat(searchResult).isPresent();
             }
         }
     }
@@ -135,33 +150,33 @@ public class LuceneVectorGlobalIndexTest {
 
         for (int dimension : dimensions) {
             Options options = createDefaultOptions(dimension);
-
+            LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
             Path dimIndexPath = new Path(indexPath, "dim_" + dimension);
             GlobalIndexFileWriter fileWriter = createFileWriter(dimIndexPath);
             LuceneVectorGlobalIndexWriter writer =
-                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                    new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
             int numVectors = 10;
             List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
             testVectors.forEach(writer::write);
 
-            List<GlobalIndexWriter.ResultEntry> results = writer.finish();
+            List<ResultEntry> results = writer.finish();
             assertThat(results).hasSize(1);
 
-            GlobalIndexWriter.ResultEntry result = results.get(0);
+            ResultEntry result = results.get(0);
             GlobalIndexFileReader fileReader = createFileReader(dimIndexPath);
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(dimIndexPath, result.fileName())),
-                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
 
             try (LuceneVectorGlobalIndexReader reader =
-                    new LuceneVectorGlobalIndexReader(fileReader, metas)) {
+                    new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
                 // Verify search works with this dimension
-                GlobalIndexResult searchResult = reader.search(testVectors.get(0), 5);
+                VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5, fieldName);
+                Optional<GlobalIndexResult> searchResult = reader.visitVectorSearch(vectorSearch);
                 assertThat(searchResult).isNotNull();
             }
         }
@@ -172,8 +187,9 @@ public class LuceneVectorGlobalIndexTest {
         Options options = createDefaultOptions(64);
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
         LuceneVectorGlobalIndexWriter writer =
-                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
         // Try to write vector with wrong dimension
         float[] wrongDimVector = new float[32]; // Wrong dimension
@@ -196,36 +212,56 @@ public class LuceneVectorGlobalIndexTest {
                 };
 
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
         LuceneVectorGlobalIndexWriter writer =
-                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, options);
+                new LuceneVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
         Arrays.stream(vectors).forEach(writer::write);
 
-        List<GlobalIndexWriter.ResultEntry> results = writer.finish();
+        List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(2);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
-        for (int i = 0; i < results.size(); i++) {
-            GlobalIndexWriter.ResultEntry result = results.get(i);
+        for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
         }
 
         try (LuceneVectorGlobalIndexReader reader =
-                new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-            GlobalIndexResult result = reader.search(vectors[0], 1);
+                new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
+            VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
+            LuceneVectorSearchGlobalIndexResult result =
+                    (LuceneVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            assertThat(containsRowId(result, 1)).isTrue();
+            long expectedRowId = 0;
+            assertThat(containsRowId(result, expectedRowId)).isTrue();
+            assertThat(result.scoreGetter().score(expectedRowId)).isEqualTo(1.0f);
+            expectedRowId = 1;
+            RoaringNavigableMap64 filterResults = new RoaringNavigableMap64();
+            filterResults.add(expectedRowId);
+            vectorSearch =
+                    new VectorSearch(vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
+            result =
+                    (LuceneVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
+            assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
-            result = reader.search(queryVector, 2);
+            vectorSearch = new VectorSearch(queryVector, 2, fieldName);
+            result =
+                    (LuceneVectorSearchGlobalIndexResult)
+                            reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
-            assertThat(containsRowId(result, 2)).isTrue();
-            assertThat(containsRowId(result, 4)).isTrue();
+            long rowId1 = 1;
+            long rowId2 = 3;
+            assertThat(containsRowId(result, rowId1)).isTrue();
+            assertThat(containsRowId(result, rowId2)).isTrue();
+            assertThat(result.scoreGetter().score(rowId1)).isEqualTo(0.98765427f);
+            assertThat(result.scoreGetter().score(rowId2)).isEqualTo(0.9738046f);
         }
     }
 
@@ -244,43 +280,52 @@ public class LuceneVectorGlobalIndexTest {
 
         DataType byteVectorType = new ArrayType(new TinyIntType());
         GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuceneVectorIndexOptions indexOptions = new LuceneVectorIndexOptions(options);
         LuceneVectorGlobalIndexWriter writer =
-                new LuceneVectorGlobalIndexWriter(fileWriter, byteVectorType, options);
+                new LuceneVectorGlobalIndexWriter(fileWriter, byteVectorType, indexOptions);
         Arrays.stream(vectors).forEach(writer::write);
 
-        List<GlobalIndexWriter.ResultEntry> results = writer.finish();
+        List<ResultEntry> results = writer.finish();
         assertThat(results).hasSize(2);
 
         GlobalIndexFileReader fileReader = createFileReader(indexPath);
         List<GlobalIndexIOMeta> metas = new ArrayList<>();
-        for (int i = 0; i < results.size(); i++) {
-            GlobalIndexWriter.ResultEntry result = results.get(i);
+        for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
                             result.fileName(),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
-                            result.rowRange().to - result.rowRange().from,
                             result.meta()));
         }
 
         try (LuceneVectorGlobalIndexReader reader =
-                new LuceneVectorGlobalIndexReader(fileReader, metas)) {
-            GlobalIndexResult result = reader.search(vectors[0], 1);
+                new LuceneVectorGlobalIndexReader(fileReader, metas, byteVectorType)) {
+            VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
+            GlobalIndexResult result = reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
-            assertThat(containsRowId(result, 1)).isTrue();
+            assertThat(containsRowId(result, 0)).isTrue();
 
             byte[] queryVector = new byte[] {85, 15};
-            result = reader.search(queryVector, 2);
+            vectorSearch = new VectorSearch(queryVector, 2, fieldName);
+            result = reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
-            assertThat(containsRowId(result, 2)).isTrue();
-            assertThat(containsRowId(result, 4)).isTrue();
+            assertThat(containsRowId(result, 1)).isTrue();
+            assertThat(containsRowId(result, 3)).isTrue();
         }
+    }
+
+    @Test
+    public void testInvalidTopK() {
+        assertThatThrownBy(() -> new VectorSearch(new float[] {0.1f}, 0, fieldName))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Limit must be positive");
     }
 
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger("vector.dim", dimension);
-        options.setString("vector.metric", "EUCLIDEAN");
+        String defaultMetric = "EUCLIDEAN";
+        options.setString("vector.metric", defaultMetric);
         options.setInteger("vector.m", 16);
         options.setInteger("vector.ef-construction", 100);
         return options;

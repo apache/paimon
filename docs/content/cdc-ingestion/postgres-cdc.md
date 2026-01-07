@@ -30,9 +30,15 @@ Paimon supports synchronizing changes from different databases using change data
 
 ## Prepare CDC Bundled Jar
 
-```
-flink-connector-postgres-cdc-*.jar
-```
+Download `CDC Bundled Jar` and put them under <FLINK_HOME>/lib/.
+
+| Version | Bundled Jar                                                                                                                                                                                                                                                                                                                          |
+|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 3.5.0   | <li> <a href="https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-postgres-cdc/3.5.0/flink-sql-connector-postgres-cdc-3.5.0.jar">flink-sql-connector-postgres-cdc-3.5.0.jar</a> |
+
+{{< hint danger >}}
+Only CDC 3.5.0 or above is supported.
+{{< /hint >}}
 
 ## Synchronizing Tables
 

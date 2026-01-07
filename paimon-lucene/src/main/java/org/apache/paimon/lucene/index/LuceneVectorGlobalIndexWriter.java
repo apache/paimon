@@ -18,11 +18,10 @@
 
 package org.apache.paimon.lucene.index;
 
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Range;
 
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene912.Lucene912Codec;
@@ -44,35 +43,37 @@ import java.util.List;
  * <p>This implementation uses Lucene's native KnnFloatVectorField with HNSW algorithm for efficient
  * approximate nearest neighbor search.
  */
-public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
+public class LuceneVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
 
     private final GlobalIndexFileWriter fileWriter;
-    private final LuceneVectorIndexOptions vectorOptions;
+    private final LuceneVectorIndexOptions vectorIndexOptions;
     private final VectorSimilarityFunction similarityFunction;
     private final int sizePerIndex;
     private final LuceneVectorIndexFactory vectorIndexFactory;
 
     private long count = 0;
-    private final List<LuceneVectorIndex> vectorIndices;
+    private final List<LuceneVectorIndex<?>> vectorIndices;
     private final List<ResultEntry> results;
 
     public LuceneVectorGlobalIndexWriter(
-            GlobalIndexFileWriter fileWriter, DataType fieldType, Options options) {
+            GlobalIndexFileWriter fileWriter,
+            DataType fieldType,
+            LuceneVectorIndexOptions options) {
         this.vectorIndexFactory = LuceneVectorIndexFactory.init(fieldType);
         this.fileWriter = fileWriter;
         this.vectorIndices = new ArrayList<>();
         this.results = new ArrayList<>();
-        this.vectorOptions = new LuceneVectorIndexOptions(options);
-        this.similarityFunction = vectorOptions.metric().vectorSimilarityFunction();
-        this.sizePerIndex = vectorOptions.sizePerIndex();
+        this.vectorIndexOptions = options;
+        this.similarityFunction = vectorIndexOptions.metric().vectorSimilarityFunction();
+        this.sizePerIndex = vectorIndexOptions.sizePerIndex();
     }
 
     @Override
     public void write(Object key) {
-        count++;
-        LuceneVectorIndex index = vectorIndexFactory.create(count, key);
-        index.checkDimension(vectorOptions.dimension());
+        LuceneVectorIndex<?> index = vectorIndexFactory.create(count, key);
+        index.checkDimension(vectorIndexOptions.dimension());
         vectorIndices.add(index);
+        count++;
         if (vectorIndices.size() >= sizePerIndex) {
             try {
                 flush();
@@ -100,19 +101,17 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
         try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
             buildIndex(
                     vectorIndices,
-                    this.vectorOptions.m(),
-                    this.vectorOptions.efConstruction(),
-                    this.vectorOptions.writeBufferSize(),
+                    this.vectorIndexOptions.m(),
+                    this.vectorIndexOptions.efConstruction(),
+                    this.vectorIndexOptions.writeBufferSize(),
                     out);
         }
-        long minRowIdInBatch = vectorIndices.get(0).id();
-        long maxRowIdInBatch = vectorIndices.get(vectorIndices.size() - 1).id();
-        results.add(ResultEntry.of(fileName, null, new Range(minRowIdInBatch, maxRowIdInBatch)));
+        results.add(new ResultEntry(fileName, count, null));
         vectorIndices.clear();
     }
 
     private void buildIndex(
-            List<LuceneVectorIndex> batchVectors,
+            List<LuceneVectorIndex<?>> batchVectors,
             int m,
             int efConstruction,
             int writeBufferSize,
@@ -122,9 +121,10 @@ public class LuceneVectorGlobalIndexWriter implements GlobalIndexWriter {
         try (LuceneIndexMMapDirectory luceneIndexMMapDirectory = new LuceneIndexMMapDirectory()) {
             try (IndexWriter writer =
                     new IndexWriter(luceneIndexMMapDirectory.directory(), config)) {
-                for (LuceneVectorIndex luceneVectorIndex : batchVectors) {
+                for (LuceneVectorIndex<?> luceneVectorIndex : batchVectors) {
                     Document doc = new Document();
                     doc.add(luceneVectorIndex.indexableField(similarityFunction));
+                    doc.add(luceneVectorIndex.rowIdLongPoint());
                     doc.add(luceneVectorIndex.rowIdStoredField());
                     writer.addDocument(doc);
                 }

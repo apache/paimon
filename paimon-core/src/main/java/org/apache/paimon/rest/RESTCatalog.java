@@ -373,10 +373,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant)
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         try {
-            api.rollbackTo(identifier, instant);
+            api.rollbackTo(identifier, instant, fromSnapshot);
         } catch (NoSuchResourceException e) {
             if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
@@ -1053,10 +1053,13 @@ public class RESTCatalog implements Catalog {
      */
     @Override
     public PagedList<String> listTagsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix)
             throws TableNotExistException {
         try {
-            return api.listTagsPaged(identifier, maxResults, pageToken);
+            return api.listTagsPaged(identifier, maxResults, pageToken, tagNamePrefix);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {

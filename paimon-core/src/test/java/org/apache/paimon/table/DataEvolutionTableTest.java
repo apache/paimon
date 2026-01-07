@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
+import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -28,11 +30,12 @@ import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
 import org.apache.paimon.globalindex.GlobalIndexerFactory;
 import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -40,6 +43,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -53,6 +57,7 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
@@ -67,6 +72,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -896,6 +902,72 @@ public class DataEvolutionTableTest extends TableTestBase {
         Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
     }
 
+    @Test
+    public void testCompactCoordinator() throws Exception {
+        for (int i = 0; i < 10; i++) {
+            write(100000L);
+        }
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        // Create coordinator and call plan multiple times
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false);
+
+        // Each plan() call processes one manifest group
+        List<DataEvolutionCompactTask> allTasks = new ArrayList<>();
+        List<DataEvolutionCompactTask> tasks;
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty() || allTasks.isEmpty()) {
+                allTasks.addAll(tasks);
+                if (tasks.isEmpty()) {
+                    break;
+                }
+            }
+        } catch (EndOfScanException ingore) {
+
+        }
+
+        // Verify no exceptions were thrown and tasks list is valid (may be empty)
+        assertThat(allTasks).isNotNull();
+        assertThat(allTasks.size()).isEqualTo(1);
+        DataEvolutionCompactTask task = allTasks.get(0);
+        assertThat(task.compactBefore().size()).isEqualTo(20);
+    }
+
+    @Test
+    public void testCompact() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            write(100000L);
+        }
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        // Create coordinator and call plan multiple times
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false);
+
+        // Each plan() call processes one manifest group
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        List<DataEvolutionCompactTask> tasks;
+        try {
+            while (!(tasks = coordinator.plan()).isEmpty()) {
+                for (DataEvolutionCompactTask task : tasks) {
+                    commitMessages.add(task.doCompact(table, "test-commit"));
+                }
+            }
+        } catch (EndOfScanException ignore) {
+        }
+
+        table.newBatchWriteBuilder().newCommit().commit(commitMessages);
+
+        List<ManifestEntry> entries = new ArrayList<>();
+        Iterator<ManifestEntry> files = table.newSnapshotReader().readFileIterator();
+        while (files.hasNext()) {
+            entries.add(files.next());
+        }
+
+        assertThat(entries.size()).isEqualTo(1);
+        assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
+        assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
+    }
+
     private void write(long count) throws Exception {
         createTableDefault();
 
@@ -911,6 +983,7 @@ public class DataEvolutionTableTest extends TableTestBase {
             commit.commit(write0.prepareCommit());
         }
 
+        long rowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - count;
         builder = getTableDefault().newBatchWriteBuilder();
         try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
             for (int i = 0; i < count; i++) {
@@ -918,7 +991,7 @@ public class DataEvolutionTableTest extends TableTestBase {
             }
             BatchTableCommit commit = builder.newCommit();
             List<CommitMessage> commitables = write1.prepareCommit();
-            setFirstRowId(commitables, 0L);
+            setFirstRowId(commitables, rowId);
             commit.commit(commitables);
         }
 
@@ -942,19 +1015,20 @@ public class DataEvolutionTableTest extends TableTestBase {
         GlobalIndexerFactory globalIndexerFactory =
                 GlobalIndexerFactoryUtils.load(BitmapGlobalIndexerFactory.IDENTIFIER);
         GlobalIndexer globalIndexer = globalIndexerFactory.create(indexField, new Options());
-        GlobalIndexWriter globaIndexBuilder = globalIndexer.createWriter(indexFileReadWrite);
+        GlobalIndexSingletonWriter globaIndexBuilder =
+                (GlobalIndexSingletonWriter) globalIndexer.createWriter(indexFileReadWrite);
 
         reader.forEachRemaining(r -> globaIndexBuilder.write(r.getString(0)));
 
-        List<GlobalIndexWriter.ResultEntry> results = globaIndexBuilder.finish();
+        List<ResultEntry> results = globaIndexBuilder.finish();
 
         List<IndexFileMeta> indexFileMetaList = new ArrayList<>();
-        for (GlobalIndexWriter.ResultEntry result : results) {
+        for (ResultEntry result : results) {
             String fileName = result.fileName();
-            Range range = result.rowRange();
             long fileSize = fileIO.getFileSize(indexFileReadWrite.filePath(fileName));
             GlobalIndexMeta globalIndexMeta =
-                    new GlobalIndexMeta(range.from, range.to, indexField.id(), null, result.meta());
+                    new GlobalIndexMeta(
+                            0, result.rowCount() - 1, indexField.id(), null, result.meta());
             indexFileMetaList.add(
                     new IndexFileMeta(
                             BitmapGlobalIndexerFactory.IDENTIFIER,
@@ -985,7 +1059,7 @@ public class DataEvolutionTableTest extends TableTestBase {
         for (Range range : ranges) {
             try (RowRangeGlobalIndexScanner scanner =
                     indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate);
+                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate, null);
                 if (!globalIndexResult.isPresent()) {
                     throw new RuntimeException("Can't find index result by scan");
                 }

@@ -18,8 +18,9 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonSparkTestBase, PaimonSplitScan}
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
+import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.scan.PaimonSplitScan
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.source.DataSplit
 
@@ -52,7 +53,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
           resultedTableFiles: Long): Unit = {
         val scan = getPaimonScan(s)
         // call getInputPartitions to trigger scan
-        scan.lazyInputPartitions
+        scan.inputPartitions
         val metrics = scan.reportDriverMetrics()
         Assertions.assertEquals(scannedSnapshotId, metric(metrics, SCANNED_SNAPSHOT_ID))
         Assertions.assertEquals(skippedTableFiles, metric(metrics, SKIPPED_TABLE_FILES))
@@ -78,7 +79,7 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql(s"INSERT INTO T VALUES (1, 'a'), (2, 'b')")
       sql(s"INSERT INTO T VALUES (3, 'c')")
 
-      val splits = getPaimonScan("SELECT * FROM T").getOriginSplits.map(_.asInstanceOf[DataSplit])
+      val splits = getPaimonScan("SELECT * FROM T").inputSplits.map(_.asInstanceOf[DataSplit])
       val df = createDataset(spark, createNewScanPlan(splits, createRelationV2("T")))
       val scan = df.queryExecution.optimizedPlan
         .collectFirst { case relation: DataSourceV2ScanRelation => relation }

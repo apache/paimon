@@ -20,15 +20,16 @@ package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreReader;
+import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
+import org.apache.paimon.sst.BlockCache;
 import org.apache.paimon.sst.SstFileReader;
+import org.apache.paimon.utils.FileBasedBloomFilter;
 
 import javax.annotation.Nullable;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Comparator;
 
@@ -39,17 +40,34 @@ public class SortLookupStoreReader implements LookupStoreReader {
     private final SstFileReader reader;
 
     public SortLookupStoreReader(
-            Comparator<MemorySlice> comparator, File file, CacheManager cacheManager)
-            throws IOException {
-        Path filePath = new Path(file.getAbsolutePath());
-        this.input = LocalFileIO.INSTANCE.newInputStream(filePath);
-        this.reader = new SstFileReader(comparator, file.length(), filePath, input, cacheManager);
+            Comparator<MemorySlice> comparator,
+            Path filePath,
+            long fileLen,
+            SeekableInputStream input,
+            CacheManager cacheManager) {
+        this.input = input;
+        BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
+        int footerLen = SortLookupStoreFooter.ENCODED_LENGTH;
+        MemorySegment footerData =
+                blockCache.getBlock(fileLen - footerLen, footerLen, b -> b, true);
+        SortLookupStoreFooter footer =
+                SortLookupStoreFooter.readFooter(MemorySlice.wrap(footerData).toInput());
+        FileBasedBloomFilter bloomFilter =
+                FileBasedBloomFilter.create(
+                        input, filePath, cacheManager, footer.getBloomFilterHandle());
+        this.reader =
+                new SstFileReader(
+                        comparator, blockCache, footer.getIndexBlockHandle(), bloomFilter);
     }
 
     @Nullable
     @Override
     public byte[] lookup(byte[] key) throws IOException {
         return reader.lookup(key);
+    }
+
+    public SstFileReader.SstFileIterator createIterator() {
+        return reader.createIterator();
     }
 
     @Override

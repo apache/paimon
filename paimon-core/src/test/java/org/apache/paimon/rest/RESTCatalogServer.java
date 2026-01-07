@@ -118,6 +118,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
+import javax.annotation.Nullable;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -151,6 +153,7 @@ import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_TYPE;
+import static org.apache.paimon.rest.RESTApi.TAG_NAME_PREFIX;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTIONS;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
@@ -478,7 +481,8 @@ public class RESTCatalogServer {
                                 long snapshotId =
                                         ((Instant.SnapshotInstant) requestBody.getInstant())
                                                 .getSnapshotId();
-                                return rollbackTableByIdHandle(identifier, snapshotId);
+                                return rollbackTableByIdHandle(
+                                        identifier, snapshotId, requestBody.getFromSnapshot());
                             } else if (requestBody.getInstant() instanceof Instant.TagInstant) {
                                 String tagName =
                                         ((Instant.TagInstant) requestBody.getInstant())
@@ -844,26 +848,35 @@ public class RESTCatalogServer {
                 requestBody.getStatistics());
     }
 
-    private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
-            throws Exception {
+    private MockResponse rollbackTableByIdHandle(
+            Identifier identifier, long snapshotId, @Nullable Long fromSnapshot) throws Exception {
         FileStoreTable table = getFileTable(identifier);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
-        if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-            table =
-                    table.copy(
-                            Collections.singletonMap(
-                                    SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
-            long latestSnapshotId = table.snapshotManager().latestSnapshotId();
-            table.rollbackTo(snapshotId);
-            cleanSnapshot(identifier, snapshotId, latestSnapshotId);
-            tableLatestSnapshotStore.put(
-                    identifier.getFullName(),
-                    tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
-            return new MockResponse().setResponseCode(200);
+        TableSnapshot toSnapshot = tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId);
+        if (toSnapshot == null) {
+            return mockResponse(
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_SNAPSHOT, "" + snapshotId, "", 404),
+                    404);
         }
-        return mockResponse(
-                new ErrorResponse(ErrorResponse.RESOURCE_TYPE_SNAPSHOT, "" + snapshotId, "", 404),
-                404);
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        if (fromSnapshot != null && fromSnapshot != latestSnapshotId) {
+            return mockResponse(
+                    new ErrorResponse(
+                            null,
+                            null,
+                            String.format(
+                                    "Latest snapshot %s is not %s", latestSnapshotId, fromSnapshot),
+                            500),
+                    500);
+        }
+        table =
+                table.copy(
+                        Collections.singletonMap(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
+        table.rollbackTo(snapshotId);
+        cleanSnapshot(identifier, snapshotId, latestSnapshotId);
+        tableLatestSnapshotStore.put(identifier.getFullName(), toSnapshot);
+        return new MockResponse().setResponseCode(200);
     }
 
     private MockResponse rollbackTableByTagNameHandle(Identifier identifier, String tagName)
@@ -1724,6 +1737,16 @@ public class RESTCatalogServer {
                         // GET /v1/{prefix}/databases/{database}/tables/{table}/tags
                         // Page list tags
                         List<String> tags = new ArrayList<>(tagManager.allTagNames());
+
+                        // Filter by tagNamePrefix if provided
+                        String tagNamePrefix = parameters.get(TAG_NAME_PREFIX);
+                        if (StringUtils.isNotEmpty(tagNamePrefix)) {
+                            tags =
+                                    tags.stream()
+                                            .filter(tag -> matchNamePattern(tag, tagNamePrefix))
+                                            .collect(Collectors.toList());
+                        }
+
                         if (tags.isEmpty()) {
                             response = new ListTagsResponse(Collections.emptyList(), null);
                             return mockResponse(response, 200);

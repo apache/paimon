@@ -18,11 +18,12 @@
 
 package org.apache.paimon.spark.execution
 
+import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.spark.{SparkCatalog, SparkGenericCatalog, SparkTable, SparkUtils}
 import org.apache.paimon.spark.catalog.{SparkBaseCatalog, SupportView}
 import org.apache.paimon.spark.catalyst.analysis.ResolvedPaimonView
-import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand}
-import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
+import org.apache.paimon.spark.catalyst.plans.logical.{CreateOrReplaceTagCommand, CreatePaimonView, DeleteTagCommand, DropPaimonView, PaimonCallCommand, PaimonDropPartitions, RenameTagCommand, ResolvedIdentifier, ShowPaimonViews, ShowTagsCommand, TruncatePaimonTableWithFilter}
+import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
@@ -125,7 +126,7 @@ case class PaimonStrategy(spark: SparkSession)
         case _ => Nil
       }
 
-    case d @ PaimonDropPartitions(
+    case PaimonDropPartitions(
           r @ ResolvedTable(_, _, table: SparkTable, _),
           parts,
           ifExists,
@@ -136,6 +137,11 @@ case class PaimonStrategy(spark: SparkSession)
         ifExists,
         purge,
         recacheTable(r)) :: Nil
+
+    case TruncatePaimonTableWithFilter(
+          table: Table,
+          partitionPredicate: Option[PartitionPredicate]) =>
+      TruncatePaimonTableWithFilterExec(table, partitionPredicate) :: Nil
 
     case _ => Nil
   }

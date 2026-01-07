@@ -25,12 +25,18 @@ from functools import partial
 from typing import List, Optional, Iterable
 
 import pyarrow
+from packaging.version import parse
+import ray
 
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
 from pypaimon.schema.data_types import PyarrowFieldParser
 
 logger = logging.getLogger(__name__)
+
+# Ray version constants for compatibility
+RAY_VERSION_SCHEMA_IN_READ_TASK = "2.48.0"  # Schema moved from BlockMetadata to ReadTask
+RAY_VERSION_PER_TASK_ROW_LIMIT = "2.52.0"  # per_task_row_limit parameter introduced
 
 from ray.data.datasource import Datasource
 
@@ -94,10 +100,12 @@ class PaimonDatasource(Datasource):
 
         return chunks
 
-    def get_read_tasks(self, parallelism: int) -> List:
+    def get_read_tasks(self, parallelism: int, **kwargs) -> List:
         """Return a list of read tasks that can be executed in parallel."""
         from ray.data.datasource import ReadTask
         from ray.data.block import BlockMetadata
+
+        per_task_row_limit = kwargs.get('per_task_row_limit', None)
 
         # Validate parallelism parameter
         if parallelism < 1:
@@ -191,20 +199,30 @@ class PaimonDatasource(Datasource):
                 num_rows = total_rows if total_rows > 0 else None
             size_bytes = total_size if total_size > 0 else None
 
-            metadata = BlockMetadata(
-                num_rows=num_rows,
-                size_bytes=size_bytes,
-                input_files=input_files if input_files else None,
-                exec_stats=None,  # Will be populated by Ray during execution
-            )
+            metadata_kwargs = {
+                'num_rows': num_rows,
+                'size_bytes': size_bytes,
+                'input_files': input_files if input_files else None,
+                'exec_stats': None,  # Will be populated by Ray during execution
+            }
 
-            # TODO: per_task_row_limit is not supported in Ray 2.48.0, will be added in future versions
-            read_tasks.append(
-                ReadTask(
-                    read_fn=lambda splits=chunk_splits: get_read_task(splits),
-                    metadata=metadata,
-                    schema=schema,
-                )
-            )
+            if parse(ray.__version__) < parse(RAY_VERSION_SCHEMA_IN_READ_TASK):
+                metadata_kwargs['schema'] = schema
+
+            metadata = BlockMetadata(**metadata_kwargs)
+
+            read_fn = partial(get_read_task, chunk_splits)
+            read_task_kwargs = {
+                'read_fn': read_fn,
+                'metadata': metadata,
+            }
+            
+            if parse(ray.__version__) >= parse(RAY_VERSION_SCHEMA_IN_READ_TASK):
+                read_task_kwargs['schema'] = schema
+            
+            if parse(ray.__version__) >= parse(RAY_VERSION_PER_TASK_ROW_LIMIT) and per_task_row_limit is not None:
+                read_task_kwargs['per_task_row_limit'] = per_task_row_limit
+
+            read_tasks.append(ReadTask(**read_task_kwargs))
 
         return read_tasks

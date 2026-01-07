@@ -19,44 +19,29 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFromPaimonTable
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
+import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 
-import scala.collection.JavaConverters._
-
 object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
 
-  /**
-   * Determines if DataSourceV2 delete is not supported for the given table. DataSourceV2 delete is
-   * not supported in the following scenarios:
-   *   - Spark version is 3.4 or earlier
-   *   - Table does not use V2 write
-   *   - Row tracking is enabled
-   *   - Deletion vectors are enabled
-   *   - Table has primary keys defined
-   *   - Table is not a FileStoreTable
-   *   - Data evolution is enabled
-   */
-  private def shouldFallbackToV1Delete(table: SparkTable): Boolean = {
+  /** Determines if DataSourceV2 delete is not supported for the given table. */
+  private def shouldFallbackToV1Delete(table: SparkTable, condition: Expression): Boolean = {
     val baseTable = table.getTable
-
-    val baseConditions = org.apache.spark.SPARK_VERSION <= "3.4" ||
-      !table.useV2Write ||
-      table.coreOptions.rowTrackingEnabled() ||
-      table.coreOptions.deletionVectorsEnabled() ||
-      !baseTable.primaryKeys().isEmpty
-
-    baseConditions || {
-      baseTable match {
-        case paimonTable: FileStoreTable =>
-          paimonTable.coreOptions().dataEvolutionEnabled()
-        case _ =>
-          true
-      }
-    }
+    org.apache.spark.SPARK_VERSION < "3.5" ||
+    !baseTable.isInstanceOf[FileStoreTable] ||
+    !baseTable.primaryKeys().isEmpty ||
+    !table.useV2Write ||
+    table.coreOptions.deletionVectorsEnabled() ||
+    table.coreOptions.rowTrackingEnabled() ||
+    table.coreOptions.dataEvolutionEnabled() ||
+    OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(
+      baseTable.asInstanceOf[FileStoreTable],
+      condition)
   }
 
   override val operation: RowLevelOp = Delete
@@ -64,7 +49,7 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
       case d @ DeleteFromTable(PaimonRelation(table), condition)
-          if d.resolved && shouldFallbackToV1Delete(table) =>
+          if d.resolved && shouldFallbackToV1Delete(table, condition) =>
         checkPaimonTable(table.getTable)
 
         table.getTable match {

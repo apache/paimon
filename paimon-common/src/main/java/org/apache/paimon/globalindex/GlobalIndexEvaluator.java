@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -52,18 +53,39 @@ public class GlobalIndexEvaluator
         this.readersFunction = readersFunction;
     }
 
-    public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
-        if (predicate == null) {
-            return Optional.empty();
+    public Optional<GlobalIndexResult> evaluate(
+            @Nullable Predicate predicate, @Nullable VectorSearch vectorSearch) {
+        Optional<GlobalIndexResult> compoundResult = Optional.empty();
+        if (predicate != null) {
+            compoundResult = predicate.visit(this);
         }
-        return predicate.visit(this);
-    }
+        if (vectorSearch != null) {
+            int fieldId = rowType.getField(vectorSearch.fieldName()).id();
+            Collection<GlobalIndexReader> readers =
+                    indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
+            if (compoundResult.isPresent()) {
+                vectorSearch = vectorSearch.withIncludeRowIds(compoundResult.get().results());
+            }
+            for (GlobalIndexReader fileIndexReader : readers) {
+                Optional<GlobalIndexResult> childResult = vectorSearch.visit(fileIndexReader);
+                if (!childResult.isPresent()) {
+                    continue;
+                }
+                GlobalIndexResult result = childResult.get();
+                // AND Operation
+                if (compoundResult.isPresent()) {
+                    GlobalIndexResult r1 = compoundResult.get();
+                    compoundResult = Optional.of(r1.and(result));
+                } else {
+                    compoundResult = Optional.of(result);
+                }
 
-    public void close() {
-        IOUtils.closeAllQuietly(
-                indexReadersCache.values().stream()
-                        .flatMap(Collection::stream)
-                        .collect(Collectors.toList()));
+                if (compoundResult.get().results().isEmpty()) {
+                    return compoundResult;
+                }
+            }
+        }
+        return compoundResult;
     }
 
     @Override
@@ -75,15 +97,20 @@ public class GlobalIndexEvaluator
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
         for (GlobalIndexReader fileIndexReader : readers) {
-            GlobalIndexResult childResult =
+            Optional<GlobalIndexResult> childResult =
                     predicate.function().visit(fileIndexReader, fieldRef, predicate.literals());
+            if (!childResult.isPresent()) {
+                continue;
+            }
+
+            GlobalIndexResult result = childResult.get();
 
             // AND Operation
             if (compoundResult.isPresent()) {
                 GlobalIndexResult r1 = compoundResult.get();
-                compoundResult = Optional.of(r1.and(childResult));
+                compoundResult = Optional.of(r1.and(result));
             } else {
-                compoundResult = Optional.of(childResult);
+                compoundResult = Optional.of(result);
             }
 
             if (compoundResult.get().results().isEmpty()) {
@@ -134,5 +161,12 @@ public class GlobalIndexEvaluator
     @Override
     public Optional<GlobalIndexResult> visit(TransformPredicate predicate) {
         return Optional.empty();
+    }
+
+    public void close() {
+        IOUtils.closeAllQuietly(
+                indexReadersCache.values().stream()
+                        .flatMap(Collection::stream)
+                        .collect(Collectors.toList()));
     }
 }

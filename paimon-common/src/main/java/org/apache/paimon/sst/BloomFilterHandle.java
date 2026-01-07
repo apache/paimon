@@ -27,7 +27,7 @@ public class BloomFilterHandle {
     private final int size;
     private final long expectedEntries;
 
-    BloomFilterHandle(long offset, int size, long expectedEntries) {
+    public BloomFilterHandle(long offset, int size, long expectedEntries) {
         this.offset = offset;
         this.size = size;
         this.expectedEntries = expectedEntries;

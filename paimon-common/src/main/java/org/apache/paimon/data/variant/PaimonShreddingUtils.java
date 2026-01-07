@@ -408,10 +408,6 @@ public class PaimonShreddingUtils {
                 default:
                     throw invalidVariantShreddingSchema(rowType);
             }
-
-            if (topLevel && (topLevelMetadataIdx == -1)) {
-                topLevelMetadataIdx = i;
-            }
         }
 
         if (topLevel != (topLevelMetadataIdx >= 0)) {

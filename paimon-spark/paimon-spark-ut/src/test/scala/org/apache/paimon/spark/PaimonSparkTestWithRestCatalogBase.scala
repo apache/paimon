@@ -34,7 +34,7 @@ class PaimonSparkTestWithRestCatalogBase extends PaimonSparkTestBase {
 
   private var restCatalogServer: RESTCatalogServer = _
   private var serverUrl: String = _
-  private var warehouse: String = _
+  protected var warehouse: String = _
   private val initToken = "init_token"
 
   override protected def beforeAll(): Unit = {

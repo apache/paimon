@@ -27,28 +27,27 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 
-import java.io.IOException;
 import java.util.List;
 
 /** Lucene vector global indexer. */
 public class LuceneVectorGlobalIndexer implements GlobalIndexer {
 
     private final DataType fieldType;
-    private final Options options;
+    private final LuceneVectorIndexOptions options;
 
     public LuceneVectorGlobalIndexer(DataType fieldType, Options options) {
         this.fieldType = fieldType;
-        this.options = options;
+        this.options = new LuceneVectorIndexOptions(options);
     }
 
     @Override
-    public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) throws IOException {
+    public GlobalIndexWriter createWriter(GlobalIndexFileWriter fileWriter) {
         return new LuceneVectorGlobalIndexWriter(fileWriter, fieldType, options);
     }
 
     @Override
     public GlobalIndexReader createReader(
-            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
-        return new LuceneVectorGlobalIndexReader(fileReader, files);
+            GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) {
+        return new LuceneVectorGlobalIndexReader(fileReader, files, fieldType);
     }
 }

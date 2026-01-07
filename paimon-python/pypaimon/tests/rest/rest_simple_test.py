@@ -21,6 +21,8 @@ import pyarrow as pa
 from pypaimon import Schema
 from pypaimon.catalog.catalog_exception import DatabaseAlreadyExistException, TableAlreadyExistException, \
     DatabaseNotExistException, TableNotExistException
+from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor, DynamicBucketRowKeyExtractor, \
     UnawareBucketRowKeyExtractor
@@ -698,7 +700,7 @@ class RESTSimpleTest(RESTBaseTest):
         try:
             self.rest_catalog.drop_table("db1.tbl1", True)
         except TableNotExistException:
-            self.fail("drop_table with ignore_if_exists=True should not raise TableNotExistException")
+            self.fail("drop_table with ignore_if_not_exists=True should not raise TableNotExistException")
 
         # test drop database
         self.rest_catalog.drop_database("db1", False)
@@ -709,4 +711,92 @@ class RESTSimpleTest(RESTBaseTest):
         try:
             self.rest_catalog.drop_database("db1", True)
         except DatabaseNotExistException:
-            self.fail("drop_database with ignore_if_exists=True should not raise DatabaseNotExistException")
+            self.fail("drop_database with ignore_if_not_exists=True should not raise DatabaseNotExistException")
+
+    def test_alter_table(self):
+        catalog = self.rest_catalog
+        catalog.create_database("test_db_alter", True)
+
+        identifier = "test_db_alter.test_table"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "col1", "type": "STRING", "description": "field1"}),
+                DataField.from_dict({"id": 1, "name": "col2", "type": "STRING", "description": "field2"})
+            ],
+            partition_keys=[],
+            primary_keys=[],
+            options={},
+            comment="comment"
+        )
+        catalog.create_table(identifier, schema, False)
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("col3", AtomicType("DATE"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 3)
+        self.assertEqual(table.fields[2].name, "col3")
+        self.assertEqual(table.fields[2].type.type, "DATE")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_comment("new comment")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.comment, "new comment")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.rename_column("col1", "new_col1")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[0].name, "new_col1")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_type("col2", AtomicType("BIGINT"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[1].type.type, "BIGINT")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.update_column_comment("col2", "col2 field")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.fields[1].description, "col2 field")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.set_option("write-buffer-size", "256 MB")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(table.table_schema.options.get("write-buffer-size"), "256 MB")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.remove_option("write-buffer-size")],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertNotIn("write-buffer-size", table.table_schema.options)
+
+        with self.assertRaises(TableNotExistException):
+            catalog.alter_table(
+                "test_db_alter.non_existing_table",
+                [SchemaChange.add_column("col2", AtomicType("INT"))],
+                False
+            )
+
+        catalog.alter_table(
+            "test_db_alter.non_existing_table",
+            [SchemaChange.add_column("col2", AtomicType("INT"))],
+            True
+        )

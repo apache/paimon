@@ -25,11 +25,10 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilder;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderContext;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory;
-import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactoryUtils;
-import org.apache.paimon.spark.globalindex.GlobalIndexTopoBuilder;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.spark.globalindex.DefaultGlobalIndexBuilder;
+import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilder;
+import org.apache.paimon.spark.globalindex.GlobalIndexTopologyBuilderUtils;
 import org.apache.paimon.spark.utils.SparkProcedureUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
@@ -37,8 +36,10 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Pair;
@@ -127,10 +128,6 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
 
         String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
 
-        // Early validation: check if the index type is supported
-        GlobalIndexBuilderFactory globalIndexBuilderFactory =
-                GlobalIndexBuilderFactoryUtils.load(indexType);
-
         LOG.info("Starting to build index for table " + tableIdent + " WHERE: " + finalWhere);
 
         return modifyPaimonTable(
@@ -169,33 +166,39 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         ProcedureUtils.putAllOptions(parsedOptions, optionString);
                         Options userOptions = Options.fromMap(parsedOptions);
                         Options tableOptions = new Options(table.options());
-                        long rowsPerShard =
-                                tableOptions
-                                        .getOptional(GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
-                                        .orElse(GLOBAL_INDEX_ROW_COUNT_PER_SHARD.defaultValue());
-                        checkArgument(
-                                rowsPerShard > 0,
-                                "Option 'global-index.row-count-per-shard' must be greater than 0.");
-
-                        // Step 1: generate splits for each partition&&shard
-                        Map<BinaryRow, List<IndexedSplit>> splits =
-                                split(table, partitionPredicate, rowsPerShard);
 
                         List<CommitMessage> indexResults;
-                        // Step 2: build index by certain index system
-                        GlobalIndexTopoBuilder topoBuildr =
-                                globalIndexBuilderFactory.createTopoBulder();
-                        if (topoBuildr != null) {
+                        // Step 1: build index by certain index system
+                        GlobalIndexTopologyBuilder topoBuilder =
+                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);
+
+                        if (topoBuilder != null) {
+                            // do not need to prepare index shards for custom topo builder
                             indexResults =
-                                    topoBuildr.buildIndex(
-                                            new JavaSparkContext(spark().sparkContext()),
+                                    topoBuilder.buildIndex(
+                                            spark(),
+                                            relation,
+                                            partitionPredicate,
                                             table,
-                                            splits,
                                             indexType,
                                             readRowType,
                                             indexField,
                                             userOptions);
                         } else {
+                            long rowsPerShard =
+                                    tableOptions
+                                            .getOptional(GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
+                                            .orElse(
+                                                    GLOBAL_INDEX_ROW_COUNT_PER_SHARD
+                                                            .defaultValue());
+                            checkArgument(
+                                    rowsPerShard > 0,
+                                    "Option 'global-index.row-count-per-shard' must be greater than 0.");
+
+                            // generate splits for each partition&&shard
+                            Map<BinaryRow, List<IndexedSplit>> splits =
+                                    split(table, partitionPredicate, rowsPerShard);
+
                             indexResults =
                                     buildIndex(
                                             table,
@@ -206,7 +209,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                             userOptions);
                         }
 
-                        // Step 3: commit index meta to a new snapshot
+                        // Step 2: commit index meta to a new snapshot
                         commit(table, indexResults);
 
                         return new InternalRow[] {newInternalRow(true)};
@@ -229,7 +232,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
             Options options)
             throws IOException {
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
-        List<Pair<GlobalIndexBuilderContext, byte[]>> taskList = new ArrayList<>();
+        List<Pair<byte[], byte[]>> taskList = new ArrayList<>();
         for (Map.Entry<BinaryRow, List<IndexedSplit>> entry : preparedDS.entrySet()) {
             BinaryRow partition = entry.getKey();
             List<IndexedSplit> partitions = entry.getValue();
@@ -238,18 +241,19 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                 checkArgument(
                         indexedSplit.rowRanges().size() == 1,
                         "Each IndexedSplit should contain exactly one row range.");
-                GlobalIndexBuilderContext builderContext =
-                        new GlobalIndexBuilderContext(
+                DefaultGlobalIndexBuilder builder =
+                        new DefaultGlobalIndexBuilder(
                                 table,
                                 partition,
                                 readType,
                                 indexField,
                                 indexType,
-                                indexedSplit.rowRanges().get(0).from,
+                                indexedSplit.rowRanges().get(0),
                                 options);
 
-                byte[] dsBytes = InstantiationUtil.serializeObject(indexedSplit);
-                taskList.add(Pair.of(builderContext, dsBytes));
+                byte[] builderBytes = InstantiationUtil.serializeObject(builder);
+                byte[] splitBytes = InstantiationUtil.serializeObject(indexedSplit);
+                taskList.add(Pair.of(builderBytes, splitBytes));
             }
         }
 
@@ -260,19 +264,26 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                 pair -> {
                                     CommitMessageSerializer commitMessageSerializer =
                                             new CommitMessageSerializer();
-                                    GlobalIndexBuilderContext builderContext = pair.getLeft();
+                                    ClassLoader classLoader =
+                                            DefaultGlobalIndexBuilder.class.getClassLoader();
+                                    DefaultGlobalIndexBuilder indexBuilder =
+                                            InstantiationUtil.deserializeObject(
+                                                    pair.getLeft(), classLoader);
                                     byte[] dataSplitBytes = pair.getRight();
                                     IndexedSplit split =
                                             InstantiationUtil.deserializeObject(
-                                                    dataSplitBytes,
-                                                    GlobalIndexBuilder.class.getClassLoader());
-                                    GlobalIndexBuilderFactory globalIndexBuilderFactory =
-                                            GlobalIndexBuilderFactoryUtils.load(
-                                                    builderContext.indexType());
-                                    GlobalIndexBuilder globalIndexBuilder =
-                                            globalIndexBuilderFactory.create(builderContext);
-                                    return commitMessageSerializer.serialize(
-                                            globalIndexBuilder.build(split));
+                                                    dataSplitBytes, classLoader);
+                                    ReadBuilder builder = indexBuilder.table().newReadBuilder();
+                                    builder.withReadType(indexBuilder.readType());
+
+                                    try (RecordReader<org.apache.paimon.data.InternalRow>
+                                                    recordReader =
+                                                            builder.newRead().createReader(split);
+                                            CloseableIterator<org.apache.paimon.data.InternalRow>
+                                                    data = recordReader.toCloseableIterator()) {
+                                        CommitMessage commitMessage = indexBuilder.build(data);
+                                        return commitMessageSerializer.serialize(commitMessage);
+                                    }
                                 })
                         .collect();
 

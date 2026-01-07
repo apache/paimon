@@ -20,7 +20,6 @@ import time
 import uuid
 from typing import List
 
-from pypaimon.common.core_options import CoreOptions
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
@@ -131,10 +130,11 @@ class FileStoreCommit:
         deleted_file_count = 0
         delta_record_count = 0
         # process snapshot
-        new_snapshot_id = self._generate_snapshot_id()
+        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+        new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
 
         # Check if row tracking is enabled
-        row_tracking_enabled = self.table.options.get(CoreOptions.ROW_TRACKING_ENABLED, 'false').lower() == 'true'
+        row_tracking_enabled = self.table.options.row_tracking_enabled()
 
         # Apply row tracking logic if enabled
         next_row_id = None
@@ -185,7 +185,6 @@ class FileStoreCommit:
         self.manifest_list_manager.write(delta_manifest_list, [new_manifest_list])
 
         # process existing_manifest
-        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         total_record_count = 0
         if latest_snapshot:
             existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
@@ -197,10 +196,9 @@ class FileStoreCommit:
         self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
 
         # process snapshot
-        new_snapshot_id = self._generate_snapshot_id()
         total_record_count += delta_record_count
         snapshot_data = Snapshot(
-            version=1,
+            version=3,
             id=new_snapshot_id,
             schema_id=self.table.table_schema.id,
             base_manifest_list=base_manifest_list,
@@ -242,14 +240,6 @@ class FileStoreCommit:
         """Close the FileStoreCommit and release resources."""
         if hasattr(self.snapshot_commit, 'close'):
             self.snapshot_commit.close()
-
-    def _generate_snapshot_id(self) -> int:
-        """Generate the next snapshot ID."""
-        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-        if latest_snapshot:
-            return latest_snapshot.id + 1
-        else:
-            return 1
 
     def _generate_partition_statistics(self, commit_entries: List[ManifestEntry]) -> List[PartitionStatistics]:
         """

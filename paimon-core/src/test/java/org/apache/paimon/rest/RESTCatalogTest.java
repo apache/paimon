@@ -50,6 +50,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
@@ -1751,24 +1752,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             GenericRow record = GenericRow.of(i);
             write.write(record);
             commit.commit(i, write.prepareCommit(false, i));
-            table.createTag("tag-" + i);
+            table.createTag("tag-" + (i + 1));
         }
         write.close();
         commit.close();
+
+        // rollback to snapshot 4
         long rollbackToSnapshotId = 4;
         table.rollbackTo(rollbackToSnapshotId);
         assertThat(table.snapshotManager().snapshot(rollbackToSnapshotId))
                 .isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
         assertThat(table.tagManager().tagExists("tag-" + (rollbackToSnapshotId + 2))).isFalse();
         assertThat(table.snapshotManager().snapshotExists(rollbackToSnapshotId + 1)).isFalse();
-
         assertThrows(
                 IllegalArgumentException.class, () -> table.rollbackTo(rollbackToSnapshotId + 1));
 
+        // rollback to snapshot 3
         String rollbackToTagName = "tag-" + (rollbackToSnapshotId - 1);
         table.rollbackTo(rollbackToTagName);
         Snapshot tagSnapshot = table.tagManager().getOrThrow(rollbackToTagName).trimToSnapshot();
         assertThat(tagSnapshot).isEqualTo(restCatalog.loadSnapshot(identifier).get().snapshot());
+
+        // rollback to snapshot 2 from snapshot
+        assertThatThrownBy(() -> catalog.rollbackTo(identifier, Instant.snapshot(2L), 4L))
+                .hasMessageContaining("Latest snapshot 3 is not 4");
+        catalog.rollbackTo(identifier, Instant.snapshot(2L), 3L);
+        assertThat(table.latestSnapshot().get().id()).isEqualTo(2);
     }
 
     @Test
@@ -1957,15 +1966,20 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 SnapshotNotExistException.class,
                 () -> restCatalog.createTag(identifier, "my_tag_v3", 99999L, null, false));
 
-        // Test listTags
-        PagedList<String> tags = restCatalog.listTagsPaged(identifier, null, "my_tag");
+        // Test listTags for pageToken
+        PagedList<String> tags = restCatalog.listTagsPaged(identifier, 1, null, null);
+        tags = restCatalog.listTagsPaged(identifier, 1, tags.getNextPageToken(), null);
         assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
-        tags = restCatalog.listTagsPaged(identifier, null, null);
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
         assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag", "my_tag_v2");
+
+        // Test listTags for tagNamePrefix
+        tags = restCatalog.listTagsPaged(identifier, 1, null, "my_tag_v2");
+        assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
 
         // Test deleteTag
         restCatalog.deleteTag(identifier, "my_tag");
-        tags = restCatalog.listTagsPaged(identifier, null, null);
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
         assertThat(tags.getElements()).containsExactlyInAnyOrder("my_tag_v2");
 
         // Test deleteTag with non-existent tag
@@ -1979,7 +1993,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // Delete remaining tag
         restCatalog.deleteTag(identifier, "my_tag_v2");
-        tags = restCatalog.listTagsPaged(identifier, null, null);
+        tags = restCatalog.listTagsPaged(identifier, null, null, null);
         assertThat(tags.getElements()).isEmpty();
     }
 

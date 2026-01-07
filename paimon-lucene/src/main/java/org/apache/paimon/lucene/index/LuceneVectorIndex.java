@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lucene.index;
 
+import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.VectorSimilarityFunction;
@@ -38,6 +39,10 @@ public abstract class LuceneVectorIndex<T> {
 
     public StoredField rowIdStoredField() {
         return new StoredField(ROW_ID_FIELD, id());
+    }
+
+    public LongPoint rowIdLongPoint() {
+        return new LongPoint(ROW_ID_FIELD, id());
     }
 
     public void checkDimension(int dimension) {

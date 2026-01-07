@@ -23,6 +23,7 @@ from typing import Dict, List, Optional
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import json_field
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
@@ -76,3 +77,10 @@ class CommitTableRequest(RESTRequest):
     table_uuid: Optional[str] = json_field(FIELD_TABLE_UUID)
     snapshot: Snapshot = json_field(FIELD_SNAPSHOT)
     statistics: List[PartitionStatistics] = json_field(FIELD_STATISTICS)
+
+
+@dataclass
+class AlterTableRequest(RESTRequest):
+    FIELD_CHANGES = "changes"
+
+    changes: List[SchemaChange] = json_field(FIELD_CHANGES)

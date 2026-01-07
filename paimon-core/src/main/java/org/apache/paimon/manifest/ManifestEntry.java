@@ -26,6 +26,8 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.List;
 
@@ -62,7 +64,17 @@ public interface ManifestEntry extends FileEntry {
 
     ManifestEntry assignFirstRowId(long firstRowId);
 
+    ManifestEntry upgrade(int newLevel);
+
     static long recordCount(List<ManifestEntry> manifestEntries) {
+        return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();
+    }
+
+    @Nullable
+    static Long nullableRecordCount(List<ManifestEntry> manifestEntries) {
+        if (manifestEntries.isEmpty()) {
+            return null;
+        }
         return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();
     }
 

@@ -30,6 +30,7 @@ org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory
+org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldPrimaryKeyAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldProductAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap32AggFactory

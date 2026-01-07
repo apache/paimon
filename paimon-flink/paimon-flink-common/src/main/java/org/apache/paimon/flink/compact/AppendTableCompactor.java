@@ -199,7 +199,7 @@ public class AppendTableCompactor {
                 tempList.add(future.get());
             }
             return tempList.stream()
-                    .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
+                    .map(s -> new Committable(checkpointId, s))
                     .collect(Collectors.toList());
         } catch (InterruptedException e) {
             throw new RuntimeException("Interrupted while waiting tasks done.", e);

@@ -19,10 +19,9 @@ limitations under the License.
 import json
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Optional
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import json_field
 from pypaimon.schema.data_types import DataField
@@ -94,7 +93,7 @@ class TableSchema:
         )
 
     @staticmethod
-    def from_path(file_io: FileIO, schema_path: Path):
+    def from_path(file_io: FileIO, schema_path: str):
         try:
             json_str = file_io.read_file_utf8(schema_path)
             return TableSchema.from_json(json_str)
@@ -110,10 +109,10 @@ class TableSchema:
             version = data.get(TableSchema.FIELD_VERSION, TableSchema.PAIMON_07_VERSION)
             fields = [DataField.from_dict(field) for field in data[TableSchema.FIELD_FIELDS]]
             options = data[TableSchema.FIELD_OPTIONS]
-            if version <= TableSchema.PAIMON_07_VERSION and CoreOptions.BUCKET not in options:
-                options[CoreOptions.BUCKET] = "1"
-            if version <= TableSchema.PAIMON_08_VERSION and CoreOptions.FILE_FORMAT not in options:
-                options[CoreOptions.FILE_FORMAT] = "orc"
+            if version <= TableSchema.PAIMON_07_VERSION and CoreOptions.BUCKET.key() not in options:
+                options[CoreOptions.BUCKET.key()] = "1"
+            if version <= TableSchema.PAIMON_08_VERSION and CoreOptions.FILE_FORMAT.key() not in options:
+                options[CoreOptions.FILE_FORMAT.key()] = "orc"
 
             return TableSchema(
                 version=version,

@@ -39,6 +39,7 @@ import static org.apache.paimon.TableType.FORMAT_TABLE;
 import static org.apache.paimon.catalog.Catalog.COMMENT_PROP;
 import static org.apache.paimon.format.csv.CsvOptions.FIELD_DELIMITER;
 import static org.apache.paimon.hive.HiveCatalog.HIVE_FIELD_DELIM_DEFAULT;
+import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.apache.paimon.hive.HiveCatalog.isView;
 
 class HiveTableUtils {
@@ -76,12 +77,16 @@ class HiveTableUtils {
             if (serLib.contains("json")) {
                 format = Format.JSON;
             } else {
-                format = Format.CSV;
-                options.set(
-                        FIELD_DELIMITER,
-                        serdeInfo
-                                .getParameters()
-                                .getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));
+                if ("TEXT".equals(options.get(TABLE_TYPE_PROP))) {
+                    format = Format.TEXT;
+                } else {
+                    format = Format.CSV;
+                    options.set(
+                            FIELD_DELIMITER,
+                            serdeInfo
+                                    .getParameters()
+                                    .getOrDefault(FIELD_DELIM, HIVE_FIELD_DELIM_DEFAULT));
+                }
             }
         } else {
             throw new UnsupportedOperationException("Unsupported table: " + hiveTable);

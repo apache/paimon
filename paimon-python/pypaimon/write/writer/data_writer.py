@@ -21,7 +21,7 @@ import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Tuple
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
@@ -34,7 +34,7 @@ from pypaimon.table.row.generic_row import GenericRow
 class DataWriter(ABC):
     """Base class for data writers that handle PyArrow tables directly."""
 
-    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: Dict[str, str] = None,
+    def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None,
                  write_cols: Optional[List[str]] = None):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -47,21 +47,21 @@ class DataWriter(ABC):
         self.trimmed_primary_keys = self.table.trimmed_primary_keys
 
         self.options = options
-        self.target_file_size = CoreOptions.target_file_size(options, self.table.is_primary_key_table)
+        self.target_file_size = self.options.target_file_size(self.table.is_primary_key_table)
         # POSTPONE_BUCKET uses AVRO format, otherwise default to PARQUET
         default_format = (
             CoreOptions.FILE_FORMAT_AVRO
             if self.bucket == BucketMode.POSTPONE_BUCKET.value
             else CoreOptions.FILE_FORMAT_PARQUET
         )
-        self.file_format = CoreOptions.file_format(options, default=default_format)
-        self.compression = CoreOptions.file_compression(options)
+        self.file_format = self.options.file_format(default_format)
+        self.compression = self.options.file_compression()
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
         self.pending_data: Optional[pa.Table] = None
         self.committed_files: List[DataFileMeta] = []
         self.write_cols = write_cols
-        self.blob_as_descriptor = CoreOptions.blob_as_descriptor(options)
+        self.blob_as_descriptor = self.options.blob_as_descriptor()
 
         self.path_factory = self.table.path_factory()
         self.external_path_provider: Optional[ExternalPathProvider] = self.path_factory.create_external_path_provider(
@@ -191,22 +191,23 @@ class DataWriter(ABC):
         max_key = [col.to_pylist()[0] for col in max_key_row_batch.columns]
 
         # key stats & value stats
-        data_fields = self.table.fields if self.table.is_primary_key_table \
-            else PyarrowFieldParser.to_paimon_schema(data.schema)
+        value_stats_enabled = self.options.metadata_stats_enabled()
+        if value_stats_enabled:
+            stats_fields = self.table.fields if self.table.is_primary_key_table \
+                else PyarrowFieldParser.to_paimon_schema(data.schema)
+        else:
+            stats_fields = self.table.trimmed_primary_keys_fields
         column_stats = {
             field.name: self._get_column_stats(data, field.name)
-            for field in data_fields
+            for field in stats_fields
         }
-        all_fields = data_fields
-        min_value_stats = [column_stats[field.name]['min_values'] for field in all_fields]
-        max_value_stats = [column_stats[field.name]['max_values'] for field in all_fields]
-        value_null_counts = [column_stats[field.name]['null_counts'] for field in all_fields]
         key_fields = self.trimmed_primary_keys_fields
-        min_key_stats = [column_stats[field.name]['min_values'] for field in key_fields]
-        max_key_stats = [column_stats[field.name]['max_values'] for field in key_fields]
-        key_null_counts = [column_stats[field.name]['null_counts'] for field in key_fields]
-        if not all(count == 0 for count in key_null_counts):
+        key_stats = self._collect_value_stats(data, key_fields, column_stats)
+        if not all(count == 0 for count in key_stats.null_counts):
             raise RuntimeError("Primary key should not be null")
+
+        value_fields = stats_fields if value_stats_enabled else []
+        value_stats = self._collect_value_stats(data, value_fields, column_stats)
 
         min_seq = self.sequence_generator.start
         max_seq = self.sequence_generator.current
@@ -217,16 +218,8 @@ class DataWriter(ABC):
             row_count=data.num_rows,
             min_key=GenericRow(min_key, self.trimmed_primary_keys_fields),
             max_key=GenericRow(max_key, self.trimmed_primary_keys_fields),
-            key_stats=SimpleStats(
-                GenericRow(min_key_stats, self.trimmed_primary_keys_fields),
-                GenericRow(max_key_stats, self.trimmed_primary_keys_fields),
-                key_null_counts,
-            ),
-            value_stats=SimpleStats(
-                GenericRow(min_value_stats, data_fields),
-                GenericRow(max_value_stats, data_fields),
-                value_null_counts,
-            ),
+            key_stats=key_stats,
+            value_stats=value_stats,
             min_sequence_number=min_seq,
             max_sequence_number=max_seq,
             schema_id=self.table.table_schema.id,
@@ -235,7 +228,7 @@ class DataWriter(ABC):
             creation_time=Timestamp.now(),
             delete_row_count=0,
             file_source=0,
-            value_stats_cols=None,  # None means all columns in the data have statistics
+            value_stats_cols=None if value_stats_enabled else [],
             external_path=external_path_str,  # Set external path if using external paths
             first_row_id=None,
             write_cols=self.write_cols,
@@ -274,6 +267,27 @@ class DataWriter(ABC):
 
         return best_split
 
+    def _collect_value_stats(self, data: pa.Table, fields: List,
+                             column_stats: Optional[Dict[str, Dict]] = None) -> SimpleStats:
+        if not fields:
+            return SimpleStats.empty_stats()
+        
+        if column_stats is None or not column_stats:
+            column_stats = {
+                field.name: self._get_column_stats(data, field.name)
+                for field in fields
+            }
+        
+        min_stats = [column_stats[field.name]['min_values'] for field in fields]
+        max_stats = [column_stats[field.name]['max_values'] for field in fields]
+        null_counts = [column_stats[field.name]['null_counts'] for field in fields]
+        
+        return SimpleStats(
+            GenericRow(min_stats, fields),
+            GenericRow(max_stats, fields),
+            null_counts
+        )
+
     @staticmethod
     def _get_column_stats(record_batch: pa.RecordBatch, column_name: str) -> Dict:
         column_array = record_batch.column(column_name)
@@ -283,6 +297,17 @@ class DataWriter(ABC):
                 "max_values": None,
                 "null_counts": column_array.null_count,
             }
+        
+        column_type = column_array.type
+        supports_minmax = not (pa.types.is_nested(column_type) or pa.types.is_map(column_type))
+        
+        if not supports_minmax:
+            return {
+                "min_values": None,
+                "max_values": None,
+                "null_counts": column_array.null_count,
+            }
+        
         min_values = pc.min(column_array).as_py()
         max_values = pc.max(column_array).as_py()
         null_counts = column_array.null_count

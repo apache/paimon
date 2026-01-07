@@ -521,7 +521,10 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public PagedList<String> listTagsPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix)
             throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
@@ -558,7 +561,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant)
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }

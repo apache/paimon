@@ -111,6 +111,10 @@ object OptionUtils extends SQLConfHelper with Logging {
     getOptionString(SparkConnectorOptions.READ_ALLOW_FULL_SCAN).toBoolean
   }
 
+  def sourceSplitTargetSizeWithColumnPruning(): Boolean = {
+    getOptionString(SparkConnectorOptions.SOURCE_SPLIT_TARGET_SIZE_WITH_COLUMN_PRUNING).toBoolean
+  }
+
   private def mergeSQLConf(extraOptions: JMap[String, String]): JMap[String, String] = {
     val mergedOptions = new JHashMap[String, String](
       conf.getAllConfs

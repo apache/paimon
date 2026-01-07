@@ -24,6 +24,7 @@ paimon-python/.idea/
 paimon-python/dist/
 paimon-python/*.egg-info/
 paimon-python/dev/log
+paimon-lucene/.idea/
 
 ### VS Code ###
 .vscode/

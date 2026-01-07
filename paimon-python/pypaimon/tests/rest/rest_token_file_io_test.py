@@ -22,9 +22,11 @@ import unittest
 from unittest.mock import patch
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
-from pypaimon.common.config import CatalogOptions, OssOptions
+
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions, OssOptions
 
 
 class RESTTokenFileIOTest(unittest.TestCase):
@@ -35,7 +37,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
         self.temp_dir = tempfile.mkdtemp(prefix="rest_token_file_io_test_")
         self.warehouse_path = f"file://{self.temp_dir}"
         self.identifier = Identifier.from_string("default.test_table")
-        self.catalog_options = {}
+        self.catalog_options = Options({})
 
     def tearDown(self):
         """Clean up test fixtures."""
@@ -129,7 +131,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             self.assertEqual(deserialized_file_io.identifier, original_file_io.identifier)
             self.assertEqual(deserialized_file_io.path, original_file_io.path)
-            self.assertEqual(deserialized_file_io.properties, original_file_io.properties)
+            self.assertEqual(deserialized_file_io.properties.data, original_file_io.properties.data)
 
             self.assertTrue(hasattr(deserialized_file_io, 'lock'))
             self.assertIsNotNone(deserialized_file_io.lock)
@@ -152,19 +154,19 @@ class RESTTokenFileIOTest(unittest.TestCase):
         """Test that DLF OSS endpoint overrides the standard OSS endpoint in token."""
         dlf_oss_endpoint = "https://dlf-custom-endpoint.oss-cn-hangzhou.aliyuncs.com"
         catalog_options = {
-            CatalogOptions.DLF_OSS_ENDPOINT: dlf_oss_endpoint
+            CatalogOptions.DLF_OSS_ENDPOINT.key(): dlf_oss_endpoint
         }
 
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
             file_io = RESTTokenFileIO(
                 self.identifier,
                 self.warehouse_path,
-                catalog_options
+                Options(catalog_options)
             )
 
             # Create a token with a standard OSS endpoint
             token = {
-                OssOptions.OSS_ENDPOINT: "https://standard-endpoint.oss-cn-beijing.aliyuncs.com",
+                OssOptions.OSS_ENDPOINT.key(): "https://standard-endpoint.oss-cn-beijing.aliyuncs.com",
                 "fs.oss.accessKeyId": "test-access-key",
                 "fs.oss.accessKeySecret": "test-secret-key"
             }
@@ -174,7 +176,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             # Verify DLF OSS endpoint overrides the standard endpoint
             self.assertEqual(
-                merged_token[OssOptions.OSS_ENDPOINT],
+                merged_token[OssOptions.OSS_ENDPOINT.key()],
                 dlf_oss_endpoint,
                 "DLF OSS endpoint should override the standard OSS endpoint in token"
             )

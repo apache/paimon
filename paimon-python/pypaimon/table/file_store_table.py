@@ -19,9 +19,10 @@
 from typing import List, Optional
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options.options import Options
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -54,16 +55,16 @@ class FileStoreTable(Table):
         self.trimmed_primary_keys = [pk for pk in self.primary_keys if pk not in self.partition_keys]
         self.trimmed_primary_keys_fields = [self.field_dict[name] for name in self.trimmed_primary_keys]
 
-        self.options = table_schema.options
+        self.options = CoreOptions(Options(table_schema.options))
         self.cross_partition_update = self.table_schema.cross_partition_update()
         self.is_primary_key_table = bool(self.primary_keys)
-        self.total_buckets = int(table_schema.options.get(CoreOptions.BUCKET, -1))
+        self.total_buckets = self.options.bucket()
 
         self.schema_manager = SchemaManager(file_io, table_path)
 
     def current_branch(self) -> str:
         """Get the current branch name from options."""
-        return self.options.get(CoreOptions.BRANCH, "main")
+        return self.options.branch()
 
     def snapshot_manager(self):
         """Get the snapshot manager for this table."""
@@ -77,9 +78,9 @@ class FileStoreTable(Table):
         external_paths = self._create_external_paths()
 
         # Get format identifier
-        format_identifier = CoreOptions.file_format(self.options)
+        format_identifier = self.options.file_format()
 
-        file_compression = CoreOptions.file_compression(self.options)
+        file_compression = self.options.file_compression()
 
         return FileStorePathFactory(
             root=str(self.table_path),
@@ -102,9 +103,9 @@ class FileStoreTable(Table):
 
     def bucket_mode(self) -> BucketMode:
         if self.is_primary_key_table:
-            if int(self.options.get(CoreOptions.BUCKET, -1)) == -2:
+            if self.options.bucket() == -2:
                 return BucketMode.POSTPONE_MODE
-            elif int(self.options.get(CoreOptions.BUCKET, -1)) == -1:
+            elif self.options.bucket() == -1:
                 if self.cross_partition_update:
                     return BucketMode.CROSS_PARTITION
                 else:
@@ -112,7 +113,7 @@ class FileStoreTable(Table):
             else:
                 return BucketMode.HASH_FIXED
         else:
-            if int(self.options.get(CoreOptions.BUCKET, -1)) == -1:
+            if self.options.bucket() == -1:
                 return BucketMode.BUCKET_UNAWARE
             else:
                 return BucketMode.HASH_FIXED
@@ -140,9 +141,9 @@ class FileStoreTable(Table):
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
     def copy(self, options: dict) -> 'FileStoreTable':
-        if CoreOptions.BUCKET in options and options.get(CoreOptions.BUCKET) != self.options.get(CoreOptions.BUCKET):
+        if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
-        new_options = self.options.copy()
+        new_options = CoreOptions.copy(self.options).options.to_map()
         for k, v in options.items():
             if v is None:
                 new_options.pop(k)
@@ -152,23 +153,19 @@ class FileStoreTable(Table):
         return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
                               self.catalog_environment)
 
-    def add_options(self, options: dict):
-        for key, value in options.items():
-            self.options[key] = value
-
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
-        from pypaimon.common.core_options import ExternalPathStrategy
+        from pypaimon.common.options.core_options import ExternalPathStrategy
 
-        external_paths_str = CoreOptions.data_file_external_paths(self.options)
+        external_paths_str = self.options.data_file_external_paths()
         if not external_paths_str:
             return []
 
-        strategy = CoreOptions.external_path_strategy(self.options)
+        strategy = self.options.data_file_external_paths_strategy()
         if strategy == ExternalPathStrategy.NONE:
             return []
 
-        specific_fs = CoreOptions.external_specific_fs(self.options)
+        specific_fs = self.options.data_file_external_paths_specific_fs()
 
         paths = []
         for path_string in external_paths_str:

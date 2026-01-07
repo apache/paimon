@@ -79,6 +79,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
     @Override
     public InnerTableScan withLimit(int limit) {
         this.pushDownLimit = limit;
+        snapshotReader.withLimit(limit);
         return this;
     }
 

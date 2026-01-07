@@ -213,6 +213,56 @@ write_builder = table.new_batch_write_builder().overwrite()
 write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
 ```
 
+### Update columns
+
+You can create `TableUpdate.update_by_arrow_with_row_id` to update columns to data evolution tables.
+
+The input data should include the `_ROW_ID` column, update operation will automatically sort and match each `_ROW_ID` to
+its corresponding `first_row_id`, then groups rows with the same `first_row_id` and writes them to a separate file.
+
+```python
+simple_pa_schema = pa.schema([
+  ('f0', pa.int8()),
+  ('f1', pa.int16()),
+])
+schema = Schema.from_pyarrow_schema(simple_pa_schema,
+                                    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
+catalog.create_table('default.test_row_tracking', schema, False)
+table = catalog.get_table('default.test_row_tracking')
+
+# write all columns
+write_builder = table.new_batch_write_builder()
+table_write = write_builder.new_write()
+table_commit = write_builder.new_commit()
+expect_data = pa.Table.from_pydict({
+  'f0': [-1, 2],
+  'f1': [-1001, 1002]
+}, schema=simple_pa_schema)
+table_write.write_arrow(expect_data)
+table_commit.commit(table_write.prepare_commit())
+table_write.close()
+table_commit.close()
+
+# update partial columns
+write_builder = table.new_batch_write_builder()
+table_update = write_builder.new_update().with_update_type(['f0'])
+table_commit = write_builder.new_commit()
+data2 = pa.Table.from_pydict({
+  '_ROW_ID': [0, 1],
+  'f0': [5, 6],
+}, schema=pa.schema([
+  ('_ROW_ID', pa.int64()),
+  ('f0', pa.int8()),
+]))
+cmts = table_update.update_by_arrow_with_row_id(data2)
+table_commit.commit(cmts)
+table_commit.close()
+
+# content should be:
+#   'f0': [5, 6],
+#   'f1': [-1001, 1002]
+```
+
 ## Batch Read
 
 ### Predicate pushdown
@@ -376,20 +426,52 @@ print(ray_dataset.to_pandas())
 # ...
 ```
 
-The `to_ray()` method supports a `parallelism` parameter to control distributed reading. Use `parallelism=1` for single-task read (default) or `parallelism > 1` for distributed read with multiple Ray workers:
+The `to_ray()` method supports Ray Data API parameters for distributed processing:
 
 ```python
-# Simple mode (single task)
-ray_dataset = table_read.to_ray(splits, parallelism=1)
+# Basic usage
+ray_dataset = table_read.to_ray(splits)
 
-# Distributed mode with 4 parallel tasks
-ray_dataset = table_read.to_ray(splits, parallelism=4)
+# Specify number of output blocks
+ray_dataset = table_read.to_ray(splits, override_num_blocks=4)
+
+# Configure Ray remote arguments
+ray_dataset = table_read.to_ray(
+    splits,
+    override_num_blocks=4,
+    ray_remote_args={"num_cpus": 2, "max_retries": 3}
+)
 
 # Use Ray Data operations
 mapped_dataset = ray_dataset.map(lambda row: {'value': row['value'] * 2})
 filtered_dataset = ray_dataset.filter(lambda row: row['score'] > 80)
 df = ray_dataset.to_pandas()
 ```
+
+**Parameters:**
+- `override_num_blocks`: Optional override for the number of output blocks. By default,
+  Ray automatically determines the optimal number.
+- `ray_remote_args`: Optional kwargs passed to `ray.remote()` in read tasks
+  (e.g., `{"num_cpus": 2, "max_retries": 3}`).
+- `concurrency`: Optional max number of Ray tasks to run concurrently. By default,
+  dynamically decided based on available resources.
+- `**read_args`: Additional kwargs passed to the datasource (e.g., `per_task_row_limit`
+  in Ray 2.52.0+).
+
+**Ray Block Size Configuration:**
+
+If you need to configure Ray's block size (e.g., when Paimon splits exceed Ray's default
+128MB block size), set it before calling `to_ray()`:
+
+```python
+from ray.data import DataContext
+
+ctx = DataContext.get_current()
+ctx.target_max_block_size = 256 * 1024 * 1024  # 256MB (default is 128MB)
+ray_dataset = table_read.to_ray(splits)
+```
+
+See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more details.
 
 ### Incremental Read
 
@@ -584,3 +666,27 @@ Key points about shard read:
 | f is not in [l1, l2]  | PredicateBuilder.is_not_in(f, [l1, l2])       |
 | lower <= f <= upper   | PredicateBuilder.between(f, lower, upper)     |
 
+## Supported Features
+
+The following shows the supported features of Python Paimon compared to Java Paimon:
+
+**Catalog Level**
+   - FileSystemCatalog
+   - RestCatalog
+
+**Table Level**
+   - Append Tables
+     - `bucket = -1` (unaware)
+     - `bucket > 0` (fixed)
+   - Primary Key Tables
+     - only support deduplicate
+     - `bucket = -2` (postpone)
+     - `bucket > 0` (fixed)
+     - read with deletion vectors enabled
+   - Read/Write Operations
+     - Batch read and write for append tables and primary key tables
+     - Predicate filtering
+     - Overwrite semantics
+     - Incremental reading of Delta data
+     - Reading and writing blob data
+     - `with_shard` feature

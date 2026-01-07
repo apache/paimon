@@ -112,7 +112,7 @@ class DataEvolutionTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
-        # append：set first_row_id = 100 to modify the row with columns write
+        # append：write (2, "x") and ("y"), set first_row_id = 100
         write0 = write_builder.new_write().with_write_type(['f0', 'f1'])
         write1 = write_builder.new_write().with_write_type(['f2'])
         commit = write_builder.new_commit()

@@ -18,10 +18,11 @@
 
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN}
-import org.apache.paimon.table.Table
+import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
+import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
@@ -42,6 +43,7 @@ abstract class PaimonBaseScanBuilder
   val table: Table
   val partitionKeys: JList[String] = table.partitionKeys()
   val rowType: RowType = table.rowType()
+  val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
 
   private var pushedSparkPredicates = Array.empty[SparkPredicate]
   protected var hasPostScanPredicates = false
@@ -50,6 +52,7 @@ abstract class PaimonBaseScanBuilder
   protected var pushedDataFilters: Array[Predicate] = Array.empty
   protected var pushedLimit: Option[Int] = None
   protected var pushedTopN: Option[TopN] = None
+  protected var pushedVectorSearch: Option[VectorSearch] = None
 
   protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
@@ -63,7 +66,11 @@ abstract class PaimonBaseScanBuilder
     val pushableDataFilters = mutable.ArrayBuffer.empty[Predicate]
     val postScan = mutable.ArrayBuffer.empty[SparkPredicate]
 
-    val converter = SparkV2FilterConverter(rowType)
+    var newRowType = rowType
+    if (coreOptions.rowTrackingEnabled() && coreOptions.dataEvolutionEnabled()) {
+      newRowType = SpecialFields.rowTypeWithRowTracking(newRowType);
+    }
+    val converter = SparkV2FilterConverter(newRowType)
     val partitionPredicateVisitor = new PartitionPredicateVisitor(partitionKeys)
     predicates.foreach {
       predicate =>

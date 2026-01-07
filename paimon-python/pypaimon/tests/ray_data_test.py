@@ -25,6 +25,7 @@ import pyarrow as pa
 import ray
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.options.core_options import CoreOptions
 
 
 class RayDataTest(unittest.TestCase):
@@ -108,7 +109,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify Ray dataset
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
@@ -120,6 +121,59 @@ class RayDataTest(unittest.TestCase):
 
         # Convert to pandas for verification
         df = ray_dataset.to_pandas()
+        self.assertEqual(len(df), 5, "DataFrame should have 5 rows")
+        # Sort by id to ensure order-independent comparison
+        df_sorted = df.sort_values(by='id').reset_index(drop=True)
+        self.assertEqual(list(df_sorted['id']), [1, 2, 3, 4, 5], "ID column should match")
+        self.assertEqual(
+            list(df_sorted['name']),
+            ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            "Name column should match"
+        )
+
+    def test_basic_ray_data_write(self):
+        """Test basic Ray Data write from PyPaimon table."""
+        # Create schema
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('value', pa.int64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_ray_write', schema, False)
+        table = self.catalog.get_table('default.test_ray_write')
+
+        # Write test data
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'value': [100, 200, 300, 400, 500],
+        }, schema=pa_schema)
+        
+        from ray.data.read_api import from_arrow
+        ds = from_arrow(test_data)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_raydata(ds, parallelism=2)
+        # Read using Ray Data
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        arrow_result = table_read.to_arrow(splits)
+
+        # Verify PyArrow table
+        self.assertIsNotNone(arrow_result, "Arrow table should not be None")
+        self.assertEqual(arrow_result.num_rows, 5, "Should have 5 rows")
+
+        # Test basic operations - get first 3 rows
+        sample_table = arrow_result.slice(0, 3)
+        self.assertEqual(sample_table.num_rows, 3, "Should have 3 sample rows")
+
+        # Convert to pandas for verification
+        df = arrow_result.to_pandas()
         self.assertEqual(len(df), 5, "DataFrame should have 5 rows")
         # Sort by id to ensure order-independent comparison
         df_sorted = df.sort_values(by='id').reset_index(drop=True)
@@ -168,7 +222,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -214,7 +268,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Verify projection
         self.assertEqual(ray_dataset.count(), 3, "Should have 3 rows")
@@ -255,7 +309,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Apply map operation (double the value)
         def double_value(row):
@@ -302,7 +356,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         # Apply filter operation (score >= 80)
         filtered_dataset = ray_dataset.filter(lambda row: row['score'] >= 80)
@@ -345,8 +399,8 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset_distributed = table_read.to_ray(splits, parallelism=2)
-        ray_dataset_simple = table_read.to_ray(splits, parallelism=1)
+        ray_dataset_distributed = table_read.to_ray(splits, override_num_blocks=2)
+        ray_dataset_simple = table_read.to_ray(splits, override_num_blocks=1)
 
         # Both should produce the same results
         self.assertEqual(ray_dataset_distributed.count(), 3, "Distributed mode should have 3 rows")
@@ -393,7 +447,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
 
@@ -452,7 +506,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
@@ -509,7 +563,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
 
         # Verify filtered results
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows after filtering")
@@ -527,7 +581,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=1)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=1)
 
         # Verify filtered results by partition
         self.assertEqual(ray_dataset.count(), 2, "Should have 2 rows in partition 2024-01-01")
@@ -536,7 +590,6 @@ class RayDataTest(unittest.TestCase):
 
     def test_ray_data_primary_key_multiple_splits_same_bucket(self):
         """Test Ray Data read from PrimaryKey table with small target_split_size."""
-        from pypaimon.common.core_options import CoreOptions
 
         pa_schema = pa.schema([
             ('id', pa.int32()),
@@ -549,7 +602,7 @@ class RayDataTest(unittest.TestCase):
             primary_keys=['id'],
             options={
                 'bucket': '2',
-                CoreOptions.SOURCE_SPLIT_TARGET_SIZE: '1b'
+                CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(): '1b'
             }
         )
         self.catalog.create_table('default.test_ray_pk_multi_split', schema, False)
@@ -588,7 +641,7 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        ray_dataset = table_read.to_ray(splits, parallelism=2)
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 4, "Should have 4 rows after upsert")
@@ -604,7 +657,6 @@ class RayDataTest(unittest.TestCase):
         self.assertEqual(list(df_sorted['value']), [150, 250, 300, 400], "Value column should reflect updates")
 
     def test_ray_data_invalid_parallelism(self):
-        """Test that invalid parallelism values raise ValueError."""
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -633,21 +685,17 @@ class RayDataTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         splits = table_scan.plan().splits()
 
-        # Test with parallelism = 0
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=0)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=0)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
-        # Test with parallelism < 0
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=-1)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
+            table_read.to_ray(splits, override_num_blocks=-1)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
-        # Test with parallelism = -10
         with self.assertRaises(ValueError) as context:
-            table_read.to_ray(splits, parallelism=-10)
-        self.assertIn("parallelism must be at least 1", str(context.exception))
-
+            table_read.to_ray(splits, override_num_blocks=-10)
+        self.assertIn("override_num_blocks must be at least 1", str(context.exception))
 
 if __name__ == '__main__':
     unittest.main()

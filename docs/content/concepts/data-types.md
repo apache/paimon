@@ -176,6 +176,13 @@ All data types supported by Paimon are as follows:
       </td>
     </tr>
     <tr>
+      <td><code>VARIANT</code></td>
+      <td><code>Data type of semi-structured data.</code><br><br>
+          <code>Designed for storing any semi-structured data, including ARRAY, MAP, and scalar types. VARIANT can only store MAP types with keys of type STRING.</code><br><br>
+          <code>Note: Requires Flink 2.0+ and Spark 4.0+.</code>
+      </td>
+    </tr>
+    <tr>
       <td><code>BLOB</code></td>
       <td><code>Data type of a binary large object.</code><br><br>
           <code>Designed for storing large binary data such as images, videos, audio files, and other multimodal data. Unlike BYTES type which stores data inline, BLOB stores large binary data in separate files and maintains references to them, providing better performance for large objects.</code><br><br>

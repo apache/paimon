@@ -89,7 +89,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         latestSnapshot.id(), latestSnapshot.schemaId(), 9L, null, colStatsMap);
         commit.updateStatistics(colStats);
         commit.close();
-        DataTableSource scanSource = new DataTableSource(identifier, table, false, null, null);
+        DataTableSource scanSource = new DataTableSource(identifier, table, false, null);
         Assertions.assertThat(scanSource.reportStatistics().getRowCount()).isEqualTo(9L);
         Map<String, ColumnStats> expectedColStats = new HashMap<>();
         expectedColStats.put(
@@ -131,7 +131,7 @@ public abstract class FileStoreTableStatisticsTestBase {
     @Test
     public void testTableStreamingStatistics() throws Exception {
         FileStoreTable table = writeData();
-        DataTableSource streamSource = new DataTableSource(identifier, table, true, null, null);
+        DataTableSource streamSource = new DataTableSource(identifier, table, true, null);
         Assertions.assertThat(streamSource.reportStatistics()).isEqualTo(TableStats.UNKNOWN);
     }
 
@@ -144,7 +144,6 @@ public abstract class FileStoreTableStatisticsTestBase {
                         identifier,
                         table,
                         false,
-                        null,
                         null,
                         builder.equal(0, 1),
                         null,
@@ -223,7 +222,6 @@ public abstract class FileStoreTableStatisticsTestBase {
                         table,
                         false,
                         null,
-                        null,
                         builder.equal(1, 50),
                         null,
                         null,
@@ -300,7 +298,6 @@ public abstract class FileStoreTableStatisticsTestBase {
                         identifier,
                         table,
                         false,
-                        null,
                         null,
                         builder.greaterThan(2, 500L),
                         null,

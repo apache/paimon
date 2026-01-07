@@ -89,6 +89,21 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
     }
   }
 
+  override def truncatePartitions(idents: Array[InternalRow]): Boolean = {
+    val partitions = toPaimonPartitions(idents).toSeq.asJava
+    val commit = table.newBatchWriteBuilder().newCommit()
+    try {
+      commit.truncatePartitions(partitions)
+    } finally {
+      commit.close()
+    }
+    true
+  }
+
+  override def truncatePartition(ident: InternalRow): Boolean = {
+    truncatePartitions(Array(ident))
+  }
+
   override def replacePartitionMetadata(
       ident: InternalRow,
       properties: JMap[String, String]): Unit = {

@@ -20,14 +20,12 @@ package org.apache.paimon.sst;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockDecompressor;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.memory.MemorySliceInput;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -39,46 +37,27 @@ import static org.apache.paimon.sst.SstFileUtils.crc32c;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An SST File Reader which only serves point queries now.
+ * An SST File Reader which serves point queries and range queries. Users can call {@code
+ * createIterator} to create a file iterator and then use seek and read methods to do range queries.
  *
  * <p>Note that this class is NOT thread-safe.
  */
 public class SstFileReader implements Closeable {
 
     private final Comparator<MemorySlice> comparator;
-    private final Path filePath;
     private final BlockCache blockCache;
-    private final BlockIterator indexBlockIterator;
+    private final BlockReader indexBlock;
     @Nullable private final FileBasedBloomFilter bloomFilter;
 
     public SstFileReader(
             Comparator<MemorySlice> comparator,
-            long fileSize,
-            Path filePath,
-            SeekableInputStream input,
-            CacheManager cacheManager)
-            throws IOException {
+            BlockCache blockCache,
+            BlockHandle indexBlockHandle,
+            @Nullable FileBasedBloomFilter bloomFilter) {
         this.comparator = comparator;
-        this.filePath = filePath;
-        this.blockCache = new BlockCache(filePath, input, cacheManager);
-        MemorySegment footerData =
-                blockCache.getBlock(
-                        fileSize - Footer.ENCODED_LENGTH, Footer.ENCODED_LENGTH, b -> b, true);
-        Footer footer = Footer.readFooter(MemorySlice.wrap(footerData).toInput());
-        this.indexBlockIterator = readBlock(footer.getIndexBlockHandle(), true).iterator();
-        BloomFilterHandle handle = footer.getBloomFilterHandle();
-        if (handle == null) {
-            this.bloomFilter = null;
-        } else {
-            this.bloomFilter =
-                    new FileBasedBloomFilter(
-                            input,
-                            filePath,
-                            cacheManager,
-                            handle.expectedEntries(),
-                            handle.offset(),
-                            handle.size());
-        }
+        this.blockCache = blockCache;
+        this.indexBlock = readBlock(indexBlockHandle, true);
+        this.bloomFilter = bloomFilter;
     }
 
     /**
@@ -95,12 +74,13 @@ public class SstFileReader implements Closeable {
 
         MemorySlice keySlice = MemorySlice.wrap(key);
         // seek the index to the block containing the key
+        BlockIterator indexBlockIterator = indexBlock.iterator();
         indexBlockIterator.seekTo(keySlice);
 
         // if indexIterator does not have a next, it means the key does not exist in this iterator
         if (indexBlockIterator.hasNext()) {
             // seek the current iterator to the key
-            BlockIterator current = getNextBlock();
+            BlockIterator current = getNextBlock(indexBlockIterator);
             if (current.seekTo(keySlice)) {
                 return current.next().getValue().copyBytes();
             }
@@ -108,7 +88,11 @@ public class SstFileReader implements Closeable {
         return null;
     }
 
-    private BlockIterator getNextBlock() {
+    public SstFileIterator createIterator() {
+        return new SstFileIterator(indexBlock.iterator());
+    }
+
+    private BlockIterator getNextBlock(BlockIterator indexBlockIterator) {
         // index block handle, point to the key, value position.
         MemorySlice blockHandle = indexBlockIterator.next().getValue();
         BlockReader dataBlock =
@@ -138,7 +122,7 @@ public class SstFileReader implements Closeable {
                         blockHandle.size(),
                         bytes -> decompressBlock(bytes, blockTrailer),
                         index);
-        return new BlockReader(MemorySlice.wrap(unCompressedBlock), comparator);
+        return BlockReader.create(MemorySlice.wrap(unCompressedBlock), comparator);
     }
 
     private byte[] decompressBlock(byte[] compressedBytes, BlockTrailer blockTrailer) {
@@ -147,8 +131,8 @@ public class SstFileReader implements Closeable {
         checkArgument(
                 blockTrailer.getCrc32c() == crc32cCode,
                 String.format(
-                        "Expected CRC32C(%d) but found CRC32C(%d) for file(%s)",
-                        blockTrailer.getCrc32c(), crc32cCode, filePath));
+                        "Expected CRC32C(%d) but found CRC32C(%d)",
+                        blockTrailer.getCrc32c(), crc32cCode));
 
         // decompress data
         BlockCompressionFactory compressionFactory =
@@ -177,6 +161,57 @@ public class SstFileReader implements Closeable {
             bloomFilter.close();
         }
         blockCache.close();
-        // do not need to close input, since it will be closed by outer classes
+    }
+
+    /** An Iterator for range queries. */
+    public class SstFileIterator {
+
+        private final BlockIterator indexIterator;
+        private @Nullable BlockIterator seekedDataBlock = null;
+
+        SstFileIterator(BlockIterator indexBlockIterator) {
+            this.indexIterator = indexBlockIterator;
+        }
+
+        /**
+         * Seek to the position of the record whose key is exactly equal to or greater than the
+         * specified key.
+         */
+        public void seekTo(byte[] key) {
+            MemorySlice keySlice = MemorySlice.wrap(key);
+
+            indexIterator.seekTo(keySlice);
+            if (indexIterator.hasNext()) {
+                seekedDataBlock = getNextBlock(indexIterator);
+                // The index block entry key is the last key of the corresponding data block.
+                // If there is some index entry key >= targetKey, the related data block must
+                // also contain some key >= target key, which means seekedDataBlock.hasNext()
+                // must be true
+                seekedDataBlock.seekTo(keySlice);
+                Preconditions.checkState(seekedDataBlock.hasNext());
+            } else {
+                seekedDataBlock = null;
+            }
+        }
+
+        /**
+         * Read a batch of records from this SST File and move current record position to the next
+         * batch.
+         *
+         * @return current batch of records, null if reaching file end.
+         */
+        public BlockIterator readBatch() throws IOException {
+            if (seekedDataBlock != null) {
+                BlockIterator result = seekedDataBlock;
+                seekedDataBlock = null;
+                return result;
+            }
+
+            if (!indexIterator.hasNext()) {
+                return null;
+            }
+
+            return getNextBlock(indexIterator);
+        }
     }
 }

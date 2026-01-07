@@ -30,6 +30,7 @@ import java.util.Map;
 
 /** Test for {@link BlockIterator}. */
 public class BlockIteratorTest {
+
     private static final int ROW_NUM = 10_000;
     private static final Comparator<MemorySlice> COMPARATOR =
             Comparator.comparingInt(slice -> slice.readInt(0));
@@ -46,7 +47,7 @@ public class BlockIteratorTest {
 
     public void innerTest(boolean aligned) throws IOException {
         MemorySlice data = writeBlock(aligned);
-        BlockIterator iterator = new BlockReader(data, COMPARATOR).iterator();
+        BlockIterator iterator = BlockReader.create(data, COMPARATOR).iterator();
 
         // 1. test for normal cases:
         final int step = 3;
