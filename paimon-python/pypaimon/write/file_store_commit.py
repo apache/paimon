@@ -269,6 +269,25 @@ class FileStoreCommit:
             logger.warning("Retry commit for exception")
             return False
 
+    def _generate_overwrite_entries(self, latestSnapshot):
+        """Generate commit entries for OVERWRITE mode based on latest snapshot."""
+        entries = []
+        current_entries = FullStartingScanner(self.table, self._overwrite_partition_filter, None).plan_files(latestSnapshot)
+        for entry in current_entries:
+            entry.kind = 1  # DELETE
+            entries.append(entry)
+        for msg in self._overwrite_commit_messages:
+            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
+            for file in msg.new_files:
+                entries.append(ManifestEntry(
+                    kind=0,  # ADD
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=self.table.total_buckets,
+                    file=file
+                ))
+        return entries
+
     def _cleanup_preparation_failure(self, manifest_file: Optional[str],
                                      delta_manifest_list: Optional[str],
                                      base_manifest_list: Optional[str]):
@@ -292,25 +311,6 @@ class FileStoreCommit:
                 self.table.file_io.delete_quietly(manifest_file_path)
         except Exception as e:
             logger.warning(f"Failed to clean up temporary files during preparation failure: {e}", exc_info=True)
-
-    def _generate_overwrite_entries(self, latestSnapshot):
-        """Generate commit entries for OVERWRITE mode based on latest snapshot."""
-        entries = []
-        current_entries = FullStartingScanner(self.table, self._overwrite_partition_filter, None).plan_files(latestSnapshot)
-        for entry in current_entries:
-            entry.kind = 1  # DELETE
-            entries.append(entry)
-        for msg in self._overwrite_commit_messages:
-            partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
-            for file in msg.new_files:
-                entries.append(ManifestEntry(
-                    kind=0,  # ADD
-                    partition=partition,
-                    bucket=msg.bucket,
-                    total_buckets=self.table.total_buckets,
-                    file=file
-                ))
-        return entries
 
     def _commit_retry_wait(self, retry_count: int):
         import threading
