@@ -79,7 +79,7 @@ class FullStartingScanner(StartingScanner):
         )
 
     def scan(self) -> Plan:
-        file_entries = self.plan_files(None)
+        file_entries = self.plan_files()
         if not file_entries:
             return Plan([])
 
@@ -104,8 +104,8 @@ class FullStartingScanner(StartingScanner):
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
 
-    def plan_files(self, latestSnapshot) -> List[ManifestEntry]:
-        latest_snapshot = self.snapshot_manager.get_latest_snapshot() if latestSnapshot is None else latestSnapshot
+    def plan_files(self) -> List[ManifestEntry]:
+        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if not latest_snapshot:
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)

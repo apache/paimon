@@ -269,8 +269,9 @@ class FileStoreCommit:
     def _generate_overwrite_entries(self, latestSnapshot):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
-        current_entries = (FullStartingScanner(self.table, self._overwrite_partition_filter, None)
-                           .plan_files(latestSnapshot))
+        current_entries = [] if latestSnapshot is None \
+            else (FullStartingScanner(self.table, self._overwrite_partition_filter, None).
+                  read_manifest_entries(self.manifest_list_manager.read_all(latestSnapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE
             entries.append(entry)
