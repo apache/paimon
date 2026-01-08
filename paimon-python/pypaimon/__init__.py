@@ -15,6 +15,15 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
+import sys
+if sys.version_info[:2] == (3, 6):
+    try:
+        from pypaimon.manifest import fastavro_py36_compat
+        if fastavro_py36_compat is not None:
+            fastavro_py36_compat._apply_zstd_patch()
+    except (ImportError, AttributeError, NameError):
+        pass
+
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.schema.schema import Schema
