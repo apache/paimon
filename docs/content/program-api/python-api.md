@@ -452,7 +452,6 @@ df = ray_dataset.to_pandas()
 ```
 
 **Parameters:**
-
 - `override_num_blocks`: Optional override for the number of output blocks. By default,
   Ray automatically determines the optimal number.
 - `ray_remote_args`: Optional kwargs passed to `ray.remote()` in read tasks
@@ -475,8 +474,7 @@ ctx.target_max_block_size = 256 * 1024 * 1024  # 256MB (default is 128MB)
 ray_dataset = table_read.to_ray(splits)
 ```
 
-See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more
-details.
+See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more details.
 
 ### Read Pytorch Dataset
 
