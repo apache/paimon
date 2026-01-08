@@ -2567,6 +2567,141 @@ class DataBlobWriterTest(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def test_concurrent_blob_writes_with_retry(self):
+        """Test concurrent blob writes to verify retry mechanism works correctly."""
+        import threading
+        from pypaimon import Schema
+        from pypaimon.snapshot.snapshot_manager import SnapshotManager
+
+        # Run the test 10 times to verify stability
+        iter_num = 2
+        for test_iteration in range(iter_num):
+            # Create a unique table for each iteration
+            table_name = f'test_db.blob_concurrent_writes_{test_iteration}'
+
+            # Create schema with blob column
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('thread_id', pa.int32()),
+                ('metadata', pa.string()),
+                ('blob_data', pa.large_binary()),
+            ])
+
+            schema = Schema.from_pyarrow_schema(
+                pa_schema,
+                options={
+                    'row-tracking.enabled': 'true',
+                    'data-evolution.enabled': 'true'
+                }
+            )
+            self.catalog.create_table(table_name, schema, False)
+            table = self.catalog.get_table(table_name)
+
+            write_results = []
+            write_errors = []
+
+            # Create blob pattern for testing
+            blob_size = 5 * 1024  # 5KB
+            blob_pattern = b'BLOB_PATTERN_' + b'X' * 1024
+            pattern_size = len(blob_pattern)
+            repetitions = blob_size // pattern_size
+            base_blob_data = blob_pattern * repetitions
+
+            def write_blob_data(thread_id, start_id):
+                """Write blob data in a separate thread."""
+                try:
+                    threading.current_thread().name = f"Iter{test_iteration}-Thread-{thread_id}"
+                    write_builder = table.new_batch_write_builder()
+                    table_write = write_builder.new_write()
+                    table_commit = write_builder.new_commit()
+
+                    # Create unique blob data for this thread
+                    data = {
+                        'id': list(range(start_id, start_id + 5)),
+                        'thread_id': [thread_id] * 5,
+                        'metadata': [f'thread{thread_id}_blob_{i}' for i in range(5)],
+                        'blob_data': [i.to_bytes(2, byteorder='little') + base_blob_data for i in range(5)]
+                    }
+                    pa_table = pa.Table.from_pydict(data, schema=pa_schema)
+
+                    table_write.write_arrow(pa_table)
+                    commit_messages = table_write.prepare_commit()
+
+                    table_commit.commit(commit_messages)
+                    table_write.close()
+                    table_commit.close()
+
+                    write_results.append({
+                        'thread_id': thread_id,
+                        'start_id': start_id,
+                        'success': True
+                    })
+                except Exception as e:
+                    write_errors.append({
+                        'thread_id': thread_id,
+                        'error': str(e)
+                    })
+
+            # Create and start multiple threads
+            threads = []
+            num_threads = 100
+            for i in range(num_threads):
+                thread = threading.Thread(
+                    target=write_blob_data,
+                    args=(i, i * 10)
+                )
+                threads.append(thread)
+                thread.start()
+
+            # Wait for all threads to complete
+            for thread in threads:
+                thread.join()
+
+            # Verify all writes succeeded (retry mechanism should handle conflicts)
+            self.assertEqual(num_threads, len(write_results),
+                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, "
+                             f"got {len(write_results)}. Errors: {write_errors}")
+            self.assertEqual(0, len(write_errors),
+                             f"Iteration {test_iteration}: Expected no errors, but got: {write_errors}")
+
+            read_builder = table.new_read_builder()
+            table_scan = read_builder.new_scan()
+            table_read = read_builder.new_read()
+            actual = table_read.to_arrow(table_scan.plan().splits()).sort_by('id')
+
+            # Verify data rows
+            self.assertEqual(num_threads * 5, actual.num_rows,
+                             f"Iteration {test_iteration}: Expected {num_threads * 5} rows")
+
+            # Verify id column
+            ids = actual.column('id').to_pylist()
+            expected_ids = []
+            for i in range(num_threads):
+                expected_ids.extend(range(i * 10, i * 10 + 5))
+            expected_ids.sort()
+
+            self.assertEqual(ids, expected_ids,
+                             f"Iteration {test_iteration}: IDs mismatch")
+
+            # Verify blob data integrity (spot check)
+            blob_data_list = actual.column('blob_data').to_pylist()
+            for i in range(0, len(blob_data_list), 100):  # Check every 100th blob
+                blob = blob_data_list[i]
+                self.assertGreater(len(blob), 2, f"Blob {i} should have data")
+                # Verify blob contains the pattern
+                self.assertIn(b'BLOB_PATTERN_', blob, f"Blob {i} should contain pattern")
+
+            # Verify snapshot count (should have num_threads snapshots)
+            snapshot_manager = SnapshotManager(table)
+            latest_snapshot = snapshot_manager.get_latest_snapshot()
+            self.assertIsNotNone(latest_snapshot,
+                                 f"Iteration {test_iteration}: Latest snapshot should not be None")
+            self.assertEqual(latest_snapshot.id, num_threads,
+                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, "
+                             f"got {latest_snapshot.id}")
+
+            print(f"✓ Blob Table Iteration {test_iteration + 1}/{iter_num} completed successfully")
+
 
 if __name__ == '__main__':
     unittest.main()

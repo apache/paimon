@@ -18,13 +18,15 @@
 import logging
 import os
 import subprocess
+import threading
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
 import pyarrow
 from packaging.version import parse
-from pyarrow._fs import FileSystem
+from pyarrow._fs import FileSystem, LocalFileSystem
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
@@ -37,6 +39,8 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
+    rename_lock = threading.Lock()
+
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
@@ -251,7 +255,15 @@ class FileIO:
                 self.mkdirs(str(dst_parent))
 
             src_str = self.to_filesystem_path(src)
-            self.filesystem.move(src_str, dst_str)
+            if isinstance(self.filesystem, LocalFileSystem):
+                if self.exists(dst):
+                    return False
+                with FileIO.rename_lock:
+                    if self.exists(dst):
+                        return False
+                    self.filesystem.move(src_str, dst_str)
+            else:
+                self.filesystem.move(src_str, dst_str)
             return True
         except Exception as e:
             self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
@@ -303,7 +315,7 @@ class FileIO:
             return input_stream.read().decode('utf-8')
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
-        temp_path = path + ".tmp"
+        temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
             self.write_file(temp_path, content, False)

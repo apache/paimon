@@ -16,10 +16,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+from datetime import timedelta
 from enum import Enum
 from typing import Any, Type
 
 from pypaimon.common.memory_size import MemorySize
+from pypaimon.common.time_utils import parse_duration
 
 
 class OptionsUtils:
@@ -63,6 +65,8 @@ class OptionsUtils:
             return OptionsUtils.convert_to_double(value)
         elif target_type == MemorySize:
             return OptionsUtils.convert_to_memory_size(value)
+        elif target_type == timedelta:
+            return OptionsUtils.convert_to_duration(value)
         else:
             raise ValueError(f"Unsupported type: {target_type}")
 
@@ -124,6 +128,15 @@ class OptionsUtils:
         if isinstance(value, str):
             return MemorySize.parse(value)
         raise ValueError(f"Cannot convert {type(value)} to MemorySize")
+
+    @staticmethod
+    def convert_to_duration(value: Any) -> timedelta:
+        if isinstance(value, timedelta):
+            return value
+        if isinstance(value, str):
+            milliseconds = parse_duration(value)
+            return timedelta(milliseconds=milliseconds)
+        raise ValueError(f"Cannot convert {type(value)} to timedelta")
 
     @staticmethod
     def convert_to_enum(value: Any, enum_class: Type[Enum]) -> Enum:
