@@ -93,7 +93,7 @@ def _apply_zstd_patch():
                 
                 if block_readers.get('zstandard') is _fixed_zstandard_read_block:
                     _patch_applied = True
-        except (TypeError, AttributeError) as e:
+        except (TypeError, AttributeError):
             pass
 
         if not _patch_applied:
@@ -122,15 +122,6 @@ def _apply_zstd_patch():
 
 if sys.version_info[:2] == (3, 6):
     try:
-        import fastavro
         _apply_zstd_patch()
-        try:
-            import fastavro._read as fastavro_read
-            if hasattr(fastavro_read, 'BLOCK_READERS'):
-                block_readers = fastavro_read.BLOCK_READERS
-                if 'zstandard' in block_readers or 'zstd' in block_readers:
-                    pass
-        except (ImportError, AttributeError):
-            pass
     except ImportError:
         pass
