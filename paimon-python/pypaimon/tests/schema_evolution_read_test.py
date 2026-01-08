@@ -322,7 +322,6 @@ class SchemaEvolutionReadTest(unittest.TestCase):
 
         # write schema-0 and schema-1 to table2
         schema_manager = SchemaManager(table2.file_io, table2.table_path)
-        schema_manager.file_io.delete_quietly(table2.table_path + "/schema/schema-0")
         schema_manager.commit(TableSchema.from_schema(schema_id=0, schema=schema))
         schema_manager.commit(TableSchema.from_schema(schema_id=1, schema=schema2))
 

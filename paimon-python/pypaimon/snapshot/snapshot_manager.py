@@ -38,7 +38,7 @@ class SnapshotManager:
         if not self.file_io.exists(self.latest_file):
             return None
 
-        latest_content = self.read_latest_file()
+        latest_content = self.file_io.read_file_utf8(self.latest_file)
         latest_snapshot_id = int(latest_content.strip())
 
         snapshot_file = f"{self.snapshot_dir}/snapshot-{latest_snapshot_id}"
@@ -47,51 +47,6 @@ class SnapshotManager:
 
         snapshot_content = self.file_io.read_file_utf8(snapshot_file)
         return JSON.from_json(snapshot_content, Snapshot)
-
-    def read_latest_file(self, max_retries: int = 5):
-        """
-        Read the latest snapshot ID from LATEST file with retry mechanism.
-        If file doesn't exist or is empty after retries, scan snapshot directory for max ID.
-        """
-        import re
-        import time
-
-        # Try to read LATEST file with retries
-        for retry_count in range(max_retries):
-            try:
-                if self.file_io.exists(self.latest_file):
-                    content = self.file_io.read_file_utf8(self.latest_file)
-                    if content and content.strip():
-                        return content.strip()
-
-                # File doesn't exist or is empty, wait a bit before retry
-                if retry_count < max_retries - 1:
-                    time.sleep(0.001)
-
-            except Exception:
-                # On exception, wait and retry
-                if retry_count < max_retries - 1:
-                    time.sleep(0.001)
-
-        # List all files in snapshot directory
-        file_infos = self.file_io.list_status(self.snapshot_dir)
-
-        max_snapshot_id = None
-        snapshot_pattern = re.compile(r'^snapshot-(\d+)$')
-
-        for file_info in file_infos:
-            # Get filename from path
-            filename = file_info.path.split('/')[-1]
-            match = snapshot_pattern.match(filename)
-            if match:
-                snapshot_id = int(match.group(1))
-                if max_snapshot_id is None or snapshot_id > max_snapshot_id:
-                    max_snapshot_id = snapshot_id
-
-        if not max_snapshot_id:
-            raise RuntimeError(f"No snapshot content found in {self.snapshot_dir}")
-
-        return str(max_snapshot_id)
 
     def get_snapshot_path(self, snapshot_id: int) -> str:
         """
