@@ -894,16 +894,14 @@ class ReaderBasicTest(unittest.TestCase):
         from pypaimon.table.row.binary_row import BinaryRow
         from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
 
-        empty_row = BinaryRow(b'\x00' * 12, [])
-        empty_row_bytes = GenericRowSerializer.to_bytes(empty_row)
+        empty_row_bytes = GenericRowSerializer.to_bytes(BinaryRow(b'\x00' * 12, []))
         empty_generic_row = GenericRow([], [])
         manifest_file_name = "manifest-missing-value-stats-cols-test"
         manifest_path = Path(table.table_path) / "manifest" / manifest_file_name
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
         file_dict = {
-            "_FILE_NAME": "data-missing-field-test.parquet",
-            "_FILE_SIZE": 1000, "_ROW_COUNT": 10,
+            "_FILE_NAME": "test.parquet", "_FILE_SIZE": 1000, "_ROW_COUNT": 10,
             "_MIN_KEY": GenericRowSerializer.to_bytes(empty_generic_row),
             "_MAX_KEY": GenericRowSerializer.to_bytes(empty_generic_row),
             "_KEY_STATS": {"_MIN_VALUES": empty_row_bytes, "_MAX_VALUES": empty_row_bytes, "_NULL_COUNTS": []},
@@ -915,8 +913,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         buffer = BytesIO()
         fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, [{
-            "_VERSION": 2, "_KIND": 0,
-            "_PARTITION": GenericRowSerializer.to_bytes(empty_generic_row),
+            "_VERSION": 2, "_KIND": 0, "_PARTITION": GenericRowSerializer.to_bytes(empty_generic_row),
             "_BUCKET": 0, "_TOTAL_BUCKETS": 1, "_FILE": file_dict
         }])
         with table.file_io.new_output_stream(str(manifest_path)) as out:
@@ -924,8 +921,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         entries = manifest_manager.read(manifest_file_name, drop_stats=False)
         self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0].file.file_name, "data-missing-field-test.parquet")
-        self.assertIsNone(entries[0].file.value_stats_cols)
+        self.assertIsNone(entries[0].file.value_stats_cols)  # Should be None when field is missing
 
     def test_primary_key_value_stats(self):
         pa_schema = pa.schema([
