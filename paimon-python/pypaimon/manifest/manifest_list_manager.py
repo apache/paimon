@@ -18,6 +18,13 @@
 
 from io import BytesIO
 from typing import List
+import sys
+
+# Apply zstd fix for Python 3.6 before importing fastavro
+try:
+    from pypaimon.manifest.fastavro_zstd_py36_fix import *  # noqa: F401, F403
+except ImportError:
+    pass
 
 import fastavro
 
@@ -59,6 +66,7 @@ class ManifestListManager:
             avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
         reader = fastavro.reader(buffer)
+        
         for record in reader:
             stats_dict = dict(record['_PARTITION_STATS'])
             partition_stats = SimpleStats(

@@ -18,6 +18,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from typing import List
+import sys
+
+# Apply zstd fix for Python 3.6 before importing fastavro
+try:
+    from pypaimon.manifest.fastavro_zstd_py36_fix import *  # noqa: F401, F403
+except ImportError:
+    pass
 
 import fastavro
 
