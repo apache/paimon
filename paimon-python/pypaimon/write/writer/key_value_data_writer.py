@@ -38,8 +38,10 @@ class KeyValueDataWriter(DataWriter):
         num_rows = data.num_rows
         enhanced_table = data
 
+        column_names = data.schema.names
+
         for pk_key in reversed(self.trimmed_primary_keys):
-            if pk_key in data.column_names:
+            if pk_key in column_names:
                 key_column = data.column(pk_key)
                 enhanced_table = enhanced_table.add_column(0, f'_KEY_{pk_key}', key_column)
 

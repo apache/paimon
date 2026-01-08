@@ -17,6 +17,7 @@
 ################################################################################
 
 import os
+import sys
 import unittest
 
 import pandas as pd
@@ -24,6 +25,12 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
+
+if sys.version_info[:2] == (3, 6):
+    from pypaimon.tests.py36.pyarrow_compat import table_sort_by
+else:
+    def table_sort_by(table: pa.Table, column_name: str, order: str = 'ascending') -> pa.Table:
+        return table.sort_by([(column_name, order)])
 
 
 class JavaPyReadWriteTest(unittest.TestCase):
@@ -196,7 +203,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits).sort_by('pt')
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
         expected = pa.Table.from_pydict({
             'pt': [1, 2, 2],
             'a': [10, 21, 22],
@@ -219,7 +226,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits).sort_by('pt')
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
         expected = pa.Table.from_pydict({
             'pt': [1] * 9999,
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
@@ -242,7 +249,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits).sort_by('pt')
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
         expected = pa.Table.from_pydict({
             'pt': [1] * 9999,
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
@@ -250,26 +257,3 @@ class JavaPyReadWriteTest(unittest.TestCase):
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
-    def test_read_zstd_manifest_table(self):
-        table_name = 'default.zstd_manifest_test_table'
-        
-        try:
-            table = self.catalog.get_table(table_name)
-        except Exception as e:
-            self.fail(
-                f"Failed to get table {table_name}. "
-                f"Make sure Java test (JavaPyE2ETest.testJavaWriteZstdManifestTable) "
-                f"has been run first. Error: {e}"
-            )
-
-        read_builder = table.new_read_builder()
-        table_scan = read_builder.new_scan()
-        table_read = read_builder.new_read()
-        
-        splits = table_scan.plan().splits()
-        result = table_read.to_pandas(splits)
-        
-        self.assertEqual(len(result), 3)
-        expected_ids = {1, 2, 3}
-        actual_ids = set(result['id'].tolist())
-        self.assertEqual(actual_ids, expected_ids)

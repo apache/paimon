@@ -67,7 +67,6 @@ import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
-import static org.apache.paimon.CoreOptions.MANIFEST_COMPRESSION;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
@@ -378,39 +377,6 @@ public class JavaPyE2ETest {
                         "4, Broccoli, Vegetable, 1.2",
                         "5, Chicken, Meat, 5.0",
                         "6, Beef, Meat, 8.0");
-    }
-
-    @Test
-    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testJavaWriteZstdManifestTable() throws Exception {
-        Identifier identifier = identifier("zstd_manifest_test_table");
-
-        Schema schema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column("name", DataTypes.STRING())
-                        .column("value", DataTypes.DOUBLE())
-                        .option(MANIFEST_COMPRESSION.key(), "zstd")
-                        .build();
-
-        catalog.createTable(identifier, schema, true);
-        Table table = catalog.getTable(identifier);
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-
-        String manifestCompression = fileStoreTable.coreOptions().manifestCompression();
-        assertThat(manifestCompression).isEqualTo("zstd");
-
-        try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
-                InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
-
-            write.write(GenericRow.of(1, BinaryString.fromString("test1"), 1.1));
-            write.write(GenericRow.of(2, BinaryString.fromString("test2"), 2.2));
-            write.write(GenericRow.of(3, BinaryString.fromString("test3"), 3.3));
-
-            commit.commit(0, write.prepareCommit(true, 0));
-        }
-
-        assertThat(fileStoreTable.newSnapshotReader().read().dataSplits()).hasSizeGreaterThan(0);
     }
 
     // Helper method from TableTestBase

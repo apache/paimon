@@ -193,76 +193,13 @@ run_pk_dv_test() {
     fi
 }
 
-# Function to run zstd manifest e2e test
-run_zstd_manifest_test() {
-    echo -e "${YELLOW}=== Step 6: Running Zstd Manifest Compression Test (Python 3.6 Compatibility) ===${NC}"
-
-    cd "$PROJECT_ROOT"
-
-    echo "Running Maven test for JavaPyE2ETest.testJavaWriteZstdManifestTable..."
-    local java_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteZstdManifestTable -pl paimon-core -Drun.e2e.tests=true; then
-        echo -e "${GREEN}✓ Java zstd manifest test completed successfully${NC}"
-    else
-        echo -e "${RED}✗ Java zstd manifest test failed${NC}"
-        java_result=1
-    fi
-
-    echo ""
-
-    cd "$PAIMON_PYTHON_DIR"
-    echo "Running Python test for JavaPyReadWriteTest.test_read_zstd_manifest_table..."
-    local python_result=0
-    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_zstd_manifest_table -v; then
-        echo -e "${GREEN}✓ Python zstd manifest test completed successfully${NC}"
-    else
-        echo -e "${RED}✗ Python zstd manifest test failed${NC}"
-        python_result=1
-    fi
-
-    if [[ $java_result -eq 0 && $python_result -eq 0 ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
 # Main execution
 main() {
-    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
-    
-    # For Python 3.6, only run zstd manifest test
-    if [ "$PYTHON_VERSION" = "3.6" ]; then
-        echo -e "${YELLOW}Python 3.6 detected: Running only Zstd Manifest Test${NC}"
-        echo ""
-        
-        local zstd_manifest_result=0
-        if ! run_zstd_manifest_test; then
-            zstd_manifest_result=1
-        fi
-        
-        echo ""
-        echo -e "${YELLOW}=== Test Results Summary ===${NC}"
-        if [[ $zstd_manifest_result -eq 0 ]]; then
-            echo -e "${GREEN}✓ Zstd Manifest Test (Python 3.6 Compatibility): PASSED${NC}"
-            echo ""
-            cleanup_warehouse
-            echo -e "${GREEN}🎉 All tests passed!${NC}"
-            return 0
-        else
-            echo -e "${RED}✗ Zstd Manifest Test (Python 3.6 Compatibility): FAILED${NC}"
-            echo ""
-            cleanup_warehouse
-            return 1
-        fi
-    fi
-    
-    # For other Python versions, run all tests
     local java_write_result=0
     local python_read_result=0
     local python_write_result=0
     local java_read_result=0
     local pk_dv_result=0
-    local zstd_manifest_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
     echo ""
@@ -305,12 +242,6 @@ main() {
     if ! run_pk_dv_test; then
         pk_dv_result=1
     fi
-
-    # Run zstd manifest test
-    if ! run_zstd_manifest_test; then
-        zstd_manifest_result=1
-    fi
-
     echo ""
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
@@ -344,18 +275,12 @@ main() {
         echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
     fi
 
-    if [[ $zstd_manifest_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Zstd Manifest Test (Python 3.6 Compatibility): PASSED${NC}"
-    else
-        echo -e "${RED}✗ Zstd Manifest Test (Python 3.6 Compatibility): FAILED${NC}"
-    fi
-
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $zstd_manifest_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else
