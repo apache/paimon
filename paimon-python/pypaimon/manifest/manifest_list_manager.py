@@ -59,7 +59,6 @@ class ManifestListManager:
             avro_bytes = input_stream.read()
         buffer = BytesIO(avro_bytes)
         reader = fastavro.reader(buffer)
-        
         for record in reader:
             stats_dict = dict(record['_PARTITION_STATS'])
             partition_stats = SimpleStats(
