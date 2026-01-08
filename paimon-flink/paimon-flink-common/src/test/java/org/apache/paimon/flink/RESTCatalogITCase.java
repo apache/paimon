@@ -169,7 +169,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         String dynamicBucketTableName = "dynamic_bucket_tbl";
         sql(
                 String.format(
-                        "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='-1', 'metastore.partitioned-table' = 'true')",
+                        "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='-1')",
                         DATABASE_NAME, dynamicBucketTableName));
         sql(
                 String.format(

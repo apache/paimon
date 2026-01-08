@@ -123,8 +123,8 @@ public class PartitionStatistics implements Serializable {
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
-                && Objects.equals(spec, that.spec)
-                && Objects.equals(totalBuckets, that.totalBuckets);
+                && totalBuckets == that.totalBuckets
+                && Objects.equals(spec, that.spec);
     }
 
     @Override

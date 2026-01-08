@@ -288,7 +288,8 @@ class FileStoreCommit:
                     'record_count': 0,
                     'file_count': 0,
                     'file_size_in_bytes': 0,
-                    'last_file_creation_time': 0
+                    'last_file_creation_time': 0,
+                    'total_buckets': entry.total_buckets
                 }
 
             # Following Java implementation: PartitionEntry.fromDataFile()
@@ -323,7 +324,8 @@ class FileStoreCommit:
                 record_count=stats['record_count'],
                 file_count=stats['file_count'],
                 file_size_in_bytes=stats['file_size_in_bytes'],
-                last_file_creation_time=stats['last_file_creation_time']
+                last_file_creation_time=stats['last_file_creation_time'],
+                total_buckets=stats['total_buckets']
             )
             for stats in partition_stats.values()
         ]

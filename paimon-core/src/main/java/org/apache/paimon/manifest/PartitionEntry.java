@@ -191,8 +191,8 @@ public class PartitionEntry {
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
-                && Objects.equals(partition, that.partition)
-                && Objects.equals(totalBuckets, that.totalBuckets);
+                && totalBuckets == that.totalBuckets
+                && Objects.equals(partition, that.partition);
     }
 
     @Override

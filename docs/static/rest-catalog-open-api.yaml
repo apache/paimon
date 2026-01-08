@@ -3287,10 +3287,10 @@ components:
           format: int64
         lastFileCreationTime:
           type: integer
-          format: int32
+          format: int64
         totalBuckets:
           type: integer
-          format: int64
+          format: int32
   #######################################
   # Examples of different values #
   #######################################
