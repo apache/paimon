@@ -20,6 +20,7 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import javax.annotation.Nullable;
@@ -73,6 +74,22 @@ public class VectorSearch implements Serializable {
 
     public VectorSearch withIncludeRowIds(RoaringNavigableMap64 includeRowIds) {
         this.includeRowIds = includeRowIds;
+        return this;
+    }
+
+    public VectorSearch offsetRange(long from, long to) {
+        if (includeRowIds != null) {
+            RoaringNavigableMap64 range = new RoaringNavigableMap64();
+            range.addRange(new Range(from, to));
+            RoaringNavigableMap64 and64 = RoaringNavigableMap64.and(range, includeRowIds);
+            final RoaringNavigableMap64 roaringNavigableMap64Offset = new RoaringNavigableMap64();
+            for (long rowId : and64) {
+                roaringNavigableMap64Offset.add(rowId - from);
+            }
+            VectorSearch target = new VectorSearch(vector, limit, fieldName);
+            target.withIncludeRowIds(roaringNavigableMap64Offset);
+            return target;
+        }
         return this;
     }
 
