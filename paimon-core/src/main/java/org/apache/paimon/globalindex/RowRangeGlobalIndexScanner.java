@@ -137,7 +137,8 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                     GlobalIndexReader innerReader =
                             new OffsetGlobalIndexReader(
                                     globalIndexer.createReader(indexFileReadWrite, globalMetas),
-                                    range.from);
+                                    range.from,
+                                    range.to);
                     unionReader.add(innerReader);
                 }
 
