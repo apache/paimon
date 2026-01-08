@@ -247,7 +247,7 @@ class FileStoreCommit:
                 next_row_id=next_row_id,
             )
 
-        # Generate partition statistics for the commit
+            # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
             self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
