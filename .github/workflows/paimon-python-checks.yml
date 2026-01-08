@@ -49,17 +49,6 @@ jobs:
         python-version: ['3.6.15', '3.10']
 
     steps:
-      - name: Free Disk Space
-        run: |
-          echo "Disk space before cleanup:"
-          df -h
-          # Remove unnecessary packages to free up space
-          apt-get clean
-          rm -rf /var/lib/apt/lists/*
-          rm -rf /tmp/*
-          echo "Disk space after cleanup:"
-          df -h
-
       - name: Checkout code
         uses: actions/checkout@v2
 
