@@ -44,6 +44,7 @@ Before coming into contact with the Table, you need to create a Catalog.
 
 {{< tabs "create-catalog" >}}
 {{< tab "filesystem" >}}
+
 ```python
 from pypaimon import CatalogFactory
 
@@ -53,6 +54,7 @@ catalog_options = {
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
+
 {{< /tab >}}
 {{< tab "rest catalog" >}}
 The sample code is as follows. The detailed meaning of option can be found in [DLF Token](../concepts/rest/dlf.md).
@@ -62,16 +64,17 @@ from pypaimon import CatalogFactory
 
 # Note that keys and values are all string
 catalog_options = {
-  'metastore': 'rest',
-  'warehouse': 'xxx',
-  'uri': 'xxx',
-  'dlf.region': 'xxx',
-  'token.provider': 'xxx',
-  'dlf.access-key-id': 'xxx',
-  'dlf.access-key-secret': 'xxx'
+    'metastore': 'rest',
+    'warehouse': 'xxx',
+    'uri': 'xxx',
+    'dlf.region': 'xxx',
+    'token.provider': 'xxx',
+    'dlf.access-key-id': 'xxx',
+    'dlf.access-key-secret': 'xxx'
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
+
 {{< /tab >}}
 {{< /tabs >}}
 
@@ -222,8 +225,8 @@ its corresponding `first_row_id`, then groups rows with the same `first_row_id` 
 
 ```python
 simple_pa_schema = pa.schema([
-  ('f0', pa.int8()),
-  ('f1', pa.int16()),
+    ('f0', pa.int8()),
+    ('f1', pa.int16()),
 ])
 schema = Schema.from_pyarrow_schema(simple_pa_schema,
                                     options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
@@ -235,8 +238,8 @@ write_builder = table.new_batch_write_builder()
 table_write = write_builder.new_write()
 table_commit = write_builder.new_commit()
 expect_data = pa.Table.from_pydict({
-  'f0': [-1, 2],
-  'f1': [-1001, 1002]
+    'f0': [-1, 2],
+    'f1': [-1001, 1002]
 }, schema=simple_pa_schema)
 table_write.write_arrow(expect_data)
 table_commit.commit(table_write.prepare_commit())
@@ -248,11 +251,11 @@ write_builder = table.new_batch_write_builder()
 table_update = write_builder.new_update().with_update_type(['f0'])
 table_commit = write_builder.new_commit()
 data2 = pa.Table.from_pydict({
-  '_ROW_ID': [0, 1],
-  'f0': [5, 6],
+    '_ROW_ID': [0, 1],
+    'f0': [5, 6],
 }, schema=pa.schema([
-  ('_ROW_ID', pa.int64()),
-  ('f0', pa.int8()),
+    ('_ROW_ID', pa.int64()),
+    ('f0', pa.int8()),
 ]))
 cmts = table_update.update_by_arrow_with_row_id(data2)
 table_commit.commit(cmts)
@@ -449,6 +452,7 @@ df = ray_dataset.to_pandas()
 ```
 
 **Parameters:**
+
 - `override_num_blocks`: Optional override for the number of output blocks. By default,
   Ray automatically determines the optimal number.
 - `ray_remote_args`: Optional kwargs passed to `ray.remote()` in read tasks
@@ -471,7 +475,40 @@ ctx.target_max_block_size = 256 * 1024 * 1024  # 256MB (default is 128MB)
 ray_dataset = table_read.to_ray(splits)
 ```
 
-See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more details.
+See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more
+details.
+
+### Read Pytorch Dataset
+
+This requires `torch` to be installed.
+
+You can read all the data into a `torch.utils.data.Dataset` or `torch.utils.data.IterableDataset`:
+
+```python
+from torch.utils.data import DataLoader
+
+table_read = read_builder.new_read()
+dataset = table_read.to_torch(splits, streaming=True)
+dataloader = DataLoader(
+    dataset,
+    batch_size=2,
+    num_workers=2,  # Concurrency to read data
+    shuffle=False
+)
+
+# Collect all data from dataloader
+for batch_idx, batch_data in enumerate(dataloader):
+    print(batch_data)
+
+# output:
+#   {'user_id': tensor([1, 2]), 'behavior': ['a', 'b']}
+#   {'user_id': tensor([3, 4]), 'behavior': ['c', 'd']}
+#   {'user_id': tensor([5, 6]), 'behavior': ['e', 'f']}
+#   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
+```
+
+When the `streaming` parameter is true, it will iteratively read;
+when it is false, it will read the full amount of data into memory.
 
 ### Incremental Read
 
@@ -671,22 +708,24 @@ Key points about shard read:
 The following shows the supported features of Python Paimon compared to Java Paimon:
 
 **Catalog Level**
-   - FileSystemCatalog
-   - RestCatalog
+
+- FileSystemCatalog
+- RestCatalog
 
 **Table Level**
-   - Append Tables
-     - `bucket = -1` (unaware)
-     - `bucket > 0` (fixed)
-   - Primary Key Tables
-     - only support deduplicate
-     - `bucket = -2` (postpone)
-     - `bucket > 0` (fixed)
-     - read with deletion vectors enabled
-   - Read/Write Operations
-     - Batch read and write for append tables and primary key tables
-     - Predicate filtering
-     - Overwrite semantics
-     - Incremental reading of Delta data
-     - Reading and writing blob data
-     - `with_shard` feature
+
+- Append Tables
+    - `bucket = -1` (unaware)
+    - `bucket > 0` (fixed)
+- Primary Key Tables
+    - only support deduplicate
+    - `bucket = -2` (postpone)
+    - `bucket > 0` (fixed)
+    - read with deletion vectors enabled
+- Read/Write Operations
+    - Batch read and write for append tables and primary key tables
+    - Predicate filtering
+    - Overwrite semantics
+    - Incremental reading of Delta data
+    - Reading and writing blob data
+    - `with_shard` feature
