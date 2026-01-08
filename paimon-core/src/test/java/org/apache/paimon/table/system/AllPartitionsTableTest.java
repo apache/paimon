@@ -20,9 +20,15 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +39,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
+import static org.apache.paimon.table.system.AllPartitionsTable.TABLE_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link AllPartitionsTable}. */
@@ -66,5 +73,33 @@ public class AllPartitionsTableTest extends TableTestBase {
                         .collect(Collectors.toList());
         result = result.stream().filter(r -> !r.contains("path")).collect(Collectors.toList());
         assertThat(result.get(0).toString()).startsWith("+I(default,T,f1=1,1,680,1,");
+    }
+
+    @Test
+    void testAllPartitionsTableWithProjection() throws Exception {
+        ReadonlyTable table = allPartitionsTable;
+
+        RowType readType =
+                new RowType(
+                        java.util.Arrays.asList(
+                                TABLE_TYPE.getField(0), // database_name
+                                TABLE_TYPE.getField(1), // table_name
+                                TABLE_TYPE.getField(5))); // file_count (field ID 5)
+
+        InnerTableScan scan = table.newScan();
+        InnerTableRead read = table.newRead().withReadType(readType);
+
+        List<InternalRow> rows = new java.util.ArrayList<>();
+        try (RecordReader<InternalRow> reader = read.createReader(scan.plan())) {
+            reader.forEachRemaining(rows::add);
+        }
+
+        assertThat(rows).isNotEmpty();
+        for (InternalRow row : rows) {
+            assertThat(row.getFieldCount()).isEqualTo(3);
+            if (!row.isNullAt(2)) {
+                row.getLong(2);
+            }
+        }
     }
 }

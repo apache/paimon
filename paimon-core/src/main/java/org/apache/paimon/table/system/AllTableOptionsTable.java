@@ -206,10 +206,7 @@ public class AllTableOptionsTable implements ReadonlyTable {
                 iterator =
                         Iterators.transform(
                                 iterator,
-                                row ->
-                                        ProjectedRow.from(
-                                                        readType, AggregationFieldsTable.TABLE_TYPE)
-                                                .replaceRow(row));
+                                row -> ProjectedRow.from(readType, TABLE_TYPE).replaceRow(row));
             }
             return new IteratorRecordReader<>(iterator);
         }
