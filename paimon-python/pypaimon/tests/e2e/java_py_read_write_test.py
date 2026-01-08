@@ -256,4 +256,3 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
-
