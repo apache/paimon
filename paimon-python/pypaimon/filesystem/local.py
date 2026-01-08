@@ -19,6 +19,7 @@ import threading
 import pyarrow
 from pyarrow._fs import LocalFileSystem
 
+
 class PaimonLocalFileSystem(LocalFileSystem):
     
     rename_lock = threading.Lock()
@@ -31,7 +32,3 @@ class PaimonLocalFileSystem(LocalFileSystem):
                 raise Exception("Target file already exists")
 
             super(PaimonLocalFileSystem, self).move(src, dst)
-
-
-
-

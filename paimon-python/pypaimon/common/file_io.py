@@ -18,7 +18,6 @@
 import logging
 import os
 import subprocess
-import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -26,7 +25,7 @@ from urllib.parse import splitport, urlparse
 
 import pyarrow
 from packaging.version import parse
-from pyarrow._fs import FileSystem, LocalFileSystem
+from pyarrow._fs import FileSystem
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options

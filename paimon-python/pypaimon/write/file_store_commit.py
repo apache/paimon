@@ -39,6 +39,7 @@ from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)
 
+
 class FileStoreCommit:
     """
     Core commit logic for file store operations.
