@@ -18,13 +18,6 @@
 from io import BytesIO
 from typing import List
 
-try:
-    from pypaimon.manifest import fastavro_py36_compat
-    if fastavro_py36_compat is not None:
-        fastavro_py36_compat._apply_zstd_patch()
-except (ImportError, AttributeError, NameError):
-    pass
-
 import fastavro
 
 from pypaimon.index.deletion_vector_meta import DeletionVectorMeta

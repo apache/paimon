@@ -21,10 +21,6 @@
 import sys
 if sys.version_info[:2] == (3, 6):
     try:
-        # Import fastavro_py36_compat module (this file is in the same directory)
         from pypaimon.manifest import fastavro_py36_compat  # noqa: F401
-        if fastavro_py36_compat is not None:
-            fastavro_py36_compat._apply_zstd_patch()
-    except (ImportError, AttributeError, NameError):
-        # Module may not be available in some environments, silently skip
+    except ImportError:
         pass
