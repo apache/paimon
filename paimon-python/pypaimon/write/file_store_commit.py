@@ -230,7 +230,7 @@ class FileStoreCommit:
             commit_entries = self._assign_snapshot_id(new_snapshot_id, commit_entries)
 
             # Get the next row ID start from the latest snapshot
-            first_row_id_start = self._get_next_row_id_start()
+            first_row_id_start = self._get_next_row_id_start(latest_snapshot)
 
             # Assign row IDs to new files and get the next row ID for the snapshot
             commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
@@ -512,9 +512,8 @@ class FileStoreCommit:
         """Assign snapshot ID to all commit entries."""
         return [entry.assign_sequence_number(snapshot_id, snapshot_id) for entry in commit_entries]
 
-    def _get_next_row_id_start(self) -> int:
+    def _get_next_row_id_start(self, latest_snapshot) -> int:
         """Get the next row ID start from the latest snapshot."""
-        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
         if latest_snapshot and hasattr(latest_snapshot, 'next_row_id') and latest_snapshot.next_row_id is not None:
             return latest_snapshot.next_row_id
         return 0
