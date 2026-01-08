@@ -210,10 +210,10 @@ run_zstd_manifest_test() {
 
     echo ""
 
-    cd "$PAIMON_PYTHON_ROOT"
+    cd "$PAIMON_PYTHON_DIR"
     echo "Running Python test for JavaPyReadWriteTest.test_read_zstd_manifest_table..."
     local python_result=0
-    if python -m pytest pypaimon/tests/e2e/java_py_read_write_test.py::JavaPyReadWriteTest::test_read_zstd_manifest_table -v; then
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_zstd_manifest_table -v; then
         echo -e "${GREEN}✓ Python zstd manifest test completed successfully${NC}"
     else
         echo -e "${RED}✗ Python zstd manifest test failed${NC}"

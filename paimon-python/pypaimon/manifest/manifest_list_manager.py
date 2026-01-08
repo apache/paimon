@@ -22,13 +22,14 @@ from typing import List
 try:
     from pypaimon.manifest import fastavro_py36_compat
 except ImportError:
-    pass
+    fastavro_py36_compat = None
 
 import fastavro
 
 try:
-    fastavro_py36_compat._apply_zstd_patch()
-except (ImportError, AttributeError):
+    if fastavro_py36_compat is not None:
+        fastavro_py36_compat._apply_zstd_patch()
+except (ImportError, AttributeError, NameError):
     pass
 
 from pypaimon.manifest.schema.manifest_file_meta import (
