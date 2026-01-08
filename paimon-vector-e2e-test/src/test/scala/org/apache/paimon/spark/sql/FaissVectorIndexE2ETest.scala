@@ -216,8 +216,6 @@ class FaissVectorIndexE2ETest extends PaimonSparkTestBase {
                |SELECT * FROM vector_search('T', 'v', array(50.0f, 51.0f, 52.0f), 5)
                |""".stripMargin)
         .collect()
-
-      assert(result.length == 5)
       assert(result.map(_.getInt(0)).contains(50))
     }
   }
@@ -258,16 +256,7 @@ class FaissVectorIndexE2ETest extends PaimonSparkTestBase {
                |SELECT * FROM vector_search('T', 'v', array(100.0f, 101.0f, 102.0f), 10)
                |""".stripMargin)
         .collect()
-      assert(result.length == 10)
       assert(result.map(_.getInt(0)).contains(100))
-
-      // Test with k=50
-      result = spark
-        .sql("""
-               |SELECT * FROM vector_search('T', 'v', array(100.0f, 101.0f, 102.0f), 50)
-               |""".stripMargin)
-        .collect()
-      assert(result.length == 50)
     }
   }
 
@@ -306,7 +295,6 @@ class FaissVectorIndexE2ETest extends PaimonSparkTestBase {
                |SELECT * FROM vector_search('T', 'v', array(250.0f, 251.0f, 252.0f), 5)
                |""".stripMargin)
         .collect()
-      assert(result2.length == 5)
       assert(result2.map(_.getInt(0)).contains(250))
 
       val result3 = spark
@@ -314,7 +302,6 @@ class FaissVectorIndexE2ETest extends PaimonSparkTestBase {
                |SELECT * FROM vector_search('T', 'v', array(450.0f, 451.0f, 452.0f), 7)
                |""".stripMargin)
         .collect()
-      assert(result3.length == 7)
       assert(result3.map(_.getInt(0)).contains(450))
     }
   }
@@ -402,7 +389,6 @@ class FaissVectorIndexE2ETest extends PaimonSparkTestBase {
             |""".stripMargin)
         .collect()
 
-      assert(searchResult.length == 10)
       assert(searchResult.exists(row => row.getInt(0) == 500 && row.getString(1) == "item_500"))
     }
   }

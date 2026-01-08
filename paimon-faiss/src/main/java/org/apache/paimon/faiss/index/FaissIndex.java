@@ -25,6 +25,7 @@ import org.apache.paimon.faiss.IndexIVF;
 import org.apache.paimon.faiss.MetricType;
 
 import java.io.Closeable;
+import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -117,13 +118,31 @@ public class FaissIndex implements Closeable {
     }
 
     /**
-     * Load an index from a byte array.
+     * Create an IVF-SQ8 index (Inverted File with Scalar Quantization 8-bit).
      *
-     * @param data the serialized index data
+     * @param dimension the dimension of vectors
+     * @param nlist the number of inverted lists (clusters)
+     * @param metric the distance metric
+     * @return the created index
+     */
+    public static FaissIndex createIvfSq8Index(int dimension, int nlist, FaissVectorMetric metric) {
+        MetricType metricType = toMetricType(metric);
+        String description = String.format("IDMap,IVF%d,SQ8", nlist);
+        Index index = IndexFactory.create(dimension, description, metricType);
+        return new FaissIndex(index, dimension, metric, FaissIndexType.IVF_SQ8);
+    }
+
+    /**
+     * Load an index from a local file using memory-mapped I/O.
+     *
+     * <p>This method uses FAISS's native file reading which can leverage mmap for efficient memory
+     * usage with large indices.
+     *
+     * @param file the local file containing the FAISS index
      * @return the loaded index
      */
-    public static FaissIndex fromBytes(byte[] data) {
-        Index index = Index.deserialize(data);
+    public static FaissIndex fromFile(File file) {
+        Index index = Index.readFromFile(file);
         return new FaissIndex(
                 index, index.getDimension(), FaissVectorMetric.L2, FaissIndexType.UNKNOWN);
     }

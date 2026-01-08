@@ -41,9 +41,9 @@ public class FaissVectorIndexOptions {
     public static final ConfigOption<FaissIndexType> VECTOR_INDEX_TYPE =
             ConfigOptions.key("vector.index-type")
                     .enumType(FaissIndexType.class)
-                    .defaultValue(FaissIndexType.HNSW)
+                    .defaultValue(FaissIndexType.IVF_SQ8)
                     .withDescription(
-                            "The type of FAISS index to use (FLAT, HNSW, IVF, IVF_PQ), and HNSW is the default");
+                            "The type of FAISS index to use (FLAT, HNSW, IVF, IVF_PQ, IVF_SQ8), and IVF_SQ8 is the default");
 
     public static final ConfigOption<Integer> VECTOR_M =
             ConfigOptions.key("vector.m")
@@ -68,13 +68,13 @@ public class FaissVectorIndexOptions {
     public static final ConfigOption<Integer> VECTOR_NLIST =
             ConfigOptions.key("vector.nlist")
                     .intType()
-                    .defaultValue(4096)
+                    .defaultValue(100)
                     .withDescription("The number of inverted lists (clusters) for IVF index");
 
     public static final ConfigOption<Integer> VECTOR_NPROBE =
             ConfigOptions.key("vector.nprobe")
                     .intType()
-                    .defaultValue(10)
+                    .defaultValue(64)
                     .withDescription("The number of clusters to visit during IVF search");
 
     public static final ConfigOption<Integer> VECTOR_PQ_M =
@@ -109,6 +109,14 @@ public class FaissVectorIndexOptions {
                             "The multiplier for the search limit when filtering is applied. "
                                     + "This is used to fetch more results to ensure enough records after filtering.");
 
+    public static final ConfigOption<Boolean> VECTOR_NORMALIZE =
+            ConfigOptions.key("vector.normalize")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to L2 normalize vectors before indexing and searching. "
+                                    + "Enabling this converts L2 distance to cosine similarity.");
+
     private final int dimension;
     private final FaissVectorMetric metric;
     private final FaissIndexType indexType;
@@ -122,6 +130,7 @@ public class FaissVectorIndexOptions {
     private final int sizePerIndex;
     private final int trainingSize;
     private final int searchFactor;
+    private final boolean normalize;
 
     public FaissVectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
@@ -140,6 +149,7 @@ public class FaissVectorIndexOptions {
                         : VECTOR_SIZE_PER_INDEX.defaultValue();
         this.trainingSize = options.get(VECTOR_TRAINING_SIZE);
         this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
+        this.normalize = options.get(VECTOR_NORMALIZE);
     }
 
     public int dimension() {
@@ -192,5 +202,9 @@ public class FaissVectorIndexOptions {
 
     public int searchFactor() {
         return searchFactor;
+    }
+
+    public boolean normalize() {
+        return normalize;
     }
 }

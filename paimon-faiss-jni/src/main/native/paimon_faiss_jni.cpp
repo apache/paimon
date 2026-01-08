@@ -305,7 +305,7 @@ JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReadFromFi
   (JNIEnv* env, jclass, jstring path) {
     FAISS_TRY
         std::string filePath = jstringToString(env, path);
-        faiss::Index* index = faiss::read_index(filePath.c_str());
+        faiss::Index* index = faiss::read_index(filePath.c_str(), faiss::IO_FLAG_MMAP);
         return reinterpret_cast<jlong>(index);
     FAISS_CATCH(env)
     return 0;

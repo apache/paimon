@@ -33,6 +33,9 @@ public enum FaissIndexType {
     /** IVF-PQ (Inverted File with Product Quantization) index. */
     IVF_PQ("IVF_PQ"),
 
+    /** IVF-SQ8 (Inverted File with Scalar Quantization 8-bit) index. */
+    IVF_SQ8("IVF_SQ8"),
+
     /** Unknown index type (e.g., loaded from serialized data). */
     UNKNOWN("Unknown");
 

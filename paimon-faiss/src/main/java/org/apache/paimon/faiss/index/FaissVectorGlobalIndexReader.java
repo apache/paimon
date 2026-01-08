@@ -32,13 +32,17 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.PriorityQueue;
+import java.util.UUID;
 
 /**
  * Vector global index reader using FAISS.
@@ -50,6 +54,7 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
     private static final int VERSION = 1;
 
     private final List<FaissIndex> indices;
+    private final List<File> localIndexFiles;
     private final List<GlobalIndexIOMeta> ioMetas;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
@@ -66,6 +71,7 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         this.fieldType = fieldType;
         this.options = options;
         this.indices = new ArrayList<>();
+        this.localIndexFiles = new ArrayList<>();
     }
 
     @Override
@@ -84,7 +90,11 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
 
     private GlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
         validateVectorType(vectorSearch.vector());
-        float[] queryVector = (float[]) vectorSearch.vector();
+        float[] queryVector = ((float[]) vectorSearch.vector()).clone();
+        // L2 normalize the query vector if enabled
+        if (options.normalize()) {
+            normalizeL2(queryVector);
+        }
         int limit = vectorSearch.limit();
 
         // Collect results from all indices using a min-heap
@@ -163,7 +173,12 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
                 break;
             case IVF:
             case IVF_PQ:
-                index.setIvfNprobe(options.nprobe());
+            case IVF_SQ8:
+                // For small indices, use higher nprobe to ensure enough results
+                // Use at least nprobe or 10% of index size, whichever is larger
+                int effectiveNprobe =
+                        Math.max(options.nprobe(), (int) Math.max(1, index.size() / 10));
+                index.setIvfNprobe(effectiveNprobe);
                 break;
             default:
                 // No special configuration needed
@@ -229,17 +244,49 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         dataIn.readLong(); // numVectors
         long indexDataLength = dataIn.readLong();
 
-        // Read index data
-        byte[] indexData = new byte[(int) indexDataLength];
-        dataIn.readFully(indexData);
+        // Create a temp file for the raw FAISS index data (for mmap loading)
+        File rawIndexFile =
+                Files.createTempFile("paimon-faiss-raw-" + UUID.randomUUID(), ".faiss").toFile();
+        localIndexFiles.add(rawIndexFile);
 
-        return FaissIndex.fromBytes(indexData);
+        // Write raw FAISS index data to the temp file
+        try (FileOutputStream fos = new FileOutputStream(rawIndexFile)) {
+            byte[] buffer = new byte[32768];
+            long remaining = indexDataLength;
+            while (remaining > 0) {
+                int toRead = (int) Math.min(buffer.length, remaining);
+                dataIn.readFully(buffer, 0, toRead);
+                fos.write(buffer, 0, toRead);
+                remaining -= toRead;
+            }
+        }
+        // Load via mmap from the raw index file
+        return FaissIndex.fromFile(rawIndexFile);
+    }
+
+    /**
+     * L2 normalize the vector in place.
+     *
+     * @param vector the vector to normalize
+     */
+    private void normalizeL2(float[] vector) {
+        float norm = 0.0f;
+        for (float v : vector) {
+            norm += v * v;
+        }
+        norm = (float) Math.sqrt(norm);
+        if (norm > 0) {
+            for (int i = 0; i < vector.length; i++) {
+                vector[i] /= norm;
+            }
+        }
     }
 
     @Override
     public void close() throws IOException {
         Throwable firstException = null;
 
+        // Close all FAISS indices
         for (FaissIndex index : indices) {
             try {
                 index.close();
@@ -252,6 +299,22 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
             }
         }
         indices.clear();
+
+        // Delete local temporary files
+        for (File localFile : localIndexFiles) {
+            try {
+                if (localFile != null && localFile.exists()) {
+                    localFile.delete();
+                }
+            } catch (Throwable t) {
+                if (firstException == null) {
+                    firstException = t;
+                } else {
+                    firstException.addSuppressed(t);
+                }
+            }
+        }
+        localIndexFiles.clear();
 
         if (firstException != null) {
             if (firstException instanceof IOException) {

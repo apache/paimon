@@ -103,6 +103,10 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
                     "Unsupported vector type: " + fieldData.getClass().getName());
         }
         checkDimension(vector);
+        // L2 normalize the vector if enabled
+        if (options.normalize()) {
+            normalizeL2(vector);
+        }
         pendingBatch.add(new VectorEntry(count, vector));
         count++;
 
@@ -228,6 +232,9 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
     private FaissIndex createIndex() {
         int dim = options.dimension();
         FaissVectorMetric metric = options.metric();
+        // Auto-calculate nlist: min(configured nlist, sqrt(sizePerIndex))
+        // This ensures nlist is appropriate for the expected data size
+        int effectiveNlist = Math.max(1, Math.min(options.nlist(), (int) Math.sqrt(sizePerIndex)));
 
         switch (options.indexType()) {
             case FLAT:
@@ -236,10 +243,12 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
                 return FaissIndex.createHnswIndex(
                         dim, options.m(), options.efConstruction(), metric);
             case IVF:
-                return FaissIndex.createIvfIndex(dim, options.nlist(), metric);
+                return FaissIndex.createIvfIndex(dim, effectiveNlist, metric);
             case IVF_PQ:
                 return FaissIndex.createIvfPqIndex(
-                        dim, options.nlist(), options.pqM(), options.pqNbits(), metric);
+                        dim, effectiveNlist, options.pqM(), options.pqNbits(), metric);
+            case IVF_SQ8:
+                return FaissIndex.createIvfSq8Index(dim, effectiveNlist, metric);
             default:
                 throw new IllegalArgumentException(
                         "Unsupported index type: " + options.indexType());
@@ -252,6 +261,24 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
                     String.format(
                             "Vector dimension mismatch: expected %d, but got %d",
                             options.dimension(), vector.length));
+        }
+    }
+
+    /**
+     * L2 normalize the vector in place.
+     *
+     * @param vector the vector to normalize
+     */
+    private void normalizeL2(float[] vector) {
+        float norm = 0.0f;
+        for (float v : vector) {
+            norm += v * v;
+        }
+        norm = (float) Math.sqrt(norm);
+        if (norm > 0) {
+            for (int i = 0; i < vector.length; i++) {
+                vector[i] /= norm;
+            }
         }
     }
 
