@@ -57,9 +57,8 @@ class SuccessResult(CommitResult):
 
 class RetryResult(CommitResult):
 
-    def __init__(self, latest_snapshot, base_data_files, exception: Optional[Exception] = None):
+    def __init__(self, latest_snapshot, exception: Optional[Exception] = None):
         self.latest_snapshot = latest_snapshot
-        self.base_data_files = base_data_files
         self.exception = exception
 
     def is_success(self) -> bool:
@@ -110,11 +109,9 @@ class FileStoreCommit:
                     file=file
                 ))
 
-        self._try_commit(
-            commit_kind="APPEND",
-            commit_entries=commit_entries,
-            commit_identifier=commit_identifier
-        )
+        self._try_commit(commit_kind="APPEND",
+                         commit_entries=commit_entries,
+                         commit_identifier=commit_identifier)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -152,57 +149,47 @@ class FileStoreCommit:
         retry_result = None
         start_time_ms = int(time.time() * 1000)
         thread_id = threading.current_thread().name
-        try:
-            while True:
-                latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+        while True:
+            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
 
-                if commit_kind == "OVERWRITE":
-                    commit_entries = self._generate_overwrite_entries(latest_snapshot)
+            if commit_kind == "OVERWRITE":
+                commit_entries = self._generate_overwrite_entries()
 
-                result = self._try_commit_once(
-                    retry_result=retry_result,
-                    commit_kind=commit_kind,
-                    commit_entries=commit_entries,
-                    commit_identifier=commit_identifier,
-                    latest_snapshot=latest_snapshot
+            result = self._try_commit_once(
+                retry_result=retry_result,
+                commit_kind=commit_kind,
+                commit_entries=commit_entries,
+                commit_identifier=commit_identifier,
+                latest_snapshot=latest_snapshot
+            )
+
+            if result.is_success():
+                logger.warning(
+                    f"Thread {thread_id}: commit success {latest_snapshot.id + 1 if latest_snapshot else 1} "
+                    f"after {retry_count} retries"
                 )
+                break
 
-                if result.is_success():
-                    logger.warning(
-                        f"Thread {thread_id}: commit success {latest_snapshot.id + 1 if latest_snapshot else 1} "
-                        f"after {retry_count} retries"
-                    )
-                    break
+            retry_result = result
 
-                retry_result = result
+            elapsed_ms = int(time.time() * 1000) - start_time_ms
+            if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
+                error_msg = (
+                    f"Commit failed {latest_snapshot.id + 1 if latest_snapshot else 1} "
+                    f"after {elapsed_ms} millis with {retry_count} retries, "
+                    f"there maybe exist commit conflicts between multiple jobs."
+                )
+                if retry_result.exception:
+                    raise RuntimeError(error_msg) from retry_result.exception
+                else:
+                    raise RuntimeError(error_msg)
 
-                elapsed_ms = int(time.time() * 1000) - start_time_ms
-                if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
-                    error_msg = (
-                        f"Thread {thread_id}: Commit failed after {elapsed_ms} millis with {retry_count} retries, "
-                        f"there maybe exist commit conflicts between multiple jobs."
-                    )
-                    logger.warning(
-                        f"Thread {thread_id}: thread commit failed {latest_snapshot.id + 1 if latest_snapshot else 1} "
-                        f"after {retry_count} retries"
-                    )
-                    if retry_result.exception:
-                        raise RuntimeError(error_msg) from retry_result.exception
-                    else:
-                        raise RuntimeError(error_msg)
-
-                self._commit_retry_wait(retry_count)
-                retry_count += 1
-        except Exception as e:
-            logger.warning(f"Thread {thread_id}: _try_commit occurs when committing: {e}", exc_info=True)
-        finally:
-            logger.warning(f"Thread {thread_id}: finally commit {result.is_success()}, {retry_count} retries")
+            self._commit_retry_wait(retry_count)
+            retry_count += 1
 
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry], commit_identifier: int,
                          latest_snapshot: Optional[Snapshot]) -> CommitResult:
-        import threading
-        thread_id = threading.current_thread().name
         start_time_ms = int(time.time() * 1000)
 
         if retry_result is not None and latest_snapshot is not None:
@@ -216,7 +203,7 @@ class FileStoreCommit:
                         snapshot.commit_identifier == commit_identifier and
                         snapshot.commit_kind == commit_kind):
                     logger.info(
-                        f"Thread {thread_id}: Commit already completed (snapshot {snapshot_id}), "
+                        f"Commit already completed (snapshot {snapshot_id}), "
                         f"user: {self.commit_user}, identifier: {commit_identifier}"
                     )
                     return SuccessResult()
@@ -309,37 +296,31 @@ class FileStoreCommit:
 
             self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
             created_base_manifest_list = base_manifest_list
-
+            total_record_count += delta_record_count
+            snapshot_data = Snapshot(
+                version=3,
+                id=new_snapshot_id,
+                schema_id=self.table.table_schema.id,
+                base_manifest_list=base_manifest_list,
+                delta_manifest_list=delta_manifest_list,
+                total_record_count=total_record_count,
+                delta_record_count=delta_record_count,
+                commit_user=self.commit_user,
+                commit_identifier=commit_identifier,
+                commit_kind=commit_kind,
+                time_millis=int(time.time() * 1000),
+                next_row_id=next_row_id,
+            )
+            # Generate partition statistics for the commit
+            statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
             self._cleanup_preparation_failure(created_manifest_file, created_delta_manifest_list,
                                               created_base_manifest_list)
-            logger.warning(f"Thread {thread_id}: Exception occurs when preparing snapshot: {e}", exc_info=True)
-            return RetryResult(latest_snapshot, [], e)
-
-        total_record_count += delta_record_count
-        snapshot_data = Snapshot(
-            version=3,
-            id=new_snapshot_id,
-            schema_id=self.table.table_schema.id,
-            base_manifest_list=base_manifest_list,
-            delta_manifest_list=delta_manifest_list,
-            total_record_count=total_record_count,
-            delta_record_count=delta_record_count,
-            commit_user=self.commit_user,
-            commit_identifier=commit_identifier,
-            commit_kind=commit_kind,
-            time_millis=int(time.time() * 1000),
-            next_row_id=next_row_id,
-        )
-        logger.warning(
-            f"Thread {thread_id}: generate snapshot {snapshot_data}."
-        )
-        # Generate partition statistics for the commit
-        statistics = self._generate_partition_statistics(commit_entries)
+            logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to prepare snapshot: {e}")
+            # return RetryResult(latest_snapshot, [], e)
 
         # Use SnapshotCommit for atomic commit
-        base_data_files = []  # Python doesn't have conflict detection, so base_data_files is empty
-
         try:
             with self.snapshot_commit:
                 success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
@@ -347,7 +328,7 @@ class FileStoreCommit:
                     # Commit failed, clean up temporary files and retry
                     commit_time_sec = (int(time.time() * 1000) - start_time_ms) / 1000
                     logger.warning(
-                        f"Thread {thread_id}: Atomic commit failed for snapshot #{new_snapshot_id} "
+                        f"Atomic commit failed for snapshot #{new_snapshot_id} "
                         f"by user {self.commit_user} "
                         f"with identifier {commit_identifier} and kind {commit_kind} after {commit_time_sec}s. "
                         f"Clean up and try again."
@@ -355,20 +336,20 @@ class FileStoreCommit:
                     # self._cleanup_commit_failure(base_manifest_list, delta_manifest_list)
                     self._cleanup_preparation_failure(created_manifest_file, created_delta_manifest_list,
                                                       created_base_manifest_list)
-                    return RetryResult(latest_snapshot, base_data_files, None)
+                    return RetryResult(latest_snapshot, None)
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
-            logger.warning(f"Thread {thread_id}: Retry commit for exception: {e}", exc_info=True)
-            return RetryResult(latest_snapshot, base_data_files, e)
+            logger.warning("Retry commit for exception")
+            return RetryResult(latest_snapshot, e)
 
         logger.warning(
-            f"Thread {thread_id}: Successfully commit snapshot {new_snapshot_id} to table {self.table.identifier} "
-            f"by user {self.commit_user} "
+            f"Successfully commit snapshot {new_snapshot_id} to table {self.table.identifier} "
+            f"for snapshot-{new_snapshot_id} by user {self.commit_user} "
             + f"with identifier {commit_identifier} and kind {commit_kind}."
         )
         return SuccessResult()
 
-    def _generate_overwrite_entries(self, latest_snapshot):
+    def _generate_overwrite_entries(self):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = FullStartingScanner(self.table, self._overwrite_partition_filter, None).plan_files()

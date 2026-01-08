@@ -15,7 +15,6 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-import logging
 import sys
 from enum import Enum
 from typing import Dict
@@ -26,8 +25,6 @@ from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
 from pypaimon.common.options.config_options import ConfigOptions
 from pypaimon.common.options.config_option import ConfigOption
-
-logger = logging.getLogger(__name__)
 
 
 class ExternalPathStrategy(str, Enum):

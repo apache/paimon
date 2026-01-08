@@ -52,15 +52,6 @@ class SnapshotManager:
         """
         Read the latest snapshot ID from LATEST file with retry mechanism.
         If file doesn't exist or is empty after retries, scan snapshot directory for max ID.
-
-        Args:
-            max_retries: Maximum number of retry attempts (default: 5)
-
-        Returns:
-            The latest snapshot ID as string
-
-        Raises:
-            RuntimeError: If no snapshots found in directory
         """
         import re
         import time
@@ -82,10 +73,6 @@ class SnapshotManager:
                 if retry_count < max_retries - 1:
                     time.sleep(0.001)
 
-        # All retries failed, scan snapshot directory for max ID
-        if not self.file_io.exists(self.snapshot_dir):
-            raise RuntimeError(f"Snapshot directory {self.snapshot_dir} does not exist")
-
         # List all files in snapshot directory
         file_infos = self.file_io.list_status(self.snapshot_dir)
 
@@ -101,8 +88,8 @@ class SnapshotManager:
                 if max_snapshot_id is None or snapshot_id > max_snapshot_id:
                     max_snapshot_id = snapshot_id
 
-        if max_snapshot_id is None:
-            raise RuntimeError(f"No snapshot files found in {self.snapshot_dir}")
+        if not max_snapshot_id:
+            raise RuntimeError(f"No snapshot content found in {self.snapshot_dir}")
 
         return str(max_snapshot_id)
 
