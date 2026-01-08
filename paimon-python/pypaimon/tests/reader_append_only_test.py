@@ -28,7 +28,11 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.file_store_commit import RetryResult
 
 
 class AoReaderTest(unittest.TestCase):
@@ -149,6 +153,62 @@ class AoReaderTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    def test_commit_retry_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_commit_retry_filter', schema, False)
+        table = self.catalog.get_table('default.test_commit_retry_filter')
+        write_builder = table.new_batch_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+        }
+        pa_table1 = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        data2 = {
+            'user_id': [5, 6, 7, 8],
+            'item_id': [1005, 1006, 1007, 1008],
+            'behavior': ['e', 'f', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p2', 'p2'],
+        }
+        pa_table2 = pa.Table.from_pydict(data2, schema=self.pa_schema)
+
+        table_write.write_arrow(pa_table1)
+        table_write.write_arrow(pa_table2)
+
+        messages = table_write.prepare_commit()
+        table_commit.commit(messages)
+        table_write.close()
+
+        snapshot_manager = SnapshotManager(table)
+        latest_snapshot = snapshot_manager.get_latest_snapshot()
+        commit_entries = []
+        for msg in messages:
+            partition = GenericRow(list(msg.partition), table.partition_keys_fields)
+            for file in msg.new_files:
+                commit_entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=table.total_buckets,
+                    file=file
+                ))
+        # mock retry
+        success = table_commit.file_store_commit._try_commit_once(
+            RetryResult(None),
+            "APPEND",
+            commit_entries,
+            BATCH_COMMIT_IDENTIFIER,
+            latest_snapshot)
+        self.assertTrue(success.is_success())
+        table_commit.close()
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
