@@ -186,7 +186,7 @@ class FileStoreCommit:
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry], commit_identifier: int,
                          latest_snapshot: Optional[Snapshot]) -> CommitResult:
-        if self._duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
+        if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
         
         unique_id = uuid.uuid4()
