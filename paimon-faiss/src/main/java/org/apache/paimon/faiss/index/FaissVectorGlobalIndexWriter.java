@@ -27,7 +27,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 
 import java.io.BufferedOutputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -48,7 +47,6 @@ import java.util.List;
  */
 public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
 
-    private static final int VERSION = 1;
     private static final int DEFAULT_BATCH_SIZE = 10000;
 
     private final GlobalIndexFileWriter fileWriter;
@@ -60,6 +58,8 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
 
     private long count = 0;
     private long currentIndexCount = 0;
+    private long currentIndexMinId = Long.MAX_VALUE;
+    private long currentIndexMaxId = Long.MIN_VALUE;
     private final List<VectorEntry> pendingBatch;
     private final List<ResultEntry> results;
     private FaissIndex currentIndex;
@@ -107,6 +107,9 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
         if (options.normalize()) {
             normalizeL2(vector);
         }
+        // Track min/max IDs for current index
+        currentIndexMinId = Math.min(currentIndexMinId, count);
+        currentIndexMaxId = Math.max(currentIndexMaxId, count);
         pendingBatch.add(new VectorEntry(count, vector));
         count++;
 
@@ -204,28 +207,31 @@ public class FaissVectorGlobalIndexWriter implements GlobalIndexSingletonWriter 
                     ByteBuffer.allocateDirect((int) serializeSize).order(ByteOrder.nativeOrder());
             long bytesWritten = currentIndex.serialize(serializeBuffer);
 
-            // Write to output stream with metadata
-            DataOutputStream dataOut = new DataOutputStream(out);
-            dataOut.writeInt(VERSION);
-            dataOut.writeInt(dim);
-            dataOut.writeInt(options.metric().getValue());
-            dataOut.writeInt(options.indexType().ordinal());
-            dataOut.writeLong(currentIndexCount);
-            dataOut.writeLong(bytesWritten);
-
-            // Write serialized index data
+            // Write only the raw serialized index data to file (no header)
             byte[] indexData = new byte[(int) bytesWritten];
             serializeBuffer.rewind();
             serializeBuffer.get(indexData);
-            dataOut.write(indexData);
-            dataOut.flush();
+            out.write(indexData);
+            out.flush();
         }
-        results.add(new ResultEntry(fileName, count, null));
+
+        // Create metadata and add to results
+        FaissIndexMeta meta =
+                new FaissIndexMeta(
+                        dim,
+                        options.metric().getValue(),
+                        options.indexType().ordinal(),
+                        currentIndexCount,
+                        currentIndexMinId,
+                        currentIndexMaxId);
+        results.add(new ResultEntry(fileName, currentIndexCount, meta.serialize()));
 
         // Close and reset
         currentIndex.close();
         currentIndex = null;
         currentIndexCount = 0;
+        currentIndexMinId = Long.MAX_VALUE;
+        currentIndexMaxId = Long.MIN_VALUE;
         trained = false;
     }
 

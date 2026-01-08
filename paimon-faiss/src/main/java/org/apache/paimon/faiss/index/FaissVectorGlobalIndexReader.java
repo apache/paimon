@@ -31,7 +31,6 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -51,14 +50,14 @@ import java.util.UUID;
  */
 public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
 
-    private static final int VERSION = 1;
-
     private final List<FaissIndex> indices;
+    private final List<FaissIndexMeta> indexMetas;
     private final List<File> localIndexFiles;
     private final List<GlobalIndexIOMeta> ioMetas;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final FaissVectorIndexOptions options;
+    private volatile boolean metasLoaded = false;
     private volatile boolean indicesLoaded = false;
 
     public FaissVectorGlobalIndexReader(
@@ -71,13 +70,39 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         this.fieldType = fieldType;
         this.options = options;
         this.indices = new ArrayList<>();
+        this.indexMetas = new ArrayList<>();
         this.localIndexFiles = new ArrayList<>();
     }
 
     @Override
     public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         try {
-            ensureLoadIndices();
+            // First load only metadata
+            ensureLoadMetas();
+
+            RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
+
+            // If includeRowIds is specified, check which indices contain matching rows
+            if (includeRowIds != null) {
+                List<Integer> matchingIndices = new ArrayList<>();
+                for (int i = 0; i < indexMetas.size(); i++) {
+                    FaissIndexMeta meta = indexMetas.get(i);
+                    // Check if the index's rowId range overlaps with includeRowIds
+                    if (hasOverlap(meta.minId(), meta.maxId(), includeRowIds)) {
+                        matchingIndices.add(i);
+                    }
+                }
+                // If no index contains matching rowIds, return empty
+                if (matchingIndices.isEmpty()) {
+                    return Optional.empty();
+                }
+                // Load only matching indices
+                ensureLoadIndices(matchingIndices);
+            } else {
+                // Load all indices
+                ensureLoadAllIndices();
+            }
+
             return Optional.ofNullable(search(vectorSearch));
         } catch (IOException e) {
             throw new RuntimeException(
@@ -86,6 +111,21 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
                             vectorSearch.fieldName(), vectorSearch.limit()),
                     e);
         }
+    }
+
+    /** Check if the range [minId, maxId] has any overlap with includeRowIds. */
+    private boolean hasOverlap(long minId, long maxId, RoaringNavigableMap64 includeRowIds) {
+        // Check if any ID in includeRowIds falls within [minId, maxId]
+        for (Long id : includeRowIds) {
+            if (id >= minId && id <= maxId) {
+                return true;
+            }
+            // Since iterator returns sorted values, we can stop early if we've passed maxId
+            if (id > maxId) {
+                break;
+            }
+        }
+        return false;
     }
 
     private GlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
@@ -115,6 +155,11 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         }
 
         for (FaissIndex index : indices) {
+            // Skip null indices (not loaded)
+            if (index == null) {
+                continue;
+            }
+
             // Configure search parameters based on index type
             configureSearchParams(index);
 
@@ -210,19 +255,29 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private void ensureLoadIndices() throws IOException {
+    /** Load only metadata from all index files. */
+    private void ensureLoadMetas() throws IOException {
+        if (!metasLoaded) {
+            synchronized (this) {
+                if (!metasLoaded) {
+                    for (GlobalIndexIOMeta ioMeta : ioMetas) {
+                        byte[] metaBytes = ioMeta.metadata();
+                        FaissIndexMeta meta = FaissIndexMeta.deserialize(metaBytes);
+                        indexMetas.add(meta);
+                    }
+                    metasLoaded = true;
+                }
+            }
+        }
+    }
+
+    /** Load all indices. */
+    private void ensureLoadAllIndices() throws IOException {
         if (!indicesLoaded) {
             synchronized (this) {
                 if (!indicesLoaded) {
-                    for (GlobalIndexIOMeta meta : ioMetas) {
-                        FaissIndex index = null;
-                        try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
-                            index = loadIndex(in);
-                            indices.add(index);
-                        } catch (Exception e) {
-                            IOUtils.closeQuietly(index);
-                            throw e;
-                        }
+                    for (int i = 0; i < ioMetas.size(); i++) {
+                        loadIndexAt(i);
                     }
                     indicesLoaded = true;
                 }
@@ -230,34 +285,54 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private FaissIndex loadIndex(SeekableInputStream in) throws IOException {
-        DataInputStream dataIn = new DataInputStream(in);
-        int version = dataIn.readInt();
-        if (version != VERSION) {
-            throw new IOException("Unsupported FAISS index version: " + version);
+    /** Load only the specified indices by their positions. */
+    private void ensureLoadIndices(List<Integer> positions) throws IOException {
+        synchronized (this) {
+            // Ensure indices list is large enough
+            while (indices.size() < ioMetas.size()) {
+                indices.add(null);
+            }
+            for (int pos : positions) {
+                if (indices.get(pos) == null) {
+                    loadIndexAt(pos);
+                }
+            }
         }
+    }
 
-        // Read header fields (required for file format compatibility)
-        dataIn.readInt(); // dim
-        dataIn.readInt(); // metricValue
-        dataIn.readInt(); // indexTypeOrdinal
-        dataIn.readLong(); // numVectors
-        long indexDataLength = dataIn.readLong();
+    /** Load a single index at the specified position. */
+    private void loadIndexAt(int position) throws IOException {
+        GlobalIndexIOMeta ioMeta = ioMetas.get(position);
+        FaissIndex index = null;
+        try (SeekableInputStream in = fileReader.getInputStream(ioMeta.fileName())) {
+            index = loadIndex(in);
+            if (indices.size() <= position) {
+                while (indices.size() < position) {
+                    indices.add(null);
+                }
+                indices.add(index);
+            } else {
+                indices.set(position, index);
+            }
+        } catch (Exception e) {
+            IOUtils.closeQuietly(index);
+            throw e;
+        }
+    }
+
+    private FaissIndex loadIndex(SeekableInputStream in) throws IOException {
 
         // Create a temp file for the raw FAISS index data (for mmap loading)
         File rawIndexFile =
-                Files.createTempFile("paimon-faiss-raw-" + UUID.randomUUID(), ".faiss").toFile();
+                Files.createTempFile("paimon-faiss-" + UUID.randomUUID(), ".faiss").toFile();
         localIndexFiles.add(rawIndexFile);
 
-        // Write raw FAISS index data to the temp file
+        // Copy raw FAISS index data to the temp file
         try (FileOutputStream fos = new FileOutputStream(rawIndexFile)) {
             byte[] buffer = new byte[32768];
-            long remaining = indexDataLength;
-            while (remaining > 0) {
-                int toRead = (int) Math.min(buffer.length, remaining);
-                dataIn.readFully(buffer, 0, toRead);
-                fos.write(buffer, 0, toRead);
-                remaining -= toRead;
+            int bytesRead;
+            while ((bytesRead = in.read(buffer)) != -1) {
+                fos.write(buffer, 0, bytesRead);
             }
         }
         // Load via mmap from the raw index file
