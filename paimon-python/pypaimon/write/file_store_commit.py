@@ -219,41 +219,41 @@ class FileStoreCommit:
                 schema_id=self.table.table_schema.id,
             )
             self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
+
+            # process existing_manifest
+            total_record_count = 0
+            if latest_snapshot:
+                existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+                previous_record_count = latest_snapshot.total_record_count
+                if previous_record_count:
+                    total_record_count += previous_record_count
+            else:
+                existing_manifest_files = []
+            self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
+
+            total_record_count += delta_record_count
+            snapshot_data = Snapshot(
+                version=3,
+                id=new_snapshot_id,
+                schema_id=self.table.table_schema.id,
+                base_manifest_list=base_manifest_list,
+                delta_manifest_list=delta_manifest_list,
+                total_record_count=total_record_count,
+                delta_record_count=delta_record_count,
+                commit_user=self.commit_user,
+                commit_identifier=commit_identifier,
+                commit_kind=commit_kind,
+                time_millis=int(time.time() * 1000),
+                next_row_id=next_row_id,
+            )
+
+        # Generate partition statistics for the commit
+            statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
             self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
                                               base_manifest_list)
             logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
             raise RuntimeError(f"Failed to prepare snapshot: {e}")
-
-        # process existing_manifest
-        total_record_count = 0
-        if latest_snapshot:
-            existing_manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
-            previous_record_count = latest_snapshot.total_record_count
-            if previous_record_count:
-                total_record_count += previous_record_count
-        else:
-            existing_manifest_files = []
-        self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
-
-        total_record_count += delta_record_count
-        snapshot_data = Snapshot(
-            version=3,
-            id=new_snapshot_id,
-            schema_id=self.table.table_schema.id,
-            base_manifest_list=base_manifest_list,
-            delta_manifest_list=delta_manifest_list,
-            total_record_count=total_record_count,
-            delta_record_count=delta_record_count,
-            commit_user=self.commit_user,
-            commit_identifier=commit_identifier,
-            commit_kind=commit_kind,
-            time_millis=int(time.time() * 1000),
-            next_row_id=next_row_id,
-        )
-
-        # Generate partition statistics for the commit
-        statistics = self._generate_partition_statistics(commit_entries)
 
         # Use SnapshotCommit for atomic commit
         try:
