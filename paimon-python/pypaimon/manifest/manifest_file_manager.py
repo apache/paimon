@@ -18,7 +18,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from typing import List
-import sys
 
 try:
     from pypaimon.manifest import fastavro_py36_compat

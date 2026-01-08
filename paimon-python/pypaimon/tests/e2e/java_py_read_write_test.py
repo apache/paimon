@@ -256,9 +256,11 @@ class JavaPyReadWriteTest(unittest.TestCase):
         try:
             table = self.catalog.get_table(table_name)
         except Exception as e:
-            self.fail(f"Failed to get table {table_name}. "
-                     f"Make sure Java test (JavaPyZstdManifestTest.testJavaWriteZstdManifestTable) "
-                     f"has been run first. Error: {e}")
+            self.fail(
+                f"Failed to get table {table_name}. "
+                f"Make sure Java test (JavaPyE2ETest.testJavaWriteZstdManifestTable) "
+                f"has been run first. Error: {e}"
+            )
 
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
