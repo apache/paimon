@@ -31,6 +31,7 @@ from pyarrow._fs import FileSystem, LocalFileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
 from pypaimon.table.row.generic_row import GenericRow
@@ -183,9 +184,8 @@ class FileIO:
         )
 
     def _initialize_local_fs(self) -> FileSystem:
-        from pyarrow.fs import LocalFileSystem
 
-        return LocalFileSystem()
+        return PaimonLocalFileSystem()
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
