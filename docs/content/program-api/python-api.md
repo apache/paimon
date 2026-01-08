@@ -44,7 +44,6 @@ Before coming into contact with the Table, you need to create a Catalog.
 
 {{< tabs "create-catalog" >}}
 {{< tab "filesystem" >}}
-
 ```python
 from pypaimon import CatalogFactory
 
@@ -54,7 +53,6 @@ catalog_options = {
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
-
 {{< /tab >}}
 {{< tab "rest catalog" >}}
 The sample code is as follows. The detailed meaning of option can be found in [DLF Token](../concepts/rest/dlf.md).
@@ -64,13 +62,13 @@ from pypaimon import CatalogFactory
 
 # Note that keys and values are all string
 catalog_options = {
-    'metastore': 'rest',
-    'warehouse': 'xxx',
-    'uri': 'xxx',
-    'dlf.region': 'xxx',
-    'token.provider': 'xxx',
-    'dlf.access-key-id': 'xxx',
-    'dlf.access-key-secret': 'xxx'
+  'metastore': 'rest',
+  'warehouse': 'xxx',
+  'uri': 'xxx',
+  'dlf.region': 'xxx',
+  'token.provider': 'xxx',
+  'dlf.access-key-id': 'xxx',
+  'dlf.access-key-secret': 'xxx'
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
@@ -225,8 +223,8 @@ its corresponding `first_row_id`, then groups rows with the same `first_row_id` 
 
 ```python
 simple_pa_schema = pa.schema([
-    ('f0', pa.int8()),
-    ('f1', pa.int16()),
+  ('f0', pa.int8()),
+  ('f1', pa.int16()),
 ])
 schema = Schema.from_pyarrow_schema(simple_pa_schema,
                                     options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
@@ -238,8 +236,8 @@ write_builder = table.new_batch_write_builder()
 table_write = write_builder.new_write()
 table_commit = write_builder.new_commit()
 expect_data = pa.Table.from_pydict({
-    'f0': [-1, 2],
-    'f1': [-1001, 1002]
+  'f0': [-1, 2],
+  'f1': [-1001, 1002]
 }, schema=simple_pa_schema)
 table_write.write_arrow(expect_data)
 table_commit.commit(table_write.prepare_commit())
@@ -251,11 +249,11 @@ write_builder = table.new_batch_write_builder()
 table_update = write_builder.new_update().with_update_type(['f0'])
 table_commit = write_builder.new_commit()
 data2 = pa.Table.from_pydict({
-    '_ROW_ID': [0, 1],
-    'f0': [5, 6],
+  '_ROW_ID': [0, 1],
+  'f0': [5, 6],
 }, schema=pa.schema([
-    ('_ROW_ID', pa.int64()),
-    ('f0', pa.int8()),
+  ('_ROW_ID', pa.int64()),
+  ('f0', pa.int8()),
 ]))
 cmts = table_update.update_by_arrow_with_row_id(data2)
 table_commit.commit(cmts)
@@ -706,24 +704,22 @@ Key points about shard read:
 The following shows the supported features of Python Paimon compared to Java Paimon:
 
 **Catalog Level**
-
-- FileSystemCatalog
-- RestCatalog
+  - FileSystemCatalog
+  - RestCatalog
 
 **Table Level**
-
-- Append Tables
+  - Append Tables
     - `bucket = -1` (unaware)
     - `bucket > 0` (fixed)
-- Primary Key Tables
-    - only support deduplicate
-    - `bucket = -2` (postpone)
-    - `bucket > 0` (fixed)
-    - read with deletion vectors enabled
-- Read/Write Operations
-    - Batch read and write for append tables and primary key tables
-    - Predicate filtering
-    - Overwrite semantics
-    - Incremental reading of Delta data
-    - Reading and writing blob data
-    - `with_shard` feature
+  - Primary Key Tables
+      - only support deduplicate
+      - `bucket = -2` (postpone)
+      - `bucket > 0` (fixed)
+      - read with deletion vectors enabled
+  - Read/Write Operations
+      - Batch read and write for append tables and primary key tables
+      - Predicate filtering
+      - Overwrite semantics
+      - Incremental reading of Delta data
+      - Reading and writing blob data
+      - `with_shard` feature

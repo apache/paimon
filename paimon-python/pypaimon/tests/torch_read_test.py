@@ -50,10 +50,7 @@ class TorchReadTest(unittest.TestCase):
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=cls.pa_schema)
 
-    @parameterized.expand([
-        (True,),
-        (False,),
-    ])
+    @parameterized.expand([True, False])
     def test_torch_read(self, is_streaming: bool = False):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
         self.catalog.create_table(f'default.test_torch_read_{str(is_streaming)}', schema, False)
