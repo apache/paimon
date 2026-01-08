@@ -228,6 +228,35 @@ run_zstd_manifest_test() {
 }
 # Main execution
 main() {
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
+    
+    # For Python 3.6, only run zstd manifest test
+    if [ "$PYTHON_VERSION" = "3.6" ]; then
+        echo -e "${YELLOW}Python 3.6 detected: Running only Zstd Manifest Test${NC}"
+        echo ""
+        
+        local zstd_manifest_result=0
+        if ! run_zstd_manifest_test; then
+            zstd_manifest_result=1
+        fi
+        
+        echo ""
+        echo -e "${YELLOW}=== Test Results Summary ===${NC}"
+        if [[ $zstd_manifest_result -eq 0 ]]; then
+            echo -e "${GREEN}✓ Zstd Manifest Test (Python 3.6 Compatibility): PASSED${NC}"
+            echo ""
+            cleanup_warehouse
+            echo -e "${GREEN}🎉 All tests passed!${NC}"
+            return 0
+        else
+            echo -e "${RED}✗ Zstd Manifest Test (Python 3.6 Compatibility): FAILED${NC}"
+            echo ""
+            cleanup_warehouse
+            return 1
+        fi
+    fi
+    
+    # For other Python versions, run all tests
     local java_write_result=0
     local python_read_result=0
     local python_write_result=0

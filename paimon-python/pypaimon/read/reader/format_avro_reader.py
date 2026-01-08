@@ -20,16 +20,12 @@ from typing import List, Optional, Any
 
 try:
     from pypaimon.manifest import fastavro_py36_compat
-except ImportError:
-    fastavro_py36_compat = None
-
-import fastavro
-
-try:
     if fastavro_py36_compat is not None:
         fastavro_py36_compat._apply_zstd_patch()
 except (ImportError, AttributeError, NameError):
     pass
+
+import fastavro
 import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
