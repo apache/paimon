@@ -246,7 +246,6 @@ class FileStoreCommit:
                 time_millis=int(time.time() * 1000),
                 next_row_id=next_row_id,
             )
-
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
