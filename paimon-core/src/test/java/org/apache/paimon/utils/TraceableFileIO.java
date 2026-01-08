@@ -113,6 +113,11 @@ public class TraceableFileIO implements FileIO {
     }
 
     @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean mkdirs(Path f) throws IOException {
         return originalFs.mkdirs(f);
     }

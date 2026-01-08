@@ -37,6 +37,7 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Options;
+import org.apache.hadoop.fs.Trash;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -151,6 +152,19 @@ public class HadoopFileIO implements FileIO {
     public boolean delete(Path path, boolean recursive) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
         return getFileSystem(hadoopPath).delete(hadoopPath, recursive);
+    }
+
+    @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        FileSystem fs = getFileSystem(hadoopPath);
+        Configuration conf = hadoopConf.get();
+
+        org.apache.hadoop.fs.Path fullyResolvedPath = fs.resolvePath(hadoopPath);
+        FileSystem fullyResolvedFs = FileSystem.get(fullyResolvedPath.toUri(), conf);
+
+        Trash trash = new Trash(fullyResolvedFs, conf);
+        return trash.moveToTrash(fullyResolvedPath);
     }
 
     @Override

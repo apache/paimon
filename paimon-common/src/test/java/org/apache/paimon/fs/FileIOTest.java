@@ -235,6 +235,11 @@ public class FileIOTest {
             return delete(file);
         }
 
+        @Override
+        public boolean moveToTrash(Path path) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+
         private boolean delete(final File f) {
             if (f.isDirectory()) {
                 final File[] files = f.listFiles();

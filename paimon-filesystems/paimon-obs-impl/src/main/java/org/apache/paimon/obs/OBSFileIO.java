@@ -20,6 +20,7 @@ package org.apache.paimon.obs;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
@@ -103,6 +104,11 @@ public class OBSFileIO extends HadoopCompliantFileIO {
                 }
             }
         }
+    }
+
+    @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
     }
 
     @Override

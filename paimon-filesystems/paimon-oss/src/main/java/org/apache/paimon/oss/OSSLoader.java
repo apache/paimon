@@ -78,6 +78,11 @@ public class OSSLoader implements FileIOLoader {
         }
 
         @Override
+        public boolean moveToTrash(Path path) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         protected FileIO createFileIO(Path path) {
             FileIO fileIO = getLoader().newInstance(OSS_CLASS);
             fileIO.configure(CatalogContext.create(options));

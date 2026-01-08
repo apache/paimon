@@ -20,6 +20,7 @@ package org.apache.paimon.azure;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
@@ -64,6 +65,11 @@ public class AzureFileIO extends HadoopCompliantFileIO {
     @Override
     public void configure(CatalogContext context) {
         this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromContext(context));
+    }
+
+    @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
     }
 
     // add additional config entries from the IO config to the Hadoop config

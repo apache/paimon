@@ -147,6 +147,11 @@ public class JindoFileIO extends HadoopCompliantFileIO {
     }
 
     @Override
+    public boolean moveToTrash(Path path) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     protected Pair<JindoHadoopSystem, String> createFileSystem(org.apache.hadoop.fs.Path path) {
         final String scheme = path.toUri().getScheme();
         final String authority = path.toUri().getAuthority();
