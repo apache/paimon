@@ -154,21 +154,19 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
     }
 
     @Test
-    public void testBucketCountStatistics() throws Exception {
+    public void testTotalBucketsStatistics() throws Exception {
         String fixedBucketTableName = "fixed_bucket_tbl";
-        sql(
+        batchSql(
                 String.format(
                         "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='2', 'bucket-key'='a')",
                         DATABASE_NAME, fixedBucketTableName));
-        sql(
+        batchSql(
                 String.format(
                         "INSERT INTO %s.%s VALUES (1, 10, 1), (2, 20, 1)",
                         DATABASE_NAME, fixedBucketTableName));
-        validateBucketCount(DATABASE_NAME, fixedBucketTableName, 2);
+        validateTotalBuckets(DATABASE_NAME, fixedBucketTableName, 2);
 
         String dynamicBucketTableName = "dynamic_bucket_tbl";
-        // enable metastore.partitioned-table to trigger
-        // org.apache.paimon.rest.RESTCatalogServer.partitionsApiHandle
         sql(
                 String.format(
                         "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='-1', 'metastore.partitioned-table' = 'true')",
@@ -177,28 +175,28 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                 String.format(
                         "INSERT INTO %s.dynamic_bucket_tbl VALUES (1, 10, 1), (2, 20, 1)",
                         DATABASE_NAME));
-        validateBucketCount(DATABASE_NAME, "dynamic_bucket_tbl", 1);
+        validateTotalBuckets(DATABASE_NAME, "dynamic_bucket_tbl", -1);
 
         String postponeBucketTableName = "postpone_bucket_tbl";
-        sql(
+        batchSql(
                 String.format(
                         "CREATE TABLE %s.%s (a INT, b INT, p INT, PRIMARY KEY (p, a) NOT ENFORCED) PARTITIONED BY (p) WITH ('bucket'='-2')",
                         DATABASE_NAME, postponeBucketTableName));
-        sql(
+        batchSql(
                 String.format(
                         "INSERT INTO %s.%s VALUES (1, 10, 1), (2, 20, 1)",
                         DATABASE_NAME, postponeBucketTableName));
-        validateBucketCount(DATABASE_NAME, postponeBucketTableName, 1);
+        validateTotalBuckets(DATABASE_NAME, postponeBucketTableName, 1);
     }
 
-    private void validateBucketCount(
-            String databaseName, String tableName, Integer expectedBucketCount) throws Exception {
+    private void validateTotalBuckets(
+            String databaseName, String tableName, Integer expectedTotalBuckets) throws Exception {
         Catalog flinkCatalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
         try (org.apache.paimon.catalog.Catalog catalog = ((FlinkCatalog) flinkCatalog).catalog()) {
             List<Partition> partitions =
                     catalog.listPartitions(Identifier.create(databaseName, tableName));
             assertThat(partitions).isNotEmpty();
-            assertThat(partitions.get(0).bucketCount()).isEqualTo(expectedBucketCount);
+            assertThat(partitions.get(0).totalBuckets()).isEqualTo(expectedTotalBuckets);
         }
     }
 }

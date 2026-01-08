@@ -40,7 +40,7 @@ class PartitionTest {
                         1024L, // fileSizeInBytes
                         2L, // fileCount
                         System.currentTimeMillis(), // lastFileCreationTime
-                        10, // bucketCount
+                        10, // totalBuckets
                         false, // done
                         null, // createdAt
                         null, // createdBy
@@ -58,7 +58,7 @@ class PartitionTest {
 
         assertThat(json).contains("done");
         assertThat(json).contains("recordCount");
-        assertThat(json).contains("bucketCount");
+        assertThat(json).contains("totalBuckets");
     }
 
     @Test
@@ -71,7 +71,7 @@ class PartitionTest {
                         1024L,
                         2L,
                         System.currentTimeMillis(),
-                        10, // bucketCount
+                        10, // totalBuckets
                         true,
                         1234567890L, // createdAt
                         "user1", // createdBy
@@ -81,7 +81,7 @@ class PartitionTest {
 
         String json = JsonSerdeUtil.toFlatJson(partition);
 
-        assertThat(json).contains("bucketCount");
+        assertThat(json).contains("totalBuckets");
         assertThat(json).contains("createdAt");
         assertThat(json).contains("createdBy");
         assertThat(json).contains("updatedAt");

@@ -479,7 +479,7 @@ public class HiveCatalog extends AbstractCatalog {
                 String modifyTimeSeconds = String.valueOf(partition.lastFileCreationTime() / 1000);
                 statistic.put(LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
 
-                statistic.put(BUCKET_COUNT, String.valueOf(partition.bucketCount()));
+                statistic.put(TOTAL_BUCKETS, String.valueOf(partition.totalBuckets()));
 
                 // just for being compatible with hive metastore
                 statistic.put(HIVE_LAST_UPDATE_TIME_PROP, modifyTimeSeconds);
@@ -560,9 +560,9 @@ public class HiveCatalog extends AbstractCatalog {
                                                     parameters.getOrDefault(
                                                             LAST_UPDATE_TIME_PROP,
                                                             System.currentTimeMillis() + ""));
-                                    int bucketCount =
+                                    int totalBuckets =
                                             Integer.parseInt(
-                                                    parameters.getOrDefault(BUCKET_COUNT, "1"));
+                                                    parameters.getOrDefault(TOTAL_BUCKETS, "0"));
                                     return new org.apache.paimon.partition.Partition(
                                             Collections.singletonMap(
                                                     tagToPartitionField, part.getValues().get(0)),
@@ -570,7 +570,7 @@ public class HiveCatalog extends AbstractCatalog {
                                             fileSizeInBytes,
                                             fileCount,
                                             lastFileCreationTime,
-                                            bucketCount,
+                                            totalBuckets,
                                             false);
                                 })
                         .collect(Collectors.toList());

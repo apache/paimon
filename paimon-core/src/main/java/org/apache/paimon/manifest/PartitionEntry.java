@@ -44,7 +44,7 @@ public class PartitionEntry {
     private final long fileSizeInBytes;
     private final long fileCount;
     private final long lastFileCreationTime;
-    private final int bucketCount;
+    private final int totalBuckets;
 
     public PartitionEntry(
             BinaryRow partition,
@@ -52,13 +52,13 @@ public class PartitionEntry {
             long fileSizeInBytes,
             long fileCount,
             long lastFileCreationTime,
-            int bucketCount) {
+            int totalBuckets) {
         this.partition = partition;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
         this.lastFileCreationTime = lastFileCreationTime;
-        this.bucketCount = bucketCount;
+        this.totalBuckets = totalBuckets;
     }
 
     public BinaryRow partition() {
@@ -81,8 +81,8 @@ public class PartitionEntry {
         return lastFileCreationTime;
     }
 
-    public int bucketCount() {
-        return bucketCount;
+    public int totalBuckets() {
+        return totalBuckets;
     }
 
     public PartitionEntry merge(PartitionEntry entry) {
@@ -92,7 +92,7 @@ public class PartitionEntry {
                 fileSizeInBytes + entry.fileSizeInBytes,
                 fileCount + entry.fileCount,
                 Math.max(lastFileCreationTime, entry.lastFileCreationTime),
-                Math.max(bucketCount, entry.bucketCount));
+                entry.totalBuckets);
     }
 
     public Partition toPartition(InternalRowPartitionComputer computer) {
@@ -102,7 +102,7 @@ public class PartitionEntry {
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime,
-                bucketCount,
+                totalBuckets,
                 false);
     }
 
@@ -113,18 +113,7 @@ public class PartitionEntry {
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime,
-                bucketCount);
-    }
-
-    public PartitionStatistics toPartitionStatistics(
-            InternalRowPartitionComputer computer, Integer dynamicBucketCount) {
-        return new PartitionStatistics(
-                computer.generatePartValues(partition),
-                recordCount,
-                fileSizeInBytes,
-                fileCount,
-                lastFileCreationTime,
-                dynamicBucketCount);
+                totalBuckets);
     }
 
     public static PartitionEntry fromManifestEntry(ManifestEntry entry) {
@@ -132,7 +121,7 @@ public class PartitionEntry {
     }
 
     public static PartitionEntry fromDataFile(
-            BinaryRow partition, FileKind kind, DataFileMeta file, Integer bucketCount) {
+            BinaryRow partition, FileKind kind, DataFileMeta file, int totalBuckets) {
         long recordCount = file.rowCount();
         long fileSizeInBytes = file.fileSize();
         long fileCount = 1;
@@ -147,7 +136,7 @@ public class PartitionEntry {
                 fileSizeInBytes,
                 fileCount,
                 file.creationTimeEpochMillis(),
-                Optional.ofNullable(bucketCount).orElse(0));
+                totalBuckets);
     }
 
     public static Collection<PartitionEntry> merge(Collection<ManifestEntry> fileEntries) {
@@ -167,7 +156,11 @@ public class PartitionEntry {
             BinaryRow partition = split.partition();
             for (DataFileMeta file : split.dataFiles()) {
                 PartitionEntry partitionEntry =
-                        fromDataFile(partition, ADD, file, split.totalBuckets());
+                        fromDataFile(
+                                partition,
+                                ADD,
+                                file,
+                                Optional.ofNullable(split.totalBuckets()).orElse(0));
                 partitions.compute(
                         partition,
                         (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
@@ -199,7 +192,7 @@ public class PartitionEntry {
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
                 && Objects.equals(partition, that.partition)
-                && Objects.equals(bucketCount, that.bucketCount);
+                && Objects.equals(totalBuckets, that.totalBuckets);
     }
 
     @Override
@@ -210,6 +203,6 @@ public class PartitionEntry {
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime,
-                bucketCount);
+                totalBuckets);
     }
 }

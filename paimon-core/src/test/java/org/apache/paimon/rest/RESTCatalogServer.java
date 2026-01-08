@@ -2405,7 +2405,7 @@ public class RESTCatalogServer {
                                                                                 .lastFileCreationTime(),
                                                                         stats
                                                                                 .lastFileCreationTime()),
-                                                                stats.bucketCount(),
+                                                                stats.totalBuckets(),
                                                                 oldPartition.done(),
                                                                 oldPartition.createdAt(),
                                                                 oldPartition.createdBy(),
@@ -2631,7 +2631,7 @@ public class RESTCatalogServer {
                 stats.fileSizeInBytes(),
                 stats.fileCount(),
                 stats.lastFileCreationTime(),
-                stats.bucketCount(),
+                stats.totalBuckets(),
                 false,
                 System.currentTimeMillis(),
                 "created",

@@ -74,7 +74,7 @@ public class PartitionStatisticsReporter implements Closeable {
             long rowCount = 0;
             long totalSize = 0;
             long fileCount = 0;
-            int bucketCount = 0;
+            int totalBuckets = 0;
             for (DataSplit split : splits) {
                 List<DataFileMeta> fileMetas = split.dataFiles();
                 fileCount += fileMetas.size();
@@ -82,14 +82,7 @@ public class PartitionStatisticsReporter implements Closeable {
                     rowCount += fileMeta.rowCount();
                     totalSize += fileMeta.fileSize();
                 }
-                Integer splitTotalBuckets = split.totalBuckets();
-                if (splitTotalBuckets != null) {
-                    bucketCount = Math.max(bucketCount, splitTotalBuckets);
-                }
-                bucketCount =
-                        Math.max(
-                                bucketCount,
-                                Optional.ofNullable(split.totalBuckets()).orElse(bucketCount));
+                totalBuckets = Optional.ofNullable(split.totalBuckets()).orElse(0);
             }
 
             PartitionStatistics partitionStats =
@@ -99,7 +92,7 @@ public class PartitionStatisticsReporter implements Closeable {
                             totalSize,
                             fileCount,
                             modifyTimeMillis,
-                            bucketCount);
+                            totalBuckets);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
             partitionHandler.alterPartitions(Collections.singletonList(partitionStats));
         }

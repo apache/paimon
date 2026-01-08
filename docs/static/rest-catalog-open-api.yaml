@@ -3252,7 +3252,7 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
-        bucketCount:
+        totalBuckets:
           type: integer
           format: int32
         done:
@@ -3288,7 +3288,7 @@ components:
         lastFileCreationTime:
           type: integer
           format: int32
-        bucketCount:
+        totalBuckets:
           type: integer
           format: int64
   #######################################

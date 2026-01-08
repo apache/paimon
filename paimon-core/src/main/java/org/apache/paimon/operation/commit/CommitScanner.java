@@ -21,7 +21,6 @@ package org.apache.paimon.operation.commit;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.BucketEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
@@ -35,9 +34,7 @@ import org.apache.paimon.table.source.ScanMode;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static java.util.Collections.emptyList;
 
@@ -124,15 +121,5 @@ public class CommitScanner {
         changesWithOverwrite.addAll(changes);
         indexChangesWithOverwrite.addAll(indexFiles);
         return new CommitChanges(changesWithOverwrite, emptyList(), indexChangesWithOverwrite);
-    }
-
-    public Map<BinaryRow, Integer> readBucketCounts(Snapshot snapshot, List<BinaryRow> partitions) {
-        List<BucketEntry> bucketEntries =
-                scan.withSnapshot(snapshot).withPartitionFilter(partitions).readBucketEntries();
-        Map<BinaryRow, Integer> result = new HashMap<>();
-        for (BucketEntry entry : bucketEntries) {
-            result.compute(entry.partition(), (k, v) -> (v == null ? 0 : v) + 1);
-        }
-        return result;
     }
 }
