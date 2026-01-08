@@ -306,7 +306,7 @@ class FileStoreCommit:
         )
         return SuccessResult()
 
-    def _duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
+    def _is_duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
         if retry_result is not None and latest_snapshot is not None:
             start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
             if retry_result.latest_snapshot is not None:
