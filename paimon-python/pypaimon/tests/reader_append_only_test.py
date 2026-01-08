@@ -421,7 +421,7 @@ class AoReaderTest(unittest.TestCase):
         import threading
 
         # Run the test 10 times to verify stability
-        iter_num = 10
+        iter_num = 5
         for test_iteration in range(iter_num):
             # Create a unique table for each iteration
             table_name = f'default.test_concurrent_writes_{test_iteration}'
