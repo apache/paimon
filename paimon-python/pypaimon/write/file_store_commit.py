@@ -287,6 +287,24 @@ class FileStoreCommit:
                 ))
         return entries
 
+    def _commit_retry_wait(self, retry_count: int):
+        import threading
+        thread_id = threading.get_ident()
+
+        retry_wait_ms = min(
+            self.commit_min_retry_wait * (2 ** retry_count),
+            self.commit_max_retry_wait
+        )
+
+        jitter_ms = random.randint(0, max(1, int(retry_wait_ms * 0.2)))
+        total_wait_ms = retry_wait_ms + jitter_ms
+
+        logger.debug(
+            f"Thread {thread_id}: Waiting {total_wait_ms}ms before retry (base: {retry_wait_ms}ms, "
+            f"jitter: {jitter_ms}ms)"
+        )
+        time.sleep(total_wait_ms / 1000.0)
+
     def _cleanup_preparation_failure(self, manifest_file: Optional[str],
                                      delta_manifest_list: Optional[str],
                                      base_manifest_list: Optional[str]):
@@ -310,24 +328,6 @@ class FileStoreCommit:
                 self.table.file_io.delete_quietly(manifest_file_path)
         except Exception as e:
             logger.warning(f"Failed to clean up temporary files during preparation failure: {e}", exc_info=True)
-
-    def _commit_retry_wait(self, retry_count: int):
-        import threading
-        thread_id = threading.get_ident()
-
-        retry_wait_ms = min(
-            self.commit_min_retry_wait * (2 ** retry_count),
-            self.commit_max_retry_wait
-        )
-
-        jitter_ms = random.randint(0, max(1, int(retry_wait_ms * 0.2)))
-        total_wait_ms = retry_wait_ms + jitter_ms
-
-        logger.debug(
-            f"Thread {thread_id}: Waiting {total_wait_ms}ms before retry (base: {retry_wait_ms}ms, "
-            f"jitter: {jitter_ms}ms)"
-        )
-        time.sleep(total_wait_ms / 1000.0)
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
