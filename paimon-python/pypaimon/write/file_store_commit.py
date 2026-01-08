@@ -40,6 +40,30 @@ from pypaimon.write.commit_message import CommitMessage
 logger = logging.getLogger(__name__)
 
 
+class CommitResult:
+    """Base class for commit results."""
+
+    def is_success(self) -> bool:
+        """Returns True if commit was successful."""
+        raise NotImplementedError
+
+
+class SuccessResult(CommitResult):
+    """Result indicating successful commit."""
+
+    def is_success(self) -> bool:
+        return True
+
+
+class RetryResult(CommitResult):
+
+    def __init__(self, latest_snapshot, exception: Optional[Exception] = None):
+        self.latest_snapshot = latest_snapshot
+        self.exception = exception
+
+    def is_success(self) -> bool:
+        return False
+
 class FileStoreCommit:
     """
     Core commit logic for file store operations.
@@ -121,6 +145,7 @@ class FileStoreCommit:
         import threading
 
         retry_count = 0
+        retry_result = None
         start_time_ms = int(time.time() * 1000)
         thread_id = threading.current_thread().name
         while True:
@@ -128,18 +153,21 @@ class FileStoreCommit:
             commit_entries = commit_entries_plan(latest_snapshot)
 
             result = self._try_commit_once(
+                retry_result=retry_result,
                 commit_kind=commit_kind,
                 commit_entries=commit_entries,
                 commit_identifier=commit_identifier,
                 latest_snapshot=latest_snapshot
             )
 
-            if result:
+            if result.is_success():
                 logger.info(
                     f"Thread {thread_id}: commit success {latest_snapshot.id + 1 if latest_snapshot else 1} "
                     f"after {retry_count} retries"
                 )
                 break
+
+            retry_result = result
 
             elapsed_ms = int(time.time() * 1000) - start_time_ms
             if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
@@ -148,14 +176,33 @@ class FileStoreCommit:
                     f"after {elapsed_ms} millis with {retry_count} retries, "
                     f"there maybe exist commit conflicts between multiple jobs."
                 )
-                raise RuntimeError(error_msg)
+                if retry_result.exception:
+                    raise RuntimeError(error_msg) from retry_result.exception
+                else:
+                    raise RuntimeError(error_msg)
 
             self._commit_retry_wait(retry_count)
             retry_count += 1
 
-    def _try_commit_once(self, commit_kind: str,
+    def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry], commit_identifier: int,
-                         latest_snapshot: Optional[Snapshot]) -> bool:
+                         latest_snapshot: Optional[Snapshot]) -> CommitResult:
+        if retry_result is not None and latest_snapshot is not None:
+            start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
+            if retry_result.latest_snapshot is not None:
+                start_check_snapshot_id = retry_result.latest_snapshot.id + 1
+
+            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 2):
+                snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+                if (snapshot and snapshot.commit_user == self.commit_user and
+                        snapshot.commit_identifier == commit_identifier and
+                        snapshot.commit_kind == commit_kind):
+                    logger.info(
+                        f"Commit already completed (snapshot {snapshot_id}), "
+                        f"user: {self.commit_user}, identifier: {commit_identifier}"
+                    )
+                    return SuccessResult()
+
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
@@ -260,11 +307,18 @@ class FileStoreCommit:
                 if not success:
                     logger.warning(f"Atomic commit failed for snapshot #{new_snapshot_id} failed")
                     self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list)
-                return success
-        except Exception:
+                    return RetryResult(latest_snapshot, None)
+        except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception")
-            return False
+            return RetryResult(latest_snapshot, e)
+
+        logger.warning(
+            f"Successfully commit snapshot {new_snapshot_id} to table {self.table.identifier} "
+            f"for snapshot-{new_snapshot_id} by user {self.commit_user} "
+            + f"with identifier {commit_identifier} and kind {commit_kind}."
+        )
+        return SuccessResult()
 
     def _generate_overwrite_entries(self, latestSnapshot):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
