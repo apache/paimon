@@ -48,6 +48,7 @@ public class CloneAction extends ActionBase {
     @Nullable private final List<String> excludedTables;
     @Nullable private final String preferFileFormat;
     private final String cloneFrom;
+    private final boolean metaOnly;
 
     public CloneAction(
             String sourceDatabase,
@@ -61,7 +62,8 @@ public class CloneAction extends ActionBase {
             @Nullable List<String> includedTables,
             @Nullable List<String> excludedTables,
             @Nullable String preferFileFormat,
-            String cloneFrom) {
+            String cloneFrom,
+            boolean metaOnly) {
         super(sourceCatalogConfig);
 
         if (cloneFrom.equalsIgnoreCase("hive")) {
@@ -94,6 +96,7 @@ public class CloneAction extends ActionBase {
                         ? preferFileFormat
                         : preferFileFormat.toLowerCase();
         this.cloneFrom = cloneFrom;
+        this.metaOnly = metaOnly;
     }
 
     @Override
@@ -113,7 +116,8 @@ public class CloneAction extends ActionBase {
                         whereSql,
                         includedTables,
                         excludedTables,
-                        preferFileFormat);
+                        preferFileFormat,
+                        metaOnly);
                 break;
             case "paimon":
                 ClonePaimonTableUtils.build(
@@ -129,7 +133,8 @@ public class CloneAction extends ActionBase {
                         whereSql,
                         includedTables,
                         excludedTables,
-                        preferFileFormat);
+                        preferFileFormat,
+                        metaOnly);
                 break;
         }
     }
