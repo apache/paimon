@@ -20,13 +20,17 @@ from io import BytesIO
 from typing import List
 import sys
 
-# Apply zstd fix for Python 3.6 before importing fastavro
 try:
-    from pypaimon.manifest.fastavro_zstd_py36_fix import *  # noqa: F401, F403
+    from pypaimon.manifest import fastavro_py36_compat
 except ImportError:
     pass
 
 import fastavro
+
+try:
+    fastavro_py36_compat._apply_zstd_patch()
+except (ImportError, AttributeError):
+    pass
 
 from datetime import datetime
 

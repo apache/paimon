@@ -249,3 +249,25 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
+
+    def test_read_zstd_manifest_table(self):
+        table_name = 'default.zstd_manifest_test_table'
+        
+        try:
+            table = self.catalog.get_table(table_name)
+        except Exception as e:
+            self.fail(f"Failed to get table {table_name}. "
+                     f"Make sure Java test (JavaPyZstdManifestTest.testJavaWriteZstdManifestTable) "
+                     f"has been run first. Error: {e}")
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        
+        splits = table_scan.plan().splits()
+        result = table_read.to_pandas(splits)
+        
+        self.assertEqual(len(result), 3)
+        expected_ids = {1, 2, 3}
+        actual_ids = set(result['id'].tolist())
+        self.assertEqual(actual_ids, expected_ids)

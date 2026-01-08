@@ -192,6 +192,40 @@ run_pk_dv_test() {
         return 1
     fi
 }
+
+# Function to run zstd manifest e2e test
+run_zstd_manifest_test() {
+    echo -e "${YELLOW}=== Step 6: Running Zstd Manifest Compression Test (Python 3.6 Compatibility) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testJavaWriteZstdManifestTable..."
+    local java_result=0
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteZstdManifestTable -pl paimon-core -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java zstd manifest test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java zstd manifest test failed${NC}"
+        java_result=1
+    fi
+
+    echo ""
+
+    cd "$PAIMON_PYTHON_ROOT"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_zstd_manifest_table..."
+    local python_result=0
+    if python -m pytest pypaimon/tests/e2e/java_py_read_write_test.py::JavaPyReadWriteTest::test_read_zstd_manifest_table -v; then
+        echo -e "${GREEN}✓ Python zstd manifest test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Python zstd manifest test failed${NC}"
+        python_result=1
+    fi
+
+    if [[ $java_result -eq 0 && $python_result -eq 0 ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
 # Main execution
 main() {
     local java_write_result=0
@@ -199,6 +233,7 @@ main() {
     local python_write_result=0
     local java_read_result=0
     local pk_dv_result=0
+    local zstd_manifest_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
     echo ""
@@ -241,6 +276,12 @@ main() {
     if ! run_pk_dv_test; then
         pk_dv_result=1
     fi
+
+    # Run zstd manifest test
+    if ! run_zstd_manifest_test; then
+        zstd_manifest_result=1
+    fi
+
     echo ""
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
@@ -268,18 +309,24 @@ main() {
         echo -e "${RED}✗ Java Read Test (Parquet + Lance): FAILED${NC}"
     fi
 
-     if [[ $pk_dv_result -eq 0 ]]; then
-          echo -e "${GREEN}✓ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): PASSED${NC}"
-      else
-          echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
-      fi
+    if [[ $pk_dv_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): PASSED${NC}"
+    else
+        echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
+    fi
+
+    if [[ $zstd_manifest_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Zstd Manifest Test (Python 3.6 Compatibility): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Zstd Manifest Test (Python 3.6 Compatibility): FAILED${NC}"
+    fi
 
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $zstd_manifest_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

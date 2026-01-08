@@ -18,7 +18,17 @@
 
 from typing import List, Optional, Any
 
+try:
+    from pypaimon.manifest import fastavro_py36_compat
+except ImportError:
+    pass
+
 import fastavro
+
+try:
+    fastavro_py36_compat._apply_zstd_patch()
+except (ImportError, AttributeError):
+    pass
 import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
