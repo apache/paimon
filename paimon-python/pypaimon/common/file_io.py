@@ -40,8 +40,6 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
-    rename_lock = threading.Lock()
-
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
@@ -255,15 +253,7 @@ class FileIO:
                 self.mkdirs(str(dst_parent))
 
             src_str = self.to_filesystem_path(src)
-            if isinstance(self.filesystem, LocalFileSystem):
-                if self.exists(dst):
-                    return False
-                with FileIO.rename_lock:
-                    if self.exists(dst):
-                        return False
-                    self.filesystem.move(src_str, dst_str)
-            else:
-                self.filesystem.move(src_str, dst_str)
+            self.filesystem.move(src_str, dst_str)
             return True
         except Exception as e:
             self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
