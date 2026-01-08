@@ -390,9 +390,7 @@ public class JavaPyE2ETest {
                         .column("id", DataTypes.INT())
                         .column("name", DataTypes.STRING())
                         .column("value", DataTypes.DOUBLE())
-                        .option(
-                                MANIFEST_COMPRESSION.key(),
-                                "zstd")
+                        .option(MANIFEST_COMPRESSION.key(), "zstd")
                         .build();
 
         catalog.createTable(identifier, schema, true);
@@ -412,14 +410,7 @@ public class JavaPyE2ETest {
             commit.commit(0, write.prepareCommit(true, 0));
         }
 
-        // Verify data was written
         assertThat(fileStoreTable.newSnapshotReader().read().dataSplits()).hasSizeGreaterThan(0);
-
-        System.out.println(
-                "✓ Java test completed: Created table with zstd-compressed manifest files");
-        System.out.println("  Table location: " + fileStoreTable.location());
-        System.out.println("  Manifest compression: " + manifestCompression);
-        System.out.println("  Python test should now read this table to reproduce the error");
     }
 
     // Helper method from TableTestBase
