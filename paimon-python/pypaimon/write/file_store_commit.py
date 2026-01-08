@@ -85,8 +85,8 @@ class FileStoreCommit:
                 ))
 
         self._try_commit(commit_kind="APPEND",
-                         commit_entries=commit_entries,
-                         commit_identifier=commit_identifier)
+                         commit_identifier=commit_identifier,
+                         commit_entries_plan=lambda snapshot : commit_entries)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -113,11 +113,11 @@ class FileStoreCommit:
 
         self._try_commit(
             commit_kind="OVERWRITE",
-            commit_entries=None,  # Will be generated in _try_commit based on latest snapshot
-            commit_identifier=commit_identifier
+            commit_identifier=commit_identifier,
+            commit_entries_plan= lambda snapshot : self._generate_overwrite_entries(snapshot)
         )
 
-    def _try_commit(self, commit_kind, commit_entries, commit_identifier):
+    def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan):
         import threading
 
         retry_count = 0
@@ -125,9 +125,7 @@ class FileStoreCommit:
         thread_id = threading.current_thread().name
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-
-            if commit_kind == "OVERWRITE":
-                commit_entries = self._generate_overwrite_entries()
+            commit_entries = commit_entries_plan(latest_snapshot)
 
             result = self._try_commit_once(
                 commit_kind=commit_kind,
@@ -192,34 +190,40 @@ class FileStoreCommit:
             else:
                 deleted_file_count += 1
                 delta_record_count -= entry.file.row_count
-        self.manifest_file_manager.write(new_manifest_file, commit_entries)
-        # TODO: implement noConflictsOrFail logic
-        partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
-        partition_min_stats = [min(col) for col in partition_columns]
-        partition_max_stats = [max(col) for col in partition_columns]
-        partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
-        if not all(count == 0 for count in partition_null_counts):
-            raise RuntimeError("Partition value should not be null")
-        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
-        new_manifest_file_meta = ManifestFileMeta(
-            file_name=new_manifest_file,
-            file_size=self.table.file_io.get_file_size(manifest_file_path),
-            num_added_files=added_file_count,
-            num_deleted_files=deleted_file_count,
-            partition_stats=SimpleStats(
-                min_values=GenericRow(
-                    values=partition_min_stats,
-                    fields=self.table.partition_keys_fields
+        try:
+            self.manifest_file_manager.write(new_manifest_file, commit_entries)
+            # TODO: implement noConflictsOrFail logic
+            partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
+            partition_min_stats = [min(col) for col in partition_columns]
+            partition_max_stats = [max(col) for col in partition_columns]
+            partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
+            if not all(count == 0 for count in partition_null_counts):
+                raise RuntimeError("Partition value should not be null")
+            manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
+            new_manifest_file_meta = ManifestFileMeta(
+                file_name=new_manifest_file,
+                file_size=self.table.file_io.get_file_size(manifest_file_path),
+                num_added_files=added_file_count,
+                num_deleted_files=deleted_file_count,
+                partition_stats=SimpleStats(
+                    min_values=GenericRow(
+                        values=partition_min_stats,
+                        fields=self.table.partition_keys_fields
+                    ),
+                    max_values=GenericRow(
+                        values=partition_max_stats,
+                        fields=self.table.partition_keys_fields
+                    ),
+                    null_counts=partition_null_counts,
                 ),
-                max_values=GenericRow(
-                    values=partition_max_stats,
-                    fields=self.table.partition_keys_fields
-                ),
-                null_counts=partition_null_counts,
-            ),
-            schema_id=self.table.table_schema.id,
-        )
-        self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
+                schema_id=self.table.table_schema.id,
+            )
+            self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
+        except Exception as e:
+            self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
+                                              base_manifest_list)
+            logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to prepare snapshot: {e}")
 
         # process existing_manifest
         total_record_count = 0
@@ -257,16 +261,42 @@ class FileStoreCommit:
                 success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
                 if not success:
                     logger.warning(f"Atomic commit failed for snapshot #{new_snapshot_id} failed")
+                    self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
+                                                      base_manifest_list)
                 return success
         except Exception:
             # Commit exception, not sure about the situation and should not clean up the files
             logger.warning("Retry commit for exception")
             return False
 
-    def _generate_overwrite_entries(self):
+    def _cleanup_preparation_failure(self, manifest_file: Optional[str],
+                                     delta_manifest_list: Optional[str],
+                                     base_manifest_list: Optional[str]):
+        try:
+            manifest_path = self.manifest_list_manager.manifest_path
+
+            if delta_manifest_list:
+                manifest_files = self.manifest_list_manager.read(delta_manifest_list)
+                for manifest_meta in manifest_files:
+                    manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_meta.file_name}"
+                    self.table.file_io.delete_quietly(manifest_file_path)
+                delta_path = f"{manifest_path}/{delta_manifest_list}"
+                self.table.file_io.delete_quietly(delta_path)
+
+            if base_manifest_list:
+                base_path = f"{manifest_path}/{base_manifest_list}"
+                self.table.file_io.delete_quietly(base_path)
+
+            if manifest_file:
+                manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_file}"
+                self.table.file_io.delete_quietly(manifest_file_path)
+        except Exception as e:
+            logger.warning(f"Failed to clean up temporary files during preparation failure: {e}", exc_info=True)
+
+    def _generate_overwrite_entries(self, latestSnapshot):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
-        current_entries = FullStartingScanner(self.table, self._overwrite_partition_filter, None).plan_files()
+        current_entries = FullStartingScanner(self.table, self._overwrite_partition_filter, None).plan_files(latestSnapshot)
         for entry in current_entries:
             entry.kind = 1  # DELETE
             entries.append(entry)
