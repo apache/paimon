@@ -249,8 +249,7 @@ class FileStoreCommit:
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
-            self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
-                                              base_manifest_list)
+            self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list)
             logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
             raise RuntimeError(f"Failed to prepare snapshot: {e}")
 
@@ -260,8 +259,7 @@ class FileStoreCommit:
                 success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
                 if not success:
                     logger.warning(f"Atomic commit failed for snapshot #{new_snapshot_id} failed")
-                    self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
-                                                      base_manifest_list)
+                    self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list)
                 return success
         except Exception:
             # Commit exception, not sure about the situation and should not clean up the files
@@ -305,7 +303,7 @@ class FileStoreCommit:
         )
         time.sleep(total_wait_ms / 1000.0)
 
-    def _cleanup_preparation_failure(self, manifest_file: Optional[str],
+    def _cleanup_preparation_failure(self,
                                      delta_manifest_list: Optional[str],
                                      base_manifest_list: Optional[str]):
         try:
@@ -322,10 +320,6 @@ class FileStoreCommit:
             if base_manifest_list:
                 base_path = f"{manifest_path}/{base_manifest_list}"
                 self.table.file_io.delete_quietly(base_path)
-
-            if manifest_file:
-                manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_file}"
-                self.table.file_io.delete_quietly(manifest_file_path)
         except Exception as e:
             logger.warning(f"Failed to clean up temporary files during preparation failure: {e}", exc_info=True)
 
