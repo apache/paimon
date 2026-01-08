@@ -64,6 +64,7 @@ class RetryResult(CommitResult):
     def is_success(self) -> bool:
         return False
 
+
 class FileStoreCommit:
     """
     Core commit logic for file store operations.
@@ -135,7 +136,8 @@ class FileStoreCommit:
         self._try_commit(
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
-            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(snapshot, partition_filter, commit_messages)
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                snapshot, partition_filter, commit_messages)
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan):
