@@ -243,13 +243,8 @@ class FileStoreCommit:
                 deleted_file_count += 1
                 delta_record_count -= entry.file.row_count
 
-        created_manifest_file = None
-        created_delta_manifest_list = None
-        created_base_manifest_list = None
-
         try:
             self.manifest_file_manager.write(new_manifest_file, commit_entries)
-            created_manifest_file = new_manifest_file
 
             # TODO: implement noConflictsOrFail logic
             partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
@@ -262,7 +257,7 @@ class FileStoreCommit:
             manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
             file_size = self.table.file_io.get_file_size(manifest_file_path)
 
-            new_manifest_list = ManifestFileMeta(
+            new_manifest_file_meta = ManifestFileMeta(
                 file_name=new_manifest_file,
                 file_size=file_size,
                 num_added_files=added_file_count,
@@ -281,8 +276,7 @@ class FileStoreCommit:
                 schema_id=self.table.table_schema.id,
             )
 
-            self.manifest_list_manager.write(delta_manifest_list, [new_manifest_list])
-            created_delta_manifest_list = delta_manifest_list
+            self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
 
             # process existing_manifest
             total_record_count = 0
@@ -295,7 +289,6 @@ class FileStoreCommit:
                 existing_manifest_files = []
 
             self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
-            created_base_manifest_list = base_manifest_list
             total_record_count += delta_record_count
             snapshot_data = Snapshot(
                 version=3,
@@ -314,11 +307,10 @@ class FileStoreCommit:
             # Generate partition statistics for the commit
             statistics = self._generate_partition_statistics(commit_entries)
         except Exception as e:
-            self._cleanup_preparation_failure(created_manifest_file, created_delta_manifest_list,
-                                              created_base_manifest_list)
+            self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
+                                              base_manifest_list)
             logger.warning(f"Exception occurs when preparing snapshot: {e}", exc_info=True)
             raise RuntimeError(f"Failed to prepare snapshot: {e}")
-            # return RetryResult(latest_snapshot, [], e)
 
         # Use SnapshotCommit for atomic commit
         try:
@@ -333,9 +325,8 @@ class FileStoreCommit:
                         f"with identifier {commit_identifier} and kind {commit_kind} after {commit_time_sec}s. "
                         f"Clean up and try again."
                     )
-                    # self._cleanup_commit_failure(base_manifest_list, delta_manifest_list)
-                    self._cleanup_preparation_failure(created_manifest_file, created_delta_manifest_list,
-                                                      created_base_manifest_list)
+                    self._cleanup_preparation_failure(new_manifest_file, delta_manifest_list,
+                                                      base_manifest_list)
                     return RetryResult(latest_snapshot, None)
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
@@ -393,13 +384,10 @@ class FileStoreCommit:
             manifest_path = self.manifest_list_manager.manifest_path
 
             if delta_manifest_list:
-                try:
-                    manifest_files = self.manifest_list_manager.read(delta_manifest_list)
-                    for manifest_meta in manifest_files:
-                        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_meta.file_name}"
-                        self.table.file_io.delete_quietly(manifest_file_path)
-                except Exception:
-                    pass  # Ignore errors when reading/cleaning
+                manifest_files = self.manifest_list_manager.read(delta_manifest_list)
+                for manifest_meta in manifest_files:
+                    manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{manifest_meta.file_name}"
+                    self.table.file_io.delete_quietly(manifest_file_path)
                 delta_path = f"{manifest_path}/{delta_manifest_list}"
                 self.table.file_io.delete_quietly(delta_path)
 
@@ -412,20 +400,6 @@ class FileStoreCommit:
                 self.table.file_io.delete_quietly(manifest_file_path)
         except Exception as e:
             logger.warning(f"Failed to clean up temporary files during preparation failure: {e}", exc_info=True)
-
-    def _cleanup_commit_failure(self, base_manifest_list: str, delta_manifest_list: str):
-        try:
-            manifest_path = self.manifest_list_manager.manifest_path
-
-            if base_manifest_list:
-                base_path = f"{manifest_path}/{base_manifest_list}"
-                self.table.file_io.delete_quietly(base_path)
-
-            if delta_manifest_list:
-                delta_path = f"{manifest_path}/{delta_manifest_list}"
-                self.table.file_io.delete_quietly(delta_path)
-        except Exception as e:
-            logger.warning(f"Failed to clean up temporary manifest files: {e}", exc_info=True)
 
     def abort(self, commit_messages: List[CommitMessage]):
         """Abort commit and delete files. Uses external_path if available to ensure proper scheme handling."""
@@ -446,13 +420,6 @@ class FileStoreCommit:
         """Close the FileStoreCommit and release resources."""
         if hasattr(self.snapshot_commit, 'close'):
             self.snapshot_commit.close()
-
-    def _generate_snapshot_id(self) -> int:
-        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-        if latest_snapshot:
-            return latest_snapshot.id + 1
-        else:
-            return 1
 
     def _generate_partition_statistics(self, commit_entries: List[ManifestEntry]) -> List[PartitionStatistics]:
         """
