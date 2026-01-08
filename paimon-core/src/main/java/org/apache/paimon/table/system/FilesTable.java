@@ -22,11 +22,13 @@ import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -117,7 +119,10 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(14, "max_sequence_number", new BigIntType(true)),
                             new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS()),
                             new DataField(16, "deleteRowCount", DataTypes.BIGINT()),
-                            new DataField(17, "file_source", DataTypes.STRING())));
+                            new DataField(17, "file_source", DataTypes.STRING()),
+                            new DataField(18, "first_row_id", DataTypes.BIGINT()),
+                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING())),
+                            new DataField(20, "blob", DataTypes.BOOLEAN())));
 
     private final FileStoreTable storeTable;
 
@@ -435,7 +440,17 @@ public class FilesTable implements ReadonlyTable {
                         () -> file.deleteRowCount().orElse(null),
                         () ->
                                 BinaryString.fromString(
-                                        file.fileSource().map(FileSource::toString).orElse(null))
+                                        file.fileSource().map(FileSource::toString).orElse(null)),
+                        file::firstRowId,
+                        () -> {
+                            List<String> writeCols = file.writeCols();
+                            if (writeCols == null) {
+                                return null;
+                            }
+                            return new GenericArray(
+                                    writeCols.stream().map(BinaryString::fromString).toArray());
+                        },
+                        () -> BlobFileFormat.isBlobFile(file.fileName())
                     };
 
             return new LazyGenericRow(fields);
