@@ -86,7 +86,7 @@ class FileStoreCommit:
 
         self._try_commit(commit_kind="APPEND",
                          commit_identifier=commit_identifier,
-                         commit_entries_plan=lambda snapshot : commit_entries)
+                         commit_entries_plan=lambda snapshot: commit_entries)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -114,7 +114,7 @@ class FileStoreCommit:
         self._try_commit(
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
-            commit_entries_plan= lambda snapshot : self._generate_overwrite_entries(snapshot)
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(snapshot)
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan):
@@ -269,7 +269,8 @@ class FileStoreCommit:
     def _generate_overwrite_entries(self, latestSnapshot):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
-        current_entries = FullStartingScanner(self.table, self._overwrite_partition_filter, None).plan_files(latestSnapshot)
+        current_entries = (FullStartingScanner(self.table, self._overwrite_partition_filter, None)
+                           .plan_files(latestSnapshot))
         for entry in current_entries:
             entry.kind = 1  # DELETE
             entries.append(entry)
