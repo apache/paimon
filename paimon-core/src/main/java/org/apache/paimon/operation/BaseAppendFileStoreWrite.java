@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendOnlyWriter;
+import org.apache.paimon.append.cluster.Sorter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -41,6 +42,7 @@ import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StatsCollectorFactories;
@@ -202,6 +204,42 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (collectedExceptions != null) {
             throw collectedExceptions;
         }
+        return rewriter.result();
+    }
+
+    public List<DataFileMeta> clusterRewrite(
+            BinaryRow partition, int bucket, List<DataFileMeta> toCluster) throws Exception {
+        RecordReaderIterator<InternalRow> reader =
+                createFilesIterator(partition, bucket, toCluster, null);
+
+        // sort and rewrite
+        Exception collectedExceptions = null;
+        Sorter sorter = Sorter.getSorter(reader, ioManager, rowType, options);
+        RowDataRollingFileWriter rewriter =
+                createRollingFileWriter(
+                        partition, bucket, new LongCounter(toCluster.get(0).minSequenceNumber()));
+        try {
+            MutableObjectIterator<BinaryRow> sorted = sorter.sort();
+            BinaryRow binaryRow = new BinaryRow(sorter.arity());
+            while ((binaryRow = sorted.next(binaryRow)) != null) {
+                InternalRow rowRemovedKey = sorter.removeSortKey(binaryRow);
+                rewriter.write(rowRemovedKey);
+            }
+        } catch (Exception e) {
+            collectedExceptions = e;
+        } finally {
+            try {
+                rewriter.close();
+                sorter.close();
+            } catch (Exception e) {
+                collectedExceptions = ExceptionUtils.firstOrSuppressed(e, collectedExceptions);
+            }
+        }
+
+        if (collectedExceptions != null) {
+            throw collectedExceptions;
+        }
+
         return rewriter.result();
     }
 

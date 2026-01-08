@@ -164,7 +164,11 @@ public class CompactAction extends TableActionBase {
             StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming)
             throws Exception {
         if (fullCompaction == null) {
-            fullCompaction = !isStreaming;
+            if (table.coreOptions().bucketClusterEnabled()) {
+                fullCompaction = false;
+            } else {
+                fullCompaction = !isStreaming;
+            }
         } else {
             checkArgument(
                     !(fullCompaction && isStreaming),
