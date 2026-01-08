@@ -159,8 +159,8 @@ class AoReaderTest(unittest.TestCase):
 
     def test_commit_retry_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
-        self.catalog.create_table('default.test_append_only_multi_once_commit', schema, False)
-        table = self.catalog.get_table('default.test_append_only_multi_once_commit')
+        self.catalog.create_table('default.test_commit_retry_filter', schema, False)
+        table = self.catalog.get_table('default.test_commit_retry_filter')
         write_builder = table.new_batch_write_builder()
 
         table_write = write_builder.new_write()
