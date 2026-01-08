@@ -132,13 +132,10 @@ class FileStoreCommit:
                     raise RuntimeError(f"Trying to overwrite partition {overwrite_partition}, but the changes "
                                        f"in {msg.partition} does not belong to this partition")
 
-        self._overwrite_partition_filter = partition_filter
-        self._overwrite_commit_messages = commit_messages
-
         self._try_commit(
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
-            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(snapshot)
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(snapshot, partition_filter, commit_messages)
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan):
@@ -187,22 +184,9 @@ class FileStoreCommit:
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry], commit_identifier: int,
                          latest_snapshot: Optional[Snapshot]) -> CommitResult:
-        if retry_result is not None and latest_snapshot is not None:
-            start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
-            if retry_result.latest_snapshot is not None:
-                start_check_snapshot_id = retry_result.latest_snapshot.id + 1
-
-            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 2):
-                snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
-                if (snapshot and snapshot.commit_user == self.commit_user and
-                        snapshot.commit_identifier == commit_identifier and
-                        snapshot.commit_kind == commit_kind):
-                    logger.info(
-                        f"Commit already completed (snapshot {snapshot_id}), "
-                        f"user: {self.commit_user}, identifier: {commit_identifier}"
-                    )
-                    return SuccessResult()
-
+        if self._duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
+            return SuccessResult()
+        
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
@@ -320,16 +304,34 @@ class FileStoreCommit:
         )
         return SuccessResult()
 
-    def _generate_overwrite_entries(self, latestSnapshot):
+    def _duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
+        if retry_result is not None and latest_snapshot is not None:
+            start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
+            if retry_result.latest_snapshot is not None:
+                start_check_snapshot_id = retry_result.latest_snapshot.id + 1
+
+            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 2):
+                snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
+                if (snapshot and snapshot.commit_user == self.commit_user and
+                        snapshot.commit_identifier == commit_identifier and
+                        snapshot.commit_kind == commit_kind):
+                    logger.info(
+                        f"Commit already completed (snapshot {snapshot_id}), "
+                        f"user: {self.commit_user}, identifier: {commit_identifier}"
+                    )
+                    return True
+        return False
+
+    def _generate_overwrite_entries(self, latestSnapshot, partition_filter, commit_messages):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = [] if latestSnapshot is None \
-            else (FullStartingScanner(self.table, self._overwrite_partition_filter, None).
+            else (FullStartingScanner(self.table, partition_filter, None).
                   read_manifest_entries(self.manifest_list_manager.read_all(latestSnapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE
             entries.append(entry)
-        for msg in self._overwrite_commit_messages:
+        for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
             for file in msg.new_files:
                 entries.append(ManifestEntry(
