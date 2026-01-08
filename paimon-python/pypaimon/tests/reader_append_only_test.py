@@ -201,8 +201,12 @@ class AoReaderTest(unittest.TestCase):
                     file=file
                 ))
         # mock retry
-        success = (table_commit.file_store_commit.
-                   _try_commit_once(RetryResult(None), "APPEND", commit_entries, BATCH_COMMIT_IDENTIFIER, latest_snapshot))
+        success = table_commit.file_store_commit._try_commit_once(
+            RetryResult(None),
+            "APPEND",
+            commit_entries,
+            BATCH_COMMIT_IDENTIFIER,
+            latest_snapshot)
         self.assertTrue(success.is_success())
         table_commit.close()
         read_builder = table.new_read_builder()
