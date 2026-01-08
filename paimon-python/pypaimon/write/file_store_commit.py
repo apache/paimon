@@ -310,7 +310,7 @@ class FileStoreCommit:
             if retry_result.latest_snapshot is not None:
                 start_check_snapshot_id = retry_result.latest_snapshot.id + 1
 
-            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 2):
+            for snapshot_id in range(start_check_snapshot_id, latest_snapshot.id + 1):
                 snapshot = self.snapshot_manager.get_snapshot_by_id(snapshot_id)
                 if (snapshot and snapshot.commit_user == self.commit_user and
                         snapshot.commit_identifier == commit_identifier and
