@@ -20,6 +20,7 @@ import pyarrow
 from pyarrow._fs import LocalFileSystem
 
 class PaimonLocalFileSystem(LocalFileSystem):
+    
     rename_lock = threading.Lock()
 
     def move(self, src, dst):
