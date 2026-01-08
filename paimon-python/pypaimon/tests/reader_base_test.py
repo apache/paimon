@@ -471,6 +471,9 @@ class ReaderBasicTest(unittest.TestCase):
             test_name="specific_case"
         )
 
+        # Test case 4: _VALUE_STATS_COLS field is missing (old version manifest files)
+        self._test_value_stats_cols_missing_case(manifest_manager, table)
+
         schema_with_stats = Schema.from_pyarrow_schema(pa_schema, options={'metadata.stats-mode': 'full'})
         catalog.create_table("test_db.test_value_stats_cols_schema_match", schema_with_stats, False)
         table_with_stats = catalog.get_table("test_db.test_value_stats_cols_schema_match")
@@ -882,6 +885,47 @@ class ReaderBasicTest(unittest.TestCase):
             f"Field names mismatch: data.schema has {data_field_names}, "
             f"but table.fields has {table_field_names}"
         )
+
+    def _test_value_stats_cols_missing_case(self, manifest_manager, table):
+        from io import BytesIO
+        from pathlib import Path
+        import fastavro
+        from pypaimon.manifest.schema.manifest_entry import MANIFEST_ENTRY_SCHEMA
+        from pypaimon.table.row.binary_row import BinaryRow
+        from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+
+        empty_row = BinaryRow(b'\x00' * 12, [])
+        empty_row_bytes = GenericRowSerializer.to_bytes(empty_row)
+        empty_generic_row = GenericRow([], [])
+        manifest_file_name = "manifest-missing-value-stats-cols-test"
+        manifest_path = Path(table.table_path) / "manifest" / manifest_file_name
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        file_dict = {
+            "_FILE_NAME": "data-missing-field-test.parquet",
+            "_FILE_SIZE": 1000, "_ROW_COUNT": 10,
+            "_MIN_KEY": GenericRowSerializer.to_bytes(empty_generic_row),
+            "_MAX_KEY": GenericRowSerializer.to_bytes(empty_generic_row),
+            "_KEY_STATS": {"_MIN_VALUES": empty_row_bytes, "_MAX_VALUES": empty_row_bytes, "_NULL_COUNTS": []},
+            "_VALUE_STATS": {"_MIN_VALUES": empty_row_bytes, "_MAX_VALUES": empty_row_bytes, "_NULL_COUNTS": []},
+            "_MIN_SEQUENCE_NUMBER": 1, "_MAX_SEQUENCE_NUMBER": 10, "_SCHEMA_ID": 0, "_LEVEL": 0,
+            "_EXTRA_FILES": [], "_CREATION_TIME": None, "_DELETE_ROW_COUNT": None,
+            "_EMBEDDED_FILE_INDEX": None, "_FILE_SOURCE": None, "_EXTERNAL_PATH": None,
+        }
+
+        buffer = BytesIO()
+        fastavro.writer(buffer, MANIFEST_ENTRY_SCHEMA, [{
+            "_VERSION": 2, "_KIND": 0,
+            "_PARTITION": GenericRowSerializer.to_bytes(empty_generic_row),
+            "_BUCKET": 0, "_TOTAL_BUCKETS": 1, "_FILE": file_dict
+        }])
+        with table.file_io.new_output_stream(str(manifest_path)) as out:
+            out.write(buffer.getvalue())
+
+        entries = manifest_manager.read(manifest_file_name, drop_stats=False)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].file.file_name, "data-missing-field-test.parquet")
+        self.assertIsNone(entries[0].file.value_stats_cols)
 
     def test_primary_key_value_stats(self):
         pa_schema = pa.schema([

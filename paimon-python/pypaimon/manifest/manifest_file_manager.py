@@ -160,7 +160,8 @@ class ManifestFileManager:
         return entries
 
     def _get_value_stats_fields(self, file_dict: dict, schema_fields: list) -> List:
-        if file_dict['_VALUE_STATS_COLS'] is None:
+        value_stats_cols = file_dict.get('_VALUE_STATS_COLS')
+        if value_stats_cols is None:
             if '_WRITE_COLS' in file_dict:
                 if file_dict['_WRITE_COLS'] is None:
                     fields = schema_fields
@@ -169,10 +170,10 @@ class ManifestFileManager:
                     fields = [self.table.field_dict[col] for col in read_fields]
             else:
                 fields = schema_fields
-        elif not file_dict['_VALUE_STATS_COLS']:
+        elif not value_stats_cols:
             fields = []
         else:
-            fields = [self.table.field_dict[col] for col in file_dict['_VALUE_STATS_COLS']]
+            fields = [self.table.field_dict[col] for col in value_stats_cols]
         return fields
 
     def write(self, file_name, entries: List[ManifestEntry]):
