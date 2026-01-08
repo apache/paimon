@@ -48,7 +48,7 @@ class IndexTest {
 
     @Test
     void testFlatIndexBasicOperations() {
-        try (Index index = IndexFactory.createFlat(DIMENSION, MetricType.L2)) {
+        try (Index index = createFlatIndexWithMetric(MetricType.L2)) {
             assertEquals(DIMENSION, index.getDimension());
             assertEquals(0, index.getCount());
             assertTrue(index.isTrained());
@@ -82,7 +82,7 @@ class IndexTest {
 
     @Test
     void testFlatIndexWithIds() {
-        try (Index index = IndexFactory.createFlatWithIds(DIMENSION, MetricType.L2)) {
+        try (Index index = IndexFactory.create(DIMENSION, "IDMap,Flat", MetricType.L2)) {
             ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
             ByteBuffer idBuffer = Index.allocateIdBuffer(NUM_VECTORS);
             idBuffer.asLongBuffer();
@@ -108,7 +108,7 @@ class IndexTest {
 
     @Test
     void testBatchSearch() {
-        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+        try (Index index = createFlatIndexWithMetric(MetricType.L2)) {
             ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
             index.add(NUM_VECTORS, vectorBuffer);
 
@@ -130,9 +130,17 @@ class IndexTest {
         }
     }
 
+    private Index createFlatIndexWithMetric(MetricType metricType) {
+        return IndexFactory.create(DIMENSION, "Flat", metricType);
+    }
+
+    private Index createFlatIndex() {
+        return IndexFactory.create(DIMENSION, "Flat", MetricType.L2);
+    }
+
     @Test
     void testInnerProductMetric() {
-        try (Index index = IndexFactory.createFlat(DIMENSION, MetricType.INNER_PRODUCT)) {
+        try (Index index = createFlatIndexWithMetric(MetricType.INNER_PRODUCT)) {
             assertEquals(MetricType.INNER_PRODUCT, index.getMetricType());
 
             ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
@@ -155,7 +163,7 @@ class IndexTest {
 
     @Test
     void testIndexReset() {
-        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+        try (Index index = createFlatIndex()) {
             ByteBuffer vectorBuffer = createVectorBuffer(100, DIMENSION);
             index.add(100, vectorBuffer);
             assertEquals(100, index.getCount());
@@ -177,7 +185,7 @@ class IndexTest {
         float[] originalDistances = new float[K];
 
         // Create and populate index
-        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+        try (Index index = createFlatIndex()) {
             index.add(NUM_VECTORS, vectorBuffer);
 
             // Perform search and save original results
@@ -200,7 +208,7 @@ class IndexTest {
         }
 
         // Test ByteBuffer serialization (zero-copy for write) and byte[] deserialization
-        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+        try (Index index = createFlatIndex()) {
             index.add(NUM_VECTORS, vectorBuffer);
 
             long serializeSize = index.serializeSize();
@@ -245,7 +253,7 @@ class IndexTest {
 
     @Test
     void testHNSWIndex() {
-        try (Index index = IndexFactory.createHNSW(DIMENSION, 32, MetricType.L2)) {
+        try (Index index = IndexFactory.create(DIMENSION, "HNSW" + 32, MetricType.L2)) {
             assertTrue(index.isTrained()); // HNSW doesn't need training
 
             ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
@@ -294,7 +302,7 @@ class IndexTest {
                 });
 
         // Test buffer validation - wrong size buffer
-        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+        try (Index index = createFlatIndex()) {
             ByteBuffer wrongSizeBuffer =
                     ByteBuffer.allocateDirect(10).order(ByteOrder.nativeOrder());
             assertThrows(
@@ -305,7 +313,7 @@ class IndexTest {
         }
 
         // Test non-direct buffer
-        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+        try (Index index = createFlatIndex()) {
             ByteBuffer heapBuffer = ByteBuffer.allocate(DIMENSION * Float.BYTES);
             assertThrows(
                     IllegalArgumentException.class,
@@ -315,7 +323,7 @@ class IndexTest {
         }
 
         // Test closed index
-        Index closedIndex = IndexFactory.createFlat(DIMENSION);
+        Index closedIndex = createFlatIndex();
         closedIndex.close();
         assertThrows(
                 IllegalStateException.class,
@@ -326,7 +334,7 @@ class IndexTest {
 
     @Test
     void testSearchResultArrays() {
-        try (Index index = IndexFactory.createFlat(DIMENSION)) {
+        try (Index index = createFlatIndex()) {
             ByteBuffer vectorBuffer = createVectorBuffer(100, DIMENSION);
             index.add(100, vectorBuffer);
 

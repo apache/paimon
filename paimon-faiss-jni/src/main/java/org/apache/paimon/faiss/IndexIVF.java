@@ -18,31 +18,8 @@
 
 package org.apache.paimon.faiss;
 
-/**
- * Utility class for IVF (Inverted File) index operations.
- *
- * <p>IVF indexes partition the vector space into clusters (cells) and only search a subset of
- * clusters during search. The {@code nprobe} parameter controls how many clusters to search,
- * trading off between speed and accuracy.
- *
- * <p>Example usage:
- *
- * <pre>{@code
- * Index index = IndexFactory.createIVFFlat(128, 1000, MetricType.L2);
- * index.train(trainingVectors);
- * index.add(vectors);
- *
- * // Set number of clusters to probe during search
- * IndexIVF.setNprobe(index, 10);  // Search 10 out of 1000 clusters
- *
- * SearchResult result = index.search(queries, 10);
- * }</pre>
- */
+/** Utility class for IVF (Inverted File) index operations. */
 public final class IndexIVF {
-
-    private IndexIVF() {
-        // Static utility class
-    }
 
     /**
      * Get the number of clusters to probe during search (nprobe).
@@ -52,7 +29,7 @@ public final class IndexIVF {
      * @throws IllegalArgumentException if the index is not an IVF index
      */
     public static int getNprobe(Index index) {
-        return FaissNative.ivfGetNprobe(index.getNativeHandle());
+        return FaissNative.ivfGetNprobe(index.nativeHandle());
     }
 
     /**
@@ -69,7 +46,7 @@ public final class IndexIVF {
         if (nprobe <= 0) {
             throw new IllegalArgumentException("nprobe must be positive: " + nprobe);
         }
-        FaissNative.ivfSetNprobe(index.getNativeHandle(), nprobe);
+        FaissNative.ivfSetNprobe(index.nativeHandle(), nprobe);
     }
 
     /**
@@ -80,6 +57,6 @@ public final class IndexIVF {
      * @throws IllegalArgumentException if the index is not an IVF index
      */
     public static int getNlist(Index index) {
-        return FaissNative.ivfGetNlist(index.getNativeHandle());
+        return FaissNative.ivfGetNlist(index.nativeHandle());
     }
 }

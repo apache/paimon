@@ -56,7 +56,6 @@ jobs:
         uses: ./.github/actions/build-faiss-native
         with:
           platform: linux-amd64
-          cmake-arch: x86_64
 
       - name: Build paimon-faiss-jni
         shell: bash

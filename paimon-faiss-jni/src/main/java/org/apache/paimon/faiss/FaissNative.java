@@ -43,12 +43,6 @@ final class FaissNative {
         }
     }
 
-    private FaissNative() {
-        // Static utility class
-    }
-
-    // ==================== Index Factory ====================
-
     /**
      * Create an index using an index factory string.
      *
@@ -58,8 +52,6 @@ final class FaissNative {
      * @return the native handle of the created index
      */
     static native long indexFactoryCreate(int dimension, String description, int metricType);
-
-    // ==================== Index Operations ====================
 
     /**
      * Destroy an index and free its resources.
@@ -107,8 +99,6 @@ final class FaissNative {
      */
     static native void indexReset(long handle);
 
-    // ==================== Index I/O ====================
-
     /**
      * Write an index to a file.
      *
@@ -124,8 +114,6 @@ final class FaissNative {
      * @return the native handle of the loaded index
      */
     static native long indexReadFromFile(String path);
-
-    // ==================== Zero-Copy Vector Operations ====================
 
     /**
      * Add vectors to an index using a direct ByteBuffer (zero-copy).
@@ -184,18 +172,6 @@ final class FaissNative {
     static native long indexRangeSearch(long handle, long n, ByteBuffer queryBuffer, float radius);
 
     /**
-     * Remove vectors by IDs from an index using direct ByteBuffer (zero-copy).
-     *
-     * @param handle the native handle of the index
-     * @param n the number of IDs
-     * @param idBuffer direct ByteBuffer containing IDs to remove (n * 8 bytes)
-     * @return the number of vectors removed
-     */
-    static native long indexRemoveIds(long handle, long n, ByteBuffer idBuffer);
-
-    // ==================== Zero-Copy Serialization ====================
-
-    /**
      * Serialize an index to a direct ByteBuffer (zero-copy).
      *
      * <p>Returns the number of bytes written. The caller must provide a buffer large enough to hold
@@ -223,8 +199,6 @@ final class FaissNative {
      * @return the native handle of the loaded index
      */
     static native long indexDeserialize(byte[] data, long length);
-
-    // ==================== Range Search Result ====================
 
     /**
      * Destroy a range search result.
@@ -273,8 +247,6 @@ final class FaissNative {
      */
     static native int rangeSearchResultGetNumQueries(long handle);
 
-    // ==================== IVF Index Specific ====================
-
     /**
      * Get the number of probe lists for an IVF index.
      *
@@ -298,8 +270,6 @@ final class FaissNative {
      * @return the number of lists
      */
     static native int ivfGetNlist(long handle);
-
-    // ==================== HNSW Index Specific ====================
 
     /**
      * Get the efSearch parameter of an HNSW index.
@@ -334,8 +304,6 @@ final class FaissNative {
      * @param efConstruction the efConstruction value
      */
     static native void hnswSetEfConstruction(long handle, int efConstruction);
-
-    // ==================== Utility ====================
 
     /**
      * Get the Faiss library version.

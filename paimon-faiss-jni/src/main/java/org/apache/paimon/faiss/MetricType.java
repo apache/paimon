@@ -30,23 +30,7 @@ package org.apache.paimon.faiss;
  * </ul>
  */
 public enum MetricType {
-    /**
-     * Euclidean distance (L2 norm).
-     *
-     * <p>The squared L2 distance between two vectors is computed as: {@code sum((a[i] - b[i])^2)}
-     *
-     * <p>Smaller distances indicate more similar vectors.
-     */
     L2(0),
-
-    /**
-     * Inner product (dot product).
-     *
-     * <p>The inner product between two vectors is computed as: {@code sum(a[i] * b[i])}
-     *
-     * <p>Larger values indicate more similar vectors. For normalized vectors, this is equivalent to
-     * cosine similarity.
-     */
     INNER_PRODUCT(1);
 
     private final int value;

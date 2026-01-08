@@ -18,22 +18,7 @@
 
 package org.apache.paimon.faiss;
 
-/**
- * Global Faiss configuration and utilities.
- *
- * <p>This class provides methods for configuring Faiss globally, such as setting the number of
- * threads for parallel operations.
- *
- * <p>Example usage:
- *
- * <pre>{@code
- * // Set the number of threads for Faiss operations
- * Faiss.setNumThreads(4);
- *
- * // Get the Faiss version
- * String version = Faiss.getVersion();
- * }</pre>
- */
+/** Global Faiss configuration and utilities. */
 public final class Faiss {
 
     static {
@@ -44,15 +29,6 @@ public final class Faiss {
         }
     }
 
-    private Faiss() {
-        // Static utility class
-    }
-
-    /**
-     * Get the version of the Faiss library.
-     *
-     * @return the version string
-     */
     public static String getVersion() {
         return FaissNative.getVersion();
     }

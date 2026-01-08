@@ -56,7 +56,6 @@ jobs:
         uses: ./.github/actions/build-faiss-native
         with:
           platform: linux-amd64
-          cmake-arch: x86_64
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
@@ -82,7 +81,6 @@ jobs:
         uses: ./.github/actions/build-faiss-native
         with:
           platform: linux-aarch64
-          cmake-arch: aarch64
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
@@ -108,7 +106,6 @@ jobs:
         uses: ./.github/actions/build-faiss-native
         with:
           platform: darwin-aarch64
-          cmake-arch: aarch64
           use-homebrew: 'true'
 
       - name: Upload native library

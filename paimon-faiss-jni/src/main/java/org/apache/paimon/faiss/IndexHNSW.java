@@ -35,10 +35,6 @@ package org.apache.paimon.faiss;
  */
 public final class IndexHNSW {
 
-    private IndexHNSW() {
-        // Static utility class
-    }
-
     /**
      * Get the efSearch parameter.
      *
@@ -50,7 +46,7 @@ public final class IndexHNSW {
      * @throws IllegalArgumentException if the index is not an HNSW index
      */
     public static int getEfSearch(Index index) {
-        return FaissNative.hnswGetEfSearch(index.getNativeHandle());
+        return FaissNative.hnswGetEfSearch(index.nativeHandle());
     }
 
     /**
@@ -67,7 +63,7 @@ public final class IndexHNSW {
         if (efSearch <= 0) {
             throw new IllegalArgumentException("efSearch must be positive: " + efSearch);
         }
-        FaissNative.hnswSetEfSearch(index.getNativeHandle(), efSearch);
+        FaissNative.hnswSetEfSearch(index.nativeHandle(), efSearch);
     }
 
     /**
@@ -81,7 +77,7 @@ public final class IndexHNSW {
      * @throws IllegalArgumentException if the index is not an HNSW index
      */
     public static int getEfConstruction(Index index) {
-        return FaissNative.hnswGetEfConstruction(index.getNativeHandle());
+        return FaissNative.hnswGetEfConstruction(index.nativeHandle());
     }
 
     /**
@@ -101,6 +97,6 @@ public final class IndexHNSW {
             throw new IllegalArgumentException(
                     "efConstruction must be positive: " + efConstruction);
         }
-        FaissNative.hnswSetEfConstruction(index.getNativeHandle(), efConstruction);
+        FaissNative.hnswSetEfConstruction(index.nativeHandle(), efConstruction);
     }
 }

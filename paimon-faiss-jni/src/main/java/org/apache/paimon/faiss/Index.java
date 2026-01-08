@@ -98,8 +98,6 @@ public class Index implements AutoCloseable {
         return MetricType.fromValue(FaissNative.indexGetMetricType(nativeHandle));
     }
 
-    // ==================== Zero-Copy Vector Operations ====================
-
     /**
      * Train the index on a set of training vectors (zero-copy).
      *
@@ -190,29 +188,11 @@ public class Index implements AutoCloseable {
         return new RangeSearchResult(resultHandle, (int) n);
     }
 
-    /**
-     * Remove vectors by their IDs (zero-copy).
-     *
-     * <p>Note: Not all index types support removal. Check Faiss documentation for details on which
-     * index types support this operation.
-     *
-     * @param n the number of IDs
-     * @param idBuffer direct ByteBuffer containing IDs to remove (n longs)
-     * @return the number of vectors actually removed
-     */
-    public long removeIds(long n, ByteBuffer idBuffer) {
-        checkNotClosed();
-        validateDirectBuffer(idBuffer, n * Long.BYTES, "id");
-        return FaissNative.indexRemoveIds(nativeHandle, n, idBuffer);
-    }
-
     /** Reset the index (remove all vectors). */
     public void reset() {
         checkNotClosed();
         FaissNative.indexReset(nativeHandle);
     }
-
-    // ==================== Index I/O ====================
 
     /**
      * Write the index to a file.
@@ -291,8 +271,6 @@ public class Index implements AutoCloseable {
         return new Index(handle, dimension);
     }
 
-    // ==================== Buffer Allocation Utilities ====================
-
     /**
      * Allocate a direct ByteBuffer suitable for vector data.
      *
@@ -315,8 +293,6 @@ public class Index implements AutoCloseable {
         return ByteBuffer.allocateDirect(numIds * Long.BYTES).order(ByteOrder.nativeOrder());
     }
 
-    // ==================== Internal Methods ====================
-
     private void validateDirectBuffer(ByteBuffer buffer, long requiredBytes, String name) {
         if (!buffer.isDirect()) {
             throw new IllegalArgumentException(name + " buffer must be a direct buffer");
@@ -338,7 +314,7 @@ public class Index implements AutoCloseable {
      *
      * @return the native handle
      */
-    long getNativeHandle() {
+    long nativeHandle() {
         return nativeHandle;
     }
 

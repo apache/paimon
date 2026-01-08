@@ -130,8 +130,6 @@ struct RangeSearchResultWrapper {
     RangeSearchResultWrapper(int nq_) : result(nq_), nq(nq_) {}
 };
 
-// ==================== Index Factory ====================
-
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexFactoryCreate
   (JNIEnv* env, jclass, jint dimension, jstring description, jint metricType) {
     FAISS_TRY
@@ -142,8 +140,6 @@ JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexFactoryCre
     FAISS_CATCH(env)
     return 0;
 }
-
-// ==================== Index Operations ====================
 
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexDestroy
   (JNIEnv* env, jclass, jlong handle) {
@@ -191,8 +187,6 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReset
         getIndex(handle)->reset();
     FAISS_CATCH(env)
 }
-
-// ==================== Zero-Copy Vector Operations ====================
 
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexTrain
   (JNIEnv* env, jclass, jlong handle, jlong n, jobject vectorBuffer) {
@@ -274,25 +268,6 @@ JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexRangeSearc
     return 0;
 }
 
-JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexRemoveIds
-  (JNIEnv* env, jclass, jlong handle, jlong n, jobject idBuffer) {
-    FAISS_TRY
-        int64_t* idData = static_cast<int64_t*>(getDirectBufferAddress(env, idBuffer, "id"));
-        
-        // Create ID selector
-        std::vector<faiss::idx_t> faissIds(n);
-        for (jlong i = 0; i < n; i++) {
-            faissIds[i] = static_cast<faiss::idx_t>(idData[i]);
-        }
-        faiss::IDSelectorArray selector(n, faissIds.data());
-        
-        return static_cast<jlong>(getIndex(handle)->remove_ids(selector));
-    FAISS_CATCH(env)
-    return 0;
-}
-
-// ==================== Index I/O ====================
-
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_indexWriteToFile
   (JNIEnv* env, jclass, jlong handle, jstring path) {
     FAISS_TRY
@@ -310,8 +285,6 @@ JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexReadFromFi
     FAISS_CATCH(env)
     return 0;
 }
-
-// ==================== Zero-Copy Serialization ====================
 
 JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexSerializeSize
   (JNIEnv* env, jclass, jlong handle) {
@@ -361,8 +334,6 @@ JNIEXPORT jlong JNICALL Java_org_apache_paimon_faiss_FaissNative_indexDeserializ
     FAISS_CATCH(env)
     return 0;
 }
-
-// ==================== Range Search Result ====================
 
 JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResultDestroy
   (JNIEnv* env, jclass, jlong handle) {
@@ -425,8 +396,6 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_rangeSearchResul
     FAISS_CATCH(env)
 }
 
-// ==================== IVF Index Specific ====================
-
 JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_ivfGetNprobe
   (JNIEnv* env, jclass, jlong handle) {
     FAISS_TRY
@@ -449,8 +418,6 @@ JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_ivfGetNlist
     FAISS_CATCH(env)
     return 0;
 }
-
-// ==================== HNSW Index Specific ====================
 
 JNIEXPORT jint JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswGetEfSearch
   (JNIEnv* env, jclass, jlong handle) {
@@ -481,8 +448,6 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_faiss_FaissNative_hnswSetEfConstru
         getIndexHNSW(handle)->hnsw.efConstruction = static_cast<int>(efConstruction);
     FAISS_CATCH(env)
 }
-
-// ==================== Utility ====================
 
 JNIEXPORT jstring JNICALL Java_org_apache_paimon_faiss_FaissNative_getVersion
   (JNIEnv* env, jclass) {
