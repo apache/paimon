@@ -2710,8 +2710,17 @@ public class CoreOptions implements Serializable {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }
 
-    public String globalIndexExternalPath() {
-        return options.get(GLOBAL_INDEX_EXTERNAL_PATH);
+    public Path globalIndexExternalPath() {
+        String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
+        if (pathString == null || pathString.isEmpty()) {
+            return null;
+        }
+        Path path = new Path(pathString);
+        String scheme = path.toUri().getScheme();
+        if (scheme == null) {
+            throw new IllegalArgumentException("scheme should not be null: " + path);
+        }
+        return path;
     }
 
     public LookupStrategy lookupStrategy() {

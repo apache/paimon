@@ -138,20 +138,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 createExternalPaths(),
                 options.externalPathStrategy(),
                 options.indexFileInDataFileDir(),
-                createGlobalIndexExternalPath());
-    }
-
-    private Path createGlobalIndexExternalPath() {
-        String globalIndexExternalPath = options.globalIndexExternalPath();
-        if (globalIndexExternalPath == null || globalIndexExternalPath.isEmpty()) {
-            return null;
-        }
-        Path path = new Path(globalIndexExternalPath);
-        String scheme = path.toUri().getScheme();
-        if (scheme == null) {
-            throw new IllegalArgumentException("scheme should not be null: " + path);
-        }
-        return path;
+                options.globalIndexExternalPath());
     }
 
     private List<Path> createExternalPaths() {
