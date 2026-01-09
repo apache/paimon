@@ -260,10 +260,7 @@ class TorchDataset(Dataset):
         Returns:
             Total number of rows across all splits
         """
-        if self._data is not None:
-            return len(self._data)
-        else:
-            return 0
+        return len(self._data)
 
     def __getitem__(self, index: int):
         """
