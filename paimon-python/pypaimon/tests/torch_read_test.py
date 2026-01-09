@@ -15,6 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -49,6 +50,10 @@ class TorchReadTest(unittest.TestCase):
             'behavior': ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=cls.pa_schema)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     @parameterized.expand([True, False])
     def test_torch_read(self, is_streaming: bool = False):
