@@ -39,8 +39,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build_native:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
+      - name: Build FAISS native library
+        uses: ./.github/actions/build-faiss-native
+        with:
+          platform: linux-amd64
+
+      - name: Upload native library artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: faiss-native-linux-amd64
+          path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
+          retention-days: 1
+
+  build_test:
+    runs-on: ubuntu-latest
+    needs: build_native
 
     steps:
       - name: Checkout code
@@ -52,10 +77,21 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
+      - name: Download native library artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: faiss-native-linux-amd64
+          path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
+
+      - name: List downloaded native library
+        run: |
+          echo "=== Downloaded native libraries ==="
+          ls -la paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
+
       - name: Build Others
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
+          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3,paimon-faiss
 
       - name: Test Others
         timeout-minutes: 60
@@ -64,7 +100,7 @@ jobs:
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
           
-          TEST_MODULES="!paimon-e2e-tests,!paimon-faiss/paimon-faiss-jni,"
+          TEST_MODULES="!paimon-e2e-tests,"
           for suffix in ut 3.5 3.4 3.3 3.2; do
             TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
