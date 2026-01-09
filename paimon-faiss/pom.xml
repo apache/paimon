@@ -34,5 +34,7 @@ under the License.
 
     <modules>
         <module>paimon-faiss-jni</module>
+        <module>paimon-faiss-index</module>
+        <module>paimon-faiss-e2e-test</module>
     </modules>
 </project>
