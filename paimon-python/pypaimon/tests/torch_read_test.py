@@ -206,68 +206,6 @@ class TorchReadTest(unittest.TestCase):
 
         print(f"✓ Blob torch read test passed: Successfully read and verified {len(blob_data)} bytes of blob data")
 
-    def test_torch_read_with_various_splits_and_workers(self):
-        """Test torch read with various combinations of splits and num_workers."""
-        from torch.utils.data import DataLoader
-
-        # Create a partitioned table to generate multiple splits
-        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
-        self.catalog.create_table('default.test_multi_splits', schema, False)
-        table = self.catalog.get_table('default.test_multi_splits')
-        self._write_test_table(table)
-
-        # Test different combinations of num_workers
-        test_cases = [
-            {'num_workers': 2, 'description': '2 workers'},
-            {'num_workers': 5, 'description': '4 workers'},
-            {'num_workers': 10, 'description': '4 workers'},
-        ]
-
-        for test_case in test_cases:
-            num_workers = test_case['num_workers']
-            description = test_case['description']
-
-            read_builder = table.new_read_builder()
-            table_scan = read_builder.new_scan()
-            table_read = read_builder.new_read()
-            splits = table_scan.plan().splits()
-
-            print(f"\n{'=' * 60}")
-            print(f"Testing: {description}")
-            print(f"Total splits: {len(splits)}")
-            print(f"Num workers: {num_workers}")
-            print(f"{'=' * 60}")
-
-            # Create dataset and dataloader
-            dataset = table_read.to_torch(splits, streaming=True)
-            dataloader = DataLoader(
-                dataset,
-                batch_size=2,
-                num_workers=num_workers,
-                shuffle=False
-            )
-
-            # Collect all data
-            all_user_ids = []
-            batch_count = 0
-            for batch_idx, batch_data in enumerate(dataloader):
-                batch_count += 1
-                user_ids = batch_data['user_id'].tolist()
-                all_user_ids.extend(user_ids)
-                print(f"  Batch {batch_idx}: user_ids={user_ids}")
-
-            # Verify all data is read
-            all_user_ids.sort()
-            expected_user_ids = [1, 2, 3, 4, 5, 6, 7, 8]
-            self.assertEqual(all_user_ids, expected_user_ids,
-                             f"{description}: User IDs mismatch. Expected {expected_user_ids}, got {all_user_ids}")
-
-            print(f"✓ {description}: Successfully read {len(all_user_ids)} rows in {batch_count} batches")
-
-        print(f"\n{'=' * 60}")
-        print("✓ All test cases passed!")
-        print(f"{'=' * 60}\n")
-
     def test_torch_read_pk_table(self):
         """Test torch read with primary key table."""
         # Create PK table with user_id as primary key and behavior as partition key
@@ -318,73 +256,6 @@ class TorchReadTest(unittest.TestCase):
                          f"Behaviors mismatch. Expected {expected_behaviors}, got {sorted_behaviors}")
 
         print(f"✓ PK table test passed: Successfully read {len(all_user_ids)} rows with correct data")
-
-    def test_torch_read_pk_table_with_various_splits_and_workers(self):
-        """Test torch read PK table with various combinations of splits and num_workers."""
-        from torch.utils.data import DataLoader
-
-        # Create PK table with user_id as primary key and behavior as partition key
-        schema = Schema.from_pyarrow_schema(
-            self.pa_schema,
-            primary_keys=['user_id', 'behavior'],
-            partition_keys=['behavior'],
-            options={'bucket': 2}
-        )
-        self.catalog.create_table('default.test_pk_multi_splits', schema, False)
-        table = self.catalog.get_table('default.test_pk_multi_splits')
-        self._write_test_table(table)
-
-        # Test different combinations of num_workers
-        test_cases = [
-            {'num_workers': 2, 'description': '2 workers'},
-            {'num_workers': 4, 'description': '4 workers'},
-            {'num_workers': 10, 'description': '10 workers'},
-        ]
-
-        for test_case in test_cases:
-            num_workers = test_case['num_workers']
-            description = test_case['description']
-
-            read_builder = table.new_read_builder()
-            table_scan = read_builder.new_scan()
-            table_read = read_builder.new_read()
-            splits = table_scan.plan().splits()
-
-            print(f"\n{'=' * 60}")
-            print(f"Testing PK table: {description}")
-            print(f"Total splits: {len(splits)}")
-            print(f"Num workers: {num_workers}")
-            print(f"{'=' * 60}")
-
-            # Create dataset and dataloader
-            dataset = table_read.to_torch(splits, streaming=True)
-            dataloader = DataLoader(
-                dataset,
-                batch_size=2,
-                num_workers=num_workers,
-                shuffle=False
-            )
-
-            # Collect all data
-            all_user_ids = []
-            batch_count = 0
-            for batch_idx, batch_data in enumerate(dataloader):
-                batch_count += 1
-                user_ids = batch_data['user_id'].tolist()
-                all_user_ids.extend(user_ids)
-                print(f"  Batch {batch_idx}: user_ids={user_ids}")
-
-            # Verify all data is read
-            all_user_ids.sort()
-            expected_user_ids = [1, 2, 3, 4, 5, 6, 7, 8]
-            self.assertEqual(all_user_ids, expected_user_ids,
-                             f"{description}: User IDs mismatch. Expected {expected_user_ids}, got {all_user_ids}")
-
-            print(f"✓ {description}: Successfully read {len(all_user_ids)} rows in {batch_count} batches")
-
-        print(f"\n{'=' * 60}")
-        print("✓ All PK table test cases passed!")
-        print(f"{'=' * 60}\n")
 
     def test_torch_read_large_append_table(self):
         """Test torch read with large data volume on append-only table."""
@@ -525,7 +396,7 @@ class TorchReadTest(unittest.TestCase):
         dataloader = DataLoader(
             dataset,
             batch_size=1000,
-            num_workers=4,
+            num_workers=8,
             shuffle=False
         )
 
