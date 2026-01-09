@@ -64,7 +64,7 @@ public class BlobFileFormatTest {
 
     @Test
     public void testBlobAsDescriptor() throws IOException {
-        innerTest(false);
+        innerTest(true);
     }
 
     @Test
