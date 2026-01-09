@@ -352,7 +352,7 @@ class TorchReadTest(unittest.TestCase):
 
         # Write large amount of data
         write_builder = table.new_batch_write_builder()
-        total_rows = 100000  # 10万行数据
+        total_rows = 100000
         batch_size = 10000
         num_batches = total_rows // batch_size
 
