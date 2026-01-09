@@ -154,7 +154,8 @@ public class RowRangeGlobalIndexScanner implements Closeable {
     private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {
         GlobalIndexMeta globalIndex = meta.globalIndexMeta();
         checkNotNull(globalIndex);
-        return new GlobalIndexIOMeta(meta.fileName(), meta.fileSize(), globalIndex.indexMeta());
+        return new GlobalIndexIOMeta(
+                meta.fileName(), meta.fileSize(), globalIndex.indexMeta(), meta.externalPath());
     }
 
     @Override

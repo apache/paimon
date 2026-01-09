@@ -18,6 +18,8 @@
 
 package org.apache.paimon.globalindex;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -27,11 +29,18 @@ public class GlobalIndexIOMeta {
     private final String fileName;
     private final long fileSize;
     private final byte[] metadata;
+    @Nullable private final String externalPath;
 
     public GlobalIndexIOMeta(String fileName, long fileSize, byte[] metadata) {
+        this(fileName, fileSize, metadata, null);
+    }
+
+    public GlobalIndexIOMeta(
+            String fileName, long fileSize, byte[] metadata, @Nullable String externalPath) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.metadata = metadata;
+        this.externalPath = externalPath;
     }
 
     public String fileName() {
@@ -44,6 +53,10 @@ public class GlobalIndexIOMeta {
 
     public byte[] metadata() {
         return metadata;
+    }
+
+    public String externalPath() {
+        return externalPath;
     }
 
     @Override

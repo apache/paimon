@@ -111,9 +111,10 @@ public class AbstractIndexReaderTest {
         fileReader =
                 new GlobalIndexFileReader() {
                     @Override
-                    public SeekableInputStream getInputStream(String fileName) throws IOException {
+                    public SeekableInputStream getInputStream(GlobalIndexIOMeta meta)
+                            throws IOException {
                         return fileIO.newInputStream(
-                                new Path(new Path(tempPath.toUri()), fileName));
+                                new Path(new Path(tempPath.toUri()), meta.fileName()));
                     }
 
                     @Override

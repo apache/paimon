@@ -75,7 +75,7 @@ public class BTreeIndexReader implements GlobalIndexReader {
             this.minKey = null;
             this.maxKey = null;
         }
-        this.input = fileReader.getInputStream(globalIndexIOMeta.fileName());
+        this.input = fileReader.getInputStream(globalIndexIOMeta);
 
         // prepare file footer
         long fileSize = globalIndexIOMeta.fileSize();

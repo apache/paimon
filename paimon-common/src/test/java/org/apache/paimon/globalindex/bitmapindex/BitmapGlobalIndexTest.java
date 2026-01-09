@@ -245,8 +245,9 @@ public class BitmapGlobalIndexTest {
         GlobalIndexFileReader fileReader =
                 new GlobalIndexFileReader() {
                     @Override
-                    public SeekableInputStream getInputStream(String fileName) throws IOException {
-                        return fileIO.newInputStream(new Path(tempDir.toString(), fileName));
+                    public SeekableInputStream getInputStream(GlobalIndexIOMeta meta)
+                            throws IOException {
+                        return fileIO.newInputStream(new Path(tempDir.toString(), meta.fileName()));
                     }
 
                     @Override

@@ -57,8 +57,11 @@ public class GlobalIndexFileReadWrite implements GlobalIndexFileReader, GlobalIn
         return fileIO.newOutputStream(indexPathFactory.toPath(fileName), true);
     }
 
-    public SeekableInputStream getInputStream(String fileName) throws IOException {
-        Path path = indexPathFactory.toPath(fileName);
+    public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
+        Path path =
+                meta.externalPath() == null
+                        ? indexPathFactory.toPath(meta.fileName())
+                        : new Path(meta.externalPath());
         return fileIO.newInputStream(path);
     }
 }

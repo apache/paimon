@@ -24,7 +24,10 @@ import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -852,5 +855,49 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         assertThat(entries.size()).isEqualTo(1);
         assertThat(entries.get(0).file().nonNullFirstRowId()).isEqualTo(0);
         assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
+    }
+
+    @Test
+    public void testIndexPath() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+
+        Path path0 = indexPathFactory.toPath("test-file");
+        assertThat(path0.toString().contains(warehouse.toString())).isTrue();
+        String testExternalpath = "file:/external/path/test-file-dir";
+        Path path1 =
+                indexPathFactory.toPath(
+                        new IndexFileMeta(
+                                "test-type",
+                                "test-file",
+                                1024L,
+                                100L,
+                                null,
+                                testExternalpath,
+                                null));
+        assertThat(path1.toString()).isEqualTo(testExternalpath);
+
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), testExternalpath));
+
+        indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+        Path path3 = indexPathFactory.toPath("test-file");
+        assertThat(path3.toString()).isEqualTo(testExternalpath + "/test-file");
+
+        String testExternalpath2 = "file:/external/path2/test-file";
+        Path path4 =
+                indexPathFactory.toPath(
+                        new IndexFileMeta(
+                                "test-type",
+                                "test-file",
+                                1024L,
+                                100L,
+                                null,
+                                testExternalpath2,
+                                null));
+        assertThat(path4.toString()).isEqualTo(testExternalpath2);
     }
 }

@@ -93,8 +93,8 @@ public class LuceneVectorGlobalIndexTest {
     private GlobalIndexFileReader createFileReader(Path path) {
         return new GlobalIndexFileReader() {
             @Override
-            public SeekableInputStream getInputStream(String fileName) throws IOException {
-                return fileIO.newInputStream(new Path(path, fileName));
+            public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
+                return fileIO.newInputStream(new Path(path, meta.fileName()));
             }
 
             @Override

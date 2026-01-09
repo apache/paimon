@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.globalindex;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
 import org.apache.paimon.globalindex.GlobalIndexer;
@@ -51,9 +52,20 @@ public class GlobalIndexBuilderUtils {
             long fileSize = readWrite.fileSize(fileName);
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(range.from, range.to, indexFieldId, null, entry.meta());
+
+            String externalPath = null;
+            String globalIndexRootDir = table.coreOptions().globalIndexExternalPath();
+            if (globalIndexRootDir != null) {
+                externalPath = new Path(globalIndexRootDir, fileName).toString();
+            }
             IndexFileMeta indexFileMeta =
                     new IndexFileMeta(
-                            indexType, fileName, fileSize, entry.rowCount(), globalIndexMeta);
+                            indexType,
+                            fileName,
+                            fileSize,
+                            entry.rowCount(),
+                            globalIndexMeta,
+                            externalPath);
             results.add(indexFileMeta);
         }
         return results;

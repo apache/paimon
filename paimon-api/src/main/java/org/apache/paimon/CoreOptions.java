@@ -2013,6 +2013,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether index file in data file directory.");
 
+    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATH =
+            key("global-index.external-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
+
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
                     .memoryType()
@@ -2701,6 +2708,10 @@ public class CoreOptions implements Serializable {
 
     public boolean indexFileInDataFileDir() {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
+    }
+
+    public String globalIndexExternalPath() {
+        return options.get(GLOBAL_INDEX_EXTERNAL_PATH);
     }
 
     public LookupStrategy lookupStrategy() {
