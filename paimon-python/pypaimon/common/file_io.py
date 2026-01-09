@@ -402,7 +402,10 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: str, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, compression: str = 'zstd', **kwargs):
+    def write_avro(
+            self, path: str, data: pyarrow.Table,
+            avro_schema: Optional[Dict[str, Any]] = None,
+            compression: str = 'zstd', **kwargs):
         import fastavro
         if avro_schema is None:
             from pypaimon.schema.data_types import PyarrowFieldParser

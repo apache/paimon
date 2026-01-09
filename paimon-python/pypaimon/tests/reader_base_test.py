@@ -786,10 +786,12 @@ class ReaderBasicTest(unittest.TestCase):
             self._verify_file_compression_with_format(
                 file_format, compression, db_name, table_name, expected_rows=3
             )
-        except (ValueError, RuntimeError) as e:
+        except (ValueError, RuntimeError):
             raise
 
-    def _verify_file_compression_with_format(self, file_format: str, compression: str, db_name: str, table_name: str, expected_rows: int = 3):
+    def _verify_file_compression_with_format(
+            self, file_format: str, compression: str,
+            db_name: str, table_name: str, expected_rows: int = 3):
         if file_format == 'parquet':
             parquet_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.parquet")
             self.assertEqual(len(parquet_files), 1)
@@ -801,8 +803,9 @@ class ReaderBasicTest(unittest.TestCase):
                 actual_compression = column_metadata.compression
                 compression_str = str(actual_compression).upper()
                 expected_compression_upper = compression.upper()
-                self.assertIn(expected_compression_upper, compression_str,
-                             f"Expected compression to be {compression}, but got {actual_compression}")
+                self.assertIn(
+                    expected_compression_upper, compression_str,
+                    f"Expected compression to be {compression}, but got {actual_compression}")
         elif file_format == 'orc':
             orc_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.orc")
             self.assertEqual(len(orc_files), 1)
@@ -828,9 +831,11 @@ class ReaderBasicTest(unittest.TestCase):
                     'snappy': 'snappy',
                     'deflate': 'deflate',
                 }
-                expected_codec = expected_codec_map.get(compression.lower(), compression.lower())
-                self.assertEqual(codec, expected_codec,
-                               f"Expected compression codec to be '{expected_codec}', but got '{codec}'")
+                expected_codec = expected_codec_map.get(
+                    compression.lower(), compression.lower())
+                self.assertEqual(
+                    codec, expected_codec,
+                    f"Expected compression codec to be '{expected_codec}', but got '{codec}'")
 
     def _verify_file_compression(self, file_format: str, db_name: str, table_name: str, expected_rows: int = 3):
         if file_format == 'parquet':
@@ -843,9 +848,10 @@ class ReaderBasicTest(unittest.TestCase):
                 column_metadata = parquet_metadata.row_group(0).column(i)
                 compression = column_metadata.compression
                 compression_str = str(compression).upper()
-                self.assertIn('ZSTD', compression_str,
-                             f"Expected compression to be ZSTD , "
-                             f"but got {compression}")
+                self.assertIn(
+                    'ZSTD', compression_str,
+                    f"Expected compression to be ZSTD , "
+                    f"but got {compression}")
         elif file_format == 'orc':
             orc_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.orc")
             self.assertEqual(len(orc_files), 1)
@@ -865,9 +871,10 @@ class ReaderBasicTest(unittest.TestCase):
             with open(avro_file_path, 'rb') as f:
                 reader = fastavro.reader(f)
                 codec = reader.codec
-                self.assertEqual(codec, 'zstandard',
-                               f"Expected compression codec to be 'zstandard', "
-                               f"but got '{codec}'")
+                self.assertEqual(
+                    codec, 'zstandard',
+                    f"Expected compression codec to be 'zstandard', "
+                    f"but got '{codec}'")
 
     def _test_value_stats_cols_case(self, manifest_manager, table, value_stats_cols, expected_fields_count, test_name):
         """Helper method to test a specific _VALUE_STATS_COLS case."""
