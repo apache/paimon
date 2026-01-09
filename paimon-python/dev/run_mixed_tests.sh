@@ -195,6 +195,42 @@ run_pk_dv_test() {
         return 1
     fi
 }
+
+# Function to run FAISS vector index test (Java write, Python read)
+run_faiss_vector_test() {
+    echo -e "${YELLOW}=== Step 6: Running FAISS Vector Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    # Run the Java test method for FAISS vector index
+    echo "Running Maven test for JavaPyFaissE2ETest.testJavaWriteFaissVectorIndex..."
+    echo "Note: Maven may download dependencies on first run, this may take a while..."
+    if mvn test '-Dtest=org.apache.paimon.faiss.index.JavaPyFaissE2ETest#testJavaWriteFaissVectorIndex' -pl paimon-faiss/paimon-faiss-index -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java FAISS write test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java FAISS write test failed${NC}"
+        return 1
+    fi
+
+    echo ""
+
+    # Run the Python test method for reading FAISS vector table
+    # Run from the tests directory where the test file is located
+    cd "$PROJECT_ROOT/paimon-python/pypaimon/tests"
+    echo "Running Python test for JavaPyFaissE2ETest.test_read_faiss_vector_table..."
+    # Capture pytest output and check for "passed" since FAISS cleanup can cause segfault on exit
+    local pytest_output
+    pytest_output=$(python -m pytest test_global_index.py::JavaPyFaissE2ETest::test_read_faiss_vector_table -v --tb=short 2>&1) || true
+    echo "$pytest_output"
+
+    if echo "$pytest_output" | grep -q "1 passed"; then
+        echo -e "${GREEN}✓ Python FAISS read test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python FAISS read test failed${NC}"
+        return 1
+    fi
+}
 # Main execution
 main() {
     local java_write_result=0
@@ -202,6 +238,7 @@ main() {
     local python_write_result=0
     local java_read_result=0
     local pk_dv_result=0
+    local faiss_vector_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
     echo ""
@@ -244,6 +281,14 @@ main() {
     if ! run_pk_dv_test; then
         pk_dv_result=1
     fi
+
+    echo ""
+
+    # Run FAISS vector index test (Java write, Python read)
+    if ! run_faiss_vector_test; then
+        faiss_vector_result=1
+    fi
+
     echo ""
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
@@ -271,18 +316,24 @@ main() {
         echo -e "${RED}✗ Java Read Test (Parquet + Lance): FAILED${NC}"
     fi
 
-     if [[ $pk_dv_result -eq 0 ]]; then
-          echo -e "${GREEN}✓ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): PASSED${NC}"
-      else
-          echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
-      fi
+    if [[ $pk_dv_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): PASSED${NC}"
+    else
+        echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
+    fi
+
+    if [[ $faiss_vector_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ FAISS Vector Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ FAISS Vector Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
 
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $faiss_vector_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else
