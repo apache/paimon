@@ -25,12 +25,16 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -104,12 +108,20 @@ public class BlobFileFormat extends FileFormat {
 
         @Override
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-            return new BlobFormatReader(
-                    context.fileIO(),
-                    context.filePath(),
-                    context.fileSize(),
-                    context.selection(),
-                    blobAsDescriptor);
+            FileIO fileIO = context.fileIO();
+            Path filePath = context.filePath();
+            SeekableInputStream in = null;
+            BlobFileMeta fileMeta;
+            try {
+                in = fileIO.newInputStream(filePath);
+                fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
+            } finally {
+                if (blobAsDescriptor) {
+                    IOUtils.closeQuietly(in);
+                    in = null;
+                }
+            }
+            return new BlobFormatReader(fileIO, filePath, fileMeta, in);
         }
     }
 }
