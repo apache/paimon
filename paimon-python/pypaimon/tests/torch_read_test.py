@@ -227,7 +227,7 @@ class TorchReadTest(unittest.TestCase):
         dataloader = DataLoader(
             dataset,
             batch_size=2,
-            num_workers=0 if os.getenv('CI') else 4,
+            num_workers=3,
             shuffle=False
         )
 
@@ -310,7 +310,7 @@ class TorchReadTest(unittest.TestCase):
         dataloader = DataLoader(
             dataset,
             batch_size=1000,
-            num_workers=0 if os.getenv('CI') else 4,
+            num_workers=4,
             shuffle=False
         )
 
@@ -396,7 +396,7 @@ class TorchReadTest(unittest.TestCase):
         dataloader = DataLoader(
             dataset,
             batch_size=1000,
-            num_workers=0 if os.getenv('CI') else 4,
+            num_workers=8,
             shuffle=False
         )
 

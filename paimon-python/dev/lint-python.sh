@@ -206,15 +206,8 @@ function pytest_torch_check() {
     # Get Python version
     PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
     echo "Detected Python version: $PYTHON_VERSION"
-
-    # Determine test directory based on Python version
-    if [ "$PYTHON_VERSION" = "3.6" ]; then
-        TEST_DIR="pypaimon/tests/py36"
-        echo "Running tests for Python 3.6: $TEST_DIR"
-    else
-        TEST_DIR="pypaimon/tests/torch_read_test.py"
-        echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests/torch_read_test.py"
-    fi
+    TEST_DIR="pypaimon/tests/torch_read_test.py"
+    echo "Running tests for Python $PYTHON_VERSION: pypaimon/tests/torch_read_test.py"
 
     # the return value of a pipeline is the status of the last command to exit
     # with a non-zero status or zero if no command exited with a non-zero status
