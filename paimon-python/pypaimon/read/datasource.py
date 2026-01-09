@@ -247,10 +247,11 @@ class TorchDataset(Dataset):
             table_read: TableRead instance for reading data
             splits: List of splits to read
         """
-
-        self.table_read = table_read
-        self.splits = splits
-        self._data = self._load_data()
+        arrow_table = table_read.to_arrow(splits)
+        if arrow_table is None or arrow_table.num_rows == 0:
+            self._data = []
+        else:
+            self._data = arrow_table.to_pylist()
 
     def __len__(self) -> int:
         """
@@ -278,22 +279,6 @@ class TorchDataset(Dataset):
             return None
 
         return self._data[index]
-
-    def _load_data(self):
-        """
-        Load all data from splits into memory.
-
-        This method reads all splits and converts them to a list of dictionaries
-        where each dictionary contains column names as keys and tensors as values.
-        """
-
-        # Read all splits into a single Arrow table
-        arrow_table = self.table_read.to_arrow(self.splits)
-
-        if arrow_table is None or arrow_table.num_rows == 0:
-            return []
-        else:
-            return arrow_table.to_pylist()
 
 
 class TorchIterDataset(IterableDataset):
