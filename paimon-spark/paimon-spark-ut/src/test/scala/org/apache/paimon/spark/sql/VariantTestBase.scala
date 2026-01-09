@@ -386,4 +386,71 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       }
     }
   }
+
+  test("Paimon Variant: read and write variant with null value") {
+    withTable("source_tbl", "target_tbl") {
+      sql("CREATE TABLE source_tbl (id INT, js STRING) USING paimon")
+      val n = 100
+      val nullCount = 98
+      val values = (1 to n)
+        .map {
+          i =>
+            if (i <= nullCount) {
+              s"($i, null)"
+            } else {
+              val jsonStr =
+                s"""
+                   |'{
+                   |  "id":$i,"name":"user$i","age":${20 + (i % 50)},
+                   |  "tags":[{"type":"vip","level":$i},{"type":"premium","level":$i}],
+                   |  "address":{"city":"city$i","street":"street$i"}
+                   |}'
+                   |""".stripMargin
+              s"($i, $jsonStr)"
+            }
+        }
+        .mkString(", ")
+      sql(s"INSERT INTO source_tbl VALUES $values")
+
+      sql("CREATE TABLE target_tbl (id INT, v VARIANT) USING paimon")
+      sql("INSERT INTO target_tbl SELECT id, parse_json(js) FROM source_tbl")
+
+      checkAnswer(
+        sql("""
+              |SELECT
+              |variant_get(v, '$.name', 'string'),
+              |variant_get(v, '$.tags', 'string'),
+              |variant_get(v, '$.tags', 'array<string>'),
+              |variant_get(v, '$.tags', 'array<struct<type string, level int>>'),
+              |variant_get(v, '$.tags[0]', 'string'),
+              |variant_get(v, '$.tags[0]', 'struct<type string, level int>'),
+              |variant_get(v, '$.tags[1].type', 'string'),
+              |variant_get(v, '$.address', 'string')
+              |FROM target_tbl where v IS NOT NULL
+              |""".stripMargin),
+        Seq(
+          Row(
+            "user99",
+            "[{\"level\":99,\"type\":\"vip\"},{\"level\":99,\"type\":\"premium\"}]",
+            Array("{\"level\":99,\"type\":\"vip\"}", "{\"level\":99,\"type\":\"premium\"}"),
+            Array(Row("vip", 99), Row("premium", 99)),
+            "{\"level\":99,\"type\":\"vip\"}",
+            Row("vip", 99),
+            "premium",
+            "{\"city\":\"city99\",\"street\":\"street99\"}"
+          ),
+          Row(
+            "user100",
+            "[{\"level\":100,\"type\":\"vip\"},{\"level\":100,\"type\":\"premium\"}]",
+            Array("{\"level\":100,\"type\":\"vip\"}", "{\"level\":100,\"type\":\"premium\"}"),
+            Array(Row("vip", 100), Row("premium", 100)),
+            "{\"level\":100,\"type\":\"vip\"}",
+            Row("vip", 100),
+            "premium",
+            "{\"city\":\"city100\",\"street\":\"street100\"}"
+          )
+        )
+      )
+    }
+  }
 }
