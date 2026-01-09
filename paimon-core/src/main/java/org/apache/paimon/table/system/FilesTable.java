@@ -28,7 +28,6 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -121,8 +120,7 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(16, "deleteRowCount", DataTypes.BIGINT()),
                             new DataField(17, "file_source", DataTypes.STRING()),
                             new DataField(18, "first_row_id", DataTypes.BIGINT()),
-                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING())),
-                            new DataField(20, "blob", DataTypes.BOOLEAN())));
+                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING()))));
 
     private final FileStoreTable storeTable;
 
@@ -450,7 +448,6 @@ public class FilesTable implements ReadonlyTable {
                             return new GenericArray(
                                     writeCols.stream().map(BinaryString::fromString).toArray());
                         },
-                        () -> BlobFileFormat.isBlobFile(file.fileName())
                     };
 
             return new LazyGenericRow(fields);

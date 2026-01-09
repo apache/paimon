@@ -224,8 +224,7 @@ public class FilesTableTest extends TableTestBase {
                             BinaryString.fromString(
                                     file.fileSource().map(Object::toString).orElse(null)),
                             file.firstRowId(),
-                            null,
-                            false));
+                            null));
         }
         return expectedRow;
     }
