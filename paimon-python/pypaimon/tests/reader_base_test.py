@@ -816,6 +816,23 @@ class ReaderBasicTest(unittest.TestCase):
         manifest_file_name = f"manifest-test-{test_name}"
         manifest_manager.write(manifest_file_name, [entry])
 
+        if value_stats_cols is None:
+            from pathlib import Path
+            import fastavro
+            manifest_path = Path(table.table_path) / "manifest" / manifest_file_name
+            with table.file_io.new_input_stream(str(manifest_path)) as f:
+                reader = fastavro.reader(f)
+                records = list(reader)
+                file_dict = records[0]['_FILE']
+                try:
+                    if file_dict['_VALUE_STATS_COLS'] is None:
+                        pass
+                except KeyError:
+                    self.fail(
+                        "_VALUE_STATS_COLS field should be written to manifest file when value is None. "
+                        "Field missing indicates fastavro omitted the None value, which breaks backward compatibility."
+                    )
+
         # Read the manifest entry back
         entries = manifest_manager.read(manifest_file_name, drop_stats=False)
 
