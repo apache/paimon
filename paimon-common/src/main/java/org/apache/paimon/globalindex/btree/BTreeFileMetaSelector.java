@@ -192,7 +192,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
                 result.retainAll(child.get());
             }
             if (result.isEmpty()) {
-                return Optional.empty();
+                break;
             }
         }
         return result == null ? Optional.empty() : Optional.of(new ArrayList<>(result));
@@ -203,9 +203,12 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
             List<Optional<List<GlobalIndexIOMeta>>> children) {
         HashSet<GlobalIndexIOMeta> result = new HashSet<>();
         for (Optional<List<GlobalIndexIOMeta>> child : children) {
+            if (!child.isPresent()) {
+                return Optional.empty();
+            }
             child.ifPresent(result::addAll);
         }
-        return result.isEmpty() ? Optional.empty() : Optional.of(new ArrayList<>(result));
+        return Optional.of(new ArrayList<>(result));
     }
 
     @Override

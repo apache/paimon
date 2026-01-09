@@ -95,4 +95,9 @@ public class BTreeGlobalIndexer implements GlobalIndexer {
             GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files) throws IOException {
         return new LazyFilteredBTreeReader(files, keySerializer, fileReader, cacheManager.get());
     }
+
+    @Override
+    public boolean rowIdLocal() {
+        return false;
+    }
 }
