@@ -125,8 +125,8 @@ class CoreOptions:
     FILE_COMPRESSION: ConfigOption[str] = (
         ConfigOptions.key("file.compression")
         .string_type()
-        .default_value("lz4")
-        .with_description("Default file compression format.")
+        .default_value("zstd")
+        .with_description("Default file compression format. For faster read and write, it is recommended to use zstd.")
     )
 
     FILE_COMPRESSION_PER_LEVEL: ConfigOption[Dict[str, str]] = (

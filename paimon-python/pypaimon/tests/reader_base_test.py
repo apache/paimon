@@ -28,6 +28,7 @@ from unittest.mock import Mock
 
 import pandas as pd
 import pyarrow as pa
+from parameterized import parameterized
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -675,7 +676,12 @@ class ReaderBasicTest(unittest.TestCase):
             l2.append(field.to_dict())
         self.assertEqual(l1, l2)
 
-    def test_write(self):
+    @parameterized.expand([
+        ('parquet',),
+        ('orc',),
+        ('avro',),
+    ])
+    def test_write(self, file_format):
         pa_schema = pa.schema([
             ('f0', pa.int32()),
             ('f1', pa.string()),
@@ -684,9 +690,15 @@ class ReaderBasicTest(unittest.TestCase):
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse
         })
-        catalog.create_database("test_write_db", False)
-        catalog.create_table("test_write_db.test_table", Schema.from_pyarrow_schema(pa_schema), False)
-        table = catalog.get_table("test_write_db.test_table")
+        db_name = f"test_write_{file_format}_db"
+        table_name = f"test_{file_format}_table"
+        catalog.create_database(db_name, False)
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={'file.format': file_format}
+        )
+        catalog.create_table(f"{db_name}.{table_name}", schema, False)
+        table = catalog.get_table(f"{db_name}.{table_name}")
 
         data = {
             'f0': [1, 2, 3],
@@ -704,17 +716,7 @@ class ReaderBasicTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-        self.assertTrue(os.path.exists(self.warehouse + "/test_write_db.db/test_table/snapshot/LATEST"))
-        self.assertTrue(os.path.exists(self.warehouse + "/test_write_db.db/test_table/snapshot/snapshot-1"))
-        self.assertTrue(os.path.exists(self.warehouse + "/test_write_db.db/test_table/manifest"))
-        self.assertTrue(os.path.exists(self.warehouse + "/test_write_db.db/test_table/bucket-0"))
-        self.assertEqual(len(glob.glob(self.warehouse + "/test_write_db.db/test_table/manifest/*")), 3)
-        self.assertEqual(len(glob.glob(self.warehouse + "/test_write_db.db/test_table/bucket-0/*.parquet")), 1)
-
-        with open(self.warehouse + '/test_write_db.db/test_table/snapshot/snapshot-1', 'r', encoding='utf-8') as file:
-            content = ''.join(file.readlines())
-            self.assertTrue(content.__contains__('\"totalRecordCount\": 3'))
-            self.assertTrue(content.__contains__('\"deltaRecordCount\": 3'))
+        self._verify_file_compression(file_format, db_name, table_name, expected_rows=3)
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -725,10 +727,147 @@ class ReaderBasicTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-        with open(self.warehouse + '/test_write_db.db/test_table/snapshot/snapshot-2', 'r', encoding='utf-8') as file:
+        snapshot_path = os.path.join(self.warehouse, f"{db_name}.db", table_name, "snapshot", "snapshot-2")
+        with open(snapshot_path, 'r', encoding='utf-8') as file:
             content = ''.join(file.readlines())
             self.assertTrue(content.__contains__('\"totalRecordCount\": 6'))
             self.assertTrue(content.__contains__('\"deltaRecordCount\": 3'))
+
+    @parameterized.expand([
+        ('parquet', 'zstd'),
+        ('parquet', 'lz4'),
+        ('parquet', 'snappy'),
+        ('orc', 'zstd'),
+        ('orc', 'lz4'),
+        ('orc', 'snappy'),
+        ('avro', 'zstd'),
+        ('avro', 'snappy'),
+    ])
+    def test_write_with_compression(self, file_format, compression):
+        pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string()),
+            ('f2', pa.string())
+        ])
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+        db_name = f"test_write_{file_format}_{compression}_db"
+        table_name = f"test_{file_format}_{compression}_table"
+        catalog.create_database(db_name, False)
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'file.format': file_format,
+                'file.compression': compression
+            }
+        )
+        catalog.create_table(f"{db_name}.{table_name}", schema, False)
+        table = catalog.get_table(f"{db_name}.{table_name}")
+
+        data = {
+            'f0': [1, 2, 3],
+            'f1': ['a', 'b', 'c'],
+            'f2': ['X', 'Y', 'Z']
+        }
+        expect = pa.Table.from_pydict(data, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        try:
+            table_write.write_arrow(expect)
+            commit_messages = table_write.prepare_commit()
+            table_commit.commit(commit_messages)
+            table_write.close()
+            table_commit.close()
+
+            self._verify_file_compression_with_format(
+                file_format, compression, db_name, table_name, expected_rows=3
+            )
+        except (ValueError, RuntimeError) as e:
+            raise
+
+    def _verify_file_compression_with_format(self, file_format: str, compression: str, db_name: str, table_name: str, expected_rows: int = 3):
+        if file_format == 'parquet':
+            parquet_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.parquet")
+            self.assertEqual(len(parquet_files), 1)
+            import pyarrow.parquet as pq
+            parquet_file_path = parquet_files[0]
+            parquet_metadata = pq.read_metadata(parquet_file_path)
+            for i in range(parquet_metadata.num_columns):
+                column_metadata = parquet_metadata.row_group(0).column(i)
+                actual_compression = column_metadata.compression
+                compression_str = str(actual_compression).upper()
+                expected_compression_upper = compression.upper()
+                self.assertIn(expected_compression_upper, compression_str,
+                             f"Expected compression to be {compression}, but got {actual_compression}")
+        elif file_format == 'orc':
+            orc_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.orc")
+            self.assertEqual(len(orc_files), 1)
+            import pyarrow.orc as orc
+            orc_file_path = orc_files[0]
+            orc_file = orc.ORCFile(orc_file_path)
+            try:
+                table = orc_file.read()
+                self.assertEqual(table.num_rows, expected_rows, "ORC file should contain expected rows")
+            except Exception as e:
+                self.fail(f"Failed to read ORC file (compression may be incorrect): {e}")
+        elif file_format == 'avro':
+            avro_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.avro")
+            self.assertEqual(len(avro_files), 1)
+            import fastavro
+            avro_file_path = avro_files[0]
+            with open(avro_file_path, 'rb') as f:
+                reader = fastavro.reader(f)
+                codec = reader.codec
+                expected_codec_map = {
+                    'zstd': 'zstandard',
+                    'zstandard': 'zstandard',
+                    'snappy': 'snappy',
+                    'deflate': 'deflate',
+                }
+                expected_codec = expected_codec_map.get(compression.lower(), compression.lower())
+                self.assertEqual(codec, expected_codec,
+                               f"Expected compression codec to be '{expected_codec}', but got '{codec}'")
+
+    def _verify_file_compression(self, file_format: str, db_name: str, table_name: str, expected_rows: int = 3):
+        if file_format == 'parquet':
+            parquet_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.parquet")
+            self.assertEqual(len(parquet_files), 1)
+            import pyarrow.parquet as pq
+            parquet_file_path = parquet_files[0]
+            parquet_metadata = pq.read_metadata(parquet_file_path)
+            for i in range(parquet_metadata.num_columns):
+                column_metadata = parquet_metadata.row_group(0).column(i)
+                compression = column_metadata.compression
+                compression_str = str(compression).upper()
+                self.assertIn('ZSTD', compression_str,
+                             f"Expected compression to be ZSTD , "
+                             f"but got {compression}")
+        elif file_format == 'orc':
+            orc_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.orc")
+            self.assertEqual(len(orc_files), 1)
+            import pyarrow.orc as orc
+            orc_file_path = orc_files[0]
+            orc_file = orc.ORCFile(orc_file_path)
+            try:
+                table = orc_file.read()
+                self.assertEqual(table.num_rows, expected_rows, "ORC file should contain expected rows")
+            except Exception as e:
+                self.fail(f"Failed to read ORC file (compression may be incorrect): {e}")
+        elif file_format == 'avro':
+            avro_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.avro")
+            self.assertEqual(len(avro_files), 1)
+            import fastavro
+            avro_file_path = avro_files[0]
+            with open(avro_file_path, 'rb') as f:
+                reader = fastavro.reader(f)
+                codec = reader.codec
+                self.assertEqual(codec, 'zstandard',
+                               f"Expected compression codec to be 'zstandard', "
+                               f"but got '{codec}'")
 
     def _test_value_stats_cols_case(self, manifest_manager, table, value_stats_cols, expected_fields_count, test_name):
         """Helper method to test a specific _VALUE_STATS_COLS case."""

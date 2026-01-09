@@ -259,7 +259,7 @@ class DataBlobWriter(DataWriter):
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
             self.file_io.write_orc(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data)
+            self.file_io.write_avro(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
             self.file_io.write_lance(file_path, data)
         else:

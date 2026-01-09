@@ -369,7 +369,7 @@ class FileIO:
 
         return None
 
-    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'snappy', **kwargs):
+    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'zstd', **kwargs):
         try:
             import pyarrow.parquet as pq
 
@@ -402,7 +402,7 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: str, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
+    def write_avro(self, path: str, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, compression: str = 'zstd', **kwargs):
         import fastavro
         if avro_schema is None:
             from pypaimon.schema.data_types import PyarrowFieldParser
@@ -417,8 +417,26 @@ class FileIO:
 
         records = record_generator()
 
+        codec_map = {
+            'null': 'null',
+            'deflate': 'deflate',
+            'snappy': 'snappy',
+            'bzip2': 'bzip2',
+            'xz': 'xz',
+            'zstandard': 'zstandard',
+            'zstd': 'zstandard',  # zstd is commonly used in Paimon
+        }
+        compression_lower = compression.lower()
+        
+        codec = codec_map.get(compression_lower)
+        if codec is None:
+            raise ValueError(
+                f"Unsupported compression '{compression}' for Avro format. "
+                f"Supported compressions: {', '.join(sorted(codec_map.keys()))}."
+            )
+
         with self.new_output_stream(path) as output_stream:
-            fastavro.writer(output_stream, avro_schema, records, **kwargs)
+            fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
 
     def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
         try:

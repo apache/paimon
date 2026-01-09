@@ -173,7 +173,7 @@ class DataWriter(ABC):
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
             self.file_io.write_orc(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data)
+            self.file_io.write_avro(file_path, data, compression=self.compression)
         elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
             self.file_io.write_blob(file_path, data, self.blob_as_descriptor)
         elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:

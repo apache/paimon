@@ -38,4 +38,8 @@ pyroaring
 ray>=2.10,<3
 readerwriterlock>=1,<2
 torch
-zstandard>=0.19,<1
+zstandard>=0.19,<1; python_version<"3.9"
+zstandard>=0.19,<1; python_version>="3.9"
+cramjam>=0.6,<1; python_version>="3.7"
+pylance>=0.20,<1; python_version>="3.9"
+pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"
