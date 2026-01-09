@@ -33,7 +33,6 @@ under the License.
 
     <properties>
         <faiss.version>1.7.4</faiss.version>
-        <skipFaissTests>true</skipFaissTests>
     </properties>
 
     <dependencies>
@@ -52,26 +51,6 @@ under the License.
 
     <build>
         <plugins>
-            <!-- Generate JNI headers -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <id>generate-jni-headers</id>
-                        <phase>compile</phase>
-                        <goals>
-                            <goal>run</goal>
-                        </goals>
-                        <configuration>
-                            <target>
-                                <mkdir dir="${project.basedir}/src/main/native/include"/>
-                            </target>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-
             <!-- Resources plugin to include native libraries -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -81,15 +60,6 @@ under the License.
                         <nonFilteredFileExtension>so</nonFilteredFileExtension>
                         <nonFilteredFileExtension>dylib</nonFilteredFileExtension>
                     </nonFilteredFileExtensions>
-                </configuration>
-            </plugin>
-
-            <!-- Surefire for tests -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <skipTests>${skipFaissTests}</skipTests>
                 </configuration>
             </plugin>
         </plugins>

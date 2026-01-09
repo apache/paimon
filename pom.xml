@@ -530,9 +530,6 @@ under the License.
             </modules>
             <activation>
                 <activeByDefault>true</activeByDefault>
-                <property>
-                    <name>paimon-faiss-vector</name>
-                </property>
             </activation>
         </profile>
     </profiles>

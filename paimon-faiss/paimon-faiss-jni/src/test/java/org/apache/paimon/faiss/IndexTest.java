@@ -130,14 +130,6 @@ class IndexTest {
         }
     }
 
-    private Index createFlatIndexWithMetric(MetricType metricType) {
-        return IndexFactory.create(DIMENSION, "Flat", metricType);
-    }
-
-    private Index createFlatIndex() {
-        return IndexFactory.create(DIMENSION, "Flat", MetricType.L2);
-    }
-
     @Test
     void testInnerProductMetric() {
         try (Index index = createFlatIndexWithMetric(MetricType.INNER_PRODUCT)) {
@@ -280,6 +272,65 @@ class IndexTest {
     }
 
     @Test
+    void testIVFSQ8Index() {
+        // IVF16384,SQ8 is a quantized index that needs training
+        try (Index index = IndexFactory.create(DIMENSION, "IVF16384,SQ8", MetricType.L2)) {
+            assertEquals(DIMENSION, index.getDimension());
+            assertEquals(MetricType.L2, index.getMetricType());
+
+            // IVF index needs training
+            assertTrue(!index.isTrained(), "IVF index should not be trained initially");
+
+            // Train the index with training vectors
+            int numTrainingVectors = 20000; // Should be >= nlist (16384) for good training
+            ByteBuffer trainingBuffer = createVectorBuffer(numTrainingVectors, DIMENSION);
+            index.train(numTrainingVectors, trainingBuffer);
+
+            assertTrue(index.isTrained(), "Index should be trained after training");
+
+            // Add vectors after training
+            ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
+            index.add(NUM_VECTORS, vectorBuffer);
+            assertEquals(NUM_VECTORS, index.getCount());
+
+            // Set nprobe for search (number of clusters to visit)
+            IndexIVF.setNprobe(index, 64);
+            assertEquals(64, IndexIVF.getNprobe(index));
+
+            // Search
+            float[] queryVectors = createQueryVectors(1, DIMENSION);
+            float[] distances = new float[K];
+            long[] labels = new long[K];
+
+            index.search(1, queryVectors, K, distances, labels);
+
+            // Verify search results
+            for (int i = 0; i < K; i++) {
+                assertTrue(
+                        labels[i] >= 0 && labels[i] < NUM_VECTORS,
+                        "Label " + labels[i] + " out of range");
+                assertTrue(distances[i] >= 0, "Distance should be non-negative for L2");
+            }
+
+            // Test batch search
+            int numQueries = 3;
+            float[] batchQueryVectors = createQueryVectors(numQueries, DIMENSION);
+            float[] batchDistances = new float[numQueries * K];
+            long[] batchLabels = new long[numQueries * K];
+
+            index.search(numQueries, batchQueryVectors, K, batchDistances, batchLabels);
+
+            for (int q = 0; q < numQueries; q++) {
+                for (int n = 0; n < K; n++) {
+                    int idx = q * K + n;
+                    assertTrue(batchLabels[idx] >= 0 && batchLabels[idx] < NUM_VECTORS);
+                    assertTrue(batchDistances[idx] >= 0);
+                }
+            }
+        }
+    }
+
+    @Test
     void testErrorHandling() {
         // Test invalid dimension
         assertThrows(
@@ -370,6 +421,14 @@ class IndexTest {
         assertTrue(idBuffer.isDirect());
         assertEquals(ByteOrder.nativeOrder(), idBuffer.order());
         assertEquals(10 * Long.BYTES, idBuffer.capacity());
+    }
+
+    private Index createFlatIndexWithMetric(MetricType metricType) {
+        return IndexFactory.create(DIMENSION, "Flat", metricType);
+    }
+
+    private Index createFlatIndex() {
+        return IndexFactory.create(DIMENSION, "Flat", MetricType.L2);
     }
 
     /** Create a direct ByteBuffer with random vectors. */
