@@ -308,7 +308,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
                    |TBLPROPERTIES (
                    |  'bucket' = '-1',
                    |  'global-index.row-count-per-shard' = '10000',
-                   |  'global-index.external-path' = '${tempIndexDir.toString}',
+                   |  'global-index.external-path' = '${"file:" + tempIndexDir.toString}',
                    |  'row-tracking.enabled' = 'true',
                    |  'data-evolution.enabled' = 'true')
                    |""".stripMargin)
@@ -336,7 +336,11 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       val totalRowCount = bitmapEntries.map(_.indexFile().rowCount()).sum
       assert(totalRowCount == 100000L)
       for (entry <- bitmapEntries) {
-        assert(entry.indexFile().externalPath().startsWith(tempIndexDir.toString))
+        assert(
+          entry
+            .indexFile()
+            .externalPath()
+            .startsWith(tempIndexDir.toString + "/" + entry.indexFile().fileName()))
       }
     }
   }
