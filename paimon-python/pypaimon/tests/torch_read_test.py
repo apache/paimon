@@ -310,7 +310,7 @@ class TorchReadTest(unittest.TestCase):
         dataloader = DataLoader(
             dataset,
             batch_size=1000,
-            num_workers=4,
+            num_workers=2,
             shuffle=False
         )
 
@@ -396,7 +396,7 @@ class TorchReadTest(unittest.TestCase):
         dataloader = DataLoader(
             dataset,
             batch_size=1000,
-            num_workers=8,
+            num_workers=2,
             shuffle=False
         )
 
