@@ -195,7 +195,6 @@ run_pk_dv_test() {
         return 1
     fi
 }
-
 # Main execution
 main() {
     local java_write_result=0
@@ -272,11 +271,11 @@ main() {
         echo -e "${RED}✗ Java Read Test (Parquet + Lance): FAILED${NC}"
     fi
 
-    if [[ $pk_dv_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): PASSED${NC}"
-    else
-        echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
-    fi
+     if [[ $pk_dv_result -eq 0 ]]; then
+          echo -e "${GREEN}✓ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): PASSED${NC}"
+      else
+          echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
+      fi
 
     echo ""
 
