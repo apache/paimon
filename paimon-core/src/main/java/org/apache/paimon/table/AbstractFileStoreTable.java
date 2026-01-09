@@ -451,7 +451,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 store().newSnapshotDeletion(),
-                store().newTagManager());
+                store().newTagManager(),
+                schemaManager(),
+                coreOptions().detectExpirationSettingEnabled());
     }
 
     @Override
@@ -460,7 +462,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 changelogManager(),
                 tagManager(),
-                store().newChangelogDeletion());
+                store().newChangelogDeletion(),
+                schemaManager(),
+                coreOptions().detectExpirationSettingEnabled());
     }
 
     @Override
