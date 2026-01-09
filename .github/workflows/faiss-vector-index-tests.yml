@@ -16,17 +16,15 @@
 # limitations under the License.
 ################################################################################
 
-name: UTCase and ITCase Others
+name: Faiss Vector Index Tests
 
 on:
   push:
+    paths:
+      - 'paimon-faiss/**'
+      - '.github/workflows/faiss-vector-index-tests.yml'
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'paimon-python/**'
-      - '.github/workflows/paimon-python-checks.yml'
-      - 'paimon-lucene/**'
+    paths:
       - 'paimon-faiss/**'
       - '.github/workflows/faiss-vector-index-tests.yml'
 
@@ -39,9 +37,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build_test:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 90
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,23 +50,17 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Build Others
-        run: |
-          echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
+      - name: Build FAISS native library
+        uses: ./.github/actions/build-faiss-native
+        with:
+          platform: linux-amd64
 
-      - name: Test Others
-        timeout-minutes: 60
-        run: |
-          . .github/workflows/utils.sh
-          jvm_timezone=$(random_timezone)
-          echo "JVM timezone is set to $jvm_timezone"
-          
-          TEST_MODULES="!paimon-e2e-tests,!paimon-faiss/paimon-faiss-jni,"
-          for suffix in ut 3.5 3.4 3.3 3.2; do
-            TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
-          done
-          TEST_MODULES="${TEST_MODULES%,}"
-          mvn -T 2C -B clean install -pl "${TEST_MODULES}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
+      - name: Build paimon-faiss-jni
+        shell: bash
+        run: mvn -B clean install -pl paimon-faiss/paimon-faiss-jni -am -DskipTests -Ppaimon-faiss
+
+      - name: Test paimon-faiss-jni
+        timeout-minutes: 10
+        run: mvn -T 1C  -B test -pl paimon-faiss/paimon-faiss-jni -DskipFaissTests=false -Ppaimon-faiss
         env:
-          MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2
+          MAVEN_OPTS: -Xmx2048m

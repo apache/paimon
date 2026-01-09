@@ -522,6 +522,16 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+
+        <profile>
+            <id>paimon-faiss</id>
+            <modules>
+                <module>paimon-faiss</module>
+            </modules>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+        </profile>
     </profiles>
 
     <build>
@@ -626,6 +636,7 @@ under the License.
                         <!-- antlr grammar files -->
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
+                        <exclude>paimon-faiss/paimon-faiss-jni/build/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>
