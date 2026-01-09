@@ -44,58 +44,65 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
     private final long[] blobLengths;
     private final long[] blobOffsets;
     private final int[] returnedPositions;
+    private final SeekableInputStream in;
+    private final boolean blobAsDescriptor;
 
     private boolean returned;
 
     public BlobFormatReader(
-            FileIO fileIO, Path filePath, long fileSize, @Nullable RoaringBitmap32 selection)
+            FileIO fileIO,
+            Path filePath,
+            long fileSize,
+            @Nullable RoaringBitmap32 selection,
+            boolean blobAsDescriptor)
             throws IOException {
         this.fileIO = fileIO;
         this.filePath = filePath;
         this.returned = false;
-        try (SeekableInputStream in = fileIO.newInputStream(filePath)) {
-            in.seek(fileSize - 5);
-            byte[] header = new byte[5];
-            IOUtils.readFully(in, header);
-            byte version = header[4];
-            if (version != 1) {
-                throw new IOException("Unsupported version: " + version);
-            }
-            int indexLength = BytesUtils.getInt(header, 0);
+        this.blobAsDescriptor = blobAsDescriptor;
+        this.in = fileIO.newInputStream(filePath);
 
-            in.seek(fileSize - 5 - indexLength);
-            byte[] indexBytes = new byte[indexLength];
-            IOUtils.readFully(in, indexBytes);
-
-            long[] blobLengths = DeltaVarintCompressor.decompress(indexBytes);
-            long[] blobOffsets = new long[blobLengths.length];
-            long offset = 0;
-            for (int i = 0; i < blobLengths.length; i++) {
-                blobOffsets[i] = offset;
-                offset += blobLengths[i];
-            }
-
-            int[] returnedPositions = null;
-            if (selection != null) {
-                int cardinality = (int) selection.getCardinality();
-                returnedPositions = new int[cardinality];
-                long[] newLengths = new long[cardinality];
-                long[] newOffsets = new long[cardinality];
-                Iterator<Integer> iterator = selection.iterator();
-                for (int i = 0; i < cardinality; i++) {
-                    Integer next = iterator.next();
-                    newLengths[i] = blobLengths[next];
-                    newOffsets[i] = blobOffsets[next];
-                    returnedPositions[i] = next;
-                }
-                blobLengths = newLengths;
-                blobOffsets = newOffsets;
-            }
-
-            this.returnedPositions = returnedPositions;
-            this.blobLengths = blobLengths;
-            this.blobOffsets = blobOffsets;
+        in.seek(fileSize - 5);
+        byte[] header = new byte[5];
+        IOUtils.readFully(in, header);
+        byte version = header[4];
+        if (version != 1) {
+            throw new IOException("Unsupported version: " + version);
         }
+        int indexLength = BytesUtils.getInt(header, 0);
+
+        in.seek(fileSize - 5 - indexLength);
+        byte[] indexBytes = new byte[indexLength];
+        IOUtils.readFully(in, indexBytes);
+
+        long[] blobLengths = DeltaVarintCompressor.decompress(indexBytes);
+        long[] blobOffsets = new long[blobLengths.length];
+        long offset = 0;
+        for (int i = 0; i < blobLengths.length; i++) {
+            blobOffsets[i] = offset;
+            offset += blobLengths[i];
+        }
+
+        int[] returnedPositions = null;
+        if (selection != null) {
+            int cardinality = (int) selection.getCardinality();
+            returnedPositions = new int[cardinality];
+            long[] newLengths = new long[cardinality];
+            long[] newOffsets = new long[cardinality];
+            Iterator<Integer> iterator = selection.iterator();
+            for (int i = 0; i < cardinality; i++) {
+                Integer next = iterator.next();
+                newLengths[i] = blobLengths[next];
+                newOffsets[i] = blobOffsets[next];
+                returnedPositions[i] = next;
+            }
+            blobLengths = newLengths;
+            blobOffsets = newOffsets;
+        }
+
+        this.returnedPositions = returnedPositions;
+        this.blobLengths = blobLengths;
+        this.blobOffsets = blobOffsets;
     }
 
     @Nullable
@@ -129,12 +136,14 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                     return null;
                 }
 
-                Blob blob =
-                        Blob.fromFile(
-                                fileIO,
-                                filePath.toString(),
-                                blobOffsets[currentPosition] + 4,
-                                blobLengths[currentPosition] - 16);
+                Blob blob;
+                long offset = blobOffsets[currentPosition] + 4;
+                long length = blobLengths[currentPosition] - 16;
+                if (!blobAsDescriptor) {
+                    blob = Blob.fromData(readInlineBlob(offset, length));
+                } else {
+                    blob = Blob.fromFile(fileIO, filePath.toString(), offset, length);
+                }
                 currentPosition++;
                 return GenericRow.of(blob);
             }
@@ -145,5 +154,18 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
     }
 
     @Override
-    public void close() throws IOException {}
+    public void close() throws IOException {
+        in.close();
+    }
+
+    private byte[] readInlineBlob(long position, long length) {
+        byte[] blobData = new byte[(int) length];
+        try {
+            in.seek(position);
+            IOUtils.readFully(in, blobData);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return blobData;
+    }
 }
