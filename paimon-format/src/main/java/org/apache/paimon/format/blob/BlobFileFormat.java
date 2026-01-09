@@ -43,8 +43,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** {@link FileFormat} for blob file. */
 public class BlobFileFormat extends FileFormat {
 
+    private final boolean blobAsDescriptor;
+
     public BlobFileFormat() {
+        this(false);
+    }
+
+    public BlobFileFormat(boolean blobAsDescriptor) {
         super(BlobFileFormatFactory.IDENTIFIER);
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     public static boolean isBlobFile(String fileName) {
@@ -56,7 +63,7 @@ public class BlobFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new BlobFormatReaderFactory();
+        return new BlobFormatReaderFactory(blobAsDescriptor);
     }
 
     @Override
@@ -89,10 +96,20 @@ public class BlobFileFormat extends FileFormat {
 
     private static class BlobFormatReaderFactory implements FormatReaderFactory {
 
+        private final boolean blobAsDescriptor;
+
+        public BlobFormatReaderFactory(boolean blobAsDescriptor) {
+            this.blobAsDescriptor = blobAsDescriptor;
+        }
+
         @Override
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
             return new BlobFormatReader(
-                    context.fileIO(), context.filePath(), context.fileSize(), context.selection());
+                    context.fileIO(),
+                    context.filePath(),
+                    context.fileSize(),
+                    context.selection(),
+                    blobAsDescriptor);
         }
     }
 }

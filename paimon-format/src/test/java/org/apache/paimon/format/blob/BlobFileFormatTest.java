@@ -18,7 +18,9 @@
 
 package org.apache.paimon.format.blob;
 
+import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -61,8 +63,17 @@ public class BlobFileFormatTest {
     }
 
     @Test
-    public void test() throws IOException {
-        BlobFileFormat format = new BlobFileFormat();
+    public void testBlobAsDescriptor() throws IOException {
+        innerTest(false);
+    }
+
+    @Test
+    public void testReadBlobInlineBytes() throws IOException {
+        innerTest(false);
+    }
+
+    private void innerTest(boolean blobAsDescriptor) throws IOException {
+        BlobFileFormat format = new BlobFileFormat(blobAsDescriptor);
         RowType rowType = RowType.of(DataTypes.BLOB());
 
         // write
@@ -83,7 +94,16 @@ public class BlobFileFormatTest {
         List<byte[]> result = new ArrayList<>();
         readerFactory
                 .createReader(context)
-                .forEachRemaining(row -> result.add(row.getBlob(0).toData()));
+                .forEachRemaining(
+                        row -> {
+                            Blob blob = row.getBlob(0);
+                            if (blobAsDescriptor) {
+                                assertThat(blob).isInstanceOf(BlobRef.class);
+                            } else {
+                                assertThat(blob).isInstanceOf(BlobData.class);
+                            }
+                            result.add(blob.toData());
+                        });
 
         // assert
         assertThat(result).containsExactlyElementsOf(blobs);
