@@ -65,7 +65,7 @@ class TorchReadTest(unittest.TestCase):
         dataloader = DataLoader(
             dataset,
             batch_size=2,
-            num_workers=0 if os.getenv('CI') else 4,  # github CI: num_workers=0
+            num_workers=2,
             shuffle=False
         )
 

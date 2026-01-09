@@ -107,7 +107,7 @@ function collect_checks() {
 function get_all_supported_checks() {
     _OLD_IFS=$IFS
     IFS=$'\n'
-    SUPPORT_CHECKS=("flake8_check" "pytest_check" "mixed_check") # control the calling sequence
+    SUPPORT_CHECKS=("flake8_check" "pytest_torch_check" "pytest_check" "mixed_check") # control the calling sequence
     for fun in $(declare -F); do
         if [[ `regexp_match "$fun" "_check$"` = true ]]; then
             check_name="${fun:11}"
@@ -179,7 +179,7 @@ function pytest_check() {
         TEST_DIR="pypaimon/tests/py36"
         echo "Running tests for Python 3.6: $TEST_DIR"
     else
-        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e"
+        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
         echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests --ignore=pypaimon/tests/py36"
     fi
 
@@ -197,7 +197,39 @@ function pytest_check() {
         print_function "STAGE" "pytest checks... [SUCCESS]"
     fi
 }
+function pytest_torch_check() {
+    print_function "STAGE" "pytest torch checks"
+    if [ ! -f "$PYTEST_PATH" ]; then
+        echo "For some unknown reasons, the pytest package is not complete."
+    fi
 
+    # Get Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    echo "Detected Python version: $PYTHON_VERSION"
+
+    # Determine test directory based on Python version
+    if [ "$PYTHON_VERSION" = "3.6" ]; then
+        TEST_DIR="pypaimon/tests/py36"
+        echo "Running tests for Python 3.6: $TEST_DIR"
+    else
+        TEST_DIR="pypaimon/tests/torch_read_test.py"
+        echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests/torch_read_test.py"
+    fi
+
+    # the return value of a pipeline is the status of the last command to exit
+    # with a non-zero status or zero if no command exited with a non-zero status
+    set -o pipefail
+    ($PYTEST_PATH $TEST_DIR) 2>&1 | tee -a $LOG_FILE
+
+    PYCODESTYLE_STATUS=$?
+    if [ $PYCODESTYLE_STATUS -ne 0 ]; then
+        print_function "STAGE" "pytest checks... [FAILED]"
+        # Stop the running script.
+        exit 1;
+    else
+        print_function "STAGE" "pytest checks... [SUCCESS]"
+    fi
+}
 # Mixed tests check - runs Java-Python interoperability tests
 function mixed_check() {
     # Get Python version
@@ -279,7 +311,7 @@ usage: $0 [options]
 -l          list all checks supported.
 Examples:
   ./lint-python.sh                 =>  exec all checks.
-  ./lint-python.sh -e tox,flake8   =>  exclude checks tox,flake8.
+  ./lint-python.sh -e flake8       =>  exclude checks flake8.
   ./lint-python.sh -i flake8       =>  include checks flake8.
   ./lint-python.sh -i mixed        =>  include checks mixed.
   ./lint-python.sh -l              =>  list all checks supported.
