@@ -458,4 +458,53 @@ public class RowToColumnConverterTest {
         assertThat(new String(nameVector.getBytes(2).getBytes())).isEqualTo("Charlie");
         assertThat(rowVector.getRow(2).getInt(0)).isEqualTo(3);
     }
+
+    @Test
+    public void testConvertNullableRowType() {
+        RowType rowType =
+                RowType.of(
+                        new DataField(
+                                0,
+                                "f",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "id", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "name", DataTypes.STRING()))));
+        RowToColumnConverter converter = new RowToColumnConverter(rowType);
+
+        // Test null row value
+        GenericRow row1 = GenericRow.of((Object) null);
+
+        // Test row with null fields
+        GenericRow rowValue2 = GenericRow.of(null, BinaryString.fromString("Bob"));
+        GenericRow row2 = GenericRow.of(rowValue2);
+
+        // Test row with all null fields
+        GenericRow rowValue3 = GenericRow.of(null, null);
+        GenericRow row3 = GenericRow.of(rowValue3);
+
+        HeapIntVector idVector = new HeapIntVector(3);
+        HeapBytesVector nameVector = new HeapBytesVector(3);
+        HeapRowVector rowVector = new HeapRowVector(3, idVector, nameVector);
+
+        WritableColumnVector[] vectors = new WritableColumnVector[] {rowVector};
+
+        // Convert null row
+        converter.convert(row1, vectors);
+        assertThat(rowVector.isNullAt(0)).isTrue();
+        assertThat(idVector.isNullAt(0)).isTrue();
+        assertThat(nameVector.isNullAt(0)).isTrue();
+
+        // Convert row with null id field
+        converter.convert(row2, vectors);
+        assertThat(rowVector.isNullAt(1)).isFalse();
+        assertThat(idVector.isNullAt(1)).isTrue();
+        assertThat(nameVector.isNullAt(1)).isFalse();
+        assertThat(new String(nameVector.getBytes(1).getBytes())).isEqualTo("Bob");
+
+        // Convert row with all null fields
+        converter.convert(row3, vectors);
+        assertThat(rowVector.isNullAt(2)).isFalse();
+        assertThat(idVector.isNullAt(2)).isTrue();
+        assertThat(nameVector.isNullAt(2)).isTrue();
+    }
 }
