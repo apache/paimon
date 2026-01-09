@@ -138,11 +138,14 @@ run_java_read_test() {
 
     cd "$PROJECT_ROOT"
 
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
+    echo "Detected Python version: $PYTHON_VERSION"
+
     # Run Java test for parquet format in paimon-core
     echo "Running Maven test for JavaPyE2ETest.testReadPkTable (Java Read Parquet)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local parquet_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable -pl paimon-core -Drun.e2e.tests=true; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTable -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
         echo -e "${GREEN}✓ Java read parquet test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java read parquet test failed${NC}"
@@ -155,7 +158,7 @@ run_java_read_test() {
     echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
     local lance_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true; then
+    if mvn test -Dtest=org.apache.paimon.JavaPyLanceE2ETest#testReadPkTableLance -pl paimon-lance -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
         echo -e "${GREEN}✓ Java read lance test completed successfully${NC}"
     else
         echo -e "${RED}✗ Java read lance test failed${NC}"
