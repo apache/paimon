@@ -18,30 +18,75 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.expire.DeletionReport;
+import org.apache.paimon.flink.expire.ExpireSnapshotsPlan;
+import org.apache.paimon.flink.expire.ExpireSnapshotsPlanner;
+import org.apache.paimon.flink.expire.RangePartitionedExpireFunction;
+import org.apache.paimon.flink.expire.SnapshotExpireSink;
+import org.apache.paimon.flink.expire.SnapshotExpireTask;
 import org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure;
+import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ProcedureUtils;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
-/** Expire snapshots action for Flink. */
+/**
+ * Expire snapshots action for Flink.
+ *
+ * <p>This action supports both local and parallel execution modes:
+ *
+ * <ul>
+ *   <li>Local mode: when {@code forceStartFlinkJob} is false and {@code parallelism <= 1}, executes
+ *       locally via {@link #executeLocally()}
+ *   <li>Parallel mode: when {@code forceStartFlinkJob} is true or {@code parallelism > 1}, uses
+ *       Flink distributed execution for deletion
+ * </ul>
+ *
+ * <p>In parallel mode:
+ *
+ * <ul>
+ *   <li>Worker phase (flatMap): deletes data files/changelog files in parallel
+ *   <li>Sink phase (commit): deletes manifests and snapshot metadata serially to avoid concurrent
+ *       deletion issues
+ * </ul>
+ */
 public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ExpireSnapshotsAction.class);
 
     private final String database;
     private final String table;
+
     private final Integer retainMax;
     private final Integer retainMin;
     private final String olderThan;
     private final Integer maxDeletes;
     private final String options;
+    private final int parallelism;
 
     public ExpireSnapshotsAction(
             String database,
             String table,
             Map<String, String> catalogConfig,
-            Integer retainMax,
-            Integer retainMin,
-            String olderThan,
-            Integer maxDeletes,
-            String options) {
+            @Nullable Integer retainMax,
+            @Nullable Integer retainMin,
+            @Nullable String olderThan,
+            @Nullable Integer maxDeletes,
+            @Nullable String options,
+            @Nullable Integer parallelism) {
         super(catalogConfig);
         this.database = database;
         this.table = table;
@@ -50,12 +95,139 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
         this.olderThan = olderThan;
         this.maxDeletes = maxDeletes;
         this.options = options;
+        this.parallelism = resolveParallelism(parallelism);
     }
 
+    private int resolveParallelism(Integer parallelism) {
+        if (parallelism != null) {
+            return parallelism;
+        }
+        int envParallelism = env.getParallelism();
+        return envParallelism > 0 ? envParallelism : 1;
+    }
+
+    @Override
+    public void run() throws Exception {
+        if (forceStartFlinkJob || parallelism > 1) {
+            // Parallel mode: build custom multi-parallelism Flink pipeline
+            build();
+            if (!env.getTransformations().isEmpty()) {
+                execute(this.getClass().getSimpleName());
+            }
+        } else {
+            // Default: ActionBase handles LocalAction → executeLocally()
+            super.run();
+        }
+    }
+
+    @Override
     public void executeLocally() throws Exception {
         ExpireSnapshotsProcedure expireSnapshotsProcedure = new ExpireSnapshotsProcedure();
         expireSnapshotsProcedure.withCatalog(catalog);
         expireSnapshotsProcedure.call(
                 null, database + "." + table, retainMax, retainMin, olderThan, maxDeletes, options);
+    }
+
+    @Override
+    public void build() throws Exception {
+        Identifier identifier = new Identifier(database, table);
+
+        // Prepare table with dynamic options
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        ProcedureUtils.putAllOptions(dynamicOptions, options);
+        FileStoreTable fileStoreTable =
+                (FileStoreTable) catalog.getTable(identifier).copy(dynamicOptions);
+
+        // Build expire config
+        CoreOptions tableOptions = fileStoreTable.store().options();
+        ExpireConfig expireConfig =
+                ProcedureUtils.fillInSnapshotOptions(
+                                tableOptions, retainMax, retainMin, olderThan, maxDeletes)
+                        .build();
+
+        // Create planner using factory method
+        ExpireSnapshotsPlanner planner = ExpireSnapshotsPlanner.create(fileStoreTable);
+
+        // Plan the expiration
+        ExpireSnapshotsPlan plan = planner.plan(expireConfig);
+        if (plan.isEmpty()) {
+            LOG.info("No snapshots to expire, skipping Flink job submission.");
+            return;
+        }
+
+        LOG.info(
+                "Planning to expire {} snapshots, range=[{}, {})",
+                plan.endExclusiveId() - plan.beginInclusiveId(),
+                plan.beginInclusiveId(),
+                plan.endExclusiveId());
+
+        // Build worker phase
+        DataStream<DeletionReport> reports = buildWorkerPhase(plan, identifier, expireConfig);
+
+        // Build sink phase
+        buildSinkPhase(reports, plan, identifier, expireConfig);
+    }
+
+    /**
+     * Build the worker phase of the Flink job.
+     *
+     * <p>Workers process data file and changelog file deletion tasks in parallel. Tasks are
+     * partitioned by snapshot range to ensure:
+     *
+     * <ul>
+     *   <li>Same snapshot range tasks are processed by the same worker
+     *   <li>Within each worker, data files are deleted before changelog files
+     *   <li>Cache locality is maximized (adjacent snapshots often share manifest files)
+     * </ul>
+     */
+    private DataStream<DeletionReport> buildWorkerPhase(
+            ExpireSnapshotsPlan plan, Identifier identifier, ExpireConfig expireConfig) {
+        // Partition by snapshot range: each worker gets a contiguous range of snapshots
+        // with dataFileTasks first, then changelogFileTasks
+        List<List<SnapshotExpireTask>> partitionedGroups =
+                plan.partitionTasksBySnapshotRange(parallelism);
+
+        DataStreamSource<List<SnapshotExpireTask>> source =
+                env.fromCollection(partitionedGroups).setParallelism(1);
+
+        return source.rebalance()
+                .flatMap(
+                        new RangePartitionedExpireFunction(
+                                catalogOptions.toMap(),
+                                identifier,
+                                plan.protectionSet().taggedSnapshots(),
+                                plan.snapshotCache(),
+                                expireConfig.isChangelogDecoupled()))
+                // Use JavaTypeInfo to ensure proper Java serialization of DeletionReport,
+                // avoiding Kryo's FieldSerializer which cannot handle BinaryRow correctly.
+                // This approach is compatible with both Flink 1.x and 2.x.
+                .returns(new JavaTypeInfo<>(DeletionReport.class))
+                .setParallelism(parallelism)
+                .name("RangePartitionedExpire");
+    }
+
+    /**
+     * Build the sink phase of the Flink job.
+     *
+     * <p>The sink collects deletion reports from workers, then serially deletes manifests and
+     * snapshot metadata files to avoid concurrent deletion issues.
+     */
+    private void buildSinkPhase(
+            DataStream<DeletionReport> reports,
+            ExpireSnapshotsPlan plan,
+            Identifier identifier,
+            ExpireConfig expireConfig) {
+        reports.sinkTo(
+                        new SnapshotExpireSink(
+                                catalogOptions.toMap(),
+                                identifier,
+                                plan.endExclusiveId(),
+                                plan.protectionSet().manifestSkippingSet(),
+                                plan.snapshotCache(),
+                                plan.manifestTasks(),
+                                plan.snapshotFileTasks(),
+                                expireConfig.isChangelogDecoupled()))
+                .setParallelism(1)
+                .name("SnapshotExpireCommit");
     }
 }

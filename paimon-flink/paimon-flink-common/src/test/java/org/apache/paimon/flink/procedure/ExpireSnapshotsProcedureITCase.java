@@ -28,7 +28,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.sql.Timestamp;
@@ -81,8 +81,11 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testExpireSnapshotsAction(boolean forceStartFlinkJob) throws Exception {
+    @CsvSource(
+            value = {"false,", "true,", "true,1", "true,2", "false,2"},
+            nullValues = "")
+    public void testExpireSnapshotsAction(boolean forceStartFlinkJob, Integer parallelism)
+            throws Exception {
         sql(
                 "CREATE TABLE word_count ( word STRING PRIMARY KEY NOT ENFORCED, cnt INT)"
                         + " WITH ( 'num-sorted-run.compaction-trigger' = '9999',"
@@ -100,77 +103,38 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
         checkSnapshots(snapshotManager, 1, 6);
 
         // retain_max => 5, expected snapshots (2, 3, 4, 5, 6)
-        createAction(
-                        ExpireSnapshotsAction.class,
-                        "expire_snapshots",
-                        "--warehouse",
-                        path,
-                        "--database",
-                        "default",
-                        "--table",
-                        "word_count",
-                        "--retain_max",
-                        "5",
-                        "--force_start_flink_job",
-                        Boolean.toString(forceStartFlinkJob))
+        createExpireAction(forceStartFlinkJob, parallelism, "--retain_max", "5")
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 2, 6);
 
         // older_than => timestamp of snapshot 6, max_deletes => 1, expected snapshots (3, 4, 5, 6)
         Timestamp ts6 = new Timestamp(snapshotManager.latestSnapshot().timeMillis());
-        createAction(
-                        ExpireSnapshotsAction.class,
-                        "expire_snapshots",
-                        "--warehouse",
-                        path,
-                        "--database",
-                        "default",
-                        "--table",
-                        "word_count",
+        createExpireAction(
+                        forceStartFlinkJob,
+                        parallelism,
                         "--older_than",
                         ts6.toString(),
                         "--max_deletes",
-                        "1",
-                        "--force_start_flink_job",
-                        Boolean.toString(forceStartFlinkJob))
+                        "1")
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 3, 6);
 
-        createAction(
-                        ExpireSnapshotsAction.class,
-                        "expire_snapshots",
-                        "--warehouse",
-                        path,
-                        "--database",
-                        "default",
-                        "--table",
-                        "word_count",
+        // older_than => timestamp of snapshot 6, retain_min => 3, expected snapshots (4, 5, 6)
+        createExpireAction(
+                        forceStartFlinkJob,
+                        parallelism,
                         "--older_than",
                         ts6.toString(),
                         "--retain_min",
-                        "3",
-                        "--force_start_flink_job",
-                        Boolean.toString(forceStartFlinkJob))
+                        "3")
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 4, 6);
 
         // older_than => timestamp of snapshot 6, expected snapshots (6)
-        createAction(
-                        ExpireSnapshotsAction.class,
-                        "expire_snapshots",
-                        "--warehouse",
-                        path,
-                        "--database",
-                        "default",
-                        "--table",
-                        "word_count",
-                        "--older_than",
-                        ts6.toString(),
-                        "--force_start_flink_job",
-                        Boolean.toString(forceStartFlinkJob))
+        createExpireAction(forceStartFlinkJob, parallelism, "--older_than", ts6.toString())
                 .withStreamExecutionEnvironment(env)
                 .run();
         checkSnapshots(snapshotManager, 6, 6);
@@ -216,5 +180,27 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
                 .filter(clazz::isInstance)
                 .map(clazz::cast)
                 .orElseThrow(() -> new RuntimeException("Failed to create action"));
+    }
+
+    private ExpireSnapshotsAction createExpireAction(
+            boolean forceStartFlinkJob, Integer parallelism, String... extraArgs) {
+        java.util.List<String> args = new java.util.ArrayList<>();
+        java.util.Collections.addAll(
+                args,
+                "expire_snapshots",
+                "--warehouse",
+                path,
+                "--database",
+                "default",
+                "--table",
+                "word_count",
+                "--force_start_flink_job",
+                Boolean.toString(forceStartFlinkJob));
+        if (parallelism != null) {
+            args.add("--parallelism");
+            args.add(String.valueOf(parallelism));
+        }
+        java.util.Collections.addAll(args, extraArgs);
+        return createAction(ExpireSnapshotsAction.class, args.toArray(new String[0]));
     }
 }
