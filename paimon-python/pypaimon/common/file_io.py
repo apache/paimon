@@ -369,20 +369,30 @@ class FileIO:
 
         return None
 
-    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'snappy', **kwargs):
+    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                      zstd_level: int = 1, **kwargs):
         try:
             import pyarrow.parquet as pq
 
             with self.new_output_stream(path) as output_stream:
+                if compression.lower() == 'zstd':
+                    kwargs['compression_level'] = zstd_level
                 pq.write_table(data, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
-    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd', **kwargs):
+    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                  zstd_level: int = 1, **kwargs):
         try:
-            """Write ORC file using PyArrow ORC writer."""
+            """Write ORC file using PyArrow ORC writer.
+            
+            Note: PyArrow's ORC writer doesn't support compression_level parameter.
+            ORC files will use zstd compression with default level
+            (which is 3, see https://github.com/facebook/zstd/blob/dev/programs/zstdcli.c)
+            instead of the specified level.
+            """
             import sys
             import pyarrow.orc as orc
 
@@ -402,7 +412,10 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: str, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
+    def write_avro(
+            self, path: str, data: pyarrow.Table,
+            avro_schema: Optional[Dict[str, Any]] = None,
+            compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         import fastavro
         if avro_schema is None:
             from pypaimon.schema.data_types import PyarrowFieldParser
@@ -417,8 +430,28 @@ class FileIO:
 
         records = record_generator()
 
+        codec_map = {
+            'null': 'null',
+            'deflate': 'deflate',
+            'snappy': 'snappy',
+            'bzip2': 'bzip2',
+            'xz': 'xz',
+            'zstandard': 'zstandard',
+            'zstd': 'zstandard',  # zstd is commonly used in Paimon
+        }
+        compression_lower = compression.lower()
+        
+        codec = codec_map.get(compression_lower)
+        if codec is None:
+            raise ValueError(
+                f"Unsupported compression '{compression}' for Avro format. "
+                f"Supported compressions: {', '.join(sorted(codec_map.keys()))}."
+            )
+
         with self.new_output_stream(path) as output_stream:
-            fastavro.writer(output_stream, avro_schema, records, **kwargs)
+            if codec == 'zstandard':
+                kwargs['codec_compression_level'] = zstd_level
+            fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
 
     def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
         try:
