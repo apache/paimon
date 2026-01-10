@@ -21,6 +21,10 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -35,7 +39,11 @@ public class FieldTransform implements Transform {
 
     private final FieldRef fieldRef;
 
-    public FieldTransform(FieldRef fieldRef) {
+    public static final String FIELD_FIELD_REF = "fieldRef";
+    public static final String FIELD_TYPE = "type";
+
+    @JsonCreator
+    public FieldTransform(@JsonProperty(FIELD_FIELD_REF) FieldRef fieldRef) {
         this.fieldRef = fieldRef;
     }
 
@@ -44,11 +52,13 @@ public class FieldTransform implements Transform {
         return "FIELD_REF";
     }
 
+    @JsonProperty(FIELD_FIELD_REF)
     public FieldRef fieldRef() {
         return fieldRef;
     }
 
     @Override
+    @JsonIgnore
     public List<Object> inputs() {
         return Collections.singletonList(fieldRef);
     }

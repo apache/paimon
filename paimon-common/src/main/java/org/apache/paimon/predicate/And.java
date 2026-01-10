@@ -21,6 +21,8 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -32,6 +34,7 @@ public class And extends CompoundPredicate.Function {
 
     public static final And INSTANCE = new And();
 
+    @JsonCreator
     private And() {}
 
     @Override

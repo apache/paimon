@@ -21,10 +21,24 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.io.Serializable;
 import java.util.List;
 
 /** Represents a transform function. */
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = Transform.Types.FIELD_TYPE)
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = FieldTransform.class, name = Transform.Types.FIELD),
+    @JsonSubTypes.Type(value = CastTransform.class, name = Transform.Types.CAST),
+    @JsonSubTypes.Type(value = ConcatTransform.class, name = Transform.Types.CONCAT),
+    @JsonSubTypes.Type(value = ConcatWsTransform.class, name = Transform.Types.CONCAT_WS),
+    @JsonSubTypes.Type(value = UpperTransform.class, name = Transform.Types.UPPER)
+})
 public interface Transform extends Serializable {
 
     String name();
@@ -36,4 +50,16 @@ public interface Transform extends Serializable {
     Object transform(InternalRow row);
 
     Transform copyWithNewInputs(List<Object> inputs);
+
+    /** Types for transform. */
+    class Types {
+        public static final String FIELD_TYPE = "type";
+        public static final String FIELD = "field";
+        public static final String CAST = "cast";
+        public static final String CONCAT = "concat";
+        public static final String CONCAT_WS = "concat_ws";
+        public static final String UPPER = "upper";
+
+        private Types() {}
+    }
 }

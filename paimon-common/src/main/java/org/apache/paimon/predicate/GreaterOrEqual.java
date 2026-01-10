@@ -20,6 +20,8 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -30,6 +32,7 @@ public class GreaterOrEqual extends NullFalseLeafBinaryFunction {
 
     public static final GreaterOrEqual INSTANCE = new GreaterOrEqual();
 
+    @JsonCreator
     private GreaterOrEqual() {}
 
     @Override

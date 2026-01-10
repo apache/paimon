@@ -22,6 +22,9 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.io.Serializable;
 import java.util.Optional;
 
@@ -32,6 +35,15 @@ import java.util.Optional;
  * @since 0.4.0
  */
 @Public
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = Predicate.Types.FIELD_TYPE)
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = LeafPredicate.class, name = Predicate.Types.LEAF),
+    @JsonSubTypes.Type(value = TransformPredicate.class, name = Predicate.Types.TRANSFORM),
+    @JsonSubTypes.Type(value = CompoundPredicate.class, name = Predicate.Types.COMPOUND)
+})
 public interface Predicate extends Serializable {
 
     /**
@@ -54,4 +66,14 @@ public interface Predicate extends Serializable {
     Optional<Predicate> negate();
 
     <T> T visit(PredicateVisitor<T> visitor);
+
+    /** Types for predicate. */
+    class Types {
+        public static final String FIELD_TYPE = "type";
+        public static final String LEAF = "leaf";
+        public static final String TRANSFORM = "transform";
+        public static final String COMPOUND = "compound";
+
+        private Types() {}
+    }
 }

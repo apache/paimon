@@ -20,6 +20,10 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryString;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -29,7 +33,11 @@ public class ConcatWsTransform extends StringTransform {
 
     private static final long serialVersionUID = 1L;
 
-    public ConcatWsTransform(List<Object> inputs) {
+    @JsonCreator
+    public ConcatWsTransform(
+            @JsonProperty(StringTransform.FIELD_INPUTS)
+                    @JsonDeserialize(contentUsing = StringTransform.InputDeserializer.class)
+                    List<Object> inputs) {
         super(inputs);
         checkArgument(inputs.size() >= 2);
     }

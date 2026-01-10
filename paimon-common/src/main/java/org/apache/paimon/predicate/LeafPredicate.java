@@ -31,6 +31,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -66,6 +69,7 @@ public class LeafPredicate implements Predicate {
         List<Object> literals) {
         this(new FieldTransform(new FieldRef(fieldIndex, fieldName, type)), function, literals);
     }
+
 
     public LeafPredicate(Transform transform, LeafFunction function, List<Object> literals) {
         this.transform = transform;

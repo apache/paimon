@@ -21,6 +21,11 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
@@ -32,10 +37,23 @@ import java.util.Optional;
  */
 public class CompoundPredicate implements Predicate {
 
+    private static final String FIELD_FUNCTION = "function";
+    private static final String FIELD_CHILDREN = "children";
+
+    private static final String FUNCTION_TYPE_PROPERTY = "type";
+    private static final String FUNCTION_TYPE_AND = "and";
+    private static final String FUNCTION_TYPE_OR = "or";
+
+    @JsonProperty(FIELD_FUNCTION)
     private final Function function;
+
+    @JsonProperty(FIELD_CHILDREN)
     private final List<Predicate> children;
 
-    public CompoundPredicate(Function function, List<Predicate> children) {
+    @JsonCreator
+    public CompoundPredicate(
+            @JsonProperty(FIELD_FUNCTION) Function function,
+            @JsonProperty(FIELD_CHILDREN) List<Predicate> children) {
         this.function = function;
         this.children = children;
     }
@@ -89,6 +107,14 @@ public class CompoundPredicate implements Predicate {
     }
 
     /** Evaluate the predicate result based on multiple {@link Predicate}s. */
+    @JsonTypeInfo(
+            use = JsonTypeInfo.Id.NAME,
+            include = JsonTypeInfo.As.PROPERTY,
+            property = FUNCTION_TYPE_PROPERTY)
+    @JsonSubTypes({
+        @JsonSubTypes.Type(value = And.class, name = FUNCTION_TYPE_AND),
+        @JsonSubTypes.Type(value = Or.class, name = FUNCTION_TYPE_OR)
+    })
     public abstract static class Function implements Serializable {
 
         public abstract boolean test(InternalRow row, List<Predicate> children);

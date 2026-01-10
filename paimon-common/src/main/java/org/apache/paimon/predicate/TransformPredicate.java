@@ -25,6 +25,11 @@ import org.apache.paimon.data.serializer.ListSerializer;
 import org.apache.paimon.data.serializer.NullableSerializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.types.DataType;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -39,15 +44,28 @@ public class TransformPredicate implements Predicate {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String FIELD_TRANSFORM = "transform";
+
+    public static final String FIELD_FUNCTION = "function";
+
+    public static final String FIELD_LITERALS = "literals";
+
+    @JsonProperty(FIELD_TRANSFORM)
     protected final Transform transform;
+
+    @JsonProperty(FIELD_FUNCTION)
     protected final LeafFunction function;
+
     protected transient List<Object> literals;
 
+    @JsonCreator
     protected TransformPredicate(
-            Transform transform, LeafFunction function, List<Object> literals) {
+            @JsonProperty(TransformPredicate.FIELD_TRANSFORM) Transform transform,
+            @JsonProperty(TransformPredicate.FIELD_FUNCTION) LeafFunction function,
+            @JsonProperty(TransformPredicate.FIELD_LITERALS) List<Object> literals) {
         this.transform = transform;
         this.function = function;
-        this.literals = literals;
+        this.literals = deserializeLiterals(transform.outputType(), literals);
     }
 
     public static TransformPredicate of(
@@ -58,8 +76,14 @@ public class TransformPredicate implements Predicate {
         return new TransformPredicate(transform, function, literals);
     }
 
+    @JsonGetter(FIELD_TRANSFORM)
     public Transform transform() {
         return transform;
+    }
+
+    @JsonGetter(FIELD_LITERALS)
+    public List<Object> literalsForJson() {
+        return serializeLiterals(transform.outputType(), literals);
     }
 
     public TransformPredicate copyWithNewInputs(List<Object> newInputs) {
@@ -140,5 +164,31 @@ public class TransformPredicate implements Predicate {
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
         literals = objectsSerializer().deserialize(new DataInputViewStreamWrapper(in));
+    }
+
+    private static List<Object> serializeLiterals(DataType type, List<Object> literals) {
+        if (literals == null) {
+            return null;
+        }
+        List<Object> serialized = new ArrayList<>(literals.size());
+        for (Object lit : literals) {
+            serialized.add(PredicateBuilder.convertToJavaObject(type, lit));
+        }
+        return serialized;
+    }
+
+    private static List<Object> deserializeLiterals(DataType type, List<Object> literals) {
+        if (literals == null) {
+            return null;
+        }
+        List<Object> converted = new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            if (literal instanceof DataType) {
+                converted.add(literal);
+                continue;
+            }
+            converted.add(PredicateBuilder.convertJavaObject(type, literal));
+        }
+        return converted;
     }
 }
