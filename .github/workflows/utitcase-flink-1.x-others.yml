@@ -28,7 +28,7 @@ on:
       - 'paimon-lucene/**'
 
 env:
-  JDK_VERSION: 8
+  JDK_VERSION: 11
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
 concurrency:
