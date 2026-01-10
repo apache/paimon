@@ -56,6 +56,7 @@ class DataWriter(ABC):
         )
         self.file_format = self.options.file_format(default_format)
         self.compression = self.options.file_compression()
+        self.zstd_level = self.options.file_compression_zstd_level()
         self.sequence_generator = SequenceGenerator(max_seq_number)
 
         self.pending_data: Optional[pa.Table] = None
@@ -169,11 +170,11 @@ class DataWriter(ABC):
             external_path_str = None
 
         if self.file_format == CoreOptions.FILE_FORMAT_PARQUET:
-            self.file_io.write_parquet(file_path, data, compression=self.compression)
+            self.file_io.write_parquet(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_ORC:
-            self.file_io.write_orc(file_path, data, compression=self.compression)
+            self.file_io.write_orc(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_AVRO:
-            self.file_io.write_avro(file_path, data, compression=self.compression)
+            self.file_io.write_avro(file_path, data, compression=self.compression, zstd_level=self.zstd_level)
         elif self.file_format == CoreOptions.FILE_FORMAT_BLOB:
             self.file_io.write_blob(file_path, data, self.blob_as_descriptor)
         elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:

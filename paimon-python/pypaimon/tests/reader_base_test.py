@@ -791,7 +791,7 @@ class ReaderBasicTest(unittest.TestCase):
 
     def _verify_file_compression_with_format(
             self, file_format: str, compression: str,
-            db_name: str, table_name: str, expected_rows: int = 3):
+            db_name: str, table_name: str, expected_rows: int = 3, expected_zstd_level: int = 1):
         if file_format == 'parquet':
             parquet_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.parquet")
             self.assertEqual(len(parquet_files), 1)
@@ -806,6 +806,11 @@ class ReaderBasicTest(unittest.TestCase):
                 self.assertIn(
                     expected_compression_upper, compression_str,
                     f"Expected compression to be {compression}, but got {actual_compression}")
+                if compression.lower() == 'zstd' and hasattr(column_metadata, 'compression_level'):
+                    actual_level = column_metadata.compression_level
+                    self.assertEqual(
+                        actual_level, expected_zstd_level,
+                        f"Expected zstd compression level to be {expected_zstd_level}, but got {actual_level}")
         elif file_format == 'orc':
             orc_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.orc")
             self.assertEqual(len(orc_files), 1)
@@ -837,7 +842,7 @@ class ReaderBasicTest(unittest.TestCase):
                     codec, expected_codec,
                     f"Expected compression codec to be '{expected_codec}', but got '{codec}'")
 
-    def _verify_file_compression(self, file_format: str, db_name: str, table_name: str, expected_rows: int = 3):
+    def _verify_file_compression(self, file_format: str, db_name: str, table_name: str, expected_rows: int = 3, expected_zstd_level: int = 1):
         if file_format == 'parquet':
             parquet_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.parquet")
             self.assertEqual(len(parquet_files), 1)
@@ -852,6 +857,11 @@ class ReaderBasicTest(unittest.TestCase):
                     'ZSTD', compression_str,
                     f"Expected compression to be ZSTD , "
                     f"but got {compression}")
+                if hasattr(column_metadata, 'compression_level'):
+                    actual_level = column_metadata.compression_level
+                    self.assertEqual(
+                        actual_level, expected_zstd_level,
+                        f"Expected zstd compression level to be {expected_zstd_level}, but got {actual_level}")
         elif file_format == 'orc':
             orc_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.orc")
             self.assertEqual(len(orc_files), 1)
