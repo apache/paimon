@@ -28,7 +28,6 @@ on:
       - 'paimon-lucene/**'
 
 env:
-  JDK_VERSION: 11
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
 concurrency:
@@ -36,9 +35,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build_test:
+  build_test_jdk8:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      JDK_VERSION: 8
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
+      - name: Build Flink
+        run: |
+          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl !paimon-flink/paimon-flink-cdc
+
+      - name: Test Flink
+        run: |
+          . .github/workflows/utils.sh
+          jvm_timezone=$(random_timezone)
+          echo "JVM timezone is set to $jvm_timezone"
+          test_modules=""
+          for suffix in 1.16 1.17 1.18 1.19 1.20; do
+          test_modules+="org.apache.paimon:paimon-flink-${suffix},"
+          done
+          test_modules="${test_modules%,}"
+          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+        env:
+          MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2
+
+  build_test_jdk11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      JDK_VERSION: 11
 
     steps:
       - name: Checkout code
