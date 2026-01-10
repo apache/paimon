@@ -32,6 +32,7 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
     private static final String OLDER_THAN = "older_than";
     private static final String MAX_DELETES = "max_deletes";
     private static final String OPTIONS = "options";
+    private static final String PARALLELISM = "parallelism";
 
     @Override
     public String identifier() {
@@ -48,6 +49,8 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
         Integer maxDeletes =
                 params.has(MAX_DELETES) ? Integer.parseInt(params.get(MAX_DELETES)) : null;
         String options = params.has(OPTIONS) ? params.get(OPTIONS) : null;
+        Integer parallelism =
+                params.has(PARALLELISM) ? Integer.parseInt(params.get(PARALLELISM)) : null;
 
         ExpireSnapshotsAction action =
                 new ExpireSnapshotsAction(
@@ -58,8 +61,8 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
                         retainMin,
                         olderThan,
                         maxDeletes,
-                        options);
-
+                        options,
+                        parallelism);
         return Optional.of(action);
     }
 
@@ -77,6 +80,7 @@ public class ExpireSnapshotsActionFactory implements ActionFactory {
                         + "--retain_max <max> \\\n"
                         + "--retain_min <min> \\\n"
                         + "--older_than <older_than> \\\n"
-                        + "--max_delete <max_delete>");
+                        + "--max_deletes <max_deletes> \\\n"
+                        + "[--parallelism <parallelism>]");
     }
 }

@@ -39,7 +39,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
 
-import static org.apache.paimon.table.ExpireSnapshotsImpl.findSkippingTags;
+import static org.apache.paimon.operation.expire.ExpireSnapshotsPlanner.findSkippingTags;
 
 /** Cleanup the changelog in changelog directory. */
 public class ExpireChangelogImpl implements ExpireSnapshots {
