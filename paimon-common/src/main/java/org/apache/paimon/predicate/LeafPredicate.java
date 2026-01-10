@@ -70,7 +70,6 @@ public class LeafPredicate implements Predicate {
         this(new FieldTransform(new FieldRef(fieldIndex, fieldName, type)), function, literals);
     }
 
-
     public LeafPredicate(Transform transform, LeafFunction function, List<Object> literals) {
         this.transform = transform;
         this.function = function;
@@ -90,7 +89,6 @@ public class LeafPredicate implements Predicate {
         @JsonProperty(FIELD_LITERALS) List<Object> literals) {
         List<Object> convertedLiterals = deserializeLiterals(transform.outputType(), literals);
         return new LeafPredicate(transform, function, convertedLiterals);
-
     }
 
     public LeafPredicate copyWithNewInputs(List<Object> newInputs) {

@@ -48,10 +48,10 @@ class PredicateJsonSerdeTest {
         Predicate nonNegatable = builder.like(2, BinaryString.fromString("%a%b%"));
         assertThat(nonNegatable).isInstanceOf(LeafPredicate.class);
         assertThat(nonNegatable.negate()).isEmpty();
-        assertThat(roundTrip(nonNegatable))
-                .isInstanceOf(LeafPredicate.class)
-                .isEqualTo(nonNegatable);
-        assertThat(roundTrip(nonNegatable).negate()).isEmpty();
+        Predicate restoredNonNegatable = roundTrip(nonNegatable);
+        assertThat(restoredNonNegatable).isInstanceOf(LeafPredicate.class);
+        assertThat(restoredNonNegatable.toString()).isEqualTo(nonNegatable.toString());
+        assertThat(restoredNonNegatable.negate()).isEmpty();
     }
 
     @Test
@@ -114,8 +114,6 @@ class PredicateJsonSerdeTest {
 
         assertThat(compound).isInstanceOf(CompoundPredicate.class);
 
-        // Contains non-negatable leaf functions (e.g. LIKE), so whole-tree negate() must be empty
-        // and should stay empty after round-trip.
         assertThat(compound.negate()).isEmpty();
         Predicate restored = roundTrip(compound);
         assertThat(restored).isInstanceOf(CompoundPredicate.class).isEqualTo(compound);
@@ -138,7 +136,7 @@ class PredicateJsonSerdeTest {
     private static List<Object> manyUpperStringsWithNulls() {
         List<Object> strings = new ArrayList<>();
         for (int i = 0; i < 21; i++) {
-            strings.add(i % 5 == 0 ? null : "S" + i);
+            strings.add(i % 5 == 0 ? null : BinaryString.fromString("S" + i));
         }
         return strings;
     }

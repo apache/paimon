@@ -58,14 +58,23 @@ public class TransformPredicate implements Predicate {
 
     protected transient List<Object> literals;
 
-    @JsonCreator
     protected TransformPredicate(
+            Transform transform, LeafFunction function, List<Object> literals) {
+        this.transform = transform;
+        this.function = function;
+        this.literals = literals;
+    }
+
+    @JsonCreator
+    protected static TransformPredicate fromJson(
             @JsonProperty(TransformPredicate.FIELD_TRANSFORM) Transform transform,
             @JsonProperty(TransformPredicate.FIELD_FUNCTION) LeafFunction function,
             @JsonProperty(TransformPredicate.FIELD_LITERALS) List<Object> literals) {
-        this.transform = transform;
-        this.function = function;
-        this.literals = deserializeLiterals(transform.outputType(), literals);
+        List<Object> convertedLiterals = deserializeLiterals(transform.outputType(), literals);
+        if (transform instanceof FieldTransform) {
+            return new LeafPredicate((FieldTransform) transform, function, convertedLiterals);
+        }
+        return new TransformPredicate(transform, function, convertedLiterals);
     }
 
     public static TransformPredicate of(
@@ -166,7 +175,7 @@ public class TransformPredicate implements Predicate {
         literals = objectsSerializer().deserialize(new DataInputViewStreamWrapper(in));
     }
 
-    private static List<Object> serializeLiterals(DataType type, List<Object> literals) {
+    protected static List<Object> serializeLiterals(DataType type, List<Object> literals) {
         if (literals == null) {
             return null;
         }
@@ -177,7 +186,7 @@ public class TransformPredicate implements Predicate {
         return serialized;
     }
 
-    private static List<Object> deserializeLiterals(DataType type, List<Object> literals) {
+    protected static List<Object> deserializeLiterals(DataType type, List<Object> literals) {
         if (literals == null) {
             return null;
         }
