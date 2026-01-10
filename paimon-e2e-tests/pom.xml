@@ -78,25 +78,10 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-mysql-cdc</artifactId>
-            <version>${flink.cdc.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-test-utils</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-flink-cdc</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-            <type>test-jar</type>
         </dependency>
 
         <!-- testcontainers -->
@@ -199,16 +184,6 @@ under the License.
                             <artifactId>flink-shaded-hadoop-2-uber</artifactId>
                             <version>${flink.shaded.hadoop.version}</version>
                             <destFileName>bundled-hadoop.jar</destFileName>
-                            <type>jar</type>
-                            <overWrite>true</overWrite>
-                            <outputDirectory>/tmp/paimon-e2e-tests-jars
-                            </outputDirectory>
-                        </artifactItem>
-                        <artifactItem>
-                            <groupId>org.apache.flink</groupId>
-                            <artifactId>flink-sql-connector-mysql-cdc</artifactId>
-                            <version>${flink.cdc.version}</version>
-                            <destFileName>mysql-cdc.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
                             <outputDirectory>/tmp/paimon-e2e-tests-jars
@@ -365,6 +340,51 @@ under the License.
             <properties>
                 <test.java.version>java11</test.java.version>
             </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.flink</groupId>
+                    <artifactId>flink-connector-mysql-cdc</artifactId>
+                    <version>${flink.cdc.version}</version>
+                    <scope>test</scope>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.paimon</groupId>
+                    <artifactId>paimon-flink-cdc</artifactId>
+                    <version>${project.version}</version>
+                    <scope>test</scope>
+                    <type>test-jar</type>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-cdc-jars</id>
+                                <phase>process-resources</phase>
+                                <goals>
+                                    <goal>copy</goal>
+                                </goals>
+                                <configuration>
+                                    <artifactItems>
+                                        <artifactItem>
+                                            <groupId>org.apache.flink</groupId>
+                                            <artifactId>flink-sql-connector-mysql-cdc</artifactId>
+                                            <version>${flink.cdc.version}</version>
+                                            <destFileName>mysql-cdc.jar</destFileName>
+                                            <type>jar</type>
+                                            <overWrite>true</overWrite>
+                                            <outputDirectory>/tmp/paimon-e2e-tests-jars</outputDirectory>
+                                        </artifactItem>
+                                    </artifactItems>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 </project>
