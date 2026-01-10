@@ -29,7 +29,7 @@ on:
       - 'paimon-lucene/**'
 
 env:
-  JDK_VERSION: 11
+  JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
 concurrency:
@@ -56,7 +56,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Flink
-        run: mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }}
+        run: mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }} -pl !paimon-flink/paimon-flink-cdc
 
       - name: Test Flink
         run: |
