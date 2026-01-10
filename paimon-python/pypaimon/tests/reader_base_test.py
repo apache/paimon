@@ -249,6 +249,19 @@ class ReaderBasicTest(unittest.TestCase):
                                                                 []).values
             self.assertEqual(min_value_stats, [])
             self.assertEqual(max_value_stats, [])
+            
+            self.assertGreater(len(manifest_entries[0].file.value_stats.min_values.data), 0,
+                              "MIN_VALUES.data should have bytes written, not empty (0 bytes)")
+            self.assertGreaterEqual(len(manifest_entries[0].file.value_stats.min_values.data), 12,
+                                   f"MIN_VALUES.data should be at least 12 bytes "
+                                   f"(4 bytes arity + 8 bytes fixed part for empty GenericRow), "
+                                   f"but got {len(manifest_entries[0].file.value_stats.min_values.data)} bytes")
+            self.assertGreater(len(manifest_entries[0].file.value_stats.max_values.data), 0,
+                              "MAX_VALUES.data should have bytes written, not empty (0 bytes)")
+            self.assertGreaterEqual(len(manifest_entries[0].file.value_stats.max_values.data), 12,
+                                   f"MAX_VALUES.data should be at least 12 bytes "
+                                   f"(4 bytes arity + 8 bytes fixed part for empty GenericRow), "
+                                   f"but got {len(manifest_entries[0].file.value_stats.max_values.data)} bytes")
 
     def test_write_wrong_schema(self):
         self.catalog.create_table('default.test_wrong_schema',
@@ -623,6 +636,22 @@ class ReaderBasicTest(unittest.TestCase):
             len(file_meta.value_stats.null_counts), len(empty_stats.null_counts),
             "value_stats.null_counts should be empty (same as SimpleStats.empty_stats()) when stats are disabled"
         )
+        
+        # 验证Python确实写入了字节数，而不是空的MIN_VALUES
+        # 即使min_values是empty (GenericRow([], []))，Python也应该序列化为12字节
+        # (4字节arity + 8字节fixed part)，而不是0字节或4字节
+        self.assertGreater(len(file_meta.value_stats.min_values.data), 0,
+                          "MIN_VALUES.data should have bytes written, not empty (0 bytes)")
+        self.assertGreaterEqual(len(file_meta.value_stats.min_values.data), 12,
+                               f"MIN_VALUES.data should be at least 12 bytes "
+                               f"(4 bytes arity + 8 bytes fixed part for empty GenericRow), "
+                               f"but got {len(file_meta.value_stats.min_values.data)} bytes")
+        self.assertGreater(len(file_meta.value_stats.max_values.data), 0,
+                          "MAX_VALUES.data should have bytes written, not empty (0 bytes)")
+        self.assertGreaterEqual(len(file_meta.value_stats.max_values.data), 12,
+                               f"MAX_VALUES.data should be at least 12 bytes "
+                               f"(4 bytes arity + 8 bytes fixed part for empty GenericRow), "
+                               f"but got {len(file_meta.value_stats.max_values.data)} bytes")
 
     def test_types(self):
         data_fields = [
