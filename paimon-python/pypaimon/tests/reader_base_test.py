@@ -842,7 +842,8 @@ class ReaderBasicTest(unittest.TestCase):
                     codec, expected_codec,
                     f"Expected compression codec to be '{expected_codec}', but got '{codec}'")
 
-    def _verify_file_compression(self, file_format: str, db_name: str, table_name: str, expected_rows: int = 3, expected_zstd_level: int = 1):
+    def _verify_file_compression(self, file_format: str, db_name: str, table_name: str,
+                                 expected_rows: int = 3, expected_zstd_level: int = 1):
         if file_format == 'parquet':
             parquet_files = glob.glob(self.warehouse + f"/{db_name}.db/{table_name}/bucket-0/*.parquet")
             self.assertEqual(len(parquet_files), 1)

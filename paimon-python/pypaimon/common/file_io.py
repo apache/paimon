@@ -369,8 +369,8 @@ class FileIO:
 
         return None
 
-    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'zstd', 
-                     zstd_level: int = 1, **kwargs):
+    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                      zstd_level: int = 1, **kwargs):
         try:
             import pyarrow.parquet as pq
 
@@ -383,8 +383,8 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
-    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd', 
-                 zstd_level: int = 1, **kwargs):
+    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                  zstd_level: int = 1, **kwargs):
         try:
             """Write ORC file using PyArrow ORC writer.
             
