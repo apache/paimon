@@ -227,6 +227,9 @@ class FileIO:
         path_str = self.to_filesystem_path(path)
         file_info = self.filesystem.get_file_info([path_str])[0]
         
+        if file_info.type == pyarrow.fs.FileType.NotFound:
+            return False
+        
         if file_info.type == pyarrow.fs.FileType.Directory:
             if not recursive:
                 selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)

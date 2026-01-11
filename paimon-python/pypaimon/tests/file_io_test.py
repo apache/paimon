@@ -222,6 +222,20 @@ class FileIOTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_delete_returns_false_when_file_not_exists(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            result = file_io.delete(f"file://{temp_dir}/nonexistent.txt")
+            self.assertFalse(result, "delete() should return False when file does not exist")
+
+            result = file_io.delete(f"file://{temp_dir}/nonexistent_dir", recursive=False)
+            self.assertFalse(result, "delete() should return False when directory does not exist")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_mkdirs_raises_error_when_path_is_file(self):
         temp_dir = tempfile.mkdtemp(prefix="file_io_mkdirs_test_")
         try:
