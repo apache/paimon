@@ -298,5 +298,42 @@ class FileIOTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_copy_file(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_copy_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            source_file = os.path.join(temp_dir, "source.txt")
+            target_file = os.path.join(temp_dir, "target.txt")
+            
+            with open(source_file, "w") as f:
+                f.write("source content")
+            
+            # Test 1: Raises FileExistsError when target exists and overwrite=False
+            with open(target_file, "w") as f:
+                f.write("target content")
+            
+            with self.assertRaises(FileExistsError) as context:
+                file_io.copy_file(f"file://{source_file}", f"file://{target_file}", overwrite=False)
+            self.assertIn("already exists", str(context.exception))
+            
+            with open(target_file, "r") as f:
+                self.assertEqual(f.read(), "target content")
+            
+            # Test 2: Overwrites when overwrite=True
+            file_io.copy_file(f"file://{source_file}", f"file://{target_file}", overwrite=True)
+            with open(target_file, "r") as f:
+                self.assertEqual(f.read(), "source content")
+            
+            # Test 3: Creates parent directory if it doesn't exist
+            target_file_in_subdir = os.path.join(temp_dir, "subdir", "target.txt")
+            file_io.copy_file(f"file://{source_file}", f"file://{target_file_in_subdir}", overwrite=False)
+            self.assertTrue(os.path.exists(target_file_in_subdir))
+            with open(target_file_in_subdir, "r") as f:
+                self.assertEqual(f.read(), "source content")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 if __name__ == '__main__':
     unittest.main()

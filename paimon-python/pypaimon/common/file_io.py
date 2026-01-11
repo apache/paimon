@@ -353,8 +353,13 @@ class FileIO:
         if not overwrite and self.exists(target_path):
             raise FileExistsError(f"Target file {target_path} already exists and overwrite=False")
 
-        source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
+        target_parent = Path(target_str).parent
+        
+        if str(target_parent) and not self.exists(str(target_parent)):
+            self.mkdirs(str(target_parent))
+
+        source_str = self.to_filesystem_path(source_path)
         self.filesystem.copy_file(source_str, target_str)
 
     def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
