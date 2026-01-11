@@ -22,6 +22,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pyarrow
 from pyarrow.fs import S3FileSystem, LocalFileSystem
 
 from pypaimon.common.file_io import FileIO
@@ -208,12 +209,92 @@ class FileIOTest(unittest.TestCase):
             mock_filesystem.get_file_info.side_effect = OSError("Network error")
             file_io.filesystem = mock_filesystem
 
-            result = file_io.rename("file:///src", "file:///dst")
-            self.assertFalse(result)
+            with self.assertRaises(OSError):
+                file_io.rename("file:///src", "file:///dst")
 
             file_io.delete_quietly("file:///some/path")
 
             file_io.delete_directory_quietly("file:///some/path")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_delete_non_empty_directory_raises_error(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            test_dir = os.path.join(temp_dir, "test_dir")
+            os.makedirs(test_dir)
+            test_file = os.path.join(test_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test")
+
+            with self.assertRaises(OSError) as context:
+                file_io.delete(f"file://{test_dir}", recursive=False)
+            self.assertIn("is not empty", str(context.exception))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_mkdirs_raises_error_when_path_is_file(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_mkdirs_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            test_file = os.path.join(temp_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test")
+
+            with self.assertRaises(FileExistsError) as context:
+                file_io.mkdirs(f"file://{test_file}")
+            self.assertIn("is not a directory", str(context.exception))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_rename_returns_false_when_dst_exists(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_rename_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            src_file = os.path.join(temp_dir, "src.txt")
+            dst_file = os.path.join(temp_dir, "dst.txt")
+            with open(src_file, "w") as f:
+                f.write("src")
+            with open(dst_file, "w") as f:
+                f.write("dst")
+
+            result = file_io.rename(f"file://{src_file}", f"file://{dst_file}")
+            self.assertFalse(result)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_get_file_status_raises_error_when_file_not_exists(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_get_file_status_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            with self.assertRaises(FileNotFoundError) as context:
+                file_io.get_file_status(f"file://{temp_dir}/nonexistent.txt")
+            self.assertIn("does not exist", str(context.exception))
+
+            test_file = os.path.join(temp_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test content")
+            
+            file_info = file_io.get_file_status(f"file://{test_file}")
+            self.assertEqual(file_info.type, pyarrow.fs.FileType.File)
+            self.assertIsNotNone(file_info.size)
+
+            with self.assertRaises(FileNotFoundError) as context:
+                file_io.get_file_size(f"file://{temp_dir}/nonexistent.txt")
+            self.assertIn("does not exist", str(context.exception))
+
+            with self.assertRaises(FileNotFoundError) as context:
+                file_io.is_dir(f"file://{temp_dir}/nonexistent_dir")
+            self.assertIn("does not exist", str(context.exception))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

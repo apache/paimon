@@ -18,6 +18,7 @@
 import logging
 import os
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -39,6 +40,8 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
+    _RENAME_LOCK = threading.Lock()
+
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
@@ -199,7 +202,12 @@ class FileIO:
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
         file_infos = self.filesystem.get_file_info([path_str])
-        return file_infos[0]
+        file_info = file_infos[0]
+        
+        if file_info.type == pyarrow.fs.FileType.NotFound:
+            raise FileNotFoundError(f"File {path} does not exist")
+        
+        return file_info
 
     def list_status(self, path: str):
         path_str = self.to_filesystem_path(path)
@@ -216,42 +224,59 @@ class FileIO:
         return file_info.type != pyarrow.fs.FileType.NotFound
 
     def delete(self, path: str, recursive: bool = False) -> bool:
-        try:
-            path_str = self.to_filesystem_path(path)
-            file_info = self.filesystem.get_file_info([path_str])[0]
-            if file_info.type == pyarrow.fs.FileType.Directory:
-                if recursive:
-                    self.filesystem.delete_dir_contents(path_str)
-                else:
-                    self.filesystem.delete_dir(path_str)
+        path_str = self.to_filesystem_path(path)
+        file_info = self.filesystem.get_file_info([path_str])[0]
+        
+        if file_info.type == pyarrow.fs.FileType.Directory:
+            if not recursive:
+                selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
+                dir_contents = self.filesystem.get_file_info(selector)
+                if len(dir_contents) > 0:
+                    raise OSError(f"Directory {path_str} is not empty")
+            if recursive:
+                self.filesystem.delete_dir_contents(path_str)
+                self.filesystem.delete_dir(path_str)
             else:
-                self.filesystem.delete_file(path_str)
-            return True
-        except Exception as e:
-            self.logger.warning(f"Failed to delete {path}: {e}")
-            return False
+                self.filesystem.delete_dir(path_str)
+        else:
+            self.filesystem.delete_file(path_str)
+        return True
 
     def mkdirs(self, path: str) -> bool:
-        try:
-            path_str = self.to_filesystem_path(path)
-            self.filesystem.create_dir(path_str, recursive=True)
+        path_str = self.to_filesystem_path(path)
+        file_info = self.filesystem.get_file_info([path_str])[0]
+        
+        if file_info.type == pyarrow.fs.FileType.Directory:
             return True
-        except Exception as e:
-            self.logger.warning(f"Failed to create directory {path}: {e}")
-            return False
+        elif file_info.type == pyarrow.fs.FileType.File:
+            raise FileExistsError(f"Path exists but is not a directory: {path_str}")
+        
+        self.filesystem.create_dir(path_str, recursive=True)
+        return True
 
     def rename(self, src: str, dst: str) -> bool:
-        try:
-            dst_str = self.to_filesystem_path(dst)
-            dst_parent = Path(dst_str).parent
-            if str(dst_parent) and not self.exists(str(dst_parent)):
-                self.mkdirs(str(dst_parent))
+        src_str = self.to_filesystem_path(src)
+        dst_str = self.to_filesystem_path(dst)
+        dst_parent = Path(dst_str).parent
+        
+        if str(dst_parent) and not self.exists(str(dst_parent)):
+            self.mkdirs(str(dst_parent))
 
-            src_str = self.to_filesystem_path(src)
-            self.filesystem.move(src_str, dst_str)
-            return True
-        except Exception as e:
-            self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
+        try:
+            with self._RENAME_LOCK:
+                dst_file_info = self.filesystem.get_file_info([dst_str])[0]
+                if dst_file_info.type != pyarrow.fs.FileType.NotFound:
+                    if dst_file_info.type == pyarrow.fs.FileType.File:
+                        return False
+                    src_name = Path(src_str).name
+                    dst_str = str(Path(dst_str) / src_name)
+                    final_dst_info = self.filesystem.get_file_info([dst_str])[0]
+                    if final_dst_info.type != pyarrow.fs.FileType.NotFound:
+                        return False
+                
+                self.filesystem.move(src_str, dst_str)
+                return True
+        except (FileNotFoundError, PermissionError, OSError):
             return False
 
     def delete_quietly(self, path: str):
