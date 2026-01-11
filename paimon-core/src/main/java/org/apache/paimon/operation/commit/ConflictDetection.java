@@ -137,6 +137,15 @@ public class ConflictDetection {
 
         Function<Throwable, RuntimeException> conflictException =
                 conflictException(baseCommitUser, baseEntries, deltaEntries);
+
+        try {
+            // check the delta, it is important not to delete and add the same file. Since scan
+            // relies on map for deduplication, this may result in the loss of this file
+            FileEntry.mergeEntries(deltaEntries);
+        } catch (Throwable e) {
+            throw conflictException.apply(e);
+        }
+
         Collection<SimpleFileEntry> mergedEntries;
         try {
             // merge manifest entries and also check if the files we want to delete are still there
