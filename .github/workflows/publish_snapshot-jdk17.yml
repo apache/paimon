@@ -63,8 +63,8 @@ jobs:
           echo "<password>$ASF_PASSWORD</password>" >> $tmp_settings
           echo "</server></servers></settings>" >> $tmp_settings
         
-          mvn --settings $tmp_settings clean install -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark4,flink1 -pl org.apache.paimon:paimon-spark-4.0_2.13 -am
+          mvn --settings $tmp_settings clean install -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark4,flink1,paimon-lucene -pl org.apache.paimon:paimon-spark-4.0_2.13 -am
           # skip deploy paimon-spark-common_2.13 and paimon-spark-ut_2.13, since they are already deployed in publish-snapshot.yml
-          mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark4,flink1 -pl org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13
+          mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark4,flink1,paimon-lucene -pl org.apache.paimon:paimon-spark4-common_2.13,org.apache.paimon:paimon-spark-4.0_2.13
 
           rm $tmp_settings
