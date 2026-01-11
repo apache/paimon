@@ -272,7 +272,7 @@ class FileIO:
                     if dst_file_info.type == pyarrow.fs.FileType.File:
                         return False
                     src_name = Path(src_str).name
-                    dst_str = str(Path(dst_str) / src_name)
+                    dst_str = f"{dst_str.rstrip('/')}/{src_name}"
                     final_dst_info = self.filesystem.get_file_info([dst_str])[0]
                     if final_dst_info.type != pyarrow.fs.FileType.NotFound:
                         return False
