@@ -197,7 +197,7 @@ public class PredicateBuilder {
     public Predicate in(int idx, List<Object> literals) {
         // In the IN predicate, 20 literals are critical for performance.
         // If there are more than 20 literals, the performance will decrease.
-        if (literals.size() > 20 || literals.size() == 0) {
+        if (literals.size() > 20 || literals.isEmpty()) {
             DataField field = rowType.getFields().get(idx);
             return new LeafPredicate(In.INSTANCE, field.type(), idx, field.name(), literals);
         }

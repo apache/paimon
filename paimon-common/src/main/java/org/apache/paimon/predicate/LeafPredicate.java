@@ -26,6 +26,7 @@ import org.apache.paimon.data.serializer.NullableSerializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -119,12 +120,13 @@ public class LeafPredicate extends TransformPredicate {
     @Override
     public String toString() {
         String literalsStr;
-        if (literals == null || literals.isEmpty()) {
+        int literalsSize = literals == null ? 0 : literals.size();
+        if (literalsSize == 0) {
             literalsStr = "";
-        } else if (literals.size() == 1) {
+        } else if (literalsSize == 1) {
             literalsStr = Objects.toString(literals.get(0));
         } else {
-            literalsStr = literals.toString();
+            literalsStr = StringUtils.truncatedString(literals, "[", ", ", "]");
         }
         return literalsStr.isEmpty()
                 ? function + "(" + fieldName() + ")"
