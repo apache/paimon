@@ -157,7 +157,7 @@ class FileIOTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_exists_do_not_catch_errors(self):
+    def test_exists_does_not_catch_exception(self):
         temp_dir = tempfile.mkdtemp(prefix="file_io_exists_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
@@ -167,7 +167,6 @@ class FileIOTest(unittest.TestCase):
             with open(test_file, "w") as f:
                 f.write("test")
             self.assertTrue(file_io.exists(f"file://{test_file}"))
-
             self.assertFalse(file_io.exists(f"file://{temp_dir}/nonexistent.txt"))
 
             mock_filesystem = MagicMock()
@@ -177,18 +176,6 @@ class FileIOTest(unittest.TestCase):
             with self.assertRaises(OSError) as context:
                 file_io.exists("file:///some/path")
             self.assertIn("Permission denied", str(context.exception))
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def test_exists_error_propagation_in_methods(self):
-        temp_dir = tempfile.mkdtemp(prefix="file_io_exists_error_test_")
-        try:
-            warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
-
-            mock_filesystem = MagicMock()
-            mock_filesystem.get_file_info.side_effect = OSError("Permission denied")
-            file_io.filesystem = mock_filesystem
 
             with self.assertRaises(OSError):
                 file_io.new_output_stream("file:///some/path/file.txt")
@@ -213,7 +200,6 @@ class FileIOTest(unittest.TestCase):
                 file_io.rename("file:///src", "file:///dst")
 
             file_io.delete_quietly("file:///some/path")
-
             file_io.delete_directory_quietly("file:///some/path")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
