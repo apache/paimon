@@ -18,6 +18,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
@@ -171,3 +172,20 @@ class FileSystemCatalogTest(unittest.TestCase):
         )
         table = catalog.get_table(identifier)
         self.assertEqual(len(table.fields), 2)
+
+    def test_get_database_propagates_exists_error(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+
+        with self.assertRaises(DatabaseNotExistException):
+            catalog.get_database("nonexistent_db")
+
+        mock_filesystem = MagicMock()
+        mock_filesystem.get_file_info.side_effect = OSError("Permission denied")
+        catalog.file_io.filesystem = mock_filesystem
+
+        with self.assertRaises(OSError) as context:
+            catalog.get_database("test_db")
+        self.assertIn("Permission denied", str(context.exception))
+        self.assertNotIsInstance(context.exception, DatabaseNotExistException)

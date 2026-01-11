@@ -20,6 +20,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from pyarrow.fs import S3FileSystem, LocalFileSystem
 
@@ -152,6 +153,67 @@ class FileIOTest(unittest.TestCase):
             file_io.write_file(test_file_uri, "overwritten content", overwrite=True)
             with open(expected_path, "r", encoding="utf-8") as f:
                 self.assertEqual(f.read(), "overwritten content")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_exists_do_not_catch_errors(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_exists_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            test_file = os.path.join(temp_dir, "test_file.txt")
+            with open(test_file, "w") as f:
+                f.write("test")
+            self.assertTrue(file_io.exists(f"file://{test_file}"))
+
+            self.assertFalse(file_io.exists(f"file://{temp_dir}/nonexistent.txt"))
+
+            mock_filesystem = MagicMock()
+            mock_filesystem.get_file_info.side_effect = OSError("Permission denied")
+            file_io.filesystem = mock_filesystem
+
+            with self.assertRaises(OSError) as context:
+                file_io.exists("file:///some/path")
+            self.assertIn("Permission denied", str(context.exception))
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_exists_error_propagation_in_methods(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_exists_error_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            mock_filesystem = MagicMock()
+            mock_filesystem.get_file_info.side_effect = OSError("Permission denied")
+            file_io.filesystem = mock_filesystem
+
+            with self.assertRaises(OSError):
+                file_io.new_output_stream("file:///some/path/file.txt")
+
+            with self.assertRaises(OSError):
+                file_io.check_or_mkdirs("file:///some/path")
+
+            with self.assertRaises(OSError):
+                file_io.write_file("file:///some/path", "content", overwrite=False)
+
+            with self.assertRaises(OSError):
+                file_io.copy_file("file:///src", "file:///dst", overwrite=False)
+
+            with patch.object(file_io, 'read_file_utf8', side_effect=Exception("Read error")):
+                with self.assertRaises(OSError):
+                    file_io.read_overwritten_file_utf8("file:///some/path")
+
+            mock_filesystem.get_file_info.side_effect = OSError("Network error")
+            file_io.filesystem = mock_filesystem
+
+            result = file_io.rename("file:///src", "file:///dst")
+            self.assertFalse(result)
+
+            file_io.delete_quietly("file:///some/path")
+
+            file_io.delete_directory_quietly("file:///some/path")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

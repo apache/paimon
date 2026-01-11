@@ -211,13 +211,9 @@ class FileIO:
         return [info for info in file_infos if info.type == pyarrow.fs.FileType.Directory]
 
     def exists(self, path: str) -> bool:
-        try:
-            path_str = self.to_filesystem_path(path)
-            file_info = self.filesystem.get_file_info([path_str])[0]
-            result = file_info.type != pyarrow.fs.FileType.NotFound
-            return result
-        except Exception:
-            return False
+        path_str = self.to_filesystem_path(path)
+        file_info = self.filesystem.get_file_info([path_str])[0]
+        return file_info.type != pyarrow.fs.FileType.NotFound
 
     def delete(self, path: str, recursive: bool = False) -> bool:
         try:
