@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
 /**
@@ -67,11 +68,7 @@ public class BinlogTable extends AuditLogTable {
 
     @Override
     public RowType rowType() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(SpecialFields.ROW_KIND);
-        if (specialFieldCount > 1) {
-            fields.add(SpecialFields.SEQUENCE_NUMBER);
-        }
+        List<DataField> fields = new ArrayList<>(specialFields);
         for (DataField field : wrapped.rowType().getFields()) {
             // convert to nullable
             fields.add(field.newType(new ArrayType(field.type().nullable())));
@@ -86,6 +83,11 @@ public class BinlogTable extends AuditLogTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
+        if (Boolean.parseBoolean(
+                dynamicOptions.getOrDefault(TABLE_READ_SEQUENCE_NUMBER_ENABLED.key(), "false"))) {
+            throw new UnsupportedOperationException(
+                    "table-read.sequence-number.enabled is not supported by hint.");
+        }
         return new BinlogTable(wrapped.copy(dynamicOptions));
     }
 
@@ -120,7 +122,7 @@ public class BinlogTable extends AuditLogTable {
             // When sequence number is enabled, the underlying data layout is:
             // [_SEQUENCE_NUMBER, pk, pt, col1, ...]
             // We need to offset the field index to skip the sequence number field.
-            int offset = specialFieldCount - 1;
+            int offset = specialFields.size() - 1;
             InternalRow.FieldGetter[] fieldGetters =
                     IntStream.range(0, wrappedReadType.getFieldCount())
                             .mapToObj(
@@ -151,7 +153,7 @@ public class BinlogTable extends AuditLogTable {
                 @Nullable InternalRow row2,
                 InternalRow.FieldGetter[] fieldGetters) {
             // seqOffset is 1 if sequence number is enabled, 0 otherwise
-            int seqOffset = specialFieldCount - 1;
+            int seqOffset = specialFields.size() - 1;
             GenericRow row = new GenericRow(fieldGetters.length + seqOffset);
 
             // Copy sequence number if enabled (it's at index 0 in input row)

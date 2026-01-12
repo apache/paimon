@@ -81,7 +81,7 @@ public class AuditLogTableTest extends TableTestBase {
         catalog.alterTable(
                 identifier(tableName),
                 SchemaChange.setOption(
-                        CoreOptions.CHANGELOG_READ_SEQUENCE_NUMBER_ENABLED.key(), "true"),
+                        CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key(), "true"),
                 false);
 
         // Re-fetch the audit_log table to get updated schema
@@ -113,7 +113,7 @@ public class AuditLogTableTest extends TableTestBase {
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
                         .option("bucket", "1");
         if (enableSequenceNumber) {
-            schemaBuilder.option(CoreOptions.CHANGELOG_READ_SEQUENCE_NUMBER_ENABLED.key(), "true");
+            schemaBuilder.option(CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key(), "true");
         }
 
         TableSchema tableSchema =

@@ -723,12 +723,12 @@ public class SchemaValidation {
 
     private static void validateChangelogReadSequenceNumber(
             TableSchema schema, CoreOptions options) {
-        if (options.changelogReadSequenceNumberEnabled()) {
+        if (options.tableReadSequenceNumberEnabled()) {
             checkArgument(
                     !schema.primaryKeys().isEmpty(),
                     "Cannot enable '%s' for non-primary-key table. "
                             + "Sequence number is only available for primary key tables.",
-                    CoreOptions.CHANGELOG_READ_SEQUENCE_NUMBER_ENABLED.key());
+                    CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key());
         }
     }
 }

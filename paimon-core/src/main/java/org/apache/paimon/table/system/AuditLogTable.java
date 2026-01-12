@@ -81,40 +81,44 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
+import static org.apache.paimon.table.source.ValueContentRowDataRecordIterator.KEY_VALUE_SEQUENCE_NUMBER_ENABLED;
 
 /** A {@link Table} for reading audit log of table. */
 public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final String AUDIT_LOG = "audit_log";
-    public static final String AUDIT_LOG_ENABLED = "audit.log.enabled";
 
     protected final FileStoreTable wrapped;
 
-    /** Number of special fields (rowkind, and optionally _SEQUENCE_NUMBER). */
-    protected final int specialFieldCount;
+    protected final List<DataField> specialFields;
 
     public AuditLogTable(FileStoreTable wrapped) {
         this.wrapped = wrapped;
-        this.wrapped.schema().options().put(AUDIT_LOG_ENABLED, "true");
-        this.specialFieldCount =
-                coreOptions().changelogReadSequenceNumberEnabled()
-                                && !wrapped.primaryKeys().isEmpty()
-                        ? 2
-                        : 1;
+        this.specialFields = new ArrayList<>();
+        specialFields.add(SpecialFields.ROW_KIND);
+
+        boolean includeSequenceNumber =
+                CoreOptions.fromMap(wrapped.options()).tableReadSequenceNumberEnabled();
+
+        if (includeSequenceNumber) {
+            this.wrapped.options().put(KEY_VALUE_SEQUENCE_NUMBER_ENABLED, "true");
+            specialFields.add(SpecialFields.SEQUENCE_NUMBER);
+        }
     }
 
     /** Creates a PredicateReplaceVisitor that adjusts field indices by systemFieldCount. */
     private PredicateReplaceVisitor createPredicateConverter() {
         return p -> {
-            if (p.index() < specialFieldCount) {
+            if (p.index() < specialFields.size()) {
                 return Optional.empty();
             }
             return Optional.of(
                     new LeafPredicate(
                             p.function(),
                             p.type(),
-                            p.index() - specialFieldCount,
+                            p.index() - specialFields.size(),
                             p.fieldName(),
                             p.literals()));
         };
@@ -152,11 +156,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(SpecialFields.ROW_KIND);
-        if (specialFieldCount > 1) {
-            fields.add(SpecialFields.SEQUENCE_NUMBER);
-        }
+        List<DataField> fields = new ArrayList<>(specialFields);
         fields.addAll(wrapped.rowType().getFields());
         return new RowType(fields);
     }
@@ -243,6 +243,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
+        if (Boolean.parseBoolean(
+                dynamicOptions.getOrDefault(TABLE_READ_SEQUENCE_NUMBER_ENABLED.key(), "false"))) {
+            throw new UnsupportedOperationException(
+                    "table-read.sequence-number.enabled is not supported by hint.");
+        }
         return new AuditLogTable(wrapped.copy(dynamicOptions));
     }
 
@@ -648,8 +653,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         // Special index for rowkind field
         protected static final int ROW_KIND_INDEX = -1;
-        // Special index for _SEQUENCE_NUMBER field
-        protected static final int SEQUENCE_NUMBER_INDEX = -2;
+        // _SEQUENCE_NUMBER is at index 0 by setting: KEY_VALUE_SEQUENCE_NUMBER_ENABLED
+        protected static final int SEQUENCE_NUMBER_INDEX = 0;
 
         protected final InnerTableRead dataRead;
 
@@ -663,13 +668,13 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         /** Default projection, add system fields (rowkind, and optionally _SEQUENCE_NUMBER). */
         private int[] defaultProjection() {
             int dataFieldCount = wrapped.rowType().getFieldCount();
-            int[] projection = new int[dataFieldCount + specialFieldCount];
+            int[] projection = new int[dataFieldCount + specialFields.size()];
             projection[0] = ROW_KIND_INDEX;
-            if (specialFieldCount > 1) {
+            if (specialFields.contains(SpecialFields.SEQUENCE_NUMBER)) {
                 projection[1] = SEQUENCE_NUMBER_INDEX;
             }
             for (int i = 0; i < dataFieldCount; i++) {
-                projection[specialFieldCount + i] = i + specialFieldCount - 1;
+                projection[specialFields.size() + i] = i + specialFields.size() - 1;
             }
             return projection;
         }
@@ -687,7 +692,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
                 } else if (fieldName.equals(SpecialFields.SEQUENCE_NUMBER.name())) {
                     projection[i] = SEQUENCE_NUMBER_INDEX;
                 } else {
-                    projection[i] = dataFieldIndex + specialFieldCount - 1;
+                    projection[i] = dataFieldIndex + specialFields.size() - 1;
                     dataFieldIndex++;
                 }
             }
@@ -764,11 +769,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         @Override
         public long getLong(int pos) {
-            int index = indexMapping[pos];
-            if (index == AuditLogRead.SEQUENCE_NUMBER_INDEX) {
-                // _SEQUENCE_NUMBER is at index 0 in bottom output
-                return row.getLong(0);
-            }
             return super.getLong(pos);
         }
 

@@ -56,6 +56,7 @@ import static java.util.Collections.singletonList;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** ITCase for batch file store. */
 public class BatchFileStoreITCase extends CatalogITCaseBase {
@@ -1055,10 +1056,29 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testAuditLogTableWithSequenceNumberEnabled() {
-        // Create primary key table with changelog-read.sequence-number.enabled option
+        // Creating an append-only table (no primary key) with
+        // table-read.sequence-number.enabled option should throw an exception
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        sql(
+                                "CREATE TABLE test_table_err (a int, b int, c AS a + b) "
+                                        + "WITH ('table-read.sequence-number.enabled'='true')"));
+
+        // Selecting an auditlog table with
+        // table-read.sequence-number.enabled option should throw an exception
+        sql("CREATE TABLE test_table_err2 (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b);");
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        sql(
+                                "SELECT * FROM `test_table_err2$audit_log`"
+                                        + " /*+ OPTIONS('table-read.sequence-number.enabled' = 'true') */"));
+
+        // Create primary key table with table-read.sequence-number.enabled option
         sql(
                 "CREATE TABLE test_table_seq (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b) "
-                        + "WITH ('changelog-read.sequence-number.enabled'='true');");
+                        + "WITH ('table-read.sequence-number.enabled'='true');");
         sql("INSERT INTO test_table_seq VALUES (1, 2)");
         sql("INSERT INTO test_table_seq VALUES (3, 4)");
 
@@ -1086,8 +1106,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("INSERT INTO test_table_dyn VALUES (1, 2)");
         sql("INSERT INTO test_table_dyn VALUES (3, 4)");
 
-        // Add changelog-read.sequence-number.enabled option via ALTER TABLE
-        sql("ALTER TABLE test_table_dyn SET ('changelog-read.sequence-number.enabled'='true')");
+        // Add table-read.sequence-number.enabled option via ALTER TABLE
+        sql("ALTER TABLE test_table_dyn SET ('table-read.sequence-number.enabled'='true')");
 
         // Test SELECT * includes _SEQUENCE_NUMBER (same as
         // testAuditLogTableWithSequenceNumberEnabled)
@@ -1105,10 +1125,10 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testBinlogTableWithSequenceNumberEnabled() {
-        // Create primary key table with changelog-read.sequence-number.enabled option
+        // Create primary key table with table-read.sequence-number.enabled option
         sql(
                 "CREATE TABLE test_table_seq (a int PRIMARY KEY NOT ENFORCED, b int) "
-                        + "WITH ('changelog-read.sequence-number.enabled'='true');");
+                        + "WITH ('table-read.sequence-number.enabled'='true');");
         sql("INSERT INTO test_table_seq VALUES (1, 2)");
         sql("INSERT INTO test_table_seq VALUES (3, 4)");
 
@@ -1135,8 +1155,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         sql("INSERT INTO test_table_dyn VALUES (1, 2)");
         sql("INSERT INTO test_table_dyn VALUES (3, 4)");
 
-        // Add changelog-read.sequence-number.enabled option via ALTER TABLE
-        sql("ALTER TABLE test_table_dyn SET ('changelog-read.sequence-number.enabled'='true')");
+        // Add table-read.sequence-number.enabled option via ALTER TABLE
+        sql("ALTER TABLE test_table_dyn SET ('table-read.sequence-number.enabled'='true')");
 
         // Test SELECT * includes _SEQUENCE_NUMBER (same as
         // testBinlogTableWithSequenceNumberEnabled)
