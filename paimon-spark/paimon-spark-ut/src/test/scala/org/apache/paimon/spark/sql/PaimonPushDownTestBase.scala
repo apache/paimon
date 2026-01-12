@@ -18,21 +18,22 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonScan, PaimonSparkTestBase, SparkTable}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.spark.{PaimonInputPartition, PaimonScan, PaimonSparkTestBase, SparkTable}
+import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.apache.spark.sql.catalyst.trees.TreePattern.{DYNAMIC_PRUNING_SUBQUERY, LIMIT, SORT}
-import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit, SupportsPushDownTopN}
+import org.apache.spark.sql.connector.read.{InputPartition, ScanBuilder, SupportsPushDownLimit, SupportsPushDownTopN}
+import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.datasources.v2.BatchScanExec
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.assertj.core.api.{Assertions => assertj}
 import org.junit.jupiter.api.Assertions
 
-import java.util.UUID
-
-abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
+abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveSparkPlanHelper {
 
   import testImplicits._
 
@@ -377,6 +378,100 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon pushDown: combine runtime partition filter and partition filter") {
+    withTable("fact_table", "dim_table", "filter_table") {
+      sql("""
+            |CREATE TABLE fact_table (
+            |  id INT,
+            |  amount DOUBLE,
+            |  category STRING,
+            |  date_pt STRING
+            |)
+            |PARTITIONED BY (date_pt)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE dim_table (
+            |  category STRING,
+            |  category_name STRING,
+            |  region STRING,
+            |  pt STRING
+            |)
+            |PARTITIONED BY (pt)
+            |""".stripMargin)
+
+      sql("""
+            |CREATE TABLE filter_table (
+            |  region STRING,
+            |  date_pt STRING
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO fact_table VALUES
+            |(1, 100.0, 'A', '2023-01-01'),
+            |(2, 200.0, 'B', '2023-01-02'),
+            |(3, 150.0, 'A', '2023-01-15'),
+            |(4, 250.0, 'C', '2023-02-01'),
+            |(5, 300.0, 'A', '2023-02-15'),
+            |(6, 180.0, 'B', '2024-01-01'),
+            |(7, 220.0, 'A', '2024-01-15'),
+            |(8, 400.0, 'C', '2024-02-01'),
+            |(9, 350.0, 'B', '2024-02-15'),
+            |(10, 500.0, 'A', '2025-03-01'),
+            |(11, 450.0, 'C', '2025-03-15'),
+            |(12, 600.0, 'B', '2025-04-01')
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO dim_table VALUES
+            |('A', 'Category A', 'East', '2023-01'),
+            |('B', 'Category B', 'West', '2023-01'),
+            |('C', 'Category C', 'North', '2023-02'),
+            |('A', 'Category A', 'East', '2024-01'),
+            |('B', 'Category B', 'West', '2024-02'),
+            |('C', 'Category C', 'North', '2024-02')
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO filter_table VALUES
+            |('East', '2023-01-01'),
+            |('East', '2023-01-15'),
+            |('East', '2024-01-15')
+            |""".stripMargin)
+
+      val df = sql("""
+                     |SELECT
+                     |  f.id,
+                     |  f.amount,
+                     |  f.category,
+                     |  d.category_name,
+                     |  d.region,
+                     |  f.date_pt
+                     |FROM fact_table f
+                     |JOIN dim_table d
+                     |  ON f.category = d.category
+                     |  AND SUBSTRING(f.date_pt, 1, 7) = d.pt
+                     |JOIN filter_table ft
+                     |  ON d.region = ft.region
+                     |  AND f.date_pt = ft.date_pt
+                     |WHERE d.region = 'East' AND f.date_pt < '2024-01-15'
+                     |ORDER BY f.id
+                     |""".stripMargin)
+
+      checkAnswer(
+        df,
+        Seq(
+          Row(1, 100.0, "A", "Category A", "East", "2023-01-01"),
+          Row(3, 150.0, "A", "Category A", "East", "2023-01-15")
+        )
+      )
+
+      val filteredSplits = collectFilteredInputSplits(df.queryExecution.executedPlan, "fact_table")
+      assert(filteredSplits.size == 2)
+    }
+  }
+
   test("Paimon pushDown: TopN for append-only tables") {
     assume(gteqSpark3_3)
     spark.sql("""
@@ -619,6 +714,25 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase {
           case _ => false
         }
       case _ => false
+    }
+  }
+
+  def collectFilteredInputSplits(plan: SparkPlan, tableName: String): Seq[Split] = {
+    flatMap(plan) {
+      case s: BatchScanExec =>
+        s.scan match {
+          case p: PaimonScan if p.table.name() == tableName =>
+            val filteredPartitionsField = s.getClass.getDeclaredField("filteredPartitions")
+            filteredPartitionsField.setAccessible(true)
+            val filteredPartitions = if (gteqSpark3_3) {
+              filteredPartitionsField.get(s).asInstanceOf[Seq[Seq[InputPartition]]].flatten
+            } else {
+              filteredPartitionsField.get(s).asInstanceOf[Seq[InputPartition]]
+            }
+            filteredPartitions.flatMap { case p: PaimonInputPartition => p.splits }
+          case _ => Nil
+        }
+      case _ => Nil
     }
   }
 }
