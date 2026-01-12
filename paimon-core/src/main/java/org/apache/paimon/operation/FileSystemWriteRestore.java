@@ -30,11 +30,15 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -52,7 +56,9 @@ public class FileSystemWriteRestore implements WriteRestore {
     private final IndexFileHandler indexFileHandler;
 
     private final Boolean usePrefetchManifestEntries;
-    @Nullable private transient PrefetchedManifestEntries prefetchedManifestEntries;
+
+    @Nullable
+    private static Cache<String, PrefetchedManifestEntries> prefetchedManifestEntriesCache;
 
     public FileSystemWriteRestore(
             CoreOptions options,
@@ -68,6 +74,24 @@ public class FileSystemWriteRestore implements WriteRestore {
             }
         }
         this.usePrefetchManifestEntries = options.prefetchManifestEntries();
+        initializeCacheIfNeeded();
+    }
+
+    private static synchronized void initializeCacheIfNeeded() {
+        if (prefetchedManifestEntriesCache == null) {
+            prefetchedManifestEntriesCache =
+                    Caffeine.newBuilder()
+                            .expireAfterAccess(Duration.ofMinutes(30))
+                            .executor(Runnable::run)
+                            .build();
+            // .softValues() - not used as we want to hold onto a copy of manifest for each table we
+            // are writing to
+            // .maximumSize(...) - not used as number of keys is static = number of tables being
+            // written to
+            // .maximumWeight(...).weigher(...) - not used as there isn't a convenient way of
+            // measuring memory size
+            //    of a ManifestEntry object
+        }
     }
 
     @Override
@@ -78,16 +102,40 @@ public class FileSystemWriteRestore implements WriteRestore {
                 .orElse(Long.MIN_VALUE);
     }
 
-    public synchronized PrefetchedManifestEntries prefetchManifestEntries(Snapshot snapshot) {
-        RowType partitionType = scan.manifestsReader().partitionType();
-        List<ManifestEntry> manifestEntries = scan.withSnapshot(snapshot).plan().files();
+    private String getPrefetchManifestEntriesCacheKey() {
+        return snapshotManager.tablePath().toString();
+    }
+
+    private List<ManifestEntry> fetchManifestEntries(
+            Snapshot snapshot, @Nullable BinaryRow partition, @Nullable Integer bucket) {
+        FileStoreScan snapshotScan = scan.withSnapshot(snapshot);
+        if (partition != null && bucket != null) {
+            snapshotScan = snapshotScan.withPartitionBucket(partition, bucket);
+        }
+        return snapshotScan.plan().files();
+    }
+
+    public PrefetchedManifestEntries prefetchManifestEntries(Snapshot snapshot) {
         LOG.info(
-                "FileSystemWriteRestore prefetched manifestEntries for snapshot {}: {} entries",
+                "FileSystemWriteRestore started prefetching manifestEntries for table {}, snapshot {}",
+                snapshotManager.tablePath(),
+                snapshot.id());
+        List<ManifestEntry> manifestEntries = fetchManifestEntries(snapshot, null, null);
+        LOG.info(
+                "FileSystemWriteRestore prefetched manifestEntries for table {}, snapshot {}: {} entries",
+                snapshotManager.tablePath(),
                 snapshot.id(),
                 manifestEntries.size());
 
-        prefetchedManifestEntries =
+        RowType partitionType = scan.manifestsReader().partitionType();
+        PrefetchedManifestEntries prefetchedManifestEntries =
                 new PrefetchedManifestEntries(snapshot, partitionType, manifestEntries);
+
+        if (prefetchedManifestEntriesCache == null) {
+            initializeCacheIfNeeded();
+        }
+        prefetchedManifestEntriesCache.put(
+                getPrefetchManifestEntriesCacheKey(), prefetchedManifestEntries);
         return prefetchedManifestEntries;
     }
 
@@ -106,22 +154,21 @@ public class FileSystemWriteRestore implements WriteRestore {
 
         List<ManifestEntry> entries;
         if (usePrefetchManifestEntries) {
-            // local reference of the prefetch container for safety across mutation
-            PrefetchedManifestEntries prefetch = prefetchedManifestEntries;
-            if (prefetch == null || prefetch.snapshot().id() != snapshot.id()) {
-                // refresh the prefetched manifest entries
+            PrefetchedManifestEntries prefetch =
+                    prefetchedManifestEntriesCache.getIfPresent(
+                            getPrefetchManifestEntriesCacheKey());
+            if (prefetch == null || prefetch.snapshot.id() != snapshot.id()) {
+                // manifest entries if snapshot ids don't match
                 prefetch = prefetchManifestEntries(snapshot);
             }
+
             entries = prefetch.filter(partition, bucket);
         } else {
-            entries =
-                    scan.withSnapshot(snapshot)
-                            .withPartitionBucket(partition, bucket)
-                            .plan()
-                            .files();
+            entries = fetchManifestEntries(snapshot, partition, bucket);
         }
         LOG.info(
-                "FileSystemWriteRestore filtered manifestEntries for {}, {}: {} entries",
+                "FileSystemWriteRestore filtered manifestEntries for {}, {}, {}: {} entries",
+                snapshotManager.tablePath(),
                 partition,
                 bucket,
                 entries.size());
