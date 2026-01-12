@@ -211,7 +211,7 @@ public class SimpleFileEntry implements FileEntry {
                 + totalBuckets
                 + ", level="
                 + level
-                + ", filePath="
+                + ", fileName="
                 + fileName
                 + ", extraFiles="
                 + extraFiles

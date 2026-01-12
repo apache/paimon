@@ -47,7 +47,7 @@ public class GlobalIndexBuilderUtils {
             throws IOException {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
-            String fileName = entry.filePath();
+            String fileName = entry.fileName();
             GlobalIndexFileReadWrite readWrite = createGlobalIndexFileReadWrite(table);
             long fileSize = readWrite.fileSize(fileName);
             GlobalIndexMeta globalIndexMeta =
