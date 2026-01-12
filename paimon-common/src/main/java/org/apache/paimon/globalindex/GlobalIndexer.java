@@ -34,18 +34,6 @@ public interface GlobalIndexer {
     GlobalIndexReader createReader(GlobalIndexFileReader fileReader, List<GlobalIndexIOMeta> files)
             throws IOException;
 
-    /**
-     * Describes whether the row ids stored in this global index are local row ids.
-     *
-     * <p>If this method returns {@code true}, the index stores row ids starting from {@code 0}
-     * within a fixed row-id range (e.g. the corresponding index shard range). Readers must
-     * translate them to global row ids by adding the corresponding base offset (e.g. {@code
-     * rangeStart}).
-     */
-    default boolean rowIdLocal() {
-        return true;
-    }
-
     static GlobalIndexer create(String type, DataField dataField, Options options) {
         GlobalIndexerFactory globalIndexerFactory = GlobalIndexerFactoryUtils.load(type);
         return globalIndexerFactory.create(dataField, options);

@@ -135,13 +135,10 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                                     .map(this::toGlobalMeta)
                                     .collect(Collectors.toList());
                     GlobalIndexReader innerReader =
-                            globalIndexer.rowIdLocal()
-                                    ? new OffsetGlobalIndexReader(
-                                            globalIndexer.createReader(
-                                                    indexFileReadWrite, globalMetas),
-                                            range.from,
-                                            range.to)
-                                    : globalIndexer.createReader(indexFileReadWrite, globalMetas);
+                            new OffsetGlobalIndexReader(
+                                    globalIndexer.createReader(indexFileReadWrite, globalMetas),
+                                    range.from,
+                                    range.to);
                     unionReader.add(innerReader);
                 }
 

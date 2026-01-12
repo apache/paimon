@@ -366,7 +366,7 @@ public class GlobalIndexTableTest extends DataEvolutionTestBase {
                     j < Math.min(currentOffset + targetFileSize, rows.size());
                     j++) {
                 InternalRow row = rows.get(j);
-                writer.write(row.getString(0), row.getLong(1));
+                writer.write(row.getString(0), row.getLong(1) - range.from);
             }
             currentOffset += targetFileSize;
 
