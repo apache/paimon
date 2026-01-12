@@ -18,6 +18,7 @@
 import os
 import pickle
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -191,6 +192,51 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 "test-secret-key",
                 "Other token properties should be preserved"
             )
+
+    def test_catalog_options_not_modified(self):
+        from pypaimon.api.rest_util import RESTUtil
+        from pypaimon.catalog.rest.rest_token import RESTToken
+        from pyarrow.fs import LocalFileSystem
+        
+        original_catalog_options = Options({
+            CatalogOptions.URI.key(): "http://test-uri",
+            "custom.key": "custom.value"
+        })
+        
+        catalog_options_copy = Options(original_catalog_options.to_map())
+        
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                original_catalog_options
+            )
+            
+            token_dict = {
+                OssOptions.OSS_ACCESS_KEY_ID.key(): "token-access-key",
+                OssOptions.OSS_ACCESS_KEY_SECRET.key(): "token-secret-key",
+                OssOptions.OSS_ENDPOINT.key(): "token-endpoint"
+            }
+            file_io.token = RESTToken(token_dict, int(time.time() * 1000) + 3600000)
+            
+            with patch.object(FileIO, '_initialize_oss_fs', return_value=LocalFileSystem()):
+                file_io._initialize_oss_fs("file:///test/path")
+            
+            self.assertEqual(
+                original_catalog_options.to_map(),
+                catalog_options_copy.to_map(),
+                "Original catalog_options should not be modified"
+            )
+            
+            merged_properties = RESTUtil.merge(
+                original_catalog_options.to_map(),
+                file_io._merge_token_with_catalog_options(token_dict)
+            )
+            
+            self.assertIn("custom.key", merged_properties)
+            self.assertEqual(merged_properties["custom.key"], "custom.value")
+            self.assertIn(OssOptions.OSS_ACCESS_KEY_ID.key(), merged_properties)
+            self.assertEqual(merged_properties[OssOptions.OSS_ACCESS_KEY_ID.key()], "token-access-key")
 
 
 if __name__ == '__main__':
