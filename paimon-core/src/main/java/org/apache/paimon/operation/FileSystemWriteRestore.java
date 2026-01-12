@@ -116,27 +116,43 @@ public class FileSystemWriteRestore implements WriteRestore {
     }
 
     public PrefetchedManifestEntries prefetchManifestEntries(Snapshot snapshot) {
-        LOG.info(
-                "FileSystemWriteRestore started prefetching manifestEntries for table {}, snapshot {}",
-                snapshotManager.tablePath(),
-                snapshot.id());
-        List<ManifestEntry> manifestEntries = fetchManifestEntries(snapshot, null, null);
-        LOG.info(
-                "FileSystemWriteRestore prefetched manifestEntries for table {}, snapshot {}: {} entries",
-                snapshotManager.tablePath(),
-                snapshot.id(),
-                manifestEntries.size());
+        synchronized (this.getClass()) {
+            if (prefetchedManifestEntriesCache == null) {
+                initializeCacheIfNeeded();
+            }
 
-        RowType partitionType = scan.manifestsReader().partitionType();
-        PrefetchedManifestEntries prefetchedManifestEntries =
-                new PrefetchedManifestEntries(snapshot, partitionType, manifestEntries);
+            // check if fetch is needed - if it was done by another thread then we can skip
+            // altogether
+            PrefetchedManifestEntries prefetch =
+                    prefetchedManifestEntriesCache.getIfPresent(
+                            getPrefetchManifestEntriesCacheKey());
+            if (prefetch != null && prefetch.snapshot.id() == snapshot.id()) {
+                LOG.info(
+                        "FileSystemWriteRestore skipping prefetching manifestEntries for table {}, snapshot {} as it was fetched by another thread",
+                        snapshotManager.tablePath(),
+                        snapshot.id());
+                return prefetch;
+            }
 
-        if (prefetchedManifestEntriesCache == null) {
-            initializeCacheIfNeeded();
+            LOG.info(
+                    "FileSystemWriteRestore started prefetching manifestEntries for table {}, snapshot {}",
+                    snapshotManager.tablePath(),
+                    snapshot.id());
+            List<ManifestEntry> manifestEntries = fetchManifestEntries(snapshot, null, null);
+            LOG.info(
+                    "FileSystemWriteRestore prefetched manifestEntries for table {}, snapshot {}: {} entries",
+                    snapshotManager.tablePath(),
+                    snapshot.id(),
+                    manifestEntries.size());
+
+            RowType partitionType = scan.manifestsReader().partitionType();
+            PrefetchedManifestEntries prefetchedManifestEntries =
+                    new PrefetchedManifestEntries(snapshot, partitionType, manifestEntries);
+
+            prefetchedManifestEntriesCache.put(
+                    getPrefetchManifestEntriesCacheKey(), prefetchedManifestEntries);
+            return prefetchedManifestEntries;
         }
-        prefetchedManifestEntriesCache.put(
-                getPrefetchManifestEntriesCacheKey(), prefetchedManifestEntries);
-        return prefetchedManifestEntries;
     }
 
     @Override
