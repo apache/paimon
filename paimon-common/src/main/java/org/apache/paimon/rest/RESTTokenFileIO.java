@@ -71,7 +71,10 @@ public class RESTTokenFileIO implements FileIO {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "The cache policy of a table provided by the REST server, combined with: meta,read,write");
+                            "The cache policy of a table provided by the REST server, combined with: meta,read,write."
+                                    + "`meta`: meta cache is enabled for visiting files; "
+                                    + "`read`: cache is enabled when reading files; "
+                                    + "`write`: data is also cached when writing files.");
 
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()

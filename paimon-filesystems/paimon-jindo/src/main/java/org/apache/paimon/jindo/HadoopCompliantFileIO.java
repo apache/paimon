@@ -39,11 +39,13 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_WHITELIST_PATH;
 import static org.apache.paimon.rest.RESTTokenFileIO.FILE_IO_CACHE_POLICY;
 
 /**
@@ -61,20 +63,22 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     private static final String READ_CACHE_ENABLED_TAG = "read";
     private static final String WRITE_CACHE_ENABLED_TAG = "write";
 
-    private boolean metaCacheEnabled = false;
-    private boolean readCacheEnabled = false;
-    private boolean writeCacheEnabled = false;
+    protected boolean metaCacheEnabled = false;
+    protected boolean readCacheEnabled = false;
+    protected boolean writeCacheEnabled = false;
 
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> fsMap;
     protected transient volatile Map<String, Pair<JindoHadoopSystem, String>> jindoCacheFsMap;
 
     // Only enable cache for path which is generated with uuid
-    private static final List<String> CACHE_WHITELIST_PATH_PATTERN =
-            Lists.newArrayList("bucket-", "manifest");
+    private List<String> cacheWhitelistPaths = new ArrayList<>();
 
-    private boolean shouldCache(Path path) {
+    protected boolean shouldCache(Path path) {
+        if (cacheWhitelistPaths.isEmpty()) {
+            return true;
+        }
         String pathStr = path.toUri().getPath();
-        for (String pattern : CACHE_WHITELIST_PATH_PATTERN) {
+        for (String pattern : cacheWhitelistPaths) {
             if (pathStr.contains(pattern)) {
                 return true;
             }
@@ -102,11 +106,16 @@ public abstract class HadoopCompliantFileIO implements FileIO {
                         context.options()
                                 .get(FILE_IO_CACHE_POLICY)
                                 .contains(WRITE_CACHE_ENABLED_TAG);
+                String whitelist = context.options().get(DLF_FILE_IO_CACHE_WHITELIST_PATH);
+                if (!whitelist.equals("*")) {
+                    cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
+                }
                 LOG.info(
-                        "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}",
+                        "Cache enabled with cache policy: meta cache enabled {}, read cache enabled {}, write cache enabled {}, whitelist path: {}",
                         metaCacheEnabled,
                         readCacheEnabled,
-                        writeCacheEnabled);
+                        writeCacheEnabled,
+                        whitelist);
             }
         }
     }

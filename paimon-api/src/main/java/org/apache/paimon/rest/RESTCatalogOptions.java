@@ -110,4 +110,10 @@ public class RESTCatalogOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
+    public static final ConfigOption<String> DLF_FILE_IO_CACHE_WHITELIST_PATH =
+            ConfigOptions.key("dlf.io-cache.whitelist-path")
+                    .stringType()
+                    .defaultValue("bucket-,manifest")
+                    .withDescription(
+                            "Cache is only applied to paths which contain the specified pattern, and * means all paths.");
 }

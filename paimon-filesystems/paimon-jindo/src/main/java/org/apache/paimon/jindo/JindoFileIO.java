@@ -139,8 +139,27 @@ public class JindoFileIO extends HadoopCompliantFileIO {
                 "fs.jindocache.read.profile.columnar.readahead.pread.enable", "false");
     }
 
-    public Options hadoopOptions() {
-        return hadoopOptions;
+    /**
+     * This method is used to initialize some thirdparty connector, such as Lance reader/writer.
+     *
+     * @param path file path
+     * @param opType read/write/meta
+     * @return
+     */
+    public Options hadoopOptions(Path path, String opType) {
+        boolean shouldCache = false;
+        if (opType.equalsIgnoreCase("read")) {
+            shouldCache = readCacheEnabled && shouldCache(path);
+        } else if (opType.equalsIgnoreCase("write")) {
+            shouldCache = writeCacheEnabled && shouldCache(path);
+        } else if (opType.equalsIgnoreCase("meta")) {
+            shouldCache = metaCacheEnabled && shouldCache(path);
+        }
+        if (shouldCache) {
+            return hadoopOptionsWithCache;
+        } else {
+            return hadoopOptions;
+        }
     }
 
     @Override
