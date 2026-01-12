@@ -19,13 +19,13 @@
 package org.apache.paimon.spark.rowops
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{And, CompoundPredicate, Predicate, PredicateBuilder}
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.commands.SparkDataFileMeta
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
-import org.apache.paimon.spark.scan.BaseScan
+import org.apache.paimon.spark.read.BaseScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
+import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
@@ -59,7 +59,7 @@ case class PaimonCopyOnWriteScan(
 
   private val filteredFileNames: mutable.Set[String] = mutable.Set[String]()
 
-  override def inputSplits: Array[Split] = {
+  protected def getInputSplits: Array[Split] = {
     loadSplits()
     dataSplits.asInstanceOf[Array[Split]]
   }

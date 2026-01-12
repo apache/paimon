@@ -16,12 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.read
 
-import org.apache.paimon.table.FormatTable
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.table.Table
 
-case class FormatTableScanBuilder(table: FormatTable) extends PaimonBaseScanBuilder {
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.connector.read.LocalScan
+import org.apache.spark.sql.types.StructType
 
-  override def build(): PaimonFormatTableScan =
-    PaimonFormatTableScan(table, requiredSchema, pushedPartitionFilters, pushedDataFilters)
+/** A scan does not require [[RDD]] to execute */
+case class PaimonLocalScan(
+    rows: Array[InternalRow],
+    readSchema: StructType,
+    table: Table,
+    pushedPartitionFilters: Seq[PartitionPredicate])
+  extends LocalScan {
+
+  override def description(): String = {
+    val pushedPartitionFiltersStr = if (pushedPartitionFilters.nonEmpty) {
+      ", PartitionFilters: [" + pushedPartitionFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+    s"PaimonLocalScan: [${table.name}]" + pushedPartitionFiltersStr
+  }
 }

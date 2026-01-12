@@ -45,39 +45,10 @@ case class PaimonScan(
     bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table)
   with SupportsReportPartitioning
-  with SupportsReportOrdering
-  with SupportsRuntimeV2Filtering {
+  with SupportsReportOrdering {
 
   def disableBucketedScan(): PaimonScan = {
     copy(bucketedScanDisabled = true)
-  }
-
-  // Since Spark 3.2
-  override def filterAttributes(): Array[NamedReference] = {
-    val requiredFields = readBuilder.readType().getFieldNames.asScala
-    table
-      .partitionKeys()
-      .asScala
-      .toArray
-      .filter(requiredFields.contains)
-      .map(fieldReference)
-  }
-
-  override def filter(predicates: Array[SparkPredicate]): Unit = {
-    val partitionType = table.rowType().project(table.partitionKeys())
-    val converter = SparkV2FilterConverter(partitionType)
-    val runtimePartitionFilters = predicates.toSeq
-      .flatMap(converter.convert(_))
-      .map(PartitionPredicate.fromPredicate(partitionType, _))
-    if (runtimePartitionFilters.nonEmpty) {
-      pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)
-      readBuilder.withPartitionFilter(
-        PartitionPredicate.and(
-          (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
-      // set inputPartitions null to trigger to get the new splits.
-      _inputPartitions = null
-      _inputSplits = null
-    }
   }
 
   @transient
@@ -187,7 +158,7 @@ case class PaimonScan(
       .toArray
   }
 
-  override def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
+  override protected def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
     if (!shouldDoBucketedScan || splits.exists(!_.isInstanceOf[DataSplit])) {
       return super.getInputPartitions(splits)
     }
