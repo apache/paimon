@@ -374,7 +374,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             readerSuppliers.add(
                     () ->
                             new DataFileRecordReader(
-                                    schema.logicalRowType(),
+                                    readRowType,
                                     formatReaderMapping.getReaderFactory(),
                                     formatReaderContext,
                                     formatReaderMapping.getIndexMapping(),
@@ -401,7 +401,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 new FormatReaderContext(
                         fileIO, dataFilePathFactory.toPath(file), file.fileSize(), selection);
         return new DataFileRecordReader(
-                schema.logicalRowType(),
+                readRowType,
                 formatReaderMapping.getReaderFactory(),
                 formatReaderContext,
                 formatReaderMapping.getIndexMapping(),
