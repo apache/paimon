@@ -127,7 +127,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JDK_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
 
       - name: Download Linux AMD64 native library
         uses: actions/download-artifact@v4
