@@ -45,7 +45,12 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Ran
 
     @Override
     public Optional<List<Range>> visit(LeafPredicate predicate) {
-        if (ROW_ID.name().equals(predicate.fieldName())) {
+        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+        if (!fieldRefOptional.isPresent()) {
+            return Optional.empty();
+        }
+        FieldRef fieldRef = fieldRefOptional.get();
+        if (ROW_ID.name().equals(fieldRef.name())) {
             LeafFunction function = predicate.function();
             if (function instanceof Equal || function instanceof In) {
                 ArrayList<Long> rowIds = new ArrayList<>();
@@ -98,11 +103,5 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Ran
             return Optional.empty();
         }
         return rowIds;
-    }
-
-    @Override
-    public Optional<List<Range>> visit(TransformPredicate predicate) {
-        // do not support transform predicate now.
-        return Optional.empty();
     }
 }

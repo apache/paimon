@@ -21,8 +21,8 @@ package org.apache.parquet.filter2.predicate;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -208,7 +208,7 @@ public class ParquetFilters {
         }
 
         @Override
-        public FilterPredicate visit(TransformPredicate predicate) {
+        public FilterPredicate visitNonFieldLeaf(LeafPredicate predicate) {
             throw new UnsupportedOperationException();
         }
     }

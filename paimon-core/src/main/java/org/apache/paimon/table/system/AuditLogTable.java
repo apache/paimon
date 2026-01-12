@@ -35,6 +35,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -90,15 +91,20 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
     public static final PredicateReplaceVisitor PREDICATE_CONVERTER =
             p -> {
-                if (p.index() == 0) {
+                Optional<FieldRef> fieldRefOptional = p.fieldRefOptional();
+                if (!fieldRefOptional.isPresent()) {
+                    return Optional.empty();
+                }
+                FieldRef fieldRef = fieldRefOptional.get();
+                if (fieldRef.index() == 0) {
                     return Optional.empty();
                 }
                 return Optional.of(
                         new LeafPredicate(
                                 p.function(),
-                                p.type(),
-                                p.index() - 1,
-                                p.fieldName(),
+                                fieldRef.type(),
+                                fieldRef.index() - 1,
+                                fieldRef.name(),
                                 p.literals()));
             };
 

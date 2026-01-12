@@ -39,9 +39,4 @@ public interface PredicateReplaceVisitor extends PredicateVisitor<Optional<Predi
         }
         return Optional.of(new CompoundPredicate(predicate.function(), converted));
     }
-
-    @Override
-    default Optional<Predicate> visit(TransformPredicate predicate) {
-        return Optional.empty();
-    }
 }

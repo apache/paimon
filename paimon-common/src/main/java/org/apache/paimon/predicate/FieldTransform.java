@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.InternalRowUtils.get;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Transform that extracts a field from a row. */
 public class FieldTransform implements Transform {
@@ -59,7 +60,7 @@ public class FieldTransform implements Transform {
 
     @Override
     public Transform copyWithNewInputs(List<Object> inputs) {
-        assert inputs.size() == 1;
+        checkArgument(inputs.size() == 1);
         return new FieldTransform((FieldRef) inputs.get(0));
     }
 

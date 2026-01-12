@@ -568,7 +568,7 @@ public class PredicateTest {
     private LeafFunction getLikeFunc(String pattern) {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
         Predicate predicate = builder.like(0, fromString(pattern));
-        return ((LeafPredicate) predicate).function;
+        return ((LeafPredicate) predicate).function();
     }
 
     @Test
