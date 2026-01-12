@@ -67,7 +67,7 @@ class LanceUtilsTest {
         TestFileIO fileIO = new TestFileIO();
         fileIO.setOptions(options);
 
-        Pair<Path, Map<String, String>> result = LanceUtils.toLanceSpecified(fileIO, path);
+        Pair<Path, Map<String, String>> result = LanceUtils.toLanceSpecifiedForReader(fileIO, path);
 
         assertTrue(result.getKey().toString().startsWith("oss://test-bucket/"));
 
@@ -97,7 +97,7 @@ class LanceUtilsTest {
         TestFileIO fileIO = new TestFileIO();
         fileIO.setOptions(options);
 
-        Pair<Path, Map<String, String>> result = LanceUtils.toLanceSpecified(fileIO, path);
+        Pair<Path, Map<String, String>> result = LanceUtils.toLanceSpecifiedForReader(fileIO, path);
 
         Map<String, String> storageOptions = result.getValue();
         assertEquals("test-token", storageOptions.get(LanceUtils.STORAGE_OPTION_SESSION_TOKEN));
