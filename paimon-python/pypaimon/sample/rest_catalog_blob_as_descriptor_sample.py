@@ -138,8 +138,8 @@ if __name__ == '__main__':
         'warehouse': "your_warehouse",
         'dlf.region': 'cn-hangzhou',
         "token.provider": "dlf",
-        'dlf.access-key-id': "YOUR_DLF_ACCESS_KEY_ID",  # For token refresh
-        'dlf.access-key-secret': "YOUR_DLF_ACCESS_KEY_SECRET",  # For token refresh
+        'dlf.access-key-id': "YOUR_DLF_ACCESS_KEY_ID",
+        'dlf.access-key-secret': "YOUR_DLF_ACCESS_KEY_SECRET",
         'dlf.oss-endpoint': "oss-cn-hangzhou.aliyuncs.com",
         **external_oss_options
     }
