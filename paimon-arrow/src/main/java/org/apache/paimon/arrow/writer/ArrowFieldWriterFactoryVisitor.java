@@ -44,6 +44,7 @@ import org.apache.paimon.types.VariantType;
 import org.apache.paimon.types.VecType;
 
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 
@@ -167,7 +168,14 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
 
     @Override
     public ArrowFieldWriterFactory visit(VecType vecType) {
-        throw new UnsupportedOperationException("Doesn't support VecType.");
+        ArrowFieldWriterFactory elementWriterFactory = vecType.getElementType().accept(this);
+        return (fieldVector, isNullable) ->
+                new ArrowFieldWriters.VecWriter(
+                        fieldVector,
+                        vecType.getLength(),
+                        elementWriterFactory.create(
+                                ((FixedSizeListVector) fieldVector).getDataVector(), isNullable),
+                        isNullable);
     }
 
     @Override

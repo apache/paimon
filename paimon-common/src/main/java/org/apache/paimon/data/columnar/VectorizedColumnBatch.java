@@ -126,7 +126,7 @@ public class VectorizedColumnBatch implements Serializable {
     }
 
     public InternalVec getVec(int rowId, int colId) {
-        throw new UnsupportedOperationException("Unsupported type: vecType");
+        return ((VecColumnVector) columns[colId]).getVec(rowId);
     }
 
     public InternalRow getRow(int rowId, int colId) {
