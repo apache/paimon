@@ -20,9 +20,17 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.spark.scan.BaseScan
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.source.Split
 
+import org.apache.spark.sql.PaimonUtils.fieldReference
+import org.apache.spark.sql.connector.expressions.NamedReference
+import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
+import org.apache.spark.sql.connector.read.SupportsRuntimeV2Filtering
 import org.apache.spark.sql.types.StructType
+
+import scala.collection.JavaConverters._
 
 /** Scan implementation for [[FormatTable]] */
 case class PaimonFormatTableScan(
@@ -31,4 +39,55 @@ case class PaimonFormatTableScan(
     pushedPartitionFilters: Seq[PartitionPredicate],
     pushedDataFilters: Seq[Predicate],
     override val pushedLimit: Option[Int])
-  extends PaimonFormatTableBaseScan {}
+  extends BaseScan
+  with SupportsRuntimeV2Filtering {
+
+  protected var _inputSplits: Array[Split] = _
+  protected var _inputPartitions: Seq[PaimonInputPartition] = _
+
+  def inputSplits: Array[Split] = {
+    if (_inputSplits == null) {
+      _inputSplits = readBuilder
+        .newScan()
+        .plan()
+        .splits()
+        .asScala
+        .toArray
+    }
+    _inputSplits
+  }
+
+  final override def inputPartitions: Seq[PaimonInputPartition] = {
+    if (_inputPartitions == null) {
+      _inputPartitions = getInputPartitions(inputSplits)
+    }
+    _inputPartitions
+  }
+
+  override def filterAttributes(): Array[NamedReference] = {
+    val requiredFields = readBuilder.readType().getFieldNames.asScala
+    table
+      .partitionKeys()
+      .asScala
+      .toArray
+      .filter(requiredFields.contains)
+      .map(fieldReference)
+  }
+
+  override def filter(predicates: Array[SparkPredicate]): Unit = {
+    val partitionType = table.rowType().project(table.partitionKeys())
+    val converter = SparkV2FilterConverter(partitionType)
+    val runtimePartitionFilters = predicates.toSeq
+      .flatMap(converter.convert(_))
+      .map(PartitionPredicate.fromPredicate(partitionType, _))
+    if (runtimePartitionFilters.nonEmpty) {
+      pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)
+      readBuilder.withPartitionFilter(
+        PartitionPredicate.and(
+          (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
+      // set inputPartitions null to trigger to get the new splits.
+      _inputPartitions = null
+      _inputSplits = null
+    }
+  }
+}

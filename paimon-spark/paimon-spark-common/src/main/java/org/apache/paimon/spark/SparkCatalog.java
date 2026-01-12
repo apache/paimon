@@ -220,23 +220,8 @@ public class SparkCatalog extends SparkBaseCatalog
     }
 
     /**
-     * Drop a namespace from the catalog, recursively dropping all objects within the namespace.
-     * This interface implementation only supports the Spark 3.0, 3.1 and 3.2.
-     *
-     * <p>If the catalog implementation does not support this operation, it may throw {@link
-     * UnsupportedOperationException}.
-     *
-     * @param namespace a multi-part namespace
-     * @return true if the namespace was dropped
-     * @throws UnsupportedOperationException If drop is not a supported operation
-     */
-    public boolean dropNamespace(String[] namespace) throws NoSuchNamespaceException {
-        return dropNamespace(namespace, false);
-    }
-
-    /**
      * Drop a namespace from the catalog with cascade mode, recursively dropping all objects within
-     * the namespace if cascade is true. This interface implementation supports the Spark 3.3+.
+     * the namespace if cascade is true.
      *
      * <p>If the catalog implementation does not support this operation, it may throw {@link
      * UnsupportedOperationException}.
@@ -301,9 +286,7 @@ public class SparkCatalog extends SparkBaseCatalog
         return loadSparkTable(ident, Collections.emptyMap());
     }
 
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Spark 3.2-.
-     */
+    @Override
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
         LOG.info("Time travel to version '{}'.", version);
         org.apache.spark.sql.connector.catalog.Table table =
@@ -316,12 +299,7 @@ public class SparkCatalog extends SparkBaseCatalog
         }
     }
 
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Spark 3.2-.
-     *
-     * <p>NOTE: Time unit of timestamp here is microsecond (see {@link
-     * TableCatalog#loadTable(Identifier, long)}). But in SQL you should use seconds.
-     */
+    @Override
     public SparkTable loadTable(Identifier ident, long timestamp) throws NoSuchTableException {
         // Paimon's timestamp use millisecond
         timestamp = timestamp / 1000;

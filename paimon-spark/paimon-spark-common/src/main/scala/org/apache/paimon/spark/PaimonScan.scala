@@ -48,11 +48,6 @@ case class PaimonScan(
   with SupportsReportOrdering
   with SupportsRuntimeV2Filtering {
 
-  def disableBucketedScan(): PaimonScan = {
-    copy(bucketedScanDisabled = true)
-  }
-
-  // Since Spark 3.2
   override def filterAttributes(): Array[NamedReference] = {
     val requiredFields = readBuilder.readType().getFieldNames.asScala
     table
@@ -135,7 +130,6 @@ case class PaimonScan(
     !bucketedScanDisabled && conf.v2BucketingEnabled && extractBucketTransform.isDefined
   }
 
-  // Since Spark 3.3
   override def outputPartitioning: Partitioning = {
     extractBucketTransform
       .map(bucket => new KeyGroupedPartitioning(Array(bucket), inputPartitions.size))

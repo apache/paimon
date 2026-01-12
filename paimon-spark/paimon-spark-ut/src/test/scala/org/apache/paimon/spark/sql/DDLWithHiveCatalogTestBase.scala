@@ -286,23 +286,20 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
   }
 
   test("Paimon DDL with hive catalog: drop database cascade which contains paimon table") {
-    // Spark supports DROP DATABASE CASCADE since 3.3
-    if (gteqSpark3_3) {
-      Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
-        catalogName =>
-          spark.sql(s"USE $catalogName")
-          spark.sql(s"CREATE DATABASE paimon_db")
-          spark.sql(s"USE paimon_db")
-          spark.sql(s"CREATE TABLE paimon_tbl (id int, name string, dt string) using paimon")
-          // Only spark_catalog supports create other table
-          if (catalogName.equals(sparkCatalogName)) {
-            spark.sql(s"CREATE TABLE parquet_tbl (id int, name string, dt string) using parquet")
-            spark.sql(s"CREATE VIEW parquet_tbl_view AS SELECT * FROM parquet_tbl")
-          }
-          spark.sql(s"CREATE VIEW paimon_tbl_view AS SELECT * FROM paimon_tbl")
-          spark.sql(s"USE default")
-          spark.sql(s"DROP DATABASE paimon_db CASCADE")
-      }
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        spark.sql(s"USE $catalogName")
+        spark.sql(s"CREATE DATABASE paimon_db")
+        spark.sql(s"USE paimon_db")
+        spark.sql(s"CREATE TABLE paimon_tbl (id int, name string, dt string) using paimon")
+        // Only spark_catalog supports create other table
+        if (catalogName.equals(sparkCatalogName)) {
+          spark.sql(s"CREATE TABLE parquet_tbl (id int, name string, dt string) using parquet")
+          spark.sql(s"CREATE VIEW parquet_tbl_view AS SELECT * FROM parquet_tbl")
+        }
+        spark.sql(s"CREATE VIEW paimon_tbl_view AS SELECT * FROM paimon_tbl")
+        spark.sql(s"USE default")
+        spark.sql(s"DROP DATABASE paimon_db CASCADE")
     }
   }
 

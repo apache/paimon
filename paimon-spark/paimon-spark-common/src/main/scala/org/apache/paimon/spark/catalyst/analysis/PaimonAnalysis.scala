@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.{SparkConnectorOptions, SparkTable}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
-import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonDropPartitions, PaimonTableValuedFunctions, PaimonTableValueFunction}
 import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand}
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
@@ -66,6 +66,9 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
         if d.resolved =>
       PaimonDropPartitions.validate(table, parts.asResolvedPartitionSpecs)
       d
+
+    case func: PaimonTableValueFunction if func.args.forall(_.resolved) =>
+      PaimonTableValuedFunctions.resolvePaimonTableValuedFunction(session, func)
   }
 
   private def writeOptions(v2WriteCommand: V2WriteCommand): Map[String, String] = {

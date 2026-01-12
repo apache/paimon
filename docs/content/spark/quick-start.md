@@ -32,7 +32,7 @@ Paimon supports the following Spark versions with their respective Java and Scal
 
 - Spark 4.x (including 4.0) : Pre-built with Java 17 and Scala 2.13
 
-- Spark 3.x (including 3.5, 3.4, 3.3, 3.2) : Pre-built with Java 8 and Scala 2.12/2.13
+- Spark 3.x (including 3.5, 3.4, 3.3) : Pre-built with Java 8 and Scala 2.12/2.13
 
 Download the jar file with corresponding version.
 
@@ -44,7 +44,6 @@ Download the jar file with corresponding version.
 | Spark 3.5 | [paimon-spark-3.5_2.12-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.5_2.12/{{< version >}}/paimon-spark-3.5_2.12-{{< version >}}.jar) | [paimon-spark-3.5_2.13-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.5_2.13/{{< version >}}/paimon-spark-3.5_2.13-{{< version >}}.jar) |
 | Spark 3.4 | [paimon-spark-3.4_2.12-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.4_2.12/{{< version >}}/paimon-spark-3.4_2.12-{{< version >}}.jar) | [paimon-spark-3.4_2.13-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.4_2.13/{{< version >}}/paimon-spark-3.4_2.13-{{< version >}}.jar) |
 | Spark 3.3 | [paimon-spark-3.3_2.12-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.3_2.12/{{< version >}}/paimon-spark-3.3_2.12-{{< version >}}.jar) | [paimon-spark-3.3_2.13-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.3_2.13/{{< version >}}/paimon-spark-3.3_2.13-{{< version >}}.jar) |
-| Spark 3.2 | [paimon-spark-3.2_2.12-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.2_2.12/{{< version >}}/paimon-spark-3.2_2.12-{{< version >}}.jar) | [paimon-spark-3.2_2.13-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-3.2_2.13/{{< version >}}/paimon-spark-3.2_2.13-{{< version >}}.jar) |
 
 {{< /stable >}}
 
@@ -56,7 +55,6 @@ Download the jar file with corresponding version.
 | Spark 3.5 | [paimon-spark-3.5_2.12-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.5_2.12/{{< version >}}/) | [paimon-spark-3.5_2.13-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.5_2.13/{{< version >}}/) |
 | Spark 3.4 | [paimon-spark-3.4_2.12-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.4_2.12/{{< version >}}/) | [paimon-spark-3.4_2.13-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.4_2.13/{{< version >}}/) |
 | Spark 3.3 | [paimon-spark-3.3_2.12-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.3_2.12/{{< version >}}/) | [paimon-spark-3.3_2.13-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.3_2.13/{{< version >}}/) |
-| Spark 3.2 | [paimon-spark-3.2_2.12-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.2_2.12/{{< version >}}/) | [paimon-spark-3.2_2.13-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-3.2_2.13/{{< version >}}/) |
 
 {{< /unstable >}}
 

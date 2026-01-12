@@ -79,8 +79,6 @@ class DisableUnnecessaryPaimonBucketedScanSuite
   }
 
   test("Disable unnecessary bucketed table scan - basic test") {
-    assume(gteqSpark3_3)
-
     withTable("t1", "t2", "t3") {
       initializeTable()
 
@@ -121,8 +119,6 @@ class DisableUnnecessaryPaimonBucketedScanSuite
   }
 
   test("Disable unnecessary bucketed table scan - multiple joins test") {
-    assume(gteqSpark3_3)
-
     withTable("t1", "t2", "t3") {
       initializeTable()
 
@@ -186,8 +182,6 @@ class DisableUnnecessaryPaimonBucketedScanSuite
   }
 
   test("Disable unnecessary bucketed table scan - other operators test") {
-    assume(gteqSpark3_3)
-
     withTable("t1", "t2", "t3") {
       initializeTable()
 
@@ -243,8 +237,6 @@ class DisableUnnecessaryPaimonBucketedScanSuite
   }
 
   test("Aggregates with no groupby over tables having 1 BUCKET, return multiple rows") {
-    assume(gteqSpark3_3)
-
     withTable("t1") {
       sql("""
             |CREATE TABLE t1 (`id` BIGINT, `event_date` DATE)

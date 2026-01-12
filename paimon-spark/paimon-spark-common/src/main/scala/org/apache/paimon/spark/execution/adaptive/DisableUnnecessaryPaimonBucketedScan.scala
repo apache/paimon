@@ -109,7 +109,7 @@ object DisableUnnecessaryPaimonBucketedScan extends Rule[SparkPlan] {
         val paimonBucketedScan = extractPaimonBucketedScan(batch)
         if (paimonBucketedScan.isDefined && (!hashInterestingPartitionOrOrder || hasExchange)) {
           val (batch, paimonScan) = paimonBucketedScan.get
-          val newBatch = batch.copy(scan = paimonScan.disableBucketedScan())
+          val newBatch = batch.copy(scan = paimonScan.copy(bucketedScanDisabled = true))
           newBatch.copyTagsFrom(batch)
           newBatch
         } else {
