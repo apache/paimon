@@ -42,7 +42,6 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.CommitChangesProvider;
 import org.apache.paimon.operation.commit.CommitCleaner;
-import org.apache.paimon.operation.commit.CommitKindProvider;
 import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
@@ -329,7 +328,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
-                                CommitKindProvider.provider(commitKind),
+                                commitKind,
                                 checkAppendFiles,
                                 null);
                 generatedSnapshot += 1;
@@ -347,7 +346,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
-                                CommitKindProvider.provider(CommitKind.COMPACT),
+                                CommitKind.COMPACT,
                                 true,
                                 null);
                 generatedSnapshot += 1;
@@ -512,7 +511,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
-                                CommitKindProvider.provider(CommitKind.COMPACT),
+                                CommitKind.COMPACT,
                                 true,
                                 null);
                 generatedSnapshot += 1;
@@ -651,7 +650,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitIdentifier,
                 null,
                 Collections.emptyMap(),
-                CommitKindProvider.provider(CommitKind.ANALYZE),
+                CommitKind.ANALYZE,
                 false,
                 statsFileName);
     }
@@ -678,7 +677,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
-            CommitKindProvider commitKindProvider,
+            CommitKind commitKind,
             boolean detectConflicts,
             @Nullable String statsFileName) {
         int retryCount = 0;
@@ -687,7 +686,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             CommitChanges changes = changesProvider.provide(latestSnapshot);
-            CommitKind commitKind = commitKindProvider.provide(changes);
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
@@ -736,12 +734,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties) {
-        CommitKindProvider commitKindProvider =
-                commitChanges ->
-                        containsFileDeletionOrDeletionVectors(
-                                        commitChanges.tableFiles, commitChanges.indexFiles)
-                                ? CommitKind.OVERWRITE
-                                : CommitKind.APPEND;
         return tryCommit(
                 latestSnapshot ->
                         scanner.readOverwriteChanges(
@@ -749,7 +741,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 identifier,
                 watermark,
                 properties,
-                commitKindProvider,
+                CommitKind.OVERWRITE,
                 true,
                 null);
     }
