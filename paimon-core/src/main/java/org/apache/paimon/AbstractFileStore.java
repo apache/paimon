@@ -19,7 +19,6 @@
 package org.apache.paimon;
 
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
-import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
@@ -38,7 +37,6 @@ import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
@@ -268,9 +266,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     public FileStoreCommitImpl newCommit(String commitUser, FileStoreTable table) {
         SnapshotManager snapshotManager = snapshotManager();
         SnapshotCommit snapshotCommit = catalogEnvironment.snapshotCommit(snapshotManager);
-        if (snapshotCommit == null) {
-            snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
-        }
         ConflictDetection conflictDetection =
                 new ConflictDetection(
                         tableName,

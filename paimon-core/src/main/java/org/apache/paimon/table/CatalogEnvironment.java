@@ -97,7 +97,6 @@ public class CatalogEnvironment implements Serializable {
         return supportsVersionManagement;
     }
 
-    @Nullable
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
         SnapshotCommit snapshotCommit;
         if (catalogLoader != null && supportsVersionManagement) {
