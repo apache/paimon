@@ -35,7 +35,7 @@ pyarrow>=16,<20; python_version >= "3.8"
 pylance>=0.20,<1; python_version>="3.9"
 pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"
 pyroaring
-ray>=2.10,<3
+ray>=2.10,<3; python_version>="3.7"
 readerwriterlock>=1,<2
 torch
 zstandard>=0.19,<1
