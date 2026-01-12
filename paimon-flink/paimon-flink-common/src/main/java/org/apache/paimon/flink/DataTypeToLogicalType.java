@@ -162,7 +162,8 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
 
     @Override
     public LogicalType visit(VecType vecType) {
-        throw new UnsupportedOperationException("Not support vecType yet.");
+        return new org.apache.flink.table.types.logical.ArrayType(
+                vecType.isNullable(), vecType.getElementType().accept(this));
     }
 
     @Override

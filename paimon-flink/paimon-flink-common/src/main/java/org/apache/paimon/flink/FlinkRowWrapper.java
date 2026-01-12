@@ -163,7 +163,7 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public InternalVec getVec(int pos) {
-        throw new UnsupportedOperationException("Not support vecType yet.");
+        return new FlinkVecWrapper(row.getArray(pos));
     }
 
     @Override
@@ -268,7 +268,7 @@ public class FlinkRowWrapper implements InternalRow {
 
         @Override
         public InternalVec getVec(int pos) {
-            throw new UnsupportedOperationException("Not support vecType yet.");
+            return new FlinkVecWrapper(array.getArray(pos));
         }
 
         @Override
@@ -314,6 +314,12 @@ public class FlinkRowWrapper implements InternalRow {
         @Override
         public double[] toDoubleArray() {
             return array.toDoubleArray();
+        }
+    }
+
+    private static class FlinkVecWrapper extends FlinkArrayWrapper implements InternalVec {
+        private FlinkVecWrapper(org.apache.flink.table.data.ArrayData array) {
+            super(array);
         }
     }
 
