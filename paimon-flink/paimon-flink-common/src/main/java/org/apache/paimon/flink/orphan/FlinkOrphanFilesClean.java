@@ -318,12 +318,14 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                     for (Path emptyDir : emptyDirs) {
                                         try {
                                             if (fileIO.delete(emptyDir, false)) {
+                                                LOG.info("Clean empty dir: {}", emptyDir);
                                                 output.collect(
                                                         new StreamRecord<>(emptyDir.toString()));
                                                 // recursive cleaning
                                                 newEmptyDir.add(emptyDir.getParent());
                                             }
                                         } catch (IOException ignored) {
+                                            LOG.warn("Clean empty dir failed: {}", emptyDir);
                                         }
                                     }
                                     emptyDirs = newEmptyDir;
