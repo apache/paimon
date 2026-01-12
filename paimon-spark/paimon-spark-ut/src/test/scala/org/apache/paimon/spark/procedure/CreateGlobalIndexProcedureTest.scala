@@ -303,12 +303,13 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
   test("create bitmap global index with external path") {
     withTable("T") {
       val tempIndexDir: File = Utils.createTempDir
+      val indexPath = "file:" + tempIndexDir.toString
       spark.sql(s"""
                    |CREATE TABLE T (id INT, name STRING)
                    |TBLPROPERTIES (
                    |  'bucket' = '-1',
                    |  'global-index.row-count-per-shard' = '10000',
-                   |  'global-index.external-path' = '${"file:" + tempIndexDir.toString}',
+                   |  'global-index.external-path' = '$indexPath',
                    |  'row-tracking.enabled' = 'true',
                    |  'data-evolution.enabled' = 'true')
                    |""".stripMargin)
@@ -340,7 +341,7 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
           entry
             .indexFile()
             .externalPath()
-            .startsWith(tempIndexDir.toString + "/" + entry.indexFile().fileName()))
+            .startsWith(indexPath + "/" + entry.indexFile().fileName()))
       }
     }
   }

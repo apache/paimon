@@ -54,7 +54,11 @@ public class GlobalIndexBuilderUtils {
                     new GlobalIndexMeta(range.from, range.to, indexFieldId, null, entry.meta());
 
             Path externalPathDir = table.coreOptions().globalIndexExternalPath();
-            Path externalPath = new Path(externalPathDir, fileName);
+            String externalPathString = null;
+            if (externalPathDir != null) {
+                Path externalPath = new Path(externalPathDir, fileName);
+                externalPathString = externalPath.toString();
+            }
             IndexFileMeta indexFileMeta =
                     new IndexFileMeta(
                             indexType,
@@ -62,7 +66,7 @@ public class GlobalIndexBuilderUtils {
                             fileSize,
                             entry.rowCount(),
                             globalIndexMeta,
-                            externalPath.toString());
+                            externalPathString);
             results.add(indexFileMeta);
         }
         return results;
