@@ -295,7 +295,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Integer> LOOKUP_REFRESH_FULL_LOAD_THRESHOLD =
             ConfigOptions.key("lookup.refresh.full-load-threshold")
                     .intType()
-                    .defaultValue(Integer.MAX_VALUE)
+                    .noDefaultValue()
                     .withDescription(
                             "If the pending snapshot count exceeds this threshold, lookup table will discard incremental updates "
                                     + "and refresh the entire table from the latest snapshot. This can improve performance when there are many snapshots pending. "

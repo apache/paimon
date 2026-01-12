@@ -100,7 +100,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     // timestamp when refreshing lookup table
     private transient long nextRefreshTime;
     // threshold for triggering full table reload when snapshots are pending
-    private transient int refreshFullThreshold;
+    private transient Integer refreshFullThreshold;
 
     protected FunctionContext functionContext;
 
@@ -368,7 +368,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
      */
     @VisibleForTesting
     public boolean shouldDoFullLoad() {
-        if (refreshFullThreshold <= 0 || refreshFullThreshold == Integer.MAX_VALUE) {
+        if (refreshFullThreshold == null) {
             return false;
         }
 
