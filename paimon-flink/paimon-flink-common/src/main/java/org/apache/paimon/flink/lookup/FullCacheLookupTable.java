@@ -151,6 +151,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.cacheRowFilter = filter;
     }
 
+    @Override
+    public Long nextSnapshotId() {
+        return this.reader.nextSnapshotId();
+    }
+
     protected void init() throws Exception {
         this.stateFactory = createStateFactory();
         this.refreshExecutor =
