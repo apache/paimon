@@ -16,53 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.read
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.Predicate
-import org.apache.paimon.spark.scan.BaseScan
-import org.apache.paimon.table.FormatTable
-import org.apache.paimon.table.source.Split
+import org.apache.paimon.predicate.{Predicate, TopN, VectorSearch}
+import org.apache.paimon.spark.SparkFilterConverter
+import org.apache.paimon.table.InnerTable
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
-import org.apache.spark.sql.connector.expressions.NamedReference
-import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
-import org.apache.spark.sql.connector.read.SupportsRuntimeV2Filtering
+import org.apache.spark.sql.connector.expressions._
+import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
+import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-/** Scan implementation for [[FormatTable]] */
-case class PaimonFormatTableScan(
-    table: FormatTable,
+case class PaimonScan(
+    table: InnerTable,
     requiredSchema: StructType,
     pushedPartitionFilters: Seq[PartitionPredicate],
     pushedDataFilters: Seq[Predicate],
-    override val pushedLimit: Option[Int])
-  extends BaseScan
-  with SupportsRuntimeV2Filtering {
-
-  protected var _inputSplits: Array[Split] = _
-  protected var _inputPartitions: Seq[PaimonInputPartition] = _
-
-  def inputSplits: Array[Split] = {
-    if (_inputSplits == null) {
-      _inputSplits = readBuilder
-        .newScan()
-        .plan()
-        .splits()
-        .asScala
-        .toArray
-    }
-    _inputSplits
-  }
-
-  final override def inputPartitions: Seq[PaimonInputPartition] = {
-    if (_inputPartitions == null) {
-      _inputPartitions = getInputPartitions(inputSplits)
-    }
-    _inputPartitions
-  }
+    override val pushedLimit: Option[Int],
+    override val pushedTopN: Option[TopN],
+    override val pushedVectorSearch: Option[VectorSearch],
+    bucketedScanDisabled: Boolean = false)
+  extends PaimonBaseScan(table)
+  with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {
     val requiredFields = readBuilder.readType().getFieldNames.asScala
@@ -74,11 +53,12 @@ case class PaimonFormatTableScan(
       .map(fieldReference)
   }
 
-  override def filter(predicates: Array[SparkPredicate]): Unit = {
+  override def filter(filters: Array[Filter]): Unit = {
     val partitionType = table.rowType().project(table.partitionKeys())
-    val converter = SparkV2FilterConverter(partitionType)
-    val runtimePartitionFilters = predicates.toSeq
-      .flatMap(converter.convert(_))
+    val converter = new SparkFilterConverter(partitionType)
+    val runtimePartitionFilters = filters.toSeq
+      .map(converter.convertIgnoreFailure)
+      .filter(_ != null)
       .map(PartitionPredicate.fromPredicate(partitionType, _))
     if (runtimePartitionFilters.nonEmpty) {
       pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)

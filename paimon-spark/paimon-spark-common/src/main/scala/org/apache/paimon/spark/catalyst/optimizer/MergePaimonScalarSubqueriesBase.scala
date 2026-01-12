@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.catalyst.optimizer
 
-import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.read.PaimonScan
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeMap, CreateNamedStruct, Expression, ExprId, GetStructField, LeafExpression, Literal, NamedExpression, PredicateHelper, ScalarSubquery, Unevaluable}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression

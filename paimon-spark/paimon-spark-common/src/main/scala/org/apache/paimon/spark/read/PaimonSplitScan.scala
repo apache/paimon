@@ -16,29 +16,36 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.scan
+package org.apache.paimon.spark.read
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.table.Table
+import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.table.{InnerTable, KnownSplitsTable}
+import org.apache.paimon.table.source.{DataSplit, Split}
 
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.connector.read.LocalScan
+import org.apache.spark.sql.connector.read.Scan
 import org.apache.spark.sql.types.StructType
 
-/** A scan does not require [[RDD]] to execute */
-case class PaimonLocalScan(
-    rows: Array[InternalRow],
-    readSchema: StructType,
-    table: Table,
-    pushedPartitionFilters: Seq[PartitionPredicate])
-  extends LocalScan {
+class PaimonSplitScanBuilder(val table: KnownSplitsTable) extends PaimonBaseScanBuilder {
 
-  override def description(): String = {
-    val pushedPartitionFiltersStr = if (pushedPartitionFilters.nonEmpty) {
-      ", PartitionFilters: [" + pushedPartitionFilters.mkString(",") + "]"
-    } else {
-      ""
-    }
-    s"PaimonLocalScan: [${table.name}]" + pushedPartitionFiltersStr
+  override def build(): Scan = {
+    PaimonSplitScan(
+      table,
+      table.splits(),
+      requiredSchema,
+      pushedPartitionFilters,
+      pushedDataFilters)
   }
+}
+
+/** For internal use only. */
+case class PaimonSplitScan(
+    table: InnerTable,
+    dataSplits: Array[DataSplit],
+    requiredSchema: StructType,
+    pushedPartitionFilters: Seq[PartitionPredicate],
+    pushedDataFilters: Seq[Predicate])
+  extends BaseScan {
+
+  override def inputSplits: Array[Split] = dataSplits.asInstanceOf[Array[Split]]
 }

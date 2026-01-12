@@ -380,8 +380,7 @@ object PaimonDynamicPartitionOverwrite {
       // when overwrite dynamic is not supported, fallback to use v1 write
       o.table match {
         case r: DataSourceV2Relation
-            if r.table.isInstanceOf[SparkTable] && !r.table
-              .capabilities()
+            if r.table.isInstanceOf[SparkTable] && !r.table.capabilities
               .contains(TableCapability.OVERWRITE_DYNAMIC) =>
           Some((r, r.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]))
         case _ => None

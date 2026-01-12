@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.rowops
 
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.PaimonBaseScanBuilder
+import org.apache.paimon.spark.read.PaimonBaseScanBuilder
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.spark.write.PaimonV2WriteBuilder
 import org.apache.paimon.table.FileStoreTable

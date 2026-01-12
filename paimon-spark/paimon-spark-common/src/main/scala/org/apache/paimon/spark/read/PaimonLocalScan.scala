@@ -16,26 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.read
 
-import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.source.ReadBuilder
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.connector.read.LocalScan
+import org.apache.spark.sql.types.StructType
 
-import java.util.Objects
+/** A scan does not require [[RDD]] to execute */
+case class PaimonLocalScan(
+    rows: Array[InternalRow],
+    readSchema: StructType,
+    table: Table,
+    pushedPartitionFilters: Seq[PartitionPredicate])
+  extends LocalScan {
 
-/** A Spark [[Batch]] for paimon. */
-case class PaimonBatch(
-    inputPartitions: Seq[PaimonInputPartition],
-    readBuilder: ReadBuilder,
-    blobAsDescriptor: Boolean,
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
-  extends Batch {
-
-  override def planInputPartitions(): Array[InputPartition] =
-    inputPartitions.map(_.asInstanceOf[InputPartition]).toArray
-
-  override def createReaderFactory(): PartitionReaderFactory =
-    PaimonPartitionReaderFactory(readBuilder, metadataColumns, blobAsDescriptor)
+  override def description(): String = {
+    val pushedPartitionFiltersStr = if (pushedPartitionFilters.nonEmpty) {
+      ", PartitionFilters: [" + pushedPartitionFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+    s"PaimonLocalScan: [${table.name}]" + pushedPartitionFiltersStr
+  }
 }

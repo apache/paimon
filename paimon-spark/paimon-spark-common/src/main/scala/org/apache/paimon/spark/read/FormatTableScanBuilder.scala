@@ -16,36 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.read
 
-import org.apache.paimon.spark.scan.BaseScan
 import org.apache.paimon.table.FormatTable
-import org.apache.paimon.table.source.Split
 
-import scala.collection.JavaConverters._
+case class FormatTableScanBuilder(table: FormatTable) extends PaimonBaseScanBuilder {
 
-/** Base Scan implementation for [[FormatTable]]. */
-abstract class PaimonFormatTableBaseScan extends BaseScan {
-
-  protected var _inputSplits: Array[Split] = _
-  protected var _inputPartitions: Seq[PaimonInputPartition] = _
-
-  def inputSplits: Array[Split] = {
-    if (_inputSplits == null) {
-      _inputSplits = readBuilder
-        .newScan()
-        .plan()
-        .splits()
-        .asScala
-        .toArray
-    }
-    _inputSplits
-  }
-
-  final override def inputPartitions: Seq[PaimonInputPartition] = {
-    if (_inputPartitions == null) {
-      _inputPartitions = getInputPartitions(inputSplits)
-    }
-    _inputPartitions
-  }
+  override def build(): FormatTableScan =
+    FormatTableScan(table, requiredSchema, pushedPartitionFilters, pushedDataFilters, pushedLimit)
 }

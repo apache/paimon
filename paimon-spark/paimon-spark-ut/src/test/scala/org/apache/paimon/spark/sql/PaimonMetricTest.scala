@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonMetrics.{RESULTED_TABLE_FILES, SCANNED_SNAPSHOT_ID, SKIPPED_TABLE_FILES}
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.scan.PaimonSplitScan
+import org.apache.paimon.spark.read.PaimonSplitScan
 import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.source.DataSplit
 

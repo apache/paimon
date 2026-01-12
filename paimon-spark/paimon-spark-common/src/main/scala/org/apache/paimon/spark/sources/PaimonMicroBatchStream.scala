@@ -20,7 +20,8 @@ package org.apache.paimon.spark.sources
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{PaimonImplicits, PaimonInputPartition, PaimonPartitionReaderFactory, SparkConnectorOptions}
+import org.apache.paimon.spark.{PaimonImplicits, SparkConnectorOptions}
+import org.apache.paimon.spark.read.{PaimonInputPartition, PaimonPartitionReaderFactory}
 import org.apache.paimon.table.DataTable
 import org.apache.paimon.table.source.ReadBuilder
 

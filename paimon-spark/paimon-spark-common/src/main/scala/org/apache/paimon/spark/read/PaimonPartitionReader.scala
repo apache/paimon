@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.read
 
 import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
 import org.apache.paimon.disk.IOManager
+import org.apache.paimon.spark.{PaimonNumSplitsTaskMetric, PaimonPartitionSizeTaskMetric, PaimonReadBatchTimeTaskMetric}
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.data.SparkInternalRow
 import org.apache.paimon.spark.schema.PaimonMetadataColumn

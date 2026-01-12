@@ -78,7 +78,7 @@ public class SparkCatalogWithHiveTest {
                                     .stream()
                                     .map(s -> s.get(0))
                                     .map(Object::toString)
-                                    .filter(s -> s.contains("PaimonFormatTableScan"))
+                                    .filter(s -> s.contains("FormatTableScan"))
                                     .count())
                     .isGreaterThan(0);
 

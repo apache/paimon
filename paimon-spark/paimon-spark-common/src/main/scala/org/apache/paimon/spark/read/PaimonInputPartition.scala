@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.read
 
 import org.apache.paimon.table.source.Split
 
@@ -30,9 +30,6 @@ trait PaimonInputPartition extends InputPartition {
   def rowCount(): Long = {
     splits.map(_.rowCount()).sum
   }
-
-  // Used to avoid checking [[PaimonBucketedInputPartition]] to workaround for multi Spark version
-  def bucketed = false
 }
 
 case class SimplePaimonInputPartition(splits: Seq[Split]) extends PaimonInputPartition
@@ -51,5 +48,4 @@ case class PaimonBucketedInputPartition(splits: Seq[Split], bucket: Int)
   extends PaimonInputPartition
   with HasPartitionKey {
   override def partitionKey(): InternalRow = new GenericInternalRow(Array(bucket.asInstanceOf[Any]))
-  override def bucketed: Boolean = true
 }

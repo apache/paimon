@@ -16,17 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.spark.read
 
-import org.apache.paimon.table.FormatTable
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
+import org.apache.paimon.table.source.ReadBuilder
 
-case class FormatTableScanBuilder(table: FormatTable) extends PaimonBaseScanBuilder {
+import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
 
-  override def build(): PaimonFormatTableScan =
-    PaimonFormatTableScan(
-      table,
-      requiredSchema,
-      pushedPartitionFilters,
-      pushedDataFilters,
-      pushedLimit)
+/** A Spark [[Batch]] for paimon. */
+case class PaimonBatch(
+    inputPartitions: Seq[PaimonInputPartition],
+    readBuilder: ReadBuilder,
+    blobAsDescriptor: Boolean,
+    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
+  extends Batch {
+
+  override def planInputPartitions(): Array[InputPartition] =
+    inputPartitions.map(_.asInstanceOf[InputPartition]).toArray
+
+  override def createReaderFactory(): PartitionReaderFactory =
+    PaimonPartitionReaderFactory(readBuilder, metadataColumns, blobAsDescriptor)
 }

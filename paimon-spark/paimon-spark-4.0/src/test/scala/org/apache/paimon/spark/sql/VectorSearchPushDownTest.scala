@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.read.PaimonScan
 
 /** Tests for vector search table-valued function with global vector index. */
 class VectorSearchPushDownTest extends BaseVectorSearchPushDownTest {

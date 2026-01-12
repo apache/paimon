@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.catalyst.optimizer
 
-import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.read.PaimonScan
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, AttributeReference, ExprId, ScalarSubquery}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
