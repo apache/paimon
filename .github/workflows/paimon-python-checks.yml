@@ -81,6 +81,24 @@ jobs:
       - name: Verify Python version
         run: python --version
 
+      - name: Verify requirements.txt dependencies can be installed
+        shell: bash
+        run: |
+          cd paimon-python
+          python -m pip install --upgrade pip
+          # Use --target to install to a temporary directory to verify dependencies
+          # This works for both Python 3.6 (pip 21.3.1) and Python 3.10+ (pip 22.2+)
+          # since --target is supported in all pip versions
+          TEMP_DIR=$(mktemp -d)
+          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || {
+            echo "ERROR: Failed to resolve dependencies from dev/requirements.txt"
+            echo "This indicates a version conflict or unavailable package version"
+            rm -rf "$TEMP_DIR"
+            exit 1
+          }
+          rm -rf "$TEMP_DIR"
+          echo "✓ All dependencies in dev/requirements.txt can be resolved"
+
       - name: Build Java
         run: |
           echo "Start compiling modules"
