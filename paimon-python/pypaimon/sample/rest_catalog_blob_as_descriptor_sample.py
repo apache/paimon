@@ -17,16 +17,6 @@
 ################################################################################
 """
 Sample demonstrating how to use blob-as-descriptor mode with REST catalog.
-
-This sample shows how to:
-1. Import blob data from external OSS into Paimon table using REST catalog
-2. Handle different credentials for REST catalog (token) and external OSS (user credentials)
-3. Use blob-as-descriptor mode for memory-efficient blob import
-
-Key points:
-- REST catalog uses token-based authentication (managed by RESTTokenFileIO)
-- External OSS uses user-provided credentials (accessKeyId/accessKeySecret)
-- FileIO.copy() ensures these configurations don't interfere with each other
 """
 from pypaimon import CatalogFactory
 import pyarrow as pa
@@ -38,7 +28,7 @@ from pypaimon.common.options import Options
 
 
 def write_table_with_blob(catalog, video_file_path: str, external_oss_options: dict):
-    database_name = 'pai_vla_demo'
+    database_name = 'blob_demo'
     table_name = 'test_table_blob_' + str(int(__import__('time').time()))
 
     catalog.create_database(
@@ -46,11 +36,10 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
         ignore_if_exists=True,
     )
 
-    print('===========1: Creating table with blob column=============')
     pa_schema = pa.schema([
         ('text', pa.string()),
-        ('videos', pa.list_(pa.string())),
-        ('picture', pa.large_binary())  # Blob column
+        ('names', pa.list_(pa.string())),
+        ('video', pa.large_binary())  # Blob column
     ])
 
     schema = Schema.from_pyarrow_schema(
@@ -60,8 +49,8 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
         options={
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
-            'blob-field': 'picture',  # Specify blob field
-            'blob-as-descriptor': 'true'  # Enable blob-as-descriptor mode
+            'blob-field': 'video',
+            'blob-as-descriptor': 'true'
         },
         comment='Table with blob column using blob-as-descriptor mode')
 
@@ -74,17 +63,11 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
 
     table = catalog.get_table(table_identifier)
     print(f"✓ Table created: {table_identifier}")
-    print(f"  Schema fields: {[f.name for f in table.table_schema.fields]}")
-    print(f"  Schema types: {[str(f.type) for f in table.table_schema.fields]}")
 
-    print('\n===========2: Accessing external OSS file with user credentials=============')
-    print('Note: External OSS uses user-provided credentials (different from REST token)')
+    # Access external OSS file to get file size
     try:
         external_file_io = FileIO(video_file_path, Options(external_oss_options))
         video_file_size = external_file_io.get_file_size(video_file_path)
-        print(f"✓ External file accessible: {video_file_path}")
-        print(f"  File size: {video_file_size / 1024 / 1024:.2f} MB")
-        print(f"  Using credentials: accessKeyId={external_oss_options.get('fs.oss.accessKeyId', 'N/A')[:10]}...")
     except Exception as e:
         raise FileNotFoundError(
             f"Failed to access external OSS file: {video_file_path}\n"
@@ -92,31 +75,21 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
             f"Please check your external_oss_options credentials."
         ) from e
 
-    print('\n===========3: Creating BlobDescriptor=============')
-    print('BlobDescriptor contains reference to external file, not the file content itself')
-    external_blob_uri = video_file_path
-    blob_descriptor = BlobDescriptor(external_blob_uri, 0, video_file_size)
+    # Create BlobDescriptor
+    blob_descriptor = BlobDescriptor(video_file_path, 0, video_file_size)
     descriptor_bytes = blob_descriptor.serialize()
-    print(f"✓ BlobDescriptor created:")
-    print(f"  URI: {external_blob_uri}")
-    print(f"  Offset: 0")
-    print(f"  Length: {video_file_size} bytes")
-    print(f"  Descriptor size: {len(descriptor_bytes)} bytes (much smaller than file!)")
-
-    print('\n===========4: Writing data to Paimon table=============')
     write_builder = table.new_batch_write_builder()
     table_write = write_builder.new_write()
     table_commit = write_builder.new_commit()
 
     table_write.write_arrow(pa.Table.from_pydict({
         'text': ['Sample video'],
-        'videos': [['video1.mp4']],
-        'picture': [descriptor_bytes]  # Store BlobDescriptor, not file content
+        'names': [['video1.mp4']],
+        'video': [descriptor_bytes]
     }, schema=pa_schema))
 
     table_commit.commit(table_write.prepare_commit())
     print("✓ Data committed successfully")
-    print("  Blob data was streamed from external OSS into Paimon storage")
     table_write.close()
     table_commit.close()
     
@@ -124,7 +97,6 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
 
 
 def read_table_with_blob(catalog, table_name: str):
-    print('\n===========5: Reading table with blob=============')
     table = catalog.get_table(table_name)
 
     read_builder = table.new_read_builder()
@@ -133,31 +105,19 @@ def read_table_with_blob(catalog, table_name: str):
     table_read = read_builder.new_read()
     
     result = table_read.to_arrow(splits)
-    
     print(f"✓ Read {result.num_rows} rows")
-    print(f"  Columns: {result.column_names}")
     
-    picture_bytes_list = result.column('picture').to_pylist()
-    
-    print('\n===========6: Verifying blob data=============')
-    for i, picture_bytes in enumerate(picture_bytes_list):
-        if picture_bytes is None:
-            print(f"Row {i}: picture is None")
+    video_bytes_list = result.column('video').to_pylist()
+    for video_bytes in video_bytes_list:
+        if video_bytes is None:
             continue
-            
-        blob_descriptor = BlobDescriptor.deserialize(picture_bytes)
-        print(f"Row {i}: BlobDescriptor:")
-        print(f"  URI: {blob_descriptor.uri}")
-        print(f"  Offset: {blob_descriptor.offset}")
-        print(f"  Length: {blob_descriptor.length} bytes")
-        
+        blob_descriptor = BlobDescriptor.deserialize(video_bytes)
         from pypaimon.common.uri_reader import FileUriReader
         uri_reader = FileUriReader(table.file_io)
         blob = Blob.from_descriptor(uri_reader, blob_descriptor)
-        
         blob_data = blob.to_data()
-        print(f"  Blob data size: {len(blob_data) / 1024 / 1024:.2f} MB")
-        print(f"  ✓ Blob data successfully read from Paimon storage")
+        print(f"✓ Blob data verified: {len(blob_data) / 1024 / 1024:.2f} MB")
+        break
     
     return result
 
@@ -181,31 +141,16 @@ if __name__ == '__main__':
         'dlf.access-key-id': "YOUR_DLF_ACCESS_KEY_ID",  # For token refresh
         'dlf.access-key-secret': "YOUR_DLF_ACCESS_KEY_SECRET",  # For token refresh
         'dlf.oss-endpoint': "oss-cn-hangzhou.aliyuncs.com",
+        **external_oss_options
     }
 
-    print('=' * 70)
-    print('REST Catalog Blob-as-Descriptor Sample')
-    print('=' * 70)
-    print('\nThis sample demonstrates:')
-    print('1. Using REST catalog with token-based authentication')
-    print('2. Importing blob data from external OSS with different credentials')
-    print('3. How FileIO.copy() prevents credential confusion')
-    print('=' * 70)
-    
     catalog = CatalogFactory.create(catalog_options)
     
     try:
         table_name = write_table_with_blob(catalog, video_file_path, external_oss_options)
         result = read_table_with_blob(catalog, table_name)
-        print('\n' + '=' * 70)
-        print('✓ Test completed successfully!')
-        print('=' * 70)
-        print('\nKey takeaways:')
-        print('- REST catalog uses token-based authentication (auto-refreshed)')
-        print('- External OSS uses user-provided credentials (static)')
-        print('- FileIO.copy() ensures these don\'t interfere with each other')
-        print('- Blob-as-descriptor mode enables memory-efficient blob import')
+        print("✓ Test completed successfully!")
     except Exception as e:
-        print(f'\n✗ Error: {e}')
+        print(f'✗ Error: {e}')
         raise
 
