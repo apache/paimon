@@ -346,7 +346,7 @@ public class FileStorePathFactory {
 
             @Override
             public boolean isExternalPath() {
-                return false;
+                return globalIndexExternalRootDir != null;
             }
         };
     }
