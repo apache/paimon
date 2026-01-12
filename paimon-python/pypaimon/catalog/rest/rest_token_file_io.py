@@ -23,6 +23,7 @@ from typing import Optional
 from pyarrow._fs import FileSystem
 
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
@@ -60,8 +61,17 @@ class RESTTokenFileIO(FileIO):
     def _initialize_oss_fs(self, path) -> FileSystem:
         self.try_to_refresh_token()
         merged_token = self._merge_token_with_catalog_options(self.token.token)
-        self.properties.data.update(merged_token)
-        return super()._initialize_oss_fs(path)
+        merged_properties = RESTUtil.merge(
+            self.properties.to_map() if self.properties else {},
+            merged_token
+        )
+        merged_options = Options(merged_properties)
+        original_properties = self.properties
+        self.properties = merged_options
+        try:
+            return super()._initialize_oss_fs(path)
+        finally:
+            self.properties = original_properties
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""

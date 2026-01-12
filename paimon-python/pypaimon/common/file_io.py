@@ -43,7 +43,7 @@ class FileIO:
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
         scheme, netloc, _ = self.parse_location(path)
-        self.uri_reader_factory = UriReaderFactory(catalog_options.copy())
+        self.uri_reader_factory = UriReaderFactory(catalog_options)
         if scheme in {"oss"}:
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
