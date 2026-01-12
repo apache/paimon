@@ -24,6 +24,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVec;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.ArrayType;
@@ -131,6 +132,11 @@ public class HivePaimonArray implements InternalArray {
         return new HivePaimonArray(
                 ((ArrayType) elementType).getElementType(),
                 ((HivePaimonArray) this.getAs(i)).getList());
+    }
+
+    @Override
+    public InternalVec getVec(int i) {
+        throw new UnsupportedOperationException("Not support vecType yet.");
     }
 
     @Override

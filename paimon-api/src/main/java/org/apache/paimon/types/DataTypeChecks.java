@@ -241,6 +241,11 @@ public final class DataTypeChecks {
         }
 
         @Override
+        public List<DataType> visit(VecType vecType) {
+            return Collections.singletonList(vecType.getElementType());
+        }
+
+        @Override
         public List<DataType> visit(MultisetType multisetType) {
             return Collections.singletonList(multisetType.getElementType());
         }

@@ -356,6 +356,11 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
     }
 
     @Override
+    public InternalVec getVec(int pos) {
+        throw new IllegalArgumentException("Unsupported type: vecType");
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readMapData(segments, offset, getLong(pos));

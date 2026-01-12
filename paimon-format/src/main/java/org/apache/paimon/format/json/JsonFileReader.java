@@ -20,6 +20,7 @@ package org.apache.paimon.format.json;
 
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.data.ArrayBasedVec;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -34,6 +35,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VecType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -102,6 +104,8 @@ public class JsonFileReader extends AbstractTextFileReader {
                 }
             case ARRAY:
                 return convertJsonArray(node, (ArrayType) dataType, options);
+            case VECTOR:
+                return convertJsonVec(node, (VecType) dataType, options);
             case MAP:
                 return convertJsonMap(node, (MapType) dataType, options);
             case ROW:
@@ -134,6 +138,12 @@ public class JsonFileReader extends AbstractTextFileReader {
             }
         }
         return new GenericArray(elements.toArray());
+    }
+
+    private ArrayBasedVec convertJsonVec(JsonNode vecNode, VecType vecType, JsonOptions options) {
+        ArrayType arrayType = DataTypes.ARRAY(vecType.getElementType());
+        GenericArray array = convertJsonArray(vecNode, arrayType, options);
+        return ArrayBasedVec.from(array);
     }
 
     private GenericMap convertJsonMap(JsonNode objectNode, MapType mapType, JsonOptions options) {

@@ -39,6 +39,12 @@ public class ReassignFieldId extends DataTypeDefaultVisitor<DataType> {
     }
 
     @Override
+    public DataType visit(VecType vecType) {
+        return new VecType(
+                vecType.isNullable(), vecType.getLength(), vecType.getElementType().accept(this));
+    }
+
+    @Override
     public DataType visit(MultisetType multisetType) {
         return new MultisetType(
                 multisetType.isNullable(), multisetType.getElementType().accept(this));

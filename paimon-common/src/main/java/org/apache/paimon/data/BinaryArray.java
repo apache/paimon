@@ -257,6 +257,11 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
     }
 
     @Override
+    public InternalVec getVec(int pos) {
+        throw new IllegalArgumentException("Unsupported type: vecType");
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readMapData(segments, offset, getLong(pos));

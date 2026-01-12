@@ -68,6 +68,8 @@ public interface DataTypeVisitor<R> {
 
     R visit(ArrayType arrayType);
 
+    R visit(VecType vecType);
+
     R visit(MultisetType multisetType);
 
     R visit(MapType mapType);

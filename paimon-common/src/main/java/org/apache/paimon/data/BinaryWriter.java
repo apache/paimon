@@ -22,6 +22,7 @@ import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.InternalVecSerializer;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataType;
@@ -73,6 +74,8 @@ public interface BinaryWriter {
     void writeBlob(int pos, Blob blob);
 
     void writeArray(int pos, InternalArray value, InternalArraySerializer serializer);
+
+    void writeVec(int pos, InternalVec value, InternalVecSerializer serializer);
 
     void writeMap(int pos, InternalMap value, InternalMapSerializer serializer);
 
@@ -210,6 +213,12 @@ public interface BinaryWriter {
                                 pos,
                                 (InternalArray) value,
                                 (InternalArraySerializer) arraySerializer);
+            case VECTOR:
+                final Serializer<?> vecSerializer =
+                        serializer == null ? InternalSerializers.create(elementType) : serializer;
+                return (writer, pos, value) ->
+                        writer.writeVec(
+                                pos, (InternalVec) value, (InternalVecSerializer) vecSerializer);
             case MULTISET:
             case MAP:
                 final Serializer<?> mapSerializer =

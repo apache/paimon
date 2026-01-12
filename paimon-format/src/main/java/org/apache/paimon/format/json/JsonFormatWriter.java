@@ -24,14 +24,17 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVec;
 import org.apache.paimon.format.text.AbstractTextFileWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VecType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
@@ -112,6 +115,8 @@ public class JsonFormatWriter extends AbstractTextFileWriter {
                 return BASE64_ENCODER.encodeToString((byte[]) value);
             case ARRAY:
                 return convertRowArray((InternalArray) value, (ArrayType) dataType);
+            case VECTOR:
+                return convertRowVec((InternalVec) value, (VecType) dataType);
             case MAP:
                 return convertRowMap((InternalMap) value, (MapType) dataType);
             case ROW:
@@ -131,6 +136,14 @@ public class JsonFormatWriter extends AbstractTextFileWriter {
             result.add(convertRowValue(InternalRowUtils.get(array, i, elementType), elementType));
         }
         return result;
+    }
+
+    private List<Object> convertRowVec(InternalVec vec, VecType vecType) {
+        if (vec.size() != vecType.getLength()) {
+            throw new IllegalArgumentException(
+                    "Size " + vec.size() + " != " + vecType.getLength() + " in JsonWriter");
+        }
+        return convertRowArray(vec, DataTypes.ARRAY(vecType.getElementType()));
     }
 
     private Map<String, Object> convertRowMap(InternalMap map, MapType mapType) {
