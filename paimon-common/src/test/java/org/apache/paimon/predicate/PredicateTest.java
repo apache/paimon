@@ -712,4 +712,17 @@ public class PredicateTest {
                 .isEqualTo(
                         "NotIn(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])");
     }
+
+    @Test
+    public void testPredicateToStringWithManyFields() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        List<Object> literals = new ArrayList<>();
+        for (int i = 1; i <= 100; i++) {
+            literals.add(i);
+        }
+        Predicate p = builder.in(0, literals);
+        assertThat(p.toString())
+                .isEqualTo(
+                        "In(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, ... 76 more fields])");
+    }
 }
