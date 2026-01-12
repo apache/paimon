@@ -3193,6 +3193,12 @@ public class CoreOptions implements Serializable {
         return options.get(CLUSTERING_INCREMENTAL);
     }
 
+    public boolean bucketClusterEnabled() {
+        return !bucketAppendOrdered()
+                && !deletionVectorsEnabled()
+                && clusteringIncrementalEnabled();
+    }
+
     public Duration clusteringHistoryPartitionIdleTime() {
         return options.get(CLUSTERING_HISTORY_PARTITION_IDLE_TIME);
     }

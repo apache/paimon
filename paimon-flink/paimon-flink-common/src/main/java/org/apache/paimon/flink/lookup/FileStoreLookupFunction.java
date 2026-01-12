@@ -129,8 +129,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         .collect(Collectors.toList());
 
         this.projectFieldsGetters =
-                Arrays.stream(projection)
-                        .mapToObj(i -> InternalRow.createFieldGetter(rowType.getTypeAt(i), i))
+                IntStream.range(0, projection.length)
+                        .mapToObj(
+                                i ->
+                                        InternalRow.createFieldGetter(
+                                                rowType.getTypeAt(projection[i]), i))
                         .collect(Collectors.toList());
 
         // add primary keys

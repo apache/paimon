@@ -36,7 +36,7 @@ class AuthProvider(ABC):
 
     @abstractmethod
     def merge_auth_header(
-            self, base_header: Dict[str, str], parammeter: RESTAuthParameter
+            self, base_header: Dict[str, str], parameter: RESTAuthParameter
     ) -> Dict[str, str]:
         """Merge authorization header into header."""
 

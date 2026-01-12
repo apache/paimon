@@ -40,10 +40,12 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -56,6 +58,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -683,6 +686,201 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         assertThat(splits.get(0).deletionFiles().get().get(0)).isNull();
     }
 
+    @Test
+    public void testClusterWithBucket() throws Exception {
+        Map<String, String> dynamicOptions = commonOptions();
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "2");
+        dynamicOptions.put(CoreOptions.BUCKET_KEY.key(), "pt");
+        dynamicOptions.put(CoreOptions.BUCKET_APPEND_ORDERED.key(), "false");
+        FileStoreTable table = createTable(null, dynamicOptions);
+
+        BinaryString randomStr = BinaryString.fromString(randomString(150));
+        List<CommitMessage> messages = new ArrayList<>();
+
+        // first write
+        for (int pt = 0; pt < 2; pt++) {
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    messages.addAll(write(GenericRow.of(i, j, randomStr, pt)));
+                }
+            }
+        }
+        commit(messages);
+        ReadBuilder readBuilder = table.newReadBuilder().withProjection(new int[] {0, 1, 3});
+        List<String> result1 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        List<String> expected1 = new ArrayList<>();
+        for (int pt = 0; pt <= 1; pt++) {
+            expected1.add(String.format("+I[0, 0, %s]", pt));
+            expected1.add(String.format("+I[0, 1, %s]", pt));
+            expected1.add(String.format("+I[0, 2, %s]", pt));
+            expected1.add(String.format("+I[1, 0, %s]", pt));
+            expected1.add(String.format("+I[1, 1, %s]", pt));
+            expected1.add(String.format("+I[1, 2, %s]", pt));
+            expected1.add(String.format("+I[2, 0, %s]", pt));
+            expected1.add(String.format("+I[2, 1, %s]", pt));
+            expected1.add(String.format("+I[2, 2, %s]", pt));
+        }
+        assertThat(result1).containsExactlyElementsOf(expected1);
+
+        // first cluster
+        runAction(Collections.emptyList());
+        checkSnapshot(table);
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits.size()).isEqualTo(2);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
+        List<String> result2 = getResult(readBuilder.newRead(), splits, readBuilder.readType());
+        List<String> expected2 = new ArrayList<>();
+        for (int pt = 1; pt >= 0; pt--) {
+            expected2.add(String.format("+I[0, 0, %s]", pt));
+            expected2.add(String.format("+I[0, 1, %s]", pt));
+            expected2.add(String.format("+I[1, 0, %s]", pt));
+            expected2.add(String.format("+I[1, 1, %s]", pt));
+            expected2.add(String.format("+I[0, 2, %s]", pt));
+            expected2.add(String.format("+I[1, 2, %s]", pt));
+            expected2.add(String.format("+I[2, 0, %s]", pt));
+            expected2.add(String.format("+I[2, 1, %s]", pt));
+            expected2.add(String.format("+I[2, 2, %s]", pt));
+        }
+        assertThat(result2).containsExactlyElementsOf(expected2);
+
+        // second write
+        messages.clear();
+        for (int pt = 0; pt <= 1; pt++) {
+            messages.addAll(
+                    write(
+                            GenericRow.of(0, 3, null, pt),
+                            GenericRow.of(1, 3, null, pt),
+                            GenericRow.of(2, 3, null, pt)));
+            messages.addAll(
+                    write(
+                            GenericRow.of(3, 0, null, pt),
+                            GenericRow.of(3, 1, null, pt),
+                            GenericRow.of(3, 2, null, pt),
+                            GenericRow.of(3, 3, null, pt)));
+        }
+        commit(messages);
+
+        List<String> result3 =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        readBuilder.readType());
+        List<String> expected3 = new ArrayList<>();
+        for (int pt = 1; pt >= 0; pt--) {
+            expected3.add(String.format("+I[0, 0, %s]", pt));
+            expected3.add(String.format("+I[0, 1, %s]", pt));
+            expected3.add(String.format("+I[1, 0, %s]", pt));
+            expected3.add(String.format("+I[1, 1, %s]", pt));
+            expected3.add(String.format("+I[0, 2, %s]", pt));
+            expected3.add(String.format("+I[1, 2, %s]", pt));
+            expected3.add(String.format("+I[2, 0, %s]", pt));
+            expected3.add(String.format("+I[2, 1, %s]", pt));
+            expected3.add(String.format("+I[2, 2, %s]", pt));
+            expected3.add(String.format("+I[0, 3, %s]", pt));
+            expected3.add(String.format("+I[1, 3, %s]", pt));
+            expected3.add(String.format("+I[2, 3, %s]", pt));
+            expected3.add(String.format("+I[3, 0, %s]", pt));
+            expected3.add(String.format("+I[3, 1, %s]", pt));
+            expected3.add(String.format("+I[3, 2, %s]", pt));
+            expected3.add(String.format("+I[3, 3, %s]", pt));
+        }
+        assertThat(result3).containsExactlyElementsOf(expected3);
+
+        // second cluster(incremental)
+        runAction(Collections.emptyList());
+        checkSnapshot(table);
+        splits = readBuilder.newScan().plan().splits();
+        List<String> result4 = getResult(readBuilder.newRead(), splits, readBuilder.readType());
+        List<String> expected4 = new ArrayList<>();
+        for (int pt = 1; pt >= 0; pt--) {
+            expected4.add(String.format("+I[0, 0, %s]", pt));
+            expected4.add(String.format("+I[0, 1, %s]", pt));
+            expected4.add(String.format("+I[1, 0, %s]", pt));
+            expected4.add(String.format("+I[1, 1, %s]", pt));
+            expected4.add(String.format("+I[0, 2, %s]", pt));
+            expected4.add(String.format("+I[1, 2, %s]", pt));
+            expected4.add(String.format("+I[2, 0, %s]", pt));
+            expected4.add(String.format("+I[2, 1, %s]", pt));
+            expected4.add(String.format("+I[2, 2, %s]", pt));
+            expected4.add(String.format("+I[0, 3, %s]", pt));
+            expected4.add(String.format("+I[1, 3, %s]", pt));
+            expected4.add(String.format("+I[3, 0, %s]", pt));
+            expected4.add(String.format("+I[3, 1, %s]", pt));
+            expected4.add(String.format("+I[2, 3, %s]", pt));
+            expected4.add(String.format("+I[3, 2, %s]", pt));
+            expected4.add(String.format("+I[3, 3, %s]", pt));
+        }
+        assertThat(splits.size()).isEqualTo(2);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(2);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(1).level()).isEqualTo(4);
+        assertThat(result4).containsExactlyElementsOf(expected4);
+
+        // full cluster
+        runAction(Lists.newArrayList("--compact_strategy", "full"));
+        checkSnapshot(table);
+        splits = readBuilder.newScan().plan().splits();
+        List<String> result5 = getResult(readBuilder.newRead(), splits, readBuilder.readType());
+        List<String> expected5 = new ArrayList<>();
+        for (int pt = 1; pt >= 0; pt--) {
+            expected5.add(String.format("+I[0, 0, %s]", pt));
+            expected5.add(String.format("+I[0, 1, %s]", pt));
+            expected5.add(String.format("+I[1, 0, %s]", pt));
+            expected5.add(String.format("+I[1, 1, %s]", pt));
+            expected5.add(String.format("+I[0, 2, %s]", pt));
+            expected5.add(String.format("+I[0, 3, %s]", pt));
+            expected5.add(String.format("+I[1, 2, %s]", pt));
+            expected5.add(String.format("+I[1, 3, %s]", pt));
+            expected5.add(String.format("+I[2, 0, %s]", pt));
+            expected5.add(String.format("+I[2, 1, %s]", pt));
+            expected5.add(String.format("+I[3, 0, %s]", pt));
+            expected5.add(String.format("+I[3, 1, %s]", pt));
+            expected5.add(String.format("+I[2, 2, %s]", pt));
+            expected5.add(String.format("+I[2, 3, %s]", pt));
+            expected5.add(String.format("+I[3, 2, %s]", pt));
+            expected5.add(String.format("+I[3, 3, %s]", pt));
+        }
+        assertThat(splits.size()).isEqualTo(2);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().size()).isEqualTo(1);
+        assertThat(((DataSplit) splits.get(0)).dataFiles().get(0).level()).isEqualTo(5);
+        assertThat(result5).containsExactlyElementsOf(expected5);
+    }
+
+    @Test
+    public void testStreamingClusterWithBucket() throws Exception {
+        Map<String, String> dynamicOptions = commonOptions();
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
+        dynamicOptions.put(CoreOptions.BUCKET.key(), "1");
+        dynamicOptions.put(CoreOptions.BUCKET_KEY.key(), "pt");
+        dynamicOptions.put(CoreOptions.BUCKET_APPEND_ORDERED.key(), "false");
+        dynamicOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        FileStoreTable table = createTable(null, dynamicOptions);
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+
+        // base records
+        writeData(GenericRow.of(2, 2, BinaryString.fromString("test"), 0));
+        writeData(GenericRow.of(2, 1, BinaryString.fromString("test"), 0));
+        writeData(GenericRow.of(2, 0, BinaryString.fromString("test"), 0));
+
+        checkSnapshot(table, Snapshot.CommitKind.APPEND);
+        runAction(true, Collections.emptyList());
+        checkSnapshot(table, 4, Snapshot.CommitKind.COMPACT, 60_000);
+
+        // incremental records
+        writeData(GenericRow.of(1, 2, BinaryString.fromString("test"), 0));
+        writeData(GenericRow.of(1, 1, BinaryString.fromString("test"), 0));
+        checkSnapshot(table, 7, Snapshot.CommitKind.COMPACT, 60_000);
+    }
+
     protected FileStoreTable createTable(String partitionKeys) throws Exception {
         return createTable(partitionKeys, commonOptions());
     }
@@ -758,8 +956,28 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     }
 
     private void checkSnapshot(FileStoreTable table) {
-        assertThat(table.latestSnapshot().get().commitKind())
-                .isEqualTo(Snapshot.CommitKind.COMPACT);
+        checkSnapshot(table, Snapshot.CommitKind.COMPACT);
+    }
+
+    private void checkSnapshot(FileStoreTable table, Snapshot.CommitKind commitKind) {
+        assertThat(table.latestSnapshot().get().commitKind()).isEqualTo(commitKind);
+    }
+
+    protected void checkSnapshot(
+            FileStoreTable table, long snapshotId, Snapshot.CommitKind commitKind, long timeout)
+            throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        long start = System.currentTimeMillis();
+        while (!Objects.equals(snapshotManager.latestSnapshotId(), snapshotId)) {
+            Thread.sleep(500);
+            if (System.currentTimeMillis() - start > timeout) {
+                throw new RuntimeException("can't wait for a compaction.");
+            }
+        }
+
+        Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+        assertThat(snapshot.id()).isEqualTo(snapshotId);
+        assertThat(snapshot.commitKind()).isEqualTo(commitKind);
     }
 
     private List<CommitMessage> produceDvIndexMessages(
@@ -789,7 +1007,16 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
     }
 
     private void runAction(List<String> extra) throws Exception {
-        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        runAction(false, extra);
+    }
+
+    private void runAction(boolean isStreaming, List<String> extra) throws Exception {
+        StreamExecutionEnvironment env;
+        if (isStreaming) {
+            env = streamExecutionEnvironmentBuilder().streamingMode().build();
+        } else {
+            env = streamExecutionEnvironmentBuilder().batchMode().build();
+        }
         ArrayList<String> baseArgs =
                 Lists.newArrayList("compact", "--database", database, "--table", tableName);
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -801,7 +1028,12 @@ public class IncrementalClusterActionITCase extends ActionITCaseBase {
         baseArgs.addAll(extra);
 
         CompactAction action = createAction(CompactAction.class, baseArgs.toArray(new String[0]));
-        action.withStreamExecutionEnvironment(env);
-        action.run();
+        action.withStreamExecutionEnvironment(env).build();
+        if (isStreaming) {
+            env.executeAsync();
+        } else {
+            env.execute();
+        }
+        //        action.run();
     }
 }

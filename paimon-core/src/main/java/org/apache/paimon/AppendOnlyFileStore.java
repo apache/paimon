@@ -141,7 +141,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     newScan(),
                     options,
                     dvMaintainerFactory,
-                    tableName);
+                    tableName,
+                    schemaManager);
         }
     }
 

@@ -125,6 +125,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class AppendOnlySimpleTableTest extends SimpleTableTestBase {
 
     @Test
+    public void testOverwriteSameFiles() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        // write files
+        List<CommitMessage> commitMessages;
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
+            write.write(rowData(1, 10, 100L));
+            commitMessages = write.prepareCommit();
+        }
+
+        // first commit
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().withOverwrite().newCommit()) {
+            commit.commit(commitMessages);
+        }
+
+        // second commit should throw exception
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().withOverwrite().newCommit()) {
+            assertThatThrownBy(() -> commit.commit(commitMessages))
+                    .hasMessageContaining("File deletion conflicts detected! Give up committing");
+        }
+    }
+
+    @Test
     public void testBucketedAppendTableWriteWithInit() throws Exception {
         innerTestBucketedAppendTableWriteInit(true);
     }

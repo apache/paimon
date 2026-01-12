@@ -15,8 +15,11 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import sys
 from enum import Enum
 from typing import Dict
+
+from datetime import timedelta
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -122,8 +125,18 @@ class CoreOptions:
     FILE_COMPRESSION: ConfigOption[str] = (
         ConfigOptions.key("file.compression")
         .string_type()
-        .default_value("lz4")
-        .with_description("Default file compression format.")
+        .default_value("zstd")
+        .with_description("Default file compression format. For faster read and write, it is recommended to use zstd.")
+    )
+
+    FILE_COMPRESSION_ZSTD_LEVEL: ConfigOption[int] = (
+        ConfigOptions.key("file.compression.zstd-level")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Default file compression zstd level. For higher compression rates, it can be configured to 9, "
+            "but the read and write speed will significantly decrease."
+        )
     )
 
     FILE_COMPRESSION_PER_LEVEL: ConfigOption[Dict[str, str]] = (
@@ -239,6 +252,34 @@ class CoreOptions:
         .with_description("The prefix for commit user.")
     )
 
+    COMMIT_MAX_RETRIES: ConfigOption[int] = (
+        ConfigOptions.key("commit.max-retries")
+        .int_type()
+        .default_value(10)
+        .with_description("Maximum number of retries for commit operations.")
+    )
+
+    COMMIT_TIMEOUT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.timeout")
+        .duration_type()
+        .no_default_value()
+        .with_description("Timeout for commit operations (e.g., '10s', '5m'). If not set, effectively unlimited.")
+    )
+
+    COMMIT_MIN_RETRY_WAIT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.min-retry-wait")
+        .duration_type()
+        .default_value(timedelta(milliseconds=10))
+        .with_description("Minimum wait time between commit retries (e.g., '10ms', '100ms').")
+    )
+
+    COMMIT_MAX_RETRY_WAIT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.max-retry-wait")
+        .duration_type()
+        .default_value(timedelta(seconds=10))
+        .with_description("Maximum wait time between commit retries (e.g., '1s', '10s').")
+    )
+
     ROW_TRACKING_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("row-tracking.enabled")
         .boolean_type()
@@ -315,6 +356,9 @@ class CoreOptions:
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)
 
+    def file_compression_zstd_level(self, default=None):
+        return self.options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL, default)
+
     def file_compression_per_level(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION_PER_LEVEL, default)
 
@@ -390,3 +434,20 @@ class CoreOptions:
 
     def data_file_external_paths_specific_fs(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, default)
+
+    def commit_max_retries(self) -> int:
+        return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)
+
+    def commit_timeout(self) -> int:
+        timeout = self.options.get(CoreOptions.COMMIT_TIMEOUT)
+        if timeout is None:
+            return sys.maxsize
+        return int(timeout.total_seconds() * 1000)
+
+    def commit_min_retry_wait(self) -> int:
+        wait = self.options.get(CoreOptions.COMMIT_MIN_RETRY_WAIT)
+        return int(wait.total_seconds() * 1000)
+
+    def commit_max_retry_wait(self) -> int:
+        wait = self.options.get(CoreOptions.COMMIT_MAX_RETRY_WAIT)
+        return int(wait.total_seconds() * 1000)

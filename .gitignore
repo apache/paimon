@@ -31,3 +31,9 @@ paimon-lucene/.idea/
 
 ### Mac OS ###
 .DS_Store
+
+### Native build artifacts ###
+paimon-faiss/paimon-faiss-jni/build/
+paimon-faiss/paimon-faiss-jni/src/main/resources/darwin*
+paimon-faiss/paimon-faiss-jni/src/main/resources/linux*
+paimon-faiss/paimon-faiss-jni/src/main/native/cmake-build-debug/

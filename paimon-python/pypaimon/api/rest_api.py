@@ -88,6 +88,7 @@ class RESTApi:
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
 
     def __build_paged_query_params(
+            self,
             max_results: Optional[int],
             page_token: Optional[str],
             name_patterns: Dict[str, str],
@@ -99,7 +100,7 @@ class RESTApi:
         if page_token is not None and page_token.strip():
             query_params[RESTApi.PAGE_TOKEN] = page_token
 
-        for key, value in name_patterns:
+        for key, value in name_patterns.items():
             if key and value and key.strip() and value.strip():
                 query_params[key] = value
 

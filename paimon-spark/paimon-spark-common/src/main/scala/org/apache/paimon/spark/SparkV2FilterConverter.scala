@@ -18,13 +18,12 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.{FieldTransform, Predicate, PredicateBuilder, Transform}
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder, Transform}
 import org.apache.paimon.spark.util.SparkExpressionConverter.{toPaimonLiteral, toPaimonTransform}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.connector.expressions.Expression
-import org.apache.spark.sql.connector.expressions.Literal
+import org.apache.spark.sql.connector.expressions.{Expression, Literal}
 import org.apache.spark.sql.connector.expressions.filter.{And, Not, Or, Predicate => SparkPredicate}
 
 import scala.collection.JavaConverters._
@@ -208,22 +207,6 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
           }
         case _ => None
       }
-    }
-  }
-
-  def isSupportedRuntimeFilter(
-      sparkPredicate: SparkPredicate,
-      partitionKeys: Seq[String]): Boolean = {
-    sparkPredicate.name() match {
-      case IN =>
-        sparkPredicate match {
-          case MultiPredicate(transform: FieldTransform, _) =>
-            partitionKeys.contains(transform.fieldRef().name())
-          case _ =>
-            logWarning(s"Convert $sparkPredicate is unsupported.")
-            false
-        }
-      case _ => false
     }
   }
 }

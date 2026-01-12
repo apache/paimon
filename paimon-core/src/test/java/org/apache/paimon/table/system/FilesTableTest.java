@@ -222,7 +222,9 @@ public class FilesTableTest extends TableTestBase {
                             file.creationTime(),
                             file.deleteRowCount().orElse(null),
                             BinaryString.fromString(
-                                    file.fileSource().map(Object::toString).orElse(null))));
+                                    file.fileSource().map(Object::toString).orElse(null)),
+                            file.firstRowId(),
+                            null));
         }
         return expectedRow;
     }

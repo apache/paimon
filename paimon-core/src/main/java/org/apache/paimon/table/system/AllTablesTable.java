@@ -233,10 +233,7 @@ public class AllTablesTable implements ReadonlyTable {
                 iterator =
                         Iterators.transform(
                                 iterator,
-                                row ->
-                                        ProjectedRow.from(
-                                                        readType, AggregationFieldsTable.TABLE_TYPE)
-                                                .replaceRow(row));
+                                row -> ProjectedRow.from(readType, TABLE_TYPE).replaceRow(row));
             }
             //noinspection ReassignedVariable,unchecked
             return new IteratorRecordReader<>((Iterator<InternalRow>) iterator);

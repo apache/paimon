@@ -18,6 +18,7 @@
 import logging
 import os
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
@@ -29,6 +30,7 @@ from pyarrow._fs import FileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
 from pypaimon.table.row.generic_row import GenericRow
@@ -179,9 +181,8 @@ class FileIO:
         )
 
     def _initialize_local_fs(self) -> FileSystem:
-        from pyarrow.fs import LocalFileSystem
 
-        return LocalFileSystem()
+        return PaimonLocalFileSystem()
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
@@ -303,7 +304,7 @@ class FileIO:
             return input_stream.read().decode('utf-8')
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
-        temp_path = path + ".tmp"
+        temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
             self.write_file(temp_path, content, False)
@@ -368,20 +369,30 @@ class FileIO:
 
         return None
 
-    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'snappy', **kwargs):
+    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                      zstd_level: int = 1, **kwargs):
         try:
             import pyarrow.parquet as pq
 
             with self.new_output_stream(path) as output_stream:
+                if compression.lower() == 'zstd':
+                    kwargs['compression_level'] = zstd_level
                 pq.write_table(data, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
-    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd', **kwargs):
+    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                  zstd_level: int = 1, **kwargs):
         try:
-            """Write ORC file using PyArrow ORC writer."""
+            """Write ORC file using PyArrow ORC writer.
+            
+            Note: PyArrow's ORC writer doesn't support compression_level parameter.
+            ORC files will use zstd compression with default level
+            (which is 3, see https://github.com/facebook/zstd/blob/dev/programs/zstdcli.c)
+            instead of the specified level.
+            """
             import sys
             import pyarrow.orc as orc
 
@@ -401,7 +412,10 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: str, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
+    def write_avro(
+            self, path: str, data: pyarrow.Table,
+            avro_schema: Optional[Dict[str, Any]] = None,
+            compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         import fastavro
         if avro_schema is None:
             from pypaimon.schema.data_types import PyarrowFieldParser
@@ -416,8 +430,28 @@ class FileIO:
 
         records = record_generator()
 
+        codec_map = {
+            'null': 'null',
+            'deflate': 'deflate',
+            'snappy': 'snappy',
+            'bzip2': 'bzip2',
+            'xz': 'xz',
+            'zstandard': 'zstandard',
+            'zstd': 'zstandard',  # zstd is commonly used in Paimon
+        }
+        compression_lower = compression.lower()
+        
+        codec = codec_map.get(compression_lower)
+        if codec is None:
+            raise ValueError(
+                f"Unsupported compression '{compression}' for Avro format. "
+                f"Supported compressions: {', '.join(sorted(codec_map.keys()))}."
+            )
+
         with self.new_output_stream(path) as output_stream:
-            fastavro.writer(output_stream, avro_schema, records, **kwargs)
+            if codec == 'zstandard':
+                kwargs['codec_compression_level'] = zstd_level
+            fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
 
     def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
         try:

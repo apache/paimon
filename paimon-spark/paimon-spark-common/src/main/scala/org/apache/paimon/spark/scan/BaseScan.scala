@@ -35,6 +35,7 @@ import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsRep
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
 
 /** Base scan. */
 trait BaseScan extends Scan with SupportsReportStatistics with Logging {
@@ -50,6 +51,9 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   def pushedLimit: Option[Int] = None
   def pushedTopN: Option[TopN] = None
   def pushedVectorSearch: Option[VectorSearch] = None
+
+  // Runtime push down
+  val pushedRuntimePartitionFilters: ListBuffer[PartitionPredicate] = ListBuffer.empty
 
   // Input splits
   def inputSplits: Array[Split]
@@ -166,6 +170,11 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     } else {
       ""
     }
+    val pushedRuntimePartitionFiltersStr = if (pushedRuntimePartitionFilters.nonEmpty) {
+      ", RuntimePartitionFilters: [" + pushedRuntimePartitionFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
     val pushedDataFiltersStr = if (pushedDataFilters.nonEmpty) {
       ", DataFilters: [" + pushedDataFilters.mkString(",") + "]"
     } else {
@@ -173,6 +182,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
     s"${getClass.getSimpleName}: [${table.name}]" +
       pushedPartitionFiltersStr +
+      pushedRuntimePartitionFiltersStr +
       pushedDataFiltersStr +
       pushedTopN.map(topN => s", TopN: [$topN]").getOrElse("") +
       pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("") +
