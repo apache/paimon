@@ -109,7 +109,7 @@ SELECT * FROM my_table$options;
 
 ### Audit log Table
 
-If you need to audit the changelog of the table, you can use the `audit_log` system table. Through `audit_log` table, you can get the `rowkind` column when you get the incremental data of the table. You can use this column for
+If you need to audit the changelog of the table, you can use the `audit_log` system table. Through `audit_log` table, you can get the `rowkind` column and `_SEQUENCE_NUMBER` column when you get the incremental data of the table. You can use this column for
 filtering and other operations to complete the audit.
 
 There are four values for `rowkind`:
@@ -123,15 +123,15 @@ There are four values for `rowkind`:
 SELECT * FROM my_table$audit_log;
 
 /*
-+------------------+-----------------+-----------------+
-|     rowkind      |     column_0    |     column_1    |
-+------------------+-----------------+-----------------+
-|        +I        |      ...        |      ...        |
-+------------------+-----------------+-----------------+
-|        -U        |      ...        |      ...        |
-+------------------+-----------------+-----------------+
-|        +U        |      ...        |      ...        |
-+------------------+-----------------+-----------------+
++------------------+------------------+-----------------+-----------------+
+|     rowkind      | _SEQUENCE_NUMBER |     column_0    |     column_1    |
++------------------+------------------+-----------------+-----------------+
+|        +I        |         0        |      ...        |      ...        |
++------------------+------------------+-----------------+-----------------+
+|        -U        |         0        |      ...        |      ...        |
++------------------+------------------+-----------------+-----------------+
+|        +U        |         1        |      ...        |      ...        |
++------------------+------------------+-----------------+-----------------+
 3 rows in set
 */
 ```
@@ -146,15 +146,15 @@ Currently, the binlog table is unable to display Flink's computed columns.
 SELECT * FROM T$binlog;
 
 /*
-+------------------+----------------------+-----------------------+
-|     rowkind      |       column_0       |       column_1        |
-+------------------+----------------------+-----------------------+
-|        +I        |       [col_0]        |       [col_1]         |
-+------------------+----------------------+-----------------------+
-|        +U        | [col_0_ub, col_0_ua] | [col_1_ub, col_1_ua]  |
-+------------------+----------------------+-----------------------+
-|        -D        |       [col_0]        |       [col_1]         |
-+------------------+----------------------+-----------------------+
++------------------+------------------+----------------------+-----------------------+
+|     rowkind      | _SEQUENCE_NUMBER |       column_0       |       column_1        |
++------------------+------------------+----------------------+-----------------------+
+|        +I        |         0        |       [col_0]        |       [col_1]         |
++------------------+------------------+----------------------+-----------------------+
+|        +U        |         1        | [col_0_ub, col_0_ua] | [col_1_ub, col_1_ua]  |
++------------------+------------------+----------------------+-----------------------+
+|        -D        |         2        |       [col_0]        |       [col_1]         |
++------------------+------------------+----------------------+-----------------------+
 */
 ```
 
