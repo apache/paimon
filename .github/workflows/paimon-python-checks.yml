@@ -81,6 +81,19 @@ jobs:
       - name: Verify Python version
         run: python --version
 
+      - name: Verify requirements.txt dependencies can be installed
+        shell: bash
+        run: |
+          cd paimon-python
+          python -m pip install --upgrade pip
+          # Use --dry-run to verify dependencies can be resolved without actually installing
+          python -m pip install -r dev/requirements.txt --dry-run || {
+            echo "ERROR: Failed to resolve dependencies from dev/requirements.txt"
+            echo "This indicates a version conflict or unavailable package version"
+            exit 1
+          }
+          echo "✓ All dependencies in dev/requirements.txt can be resolved"
+
       - name: Build Java
         run: |
           echo "Start compiling modules"
