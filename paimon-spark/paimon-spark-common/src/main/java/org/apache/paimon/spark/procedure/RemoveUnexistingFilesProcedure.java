@@ -62,7 +62,7 @@ public class RemoveUnexistingFilesProcedure extends BaseProcedure {
     private static final StructType OUTPUT_TYPE =
             new StructType(
                     new StructField[] {
-                        new StructField("filePath", DataTypes.StringType, false, Metadata.empty())
+                        new StructField("fileName", DataTypes.StringType, false, Metadata.empty())
                     });
 
     private RemoveUnexistingFilesProcedure(TableCatalog tableCatalog) {
