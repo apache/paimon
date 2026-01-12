@@ -40,8 +40,6 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
 class FileIO:
-    _RENAME_LOCK = threading.Lock()
-
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
@@ -258,28 +256,32 @@ class FileIO:
         return True
 
     def rename(self, src: str, dst: str) -> bool:
-        src_str = self.to_filesystem_path(src)
-        dst_str = self.to_filesystem_path(dst)
-        dst_parent = Path(dst_str).parent
-        
-        if str(dst_parent) and not self.exists(str(dst_parent)):
-            self.mkdirs(str(dst_parent))
-
         try:
-            with self._RENAME_LOCK:
-                dst_file_info = self.filesystem.get_file_info([dst_str])[0]
-                if dst_file_info.type != pyarrow.fs.FileType.NotFound:
-                    if dst_file_info.type == pyarrow.fs.FileType.File:
-                        return False
-                    src_name = Path(src_str).name
-                    dst_str = f"{dst_str.rstrip('/')}/{src_name}"
-                    final_dst_info = self.filesystem.get_file_info([dst_str])[0]
-                    if final_dst_info.type != pyarrow.fs.FileType.NotFound:
-                        return False
-                
-                self.filesystem.move(src_str, dst_str)
-                return True
-        except (FileNotFoundError, PermissionError, OSError):
+            dst_str = self.to_filesystem_path(dst)
+            dst_parent = Path(dst_str).parent
+            if str(dst_parent) and not self.exists(str(dst_parent)):
+                self.mkdirs(str(dst_parent))
+
+            src_str = self.to_filesystem_path(src)
+            
+            dst_file_info = self.filesystem.get_file_info([dst_str])[0]
+            if dst_file_info.type != pyarrow.fs.FileType.NotFound:
+                if dst_file_info.type == pyarrow.fs.FileType.File:
+                    return False
+                src_name = Path(src_str).name
+                dst_str = f"{dst_str.rstrip('/')}/{src_name}"
+                final_dst_info = self.filesystem.get_file_info([dst_str])[0]
+                if final_dst_info.type != pyarrow.fs.FileType.NotFound:
+                    return False
+            
+            self.filesystem.move(src_str, dst_str)
+            return True
+        except FileNotFoundError:
+            return False
+        except (PermissionError, OSError) as e:
+            raise
+        except Exception as e:
+            self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
             return False
 
     def delete_quietly(self, path: str):
