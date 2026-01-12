@@ -2720,7 +2720,7 @@ public class CoreOptions implements Serializable {
         if (scheme == null) {
             throw new IllegalArgumentException("scheme should not be null: " + path);
         }
-        return path;
+        return new Path(path, "index");
     }
 
     public LookupStrategy lookupStrategy() {
