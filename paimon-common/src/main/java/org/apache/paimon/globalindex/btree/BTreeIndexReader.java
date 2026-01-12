@@ -79,7 +79,7 @@ public class BTreeIndexReader implements GlobalIndexReader {
 
         // prepare file footer
         long fileSize = globalIndexIOMeta.fileSize();
-        Path filePath = fileReader.filePath(globalIndexIOMeta.fileName());
+        Path filePath = globalIndexIOMeta.filePath();
         BlockCache blockCache = new BlockCache(filePath, input, cacheManager);
         BTreeFileFooter footer = readFooter(blockCache, fileSize);
 

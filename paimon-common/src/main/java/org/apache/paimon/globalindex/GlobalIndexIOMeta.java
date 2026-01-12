@@ -18,7 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
-import javax.annotation.Nullable;
+import org.apache.paimon.fs.Path;
 
 import java.util.Arrays;
 import java.util.Objects;
@@ -26,25 +26,18 @@ import java.util.Objects;
 /** Index meta for global index. */
 public class GlobalIndexIOMeta {
 
-    private final String fileName;
+    private final Path filePath;
     private final long fileSize;
     private final byte[] metadata;
-    @Nullable private final String externalPath;
 
-    public GlobalIndexIOMeta(String fileName, long fileSize, byte[] metadata) {
-        this(fileName, fileSize, metadata, null);
-    }
-
-    public GlobalIndexIOMeta(
-            String fileName, long fileSize, byte[] metadata, @Nullable String externalPath) {
-        this.fileName = fileName;
+    public GlobalIndexIOMeta(Path filePath, long fileSize, byte[] metadata) {
+        this.filePath = filePath;
         this.fileSize = fileSize;
         this.metadata = metadata;
-        this.externalPath = externalPath;
     }
 
-    public String fileName() {
-        return fileName;
+    public Path filePath() {
+        return filePath;
     }
 
     public long fileSize() {
@@ -53,10 +46,6 @@ public class GlobalIndexIOMeta {
 
     public byte[] metadata() {
         return metadata;
-    }
-
-    public String externalPath() {
-        return externalPath;
     }
 
     @Override
@@ -68,14 +57,14 @@ public class GlobalIndexIOMeta {
             return false;
         }
         GlobalIndexIOMeta that = (GlobalIndexIOMeta) o;
-        return Objects.equals(fileName, that.fileName)
+        return Objects.equals(filePath, that.filePath)
                 && fileSize == that.fileSize
                 && Arrays.equals(metadata, that.metadata);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(fileName, fileSize);
+        int result = Objects.hash(filePath, fileSize);
         result = 31 * result + Arrays.hashCode(metadata);
         return result;
     }

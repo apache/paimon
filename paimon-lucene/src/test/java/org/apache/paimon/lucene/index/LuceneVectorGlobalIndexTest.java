@@ -94,12 +94,7 @@ public class LuceneVectorGlobalIndexTest {
         return new GlobalIndexFileReader() {
             @Override
             public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
-                return fileIO.newInputStream(new Path(path, meta.fileName()));
-            }
-
-            @Override
-            public Path filePath(String fileName) {
-                return new Path(path, fileName);
+                return fileIO.newInputStream(new Path(path, meta.filePath()));
             }
         };
     }
@@ -131,7 +126,7 @@ public class LuceneVectorGlobalIndexTest {
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(metricIndexPath, result.fileName()),
                             fileIO.getFileSize(new Path(metricIndexPath, result.fileName())),
                             result.meta()));
 
@@ -168,7 +163,7 @@ public class LuceneVectorGlobalIndexTest {
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(dimIndexPath, result.fileName()),
                             fileIO.getFileSize(new Path(dimIndexPath, result.fileName())),
                             result.meta()));
 
@@ -225,7 +220,7 @@ public class LuceneVectorGlobalIndexTest {
         for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(indexPath, result.fileName()),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
                             result.meta()));
         }
@@ -293,7 +288,7 @@ public class LuceneVectorGlobalIndexTest {
         for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(indexPath, result.fileName()),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
                             result.meta()));
         }

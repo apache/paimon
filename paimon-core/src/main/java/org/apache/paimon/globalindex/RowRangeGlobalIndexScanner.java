@@ -19,6 +19,8 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
@@ -54,6 +56,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
 
     private final Options options;
     private final GlobalIndexEvaluator globalIndexEvaluator;
+    private final IndexPathFactory indexPathFactory;
 
     public RowRangeGlobalIndexScanner(
             Options options,
@@ -76,8 +79,9 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                             + ")");
         }
 
-        GlobalIndexFileReadWrite indexFileReadWrite =
-                new GlobalIndexFileReadWrite(fileIO, indexPathFactory);
+        this.indexPathFactory = indexPathFactory;
+
+        GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
 
         Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
         for (IndexManifestEntry entry : entries) {
@@ -97,7 +101,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
                 fieldId ->
                         createReaders(
-                                indexFileReadWrite,
+                                indexFileReader,
                                 indexMetas.get(fieldId),
                                 rowType.getField(fieldId));
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
@@ -109,7 +113,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
     }
 
     private Collection<GlobalIndexReader> createReaders(
-            GlobalIndexFileReadWrite indexFileReadWrite,
+            GlobalIndexFileReader indexFileReadWrite,
             Map<String, Map<Range, List<IndexFileMeta>>> indexMetas,
             DataField dataField) {
         if (indexMetas == null) {
@@ -154,8 +158,8 @@ public class RowRangeGlobalIndexScanner implements Closeable {
     private GlobalIndexIOMeta toGlobalMeta(IndexFileMeta meta) {
         GlobalIndexMeta globalIndex = meta.globalIndexMeta();
         checkNotNull(globalIndex);
-        return new GlobalIndexIOMeta(
-                meta.fileName(), meta.fileSize(), globalIndex.indexMeta(), meta.externalPath());
+        Path filePath = indexPathFactory.toPath(meta);
+        return new GlobalIndexIOMeta(filePath, meta.fileSize(), globalIndex.indexMeta());
     }
 
     @Override

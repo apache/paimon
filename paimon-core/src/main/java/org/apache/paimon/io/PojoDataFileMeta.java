@@ -550,7 +550,7 @@ public class PojoDataFileMeta implements DataFileMeta {
     @Override
     public String toString() {
         return String.format(
-                "{fileName: %s, fileSize: %d, rowCount: %d, embeddedIndex: %s, "
+                "{filePath: %s, fileSize: %d, rowCount: %d, embeddedIndex: %s, "
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
                         + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, "

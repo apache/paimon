@@ -23,7 +23,6 @@ import org.apache.paimon.faiss.FaissException;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -109,17 +108,7 @@ public class FaissVectorGlobalIndexTest {
     }
 
     private GlobalIndexFileReader createFileReader(Path path) {
-        return new GlobalIndexFileReader() {
-            @Override
-            public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
-                return fileIO.newInputStream(new Path(path, meta.fileName()));
-            }
-
-            @Override
-            public Path filePath(String fileName) {
-                return new Path(path, fileName);
-            }
-        };
+        return meta -> fileIO.newInputStream(new Path(path, meta.filePath()));
     }
 
     @Test
@@ -149,7 +138,7 @@ public class FaissVectorGlobalIndexTest {
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(metricIndexPath, result.fileName()),
                             fileIO.getFileSize(new Path(metricIndexPath, result.fileName())),
                             result.meta()));
 
@@ -190,7 +179,7 @@ public class FaissVectorGlobalIndexTest {
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(typeIndexPath, result.fileName()),
                             fileIO.getFileSize(new Path(typeIndexPath, result.fileName())),
                             result.meta()));
 
@@ -227,7 +216,7 @@ public class FaissVectorGlobalIndexTest {
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(dimIndexPath, result.fileName()),
                             fileIO.getFileSize(new Path(dimIndexPath, result.fileName())),
                             result.meta()));
 
@@ -283,7 +272,7 @@ public class FaissVectorGlobalIndexTest {
         for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(indexPath, result.fileName()),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
                             result.meta()));
         }
@@ -349,7 +338,7 @@ public class FaissVectorGlobalIndexTest {
         for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(indexPath, result.fileName()),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
                             result.meta()));
         }
@@ -391,9 +380,7 @@ public class FaissVectorGlobalIndexTest {
             Path filePath = new Path(indexPath, result.fileName());
             assertThat(fileIO.exists(filePath)).isTrue();
             assertThat(fileIO.getFileSize(filePath)).isGreaterThan(0);
-            metas.add(
-                    new GlobalIndexIOMeta(
-                            result.fileName(), fileIO.getFileSize(filePath), result.meta()));
+            metas.add(new GlobalIndexIOMeta(filePath, fileIO.getFileSize(filePath), result.meta()));
         }
 
         // Search for vectors from different files
@@ -452,7 +439,7 @@ public class FaissVectorGlobalIndexTest {
         for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(indexPath, result.fileName()),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
                             result.meta()));
         }

@@ -165,7 +165,7 @@ public class IndexFileMeta {
         return "IndexManifestEntry{"
                 + "indexType="
                 + indexType
-                + ", fileName='"
+                + ", filePath='"
                 + fileName
                 + '\''
                 + ", fileSize="

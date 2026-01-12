@@ -18,7 +18,6 @@
 
 package org.apache.paimon.globalindex.io;
 
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 
@@ -28,6 +27,4 @@ import java.io.IOException;
 public interface GlobalIndexFileReader {
 
     SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException;
-
-    Path filePath(String fileName);
 }
