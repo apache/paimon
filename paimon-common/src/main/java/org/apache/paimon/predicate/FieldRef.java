@@ -71,6 +71,6 @@ public class FieldRef implements Serializable {
 
     @Override
     public String toString() {
-        return "FieldRef{" + "index=" + index + ", name='" + name + '\'' + ", type=" + type + '}';
+        return name;
     }
 }

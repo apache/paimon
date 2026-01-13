@@ -39,6 +39,11 @@ public class FieldTransform implements Transform {
         this.fieldRef = fieldRef;
     }
 
+    @Override
+    public String name() {
+        return "FIELD_REF";
+    }
+
     public FieldRef fieldRef() {
         return fieldRef;
     }
@@ -80,6 +85,6 @@ public class FieldTransform implements Transform {
 
     @Override
     public String toString() {
-        return "FieldTransform{" + "fieldRef=" + fieldRef + '}';
+        return fieldRef.name();
     }
 }

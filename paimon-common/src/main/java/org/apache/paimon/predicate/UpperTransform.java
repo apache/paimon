@@ -35,6 +35,11 @@ public class UpperTransform extends StringTransform {
     }
 
     @Override
+    public String name() {
+        return "UPPER";
+    }
+
+    @Override
     public BinaryString transform(List<BinaryString> inputs) {
         BinaryString string = inputs.get(0);
         if (string == null) {

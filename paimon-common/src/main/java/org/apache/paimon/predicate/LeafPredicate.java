@@ -172,28 +172,18 @@ public class LeafPredicate implements Predicate {
 
     @Override
     public String toString() {
-        if (fieldRefOptional().isPresent()) {
-            String literalsStr;
-            int literalsSize = literals == null ? 0 : literals.size();
-            if (literalsSize == 0) {
-                literalsStr = "";
-            } else if (literalsSize == 1) {
-                literalsStr = Objects.toString(literals.get(0));
-            } else {
-                literalsStr = StringUtils.truncatedString(literals, "[", ", ", "]");
-            }
-            return literalsStr.isEmpty()
-                    ? function + "(" + fieldName() + ")"
-                    : function + "(" + fieldName() + ", " + literalsStr + ")";
+        String literalsStr;
+        int literalsSize = literals == null ? 0 : literals.size();
+        if (literalsSize == 0) {
+            literalsStr = "";
+        } else if (literalsSize == 1) {
+            literalsStr = Objects.toString(literals.get(0));
+        } else {
+            literalsStr = StringUtils.truncatedString(literals, "[", ", ", "]");
         }
-        return "{"
-                + "transform="
-                + transform
-                + ", function="
-                + function
-                + ", literals="
-                + literals
-                + '}';
+        return literalsStr.isEmpty()
+                ? function + "(" + transform + ")"
+                : function + "(" + transform + ", " + literalsStr + ")";
     }
 
     private ListSerializer<Object> literalsSerializer() {
@@ -236,6 +226,7 @@ public class LeafPredicate implements Predicate {
     /** Use {@link #fieldRefOptional()} instead. */
     @Deprecated
     public FieldRef fieldRef() {
+        //noinspection OptionalGetWithoutIsPresent
         return fieldRefOptional().get();
     }
 
