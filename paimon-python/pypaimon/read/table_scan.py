@@ -23,7 +23,7 @@ from pypaimon.common.predicate import Predicate
 
 from pypaimon.read.plan import Plan
 from pypaimon.read.scanner.empty_starting_scanner import EmptyStartingScanner
-from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
+from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner, PartialStartingScanner
 from pypaimon.read.scanner.incremental_starting_scanner import \
     IncrementalStartingScanner
 from pypaimon.read.scanner.starting_scanner import StartingScanner
@@ -39,9 +39,12 @@ class TableScan:
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
-        self.starting_scanner = self._create_starting_scanner()
+        self.starting_scanner = None
+        self.partial_read: Optional[bool] = None
 
     def plan(self) -> Plan:
+        if self.starting_scanner is None:
+            self.starting_scanner = self._create_starting_scanner()
         return self.starting_scanner.scan()
 
     def _create_starting_scanner(self) -> Optional[StartingScanner]:
@@ -66,12 +69,30 @@ class TableScan:
                 return EmptyStartingScanner()
             return IncrementalStartingScanner.between_timestamps(self.table, self.predicate, self.limit,
                                                                  start_timestamp, end_timestamp)
-        return FullStartingScanner(self.table, self.predicate, self.limit)
+        elif self.partial_read:
+            return PartialStartingScanner(self.table, self.predicate, self.limit)
+        else:
+            return FullStartingScanner(self.table, self.predicate, self.limit)
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
+        self.partial_read = True
+        self.starting_scanner = self._create_starting_scanner()
         self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         return self
 
     def with_slice(self, start_pos, end_pos) -> 'TableScan':
+        self.partial_read = True
+        self.starting_scanner = self._create_starting_scanner()
         self.starting_scanner.with_slice(start_pos, end_pos)
+        return self
+
+    def with_sample(self, num_rows: int) -> 'TableScan':
+        """Sample the table with the given number of rows.
+
+        params:
+            num_rows: The number of rows to sample.
+        """
+        self.partial_read = True
+        self.starting_scanner = self._create_starting_scanner()
+        self.starting_scanner.with_sample(num_rows)
         return self
