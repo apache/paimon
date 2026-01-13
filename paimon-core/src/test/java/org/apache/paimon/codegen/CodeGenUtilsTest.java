@@ -32,6 +32,7 @@ import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 import static org.apache.paimon.types.DataTypes.DOUBLE;
 import static org.apache.paimon.types.DataTypes.INT;
 import static org.apache.paimon.types.DataTypes.STRING;
+import static org.apache.paimon.types.DataTypes.VECTOR;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CodeGenUtilsTest {
@@ -72,6 +73,14 @@ class CodeGenUtilsTest {
     public void testRecordComparatorCodegenCache() {
         assertClassEquals(
                 () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true));
+    }
+
+    @Test
+    public void testRecordComparatorCodegenCacheWithVec() {
+        assertClassEquals(
+                () ->
+                        newRecordComparator(
+                                Arrays.asList(STRING(), VECTOR(3, INT())), new int[] {0, 1}, true));
     }
 
     @Test

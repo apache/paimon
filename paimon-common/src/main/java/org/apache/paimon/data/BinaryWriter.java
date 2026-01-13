@@ -136,6 +136,9 @@ public interface BinaryWriter {
             case ARRAY:
                 writer.writeArray(pos, (InternalArray) o, (InternalArraySerializer) serializer);
                 break;
+            case VECTOR:
+                writer.writeVec(pos, (InternalVec) o, (InternalVecSerializer) serializer);
+                break;
             case MAP:
             case MULTISET:
                 writer.writeMap(pos, (InternalMap) o, (InternalMapSerializer) serializer);
