@@ -1801,6 +1801,15 @@ public class CoreOptions implements Serializable {
                             "For DELETE manifest entry in manifest file, drop stats to reduce memory and storage."
                                     + " Default value is false only for compatibility of old reader.");
 
+    public static final ConfigOption<Boolean> MANIFEST_PREFETCH_ENTRIES =
+            key("manifest.prefetch-entries")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Prefetch all manifest entries when initializing writers, reduces API requests to object store filesystems."
+                                    + " This is useful for jobs that write to or compacts many partitions at once,"
+                                    + " however more memory is required as the entire manifest is loaded.");
+
     public static final ConfigOption<Boolean> DATA_FILE_THIN_MODE =
             key("data-file.thin-mode")
                     .booleanType()
@@ -2535,6 +2544,10 @@ public class CoreOptions implements Serializable {
 
     public boolean manifestDeleteFileDropStats() {
         return options.get(MANIFEST_DELETE_FILE_DROP_STATS);
+    }
+
+    public boolean prefetchManifestEntries() {
+        return options.get(MANIFEST_PREFETCH_ENTRIES);
     }
 
     public boolean disableNullToNotNull() {

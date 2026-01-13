@@ -21,17 +21,24 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.sink.coordinator.CoordinatedWriteRestore;
+import org.apache.paimon.flink.sink.coordinator.WriteOperatorCoordinator;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.jobgraph.tasks.TaskOperatorEventGateway;
+import org.apache.flink.runtime.operators.coordination.OperatorCoordinator;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
+import org.apache.flink.streaming.api.operators.CoordinatedOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.operators.StreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamOperatorParameters;
@@ -69,6 +76,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private transient StoreSinkWrite write;
     private transient DataFileMetaSerializer dataFileMetaSerializer;
     private transient Set<Pair<BinaryRow, Integer>> waitToCompact;
+    protected transient @Nullable WriteRestore writeRestore;
 
     protected transient @Nullable WriterRefresher writeRefresher;
 
@@ -119,7 +127,14 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         getContainingTask().getEnvironment().getIOManager(),
                         memoryPoolFactory,
                         getMetricGroup());
+        if (writeRestore != null) {
+            write.setWriteRestore(writeRestore);
+        }
         this.writeRefresher = WriterRefresher.create(write.streamingMode(), table, write::replace);
+    }
+
+    public void setWriteRestore(@Nullable WriteRestore writeRestore) {
+        this.writeRestore = writeRestore;
     }
 
     @Override
@@ -240,6 +255,67 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         @Override
         @SuppressWarnings("rawtypes")
+        public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
+            return StoreCompactOperator.class;
+        }
+    }
+
+    /** {@link StreamOperatorFactory} of {@link StoreCompactOperator}. */
+    public static class CoordinatedFactory
+            extends PrepareCommitOperator.Factory<RowData, Committable>
+            implements CoordinatedOperatorFactory<Committable> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final FileStoreTable table;
+        private final StoreSinkWrite.Provider storeSinkWriteProvider;
+        private final String initialCommitUser;
+        private final boolean fullCompaction;
+
+        public CoordinatedFactory(
+                FileStoreTable table,
+                StoreSinkWrite.Provider storeSinkWriteProvider,
+                String initialCommitUser,
+                boolean fullCompaction) {
+            super(Options.fromMap(table.options()));
+            Preconditions.checkArgument(
+                    !table.coreOptions().writeOnly(),
+                    CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
+            this.table = table;
+            this.storeSinkWriteProvider = storeSinkWriteProvider;
+            this.initialCommitUser = initialCommitUser;
+            this.fullCompaction = fullCompaction;
+        }
+
+        @Override
+        public OperatorCoordinator.Provider getCoordinatorProvider(
+                String operatorName, OperatorID operatorID) {
+            return new WriteOperatorCoordinator.Provider(operatorID, table);
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends StreamOperator<Committable>> T createStreamOperator(
+                StreamOperatorParameters<Committable> parameters) {
+            OperatorID operatorID = parameters.getStreamConfig().getOperatorID();
+            TaskOperatorEventGateway gateway =
+                    parameters
+                            .getContainingTask()
+                            .getEnvironment()
+                            .getOperatorCoordinatorEventGateway();
+
+            StoreCompactOperator operator =
+                    new StoreCompactOperator(
+                            parameters,
+                            table,
+                            storeSinkWriteProvider,
+                            initialCommitUser,
+                            fullCompaction);
+
+            operator.setWriteRestore(new CoordinatedWriteRestore(gateway, operatorID));
+            return (T) operator;
+        }
+
         public Class<? extends StreamOperator> getStreamOperatorClass(ClassLoader classLoader) {
             return StoreCompactOperator.class;
         }
