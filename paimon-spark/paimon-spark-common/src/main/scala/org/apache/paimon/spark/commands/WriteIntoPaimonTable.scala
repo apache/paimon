@@ -23,6 +23,8 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.sink.CommitMessage
+import org.apache.paimon.utils.ChainTableUtils
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
@@ -57,7 +59,7 @@ case class WriteIntoPaimonTable(
     }
     val commitMessages = writer.write(data)
     writer.commit(commitMessages)
-
+    postCommit(dynamicPartitionOverwriteMode, overwritePartition, commitMessages)
     Seq.empty
   }
 
@@ -80,6 +82,18 @@ case class WriteIntoPaimonTable(
         throw new UnsupportedOperationException(s" This mode is unsupported for now.")
     }
     (dynamicPartitionOverwriteMode, overwritePartition)
+  }
+
+  private def postCommit(
+      dynamicPartitionOverwrite: Boolean,
+      staticOverwritePartition: Map[String, String],
+      commitMessages: Seq[CommitMessage]): Unit = {
+    if (ChainTableUtils.chainScanFallbackDeltaBranch(table.coreOptions())) {
+      ChainTableUtils.postCommit(
+        table,
+        dynamicPartitionOverwrite || staticOverwritePartition != null,
+        commitMessages.toList.asJava)
+    }
   }
 
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =

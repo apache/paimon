@@ -25,6 +25,11 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.ChainGroupReadTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
@@ -203,5 +208,50 @@ public class ChainTableUtils {
             res.put(partitionKeys.get(i), values.get(i));
         }
         return res;
+    }
+
+    public static void postCommit(
+            FileStoreTable table, boolean overwrite, List<CommitMessage> commitMessages) {
+        if (overwrite) {
+            FileStoreTable candidateTbl = table;
+            if (table instanceof FallbackReadFileStoreTable) {
+                candidateTbl =
+                        ((ChainGroupReadTable) ((FallbackReadFileStoreTable) table).fallback())
+                                .wrapped();
+            }
+            FileStoreTable snapshotTbl =
+                    candidateTbl.switchToBranch(table.coreOptions().scanFallbackSnapshotBranch());
+            InternalRowPartitionComputer partitionComputer =
+                    new InternalRowPartitionComputer(
+                            table.coreOptions().partitionDefaultName(),
+                            table.schema().logicalPartitionType(),
+                            table.schema().partitionKeys().toArray(new String[0]),
+                            table.coreOptions().legacyPartitionName());
+            List<BinaryRow> overwritePartitions =
+                    commitMessages.stream()
+                            .map(CommitMessage::partition)
+                            .distinct()
+                            .collect(Collectors.toList());
+            if (!overwritePartitions.isEmpty()) {
+                List<Map<String, String>> candidatePartitions =
+                        overwritePartitions.stream()
+                                .map(partition -> partitionComputer.generatePartValues(partition))
+                                .collect(Collectors.toList());
+                try (BatchTableCommit commit = snapshotTbl.newBatchWriteBuilder().newCommit()) {
+                    commit.truncatePartitions(candidatePartitions);
+                } catch (Exception e) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "Failed to truncate partitions in snapshot table %s.",
+                                    candidatePartitions),
+                            e);
+                }
+            }
+        }
+    }
+
+    public static boolean chainScanFallbackDeltaBranch(CoreOptions options) {
+        return options.isChainTable()
+                && options.scanFallbackDeltaBranch().equalsIgnoreCase(options.branch());
     }
 }
