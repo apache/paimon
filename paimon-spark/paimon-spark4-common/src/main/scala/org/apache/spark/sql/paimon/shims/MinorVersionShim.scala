@@ -28,7 +28,9 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeRows, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
+import org.apache.spark.sql.connector.catalog.Table
 import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
 import org.apache.spark.sql.execution.streaming.sinks.FileStreamSink
 import org.apache.spark.sql.types.StructType
@@ -58,6 +60,12 @@ object MinorVersionShim {
       condition: Option[Expression],
       assignments: Seq[Assignment]): UpdateAction = {
     UpdateAction(condition, assignments)
+  }
+
+  def createDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      table: Table): DataSourceV2Relation = {
+    relation.copy(table)
   }
 
   def createSparkInternalRow(rowType: RowType): SparkInternalRow = {

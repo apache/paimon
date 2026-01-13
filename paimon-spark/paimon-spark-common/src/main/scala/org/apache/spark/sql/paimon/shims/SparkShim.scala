@@ -34,6 +34,7 @@ import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.datasources.PartitioningAwareFileIndex
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -94,6 +95,8 @@ trait SparkShim {
   def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction
 
   def createUpdateAction(condition: Option[Expression], assignments: Seq[Assignment]): UpdateAction
+
+  def createDataSourceV2Relation(relation: DataSourceV2Relation, table: Table): DataSourceV2Relation
 
   // for variant
   def toPaimonVariant(o: Object): Variant

@@ -35,6 +35,7 @@ import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
 import org.apache.spark.sql.execution.datasources._
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.{DataTypes, StructType, VariantType}
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.apache.spark.unsafe.types.VariantVal
@@ -126,6 +127,12 @@ class Spark4Shim extends SparkShim {
       condition: Option[Expression],
       assignments: Seq[Assignment]): UpdateAction = {
     MinorVersionShim.createUpdateAction(condition, assignments)
+  }
+
+  override def createDataSourceV2Relation(
+      relation: DataSourceV2Relation,
+      table: Table): DataSourceV2Relation = {
+    MinorVersionShim.createDataSourceV2Relation(relation, table)
   }
 
   override def toPaimonVariant(o: Object): Variant = {
