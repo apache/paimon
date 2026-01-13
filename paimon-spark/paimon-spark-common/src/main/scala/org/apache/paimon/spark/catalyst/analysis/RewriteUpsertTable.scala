@@ -107,7 +107,7 @@ case class RewriteUpsertTable(spark: SparkSession) extends Rule[LogicalPlan] {
     val assignments: Seq[Assignment] =
       target.output.zip(source.output).map(a => Assignment(a._1, a._2))
 
-    val mergeActions = Seq(UpdateAction(updateCondiction, assignments))
+    val mergeActions = Seq(SparkShimLoader.shim.createUpdateAction(updateCondiction, assignments))
     val notMatchedActions = Seq(InsertAction(None, assignments))
 
     SparkShimLoader.shim.createMergeIntoTable(
