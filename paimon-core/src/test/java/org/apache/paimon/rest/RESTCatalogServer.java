@@ -829,7 +829,8 @@ public class RESTCatalogServer {
                         }
                     });
         }
-        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        AuthTableQueryResponse response =
+                new AuthTableQueryResponse(Collections.emptyList(), ImmutableMap.of());
         return mockResponse(response, 200);
     }
 

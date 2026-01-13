@@ -577,7 +577,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, List<String> select) {
+    public TableQueryAuthResult authTableQuery(Identifier identifier, List<String> select) {
         throw new UnsupportedOperationException();
     }
 

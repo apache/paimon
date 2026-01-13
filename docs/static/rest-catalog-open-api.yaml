@@ -2923,6 +2923,11 @@ components:
           type: array
           items:
             type: string
+        columnMasking:
+          type: object
+          description: Column masking rules as a map from column name to transform entry JSON string.
+          additionalProperties:
+            type: string
     AlterDatabaseRequest:
       type: object
       properties:
