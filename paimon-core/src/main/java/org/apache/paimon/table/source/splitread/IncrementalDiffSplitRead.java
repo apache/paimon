@@ -213,9 +213,11 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
             } else if (kvs.size() == 2) {
                 KeyValue before = kvs.get(0);
                 KeyValue after = kvs.get(1);
-                if (after.level() == AFTER_LEVEL) {
-                    if (!valueAndRowKindEquals(before, after)) {
+                if (!valueAndRowKindEquals(before, after)) {
+                    if (after.level() == AFTER_LEVEL) {
                         toReturn = after;
+                    } else if (after.level() == BEFORE_LEVEL) {
+                        toReturn = before;
                     }
                 }
             } else {
