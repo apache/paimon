@@ -23,7 +23,6 @@ from typing import List, Optional, Collection
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pypaimon.globalindex import GlobalIndexIOMeta, GlobalIndexReader, GlobalIndexEvaluator
-from pypaimon.globalindex.faiss import FaissVectorIndexOptions, FaissVectorGlobalIndexReader
 from pypaimon.globalindex.range import Range
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 
@@ -168,6 +167,11 @@ class RowRangeGlobalIndexScanner:
             
             for index_type, io_metas in index_metas[field_id].items():
                 if index_type == 'faiss-vector-ann':
+                    # Lazy import to avoid requiring faiss when not used
+                    from pypaimon.globalindex.faiss import (
+                        FaissVectorIndexOptions,
+                        FaissVectorGlobalIndexReader
+                    )
                     options = FaissVectorIndexOptions.from_options(self._options)
                     reader = FaissVectorGlobalIndexReader(
                         file_io=file_io,
