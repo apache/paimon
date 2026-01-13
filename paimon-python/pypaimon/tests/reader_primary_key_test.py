@@ -358,6 +358,7 @@ class PkReaderTest(unittest.TestCase):
         latest_snapshot = snapshot_manager.get_latest_snapshot()
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
+        table_scan.starting_scanner = table_scan._create_starting_scanner()
         manifest_list_manager = table_scan.starting_scanner.manifest_list_manager
         manifest_files = manifest_list_manager.read_all(latest_snapshot)
 

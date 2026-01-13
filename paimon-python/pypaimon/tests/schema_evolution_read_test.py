@@ -259,12 +259,15 @@ class SchemaEvolutionReadTest(unittest.TestCase):
         schema_manager.commit(TableSchema.from_schema(schema_id=0, schema=schema))
         schema_manager.commit(TableSchema.from_schema(schema_id=1, schema=schema2))
         # scan filter for schema evolution
-        latest_snapshot = table1.new_read_builder().new_scan().starting_scanner.snapshot_manager.get_latest_snapshot()
+        table_scan = table1.new_read_builder().new_scan()
+        table_scan.starting_scanner = table_scan._create_starting_scanner()
+        latest_snapshot = table_scan.starting_scanner.snapshot_manager.get_latest_snapshot()
         table2.table_path = table1.table_path
         new_read_buidler = table2.new_read_builder()
         predicate_builder = new_read_buidler.new_predicate_builder()
         predicate = predicate_builder.less_than('user_id', 3)
         new_scan = new_read_buidler.with_filter(predicate).new_scan()
+        new_scan.starting_scanner = new_scan._create_starting_scanner()
         manifest_files = new_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         entries = new_scan.starting_scanner.read_manifest_entries(manifest_files)
         self.assertEqual(1, len(entries))  # verify scan filter success for schema evolution

@@ -512,6 +512,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         pk_read_builder = pk_table.new_read_builder()
         pk_table_scan = pk_read_builder.new_scan()
+        pk_table_scan.starting_scanner = pk_table_scan._create_starting_scanner()
         latest_snapshot = SnapshotManager(pk_table).get_latest_snapshot()
         pk_manifest_files = pk_table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         pk_manifest_entries = pk_table_scan.starting_scanner.manifest_file_manager.read(
@@ -582,6 +583,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
+        table_scan.starting_scanner = table_scan._create_starting_scanner()
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
         manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
@@ -1089,6 +1091,7 @@ class ReaderBasicTest(unittest.TestCase):
         # Read manifest to verify value_stats_cols is None (all fields included)
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
+        table_scan.starting_scanner = table_scan._create_starting_scanner()
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
         manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
@@ -1111,7 +1114,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         value_stats = file_meta.value_stats
         self.assertIsNotNone(value_stats, "value_stats should not be None")
-        
+
         if file_meta.value_stats_cols is None:
             expected_value_fields = ['name', 'price', 'category']
             self.assertGreaterEqual(value_stats.min_values.arity, len(expected_value_fields),
@@ -1119,12 +1122,12 @@ class ReaderBasicTest(unittest.TestCase):
         else:
             self.assertNotIn('id', file_meta.value_stats_cols,
                              "Key field 'id' should NOT be in value_stats_cols")
-            
+
             expected_value_fields = ['name', 'price', 'category']
             self.assertTrue(set(expected_value_fields).issubset(set(file_meta.value_stats_cols)),
                             f"value_stats_cols should contain value fields: {expected_value_fields}, "
                             f"but got: {file_meta.value_stats_cols}")
-            
+
             expected_arity = len(file_meta.value_stats_cols)
             self.assertEqual(value_stats.min_values.arity, expected_arity,
                              f"value_stats should contain {expected_arity} fields (matching value_stats_cols), "
@@ -1135,17 +1138,17 @@ class ReaderBasicTest(unittest.TestCase):
             self.assertEqual(len(value_stats.null_counts), expected_arity,
                              f"value_stats null_counts should have {expected_arity} elements, "
                              f"but got {len(value_stats.null_counts)}")
-            
+
             self.assertEqual(value_stats.min_values.arity, len(file_meta.value_stats_cols),
                              f"value_stats.min_values.arity ({value_stats.min_values.arity}) must match "
                              f"value_stats_cols length ({len(file_meta.value_stats_cols)})")
-            
+
             for field_name in file_meta.value_stats_cols:
                 is_system_field = (field_name.startswith('_KEY_') or
                                    field_name in ['_SEQUENCE_NUMBER', '_VALUE_KIND', '_ROW_ID'])
                 self.assertFalse(is_system_field,
                                  f"value_stats_cols should not contain system field: {field_name}")
-            
+
             value_stats_fields = table_scan.starting_scanner.manifest_file_manager._get_value_stats_fields(
                 {'_VALUE_STATS_COLS': file_meta.value_stats_cols},
                 table.fields
@@ -1161,7 +1164,7 @@ class ReaderBasicTest(unittest.TestCase):
 
             self.assertEqual(len(min_value_stats), 3, "min_value_stats should have 3 values")
             self.assertEqual(len(max_value_stats), 3, "max_value_stats should have 3 values")
-        
+
         actual_data = read_builder.new_read().to_arrow(table_scan.plan().splits())
         self.assertEqual(actual_data.num_rows, 5, "Should have 5 rows")
         actual_ids = sorted(actual_data.column('id').to_pylist())
