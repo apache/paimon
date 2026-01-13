@@ -20,36 +20,88 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonValue;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
 
 /** Function to test a field with literals. */
-@JsonTypeInfo(
-        use = JsonTypeInfo.Id.NAME,
-        include = JsonTypeInfo.As.PROPERTY,
-        property = LeafFunction.FIELD_TYPE)
-@JsonSubTypes({
-    @JsonSubTypes.Type(value = Equal.class, name = Equal.NAME),
-    @JsonSubTypes.Type(value = NotEqual.class, name = NotEqual.NAME),
-    @JsonSubTypes.Type(value = LessThan.class, name = LessThan.NAME),
-    @JsonSubTypes.Type(value = LessOrEqual.class, name = LessOrEqual.NAME),
-    @JsonSubTypes.Type(value = GreaterThan.class, name = GreaterThan.NAME),
-    @JsonSubTypes.Type(value = GreaterOrEqual.class, name = GreaterOrEqual.NAME),
-    @JsonSubTypes.Type(value = IsNull.class, name = IsNull.NAME),
-    @JsonSubTypes.Type(value = IsNotNull.class, name = IsNotNull.NAME),
-    @JsonSubTypes.Type(value = StartsWith.class, name = StartsWith.NAME),
-    @JsonSubTypes.Type(value = EndsWith.class, name = EndsWith.NAME),
-    @JsonSubTypes.Type(value = Contains.class, name = Contains.NAME),
-    @JsonSubTypes.Type(value = Like.class, name = Like.NAME),
-    @JsonSubTypes.Type(value = In.class, name = In.NAME),
-    @JsonSubTypes.Type(value = NotIn.class, name = NotIn.NAME)
-})
 public abstract class LeafFunction implements Serializable {
-    public static final String FIELD_TYPE = "type";
+    @JsonCreator
+    public static LeafFunction fromJson(String name) throws IOException {
+        switch (name) {
+            case Equal.NAME:
+                return Equal.INSTANCE;
+            case NotEqual.NAME:
+                return NotEqual.INSTANCE;
+            case LessThan.NAME:
+                return LessThan.INSTANCE;
+            case LessOrEqual.NAME:
+                return LessOrEqual.INSTANCE;
+            case GreaterThan.NAME:
+                return GreaterThan.INSTANCE;
+            case GreaterOrEqual.NAME:
+                return GreaterOrEqual.INSTANCE;
+            case IsNull.NAME:
+                return IsNull.INSTANCE;
+            case IsNotNull.NAME:
+                return IsNotNull.INSTANCE;
+            case StartsWith.NAME:
+                return StartsWith.INSTANCE;
+            case EndsWith.NAME:
+                return EndsWith.INSTANCE;
+            case Contains.NAME:
+                return Contains.INSTANCE;
+            case Like.NAME:
+                return Like.INSTANCE;
+            case In.NAME:
+                return In.INSTANCE;
+            case NotIn.NAME:
+                return NotIn.INSTANCE;
+            default:
+                throw new IllegalArgumentException(
+                        "Could not resolve leaf function '" + name + "'");
+        }
+    }
+
+    @JsonValue
+    public String toJson() {
+        if (this instanceof Equal) {
+            return Equal.NAME;
+        } else if (this instanceof NotEqual) {
+            return NotEqual.NAME;
+        } else if (this instanceof LessThan) {
+            return LessThan.NAME;
+        } else if (this instanceof LessOrEqual) {
+            return LessOrEqual.NAME;
+        } else if (this instanceof GreaterThan) {
+            return GreaterThan.NAME;
+        } else if (this instanceof GreaterOrEqual) {
+            return GreaterOrEqual.NAME;
+        } else if (this instanceof IsNull) {
+            return IsNull.NAME;
+        } else if (this instanceof IsNotNull) {
+            return IsNotNull.NAME;
+        } else if (this instanceof StartsWith) {
+            return StartsWith.NAME;
+        } else if (this instanceof EndsWith) {
+            return EndsWith.NAME;
+        } else if (this instanceof Contains) {
+            return Contains.NAME;
+        } else if (this instanceof Like) {
+            return Like.NAME;
+        } else if (this instanceof In) {
+            return In.NAME;
+        } else if (this instanceof NotIn) {
+            return NotIn.NAME;
+        } else {
+            throw new IllegalArgumentException(
+                    "Unknown leaf function class for JSON serialization: " + getClass());
+        }
+    }
 
     public abstract boolean test(DataType type, Object field, List<Object> literals);
 

@@ -42,26 +42,26 @@ class TransformJsonSerdeTest {
                 // FieldTransform
                 TestSpec.forTransform(new FieldTransform(new FieldRef(0, "f0", new IntType())))
                         .expectJson(
-                                "{\"type\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}}"),
+                                "{\"transform\":\"FIELD_REF\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}}"),
 
                 // FieldTransform - String type
                 TestSpec.forTransform(new FieldTransform(new FieldRef(1, "f1", DataTypes.STRING())))
                         .expectJson(
-                                "{\"type\":\"FIELD_REF\",\"fieldRef\":{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"}}"),
+                                "{\"transform\":\"FIELD_REF\",\"fieldRef\":{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"}}"),
 
                 // CastTransform - INT to BIGINT
                 TestSpec.forTransform(
                                 new CastTransform(
                                         new FieldRef(0, "f0", new IntType()), DataTypes.BIGINT()))
                         .expectJson(
-                                "{\"type\":\"CAST\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"},\"type\":\"BIGINT\"}"),
+                                "{\"transform\":\"CAST\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"},\"type\":\"BIGINT\"}"),
 
                 // CastTransform - STRING to INT
                 TestSpec.forTransform(
                                 new CastTransform(
                                         new FieldRef(2, "f2", DataTypes.STRING()), DataTypes.INT()))
                         .expectJson(
-                                "{\"type\":\"CAST\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"},\"type\":\"INT\"}"),
+                                "{\"transform\":\"CAST\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"},\"type\":\"INT\"}"),
 
                 // UpperTransform
                 TestSpec.forTransform(
@@ -69,7 +69,7 @@ class TransformJsonSerdeTest {
                                         Collections.singletonList(
                                                 new FieldRef(1, "f1", DataTypes.STRING()))))
                         .expectJson(
-                                "{\"type\":\"UPPER\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"}]}"),
+                                "{\"transform\":\"UPPER\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"}]}"),
 
                 // ConcatTransform - two fields
                 TestSpec.forTransform(
@@ -78,7 +78,7 @@ class TransformJsonSerdeTest {
                                                 new FieldRef(1, "f1", DataTypes.STRING()),
                                                 new FieldRef(2, "f2", DataTypes.STRING()))))
                         .expectJson(
-                                "{\"type\":\"CONCAT\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]}"),
+                                "{\"transform\":\"CONCAT\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]}"),
 
                 // ConcatTransform - with literals and nulls
                 TestSpec.forTransform(
@@ -89,7 +89,7 @@ class TransformJsonSerdeTest {
                                                 new FieldRef(2, "f2", DataTypes.STRING()),
                                                 null)))
                         .expectJson(
-                                "{\"type\":\"CONCAT\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"-\",{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"},null]}"),
+                                "{\"transform\":\"CONCAT\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"-\",{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"},null]}"),
 
                 // ConcatWsTransform - with separator
                 TestSpec.forTransform(
@@ -99,7 +99,7 @@ class TransformJsonSerdeTest {
                                                 new FieldRef(1, "f1", DataTypes.STRING()),
                                                 new FieldRef(2, "f2", DataTypes.STRING()))))
                         .expectJson(
-                                "{\"type\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]}"),
+                                "{\"transform\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]}"),
 
                 // ConcatWsTransform - with literals and nulls
                 TestSpec.forTransform(
@@ -111,10 +111,10 @@ class TransformJsonSerdeTest {
                                                 null,
                                                 new FieldRef(2, "f2", DataTypes.STRING()))))
                         .expectJson(
-                                "{\"type\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]}"),
+                                "{\"transform\":\"CONCAT_WS\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]}"),
 
                 // error message testing
-                TestSpec.forJson("{\"type\":\"invalid\"}")
+                TestSpec.forJson("{\"transform\":\"invalid\"}")
                         .expectErrorMessage("Could not resolve type id 'invalid'"));
     }
 

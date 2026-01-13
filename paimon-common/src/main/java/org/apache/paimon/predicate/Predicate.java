@@ -38,13 +38,13 @@ import java.util.Optional;
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.PROPERTY,
-        property = Predicate.FIELD_TYPE)
+        property = Predicate.FIELD_PREDICATE)
 @JsonSubTypes({
     @JsonSubTypes.Type(value = LeafPredicate.class, name = LeafPredicate.NAME),
     @JsonSubTypes.Type(value = CompoundPredicate.class, name = CompoundPredicate.NAME)
 })
 public interface Predicate extends Serializable {
-    String FIELD_TYPE = "type";
+    String FIELD_PREDICATE = "predicate";
     /**
      * Test based on the specific input row.
      *
