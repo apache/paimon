@@ -204,4 +204,9 @@ public class ChainTableUtils {
         }
         return res;
     }
+
+    public static boolean isScanFallbackDeltaBranch(CoreOptions options) {
+        return options.isChainTable()
+                && options.scanFallbackDeltaBranch().equalsIgnoreCase(options.branch());
+    }
 }
