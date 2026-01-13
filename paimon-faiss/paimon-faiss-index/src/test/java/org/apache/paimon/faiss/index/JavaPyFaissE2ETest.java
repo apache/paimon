@@ -81,20 +81,31 @@ public class JavaPyFaissE2ETest {
     @BeforeEach
     public void before() throws Exception {
         // Skip tests if FAISS native library is not available
-        if (!Faiss.isLibraryLoaded()) {
-            try {
+        // Wrap entire Faiss access in try-catch because accessing Faiss.isLibraryLoaded()
+        // triggers static initialization which may throw ExceptionInInitializerError
+        try {
+            if (!Faiss.isLibraryLoaded()) {
                 Faiss.loadLibrary();
-            } catch (FaissException e) {
-                StringBuilder errorMsg = new StringBuilder("FAISS native library not available.");
-                errorMsg.append("\nError: ").append(e.getMessage());
-                if (e.getCause() != null) {
-                    errorMsg.append("\nCause: ").append(e.getCause().getMessage());
-                }
-                errorMsg.append(
-                        "\n\nTo run FAISS tests, ensure the paimon-faiss-jni JAR"
-                                + " with native libraries is available in the classpath.");
-                Assumptions.assumeTrue(false, errorMsg.toString());
             }
+        } catch (FaissException
+                | ExceptionInInitializerError
+                | UnsatisfiedLinkError
+                | NoClassDefFoundError e) {
+            StringBuilder errorMsg = new StringBuilder("FAISS native library not available.");
+            Throwable cause = e;
+            if (e instanceof ExceptionInInitializerError) {
+                cause = e.getCause();
+            }
+            if (cause != null) {
+                errorMsg.append("\nError: ").append(cause.getMessage());
+                if (cause.getCause() != null) {
+                    errorMsg.append("\nCause: ").append(cause.getCause().getMessage());
+                }
+            }
+            errorMsg.append(
+                    "\n\nTo run FAISS tests, ensure the paimon-faiss-jni JAR"
+                            + " with native libraries is available in the classpath.");
+            Assumptions.assumeTrue(false, errorMsg.toString());
         }
 
         // Create warehouse directory if it doesn't exist
@@ -231,7 +242,7 @@ public class JavaPyFaissE2ETest {
                             fileSize,
                             entry.rowCount(),
                             globalMeta,
-                            null));
+                            (String) null));
         }
         return metas;
     }

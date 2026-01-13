@@ -24,6 +24,14 @@ import numpy as np
 from pypaimon.globalindex.faiss.faiss_options import FaissVectorMetric, FaissIndexType
 
 
+def _to_faiss_metric(metric: FaissVectorMetric) -> int:
+    """Convert FaissVectorMetric enum to FAISS integer metric type."""
+    if metric == FaissVectorMetric.L2:
+        return faiss.METRIC_L2
+    else:
+        return faiss.METRIC_INNER_PRODUCT
+
+
 class FaissIndex:
 
     def __init__(
@@ -54,7 +62,8 @@ class FaissIndex:
             ef_construction: int,
             metric: FaissVectorMetric
     ) -> 'FaissIndex':
-        index = faiss.IndexHNSWFlat(dimension, m, metric)
+        faiss_metric = _to_faiss_metric(metric)
+        index = faiss.IndexHNSWFlat(dimension, m, faiss_metric)
         index.hnsw.efConstruction = ef_construction
         index = faiss.IndexIDMap2(index)
 
@@ -67,8 +76,9 @@ class FaissIndex:
             nlist: int,
             metric: FaissVectorMetric
     ) -> 'FaissIndex':
+        faiss_metric = _to_faiss_metric(metric)
         quantizer = faiss.IndexFlatL2(dimension) if metric == FaissVectorMetric.L2 else faiss.IndexFlatIP(dimension)
-        index = faiss.IndexIVFFlat(quantizer, dimension, nlist, metric)
+        index = faiss.IndexIVFFlat(quantizer, dimension, nlist, faiss_metric)
         index = faiss.IndexIDMap(index)
 
         return cls(index, dimension, metric, FaissIndexType.IVF)
@@ -95,10 +105,11 @@ class FaissIndex:
             nlist: int,
             metric: FaissVectorMetric
     ) -> 'FaissIndex':
+        faiss_metric = _to_faiss_metric(metric)
         quantizer = faiss.IndexFlatL2(dimension) if metric == FaissVectorMetric.L2 else faiss.IndexFlatIP(dimension)
         index = faiss.IndexIVFScalarQuantizer(
             quantizer, dimension, nlist,
-            faiss.ScalarQuantizer.QT_8bit, metric
+            faiss.ScalarQuantizer.QT_8bit, faiss_metric
         )
         index = faiss.IndexIDMap(index)
 

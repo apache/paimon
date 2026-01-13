@@ -17,11 +17,7 @@
 ################################################################################
 
 """
-Roaring Bitmap implementation for 64-bit integers.
-
-This module provides a Python implementation of RoaringBitmap64 that is compatible
-with the Java implementation in Paimon. It supports efficient storage and operations
-on sets of 64-bit integers.
+Roaring Bitmap.
 """
 
 from typing import Iterator, Set
