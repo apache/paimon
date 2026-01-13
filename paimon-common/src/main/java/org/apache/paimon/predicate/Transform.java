@@ -31,7 +31,7 @@ import java.util.List;
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.PROPERTY,
-        property = Transform.FIELD_TRANSFORM)
+        property = Transform.FIELD_NAME)
 @JsonSubTypes({
     @JsonSubTypes.Type(value = FieldTransform.class, name = FieldTransform.NAME),
     @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),
@@ -40,7 +40,7 @@ import java.util.List;
     @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME)
 })
 public interface Transform extends Serializable {
-    String FIELD_TRANSFORM = "transform";
+    String FIELD_NAME = "name";
 
     String name();
 
