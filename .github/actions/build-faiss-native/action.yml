@@ -60,7 +60,7 @@ runs:
       if: inputs.use-homebrew == 'false'
       shell: bash
       run: |
-        git clone --depth 1 --branch v1.7.4 https://github.com/facebookresearch/faiss.git /tmp/faiss
+        git clone --depth 1 --branch v${{ inputs.faiss-version }} https://github.com/facebookresearch/faiss.git /tmp/faiss
         cd /tmp/faiss
         cmake -B build \
           -DFAISS_ENABLE_GPU=OFF \

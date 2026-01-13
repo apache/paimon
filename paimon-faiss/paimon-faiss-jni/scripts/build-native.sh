@@ -216,7 +216,7 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
     
     JNI_LIB="$OUTPUT_DIR/libpaimon_faiss_jni.so"
     if [ -f "$JNI_LIB" ]; then
-        # Function to bundle a library and its dependencies
+        # Function to bundle a library
         bundle_lib() {
             local lib_path="$1"
             local target_name="$2"
@@ -237,11 +237,99 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
             return 0
         }
         
-        # Libraries to bundle (pattern -> target name)
-        # We check the JNI lib and all bundled libs recursively
-        LIBS_TO_CHECK="$JNI_LIB"
-        LIBS_CHECKED=""
+        # Function to find and bundle a library by name pattern
+        find_and_bundle() {
+            local pattern="$1"
+            local target_name="$2"
+            
+            if [ -f "$OUTPUT_DIR/$target_name" ]; then
+                echo "  Already bundled: $target_name"
+                return 0
+            fi
+            
+            # Search in common library paths (order matters - prefer /usr/local for user-installed libs)
+            for search_path in /usr/local/lib /usr/local/lib64 \
+                              /usr/lib /usr/lib64 \
+                              /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu \
+                              /usr/lib/x86_64-linux-gnu/openblas-pthread \
+                              /usr/lib/aarch64-linux-gnu/openblas-pthread; do
+                local found_lib=$(find "$search_path" -maxdepth 1 -name "$pattern" -type f 2>/dev/null | head -1)
+                if [ -n "$found_lib" ] && [ -f "$found_lib" ]; then
+                    bundle_lib "$found_lib" "$target_name"
+                    return $?
+                fi
+                # Also check for symlinks
+                local found_link=$(find "$search_path" -maxdepth 1 -name "$pattern" -type l 2>/dev/null | head -1)
+                if [ -n "$found_link" ] && [ -L "$found_link" ]; then
+                    bundle_lib "$found_link" "$target_name"
+                    return $?
+                fi
+            done
+            
+            # Try ldconfig cache
+            local ldconfig_path=$(ldconfig -p 2>/dev/null | grep "$pattern" | head -1 | awk '{print $NF}')
+            if [ -n "$ldconfig_path" ] && [ -f "$ldconfig_path" ]; then
+                bundle_lib "$ldconfig_path" "$target_name"
+                return $?
+            fi
+            
+            echo "  Not found: $pattern"
+            return 1
+        }
         
+        echo ""
+        echo "Bundling required libraries..."
+        
+        # Explicitly bundle FAISS and its dependencies (in dependency order)
+        # These may not show up in ldd if statically linked
+        # Use || true to prevent set -e from failing on missing libraries
+        
+        # 1. GCC runtime
+        if ! find_and_bundle "libgcc_s.so*" "libgcc_s.so.1"; then
+           echo "  Note: libgcc_s not found as shared library - likely statically linked"
+        fi
+        
+        # 2. Quadmath (needed by gfortran)
+        if ! find_and_bundle "libquadmath.so*" "libquadmath.so.0"; then
+            echo "  Note: libquadmath not found as shared library - likely statically linked"
+        fi
+
+        # 3. Fortran runtime (needed by OpenBLAS)
+        if ! find_and_bundle "libgfortran.so*" "libgfortran.so.3"; then
+           echo "  Note: libgfortran not found as shared library - likely statically linked"
+        fi
+        # 4. OpenMP runtime
+        if ! find_and_bundle "libgomp.so*" "libgomp.so.1"; then
+           echo "  Note: libgomp not found as shared library - likely statically linked"
+        fi
+        
+        # 5. BLAS/LAPACK
+        if ! find_and_bundle "libblas.so*" "libblas.so.3"; then
+           echo "  Note: libblas not found as shared library - likely statically linked"
+        fi
+        if ! find_and_bundle "liblapack.so*" "liblapack.so.3"; then
+           echo "  Note: liblapack not found as shared library - likely statically linked"
+        fi
+        
+        # 6. OpenBLAS
+        if ! find_and_bundle "libopenblas*.so*" "libopenblas.so.0"; then
+           echo "  Note: libopenblas not found as shared library - likely statically linked"
+        fi
+
+        # 7. FAISS library (may be statically linked)
+        if ! find_and_bundle "libfaiss.so*" "libfaiss.so"; then
+            echo "  Note: libfaiss not found as shared library - likely statically linked"
+        fi
+        
+        # Also check ldd for any additional dependencies we might have missed
+        echo ""
+        echo "Checking ldd for additional dependencies..."
+        LIBS_TO_CHECK="$JNI_LIB"
+        for bundled_lib in "$OUTPUT_DIR"/*.so*; do
+            [ -f "$bundled_lib" ] && LIBS_TO_CHECK="$LIBS_TO_CHECK $bundled_lib"
+        done
+        
+        LIBS_CHECKED=""
         while [ -n "$LIBS_TO_CHECK" ]; do
             CURRENT_LIB=$(echo "$LIBS_TO_CHECK" | awk '{print $1}')
             LIBS_TO_CHECK=$(echo "$LIBS_TO_CHECK" | cut -d' ' -f2-)
@@ -250,6 +338,8 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
             # Skip if already checked
             echo "$LIBS_CHECKED" | grep -q "$CURRENT_LIB" && continue
             LIBS_CHECKED="$LIBS_CHECKED $CURRENT_LIB"
+            
+            [ ! -f "$CURRENT_LIB" ] && continue
             
             echo "Checking dependencies of: $(basename "$CURRENT_LIB")"
             
@@ -263,33 +353,40 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
                 
                 # Skip system libraries that are universally available
                 case "$DEP_NAME" in
-                    linux-vdso.so*|libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*)
+                    linux-vdso.so*|libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*|libstdc++*)
                         continue
                         ;;
                 esac
                 
                 # Bundle specific libraries we know are problematic
                 case "$DEP_NAME" in
+                    libfaiss*)
+                        if bundle_lib "$DEP_PATH" "libfaiss.so"; then
+                            LIBS_TO_CHECK="$LIBS_TO_CHECK $OUTPUT_DIR/libfaiss.so"
+                        fi
+                        ;;
                     libopenblas*)
                         if bundle_lib "$DEP_PATH" "libopenblas.so.0"; then
                             LIBS_TO_CHECK="$LIBS_TO_CHECK $OUTPUT_DIR/libopenblas.so.0"
                         fi
                         ;;
                     libgfortran*)
-                        # Keep the original versioned name
-                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                        bundle_lib "$DEP_PATH" "libgfortran.so.3"
                         ;;
                     libgomp*)
                         bundle_lib "$DEP_PATH" "libgomp.so.1"
                         ;;
                     libquadmath*)
-                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                        bundle_lib "$DEP_PATH" "libquadmath.so.0"
                         ;;
                     libgcc_s*)
-                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                        bundle_lib "$DEP_PATH" "libgcc_s.so.1"
                         ;;
-                    libblas*|liblapack*)
-                        bundle_lib "$DEP_PATH" "$DEP_NAME"
+                    libblas*)
+                        bundle_lib "$DEP_PATH" "libblas.so.3"
+                        ;;
+                    liblapack*)
+                        bundle_lib "$DEP_PATH" "liblapack.so.3"
                         ;;
                 esac
             done <<< "$DEPS"
