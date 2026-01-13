@@ -75,6 +75,50 @@ case class MergeIntoPaimonDataEvolutionTable(
   import MergeIntoPaimonDataEvolutionTable._
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
+
+  private val updateColumns: Set[AttributeReference] = {
+    val columns = mutable.Set[AttributeReference]()
+    for (action <- matchedActions) {
+      action match {
+        case updateAction: UpdateAction =>
+          for (assignment <- updateAction.assignments) {
+            if (!assignment.key.equals(assignment.value)) {
+              val key = assignment.key.asInstanceOf[AttributeReference]
+              columns ++= Seq(key)
+            }
+          }
+      }
+    }
+    columns.toSet
+  }
+
+  Option(table.snapshotManager().latestSnapshot()) match {
+    case Some(snapshot) => {
+      val updatedColNames: Set[String] = updateColumns.map(_.name)
+      val rowType = table.rowType()
+
+      val globalIndexedFieldNames: Set[String] = table
+        .store()
+        .newIndexFileHandler()
+        .scan(snapshot, entry => entry.indexFile().globalIndexMeta() != null)
+        .asScala
+        .map(entry => entry.indexFile().globalIndexMeta().indexFieldId())
+        .map(fieldId => rowType.getField(fieldId).name())
+        .toSet
+
+      val conflicted = updatedColNames.intersect(globalIndexedFieldNames)
+      if (conflicted.nonEmpty) {
+        throw new RuntimeException(
+          s"""MergeInto: update columns contain globally indexed columns, not supported now.
+             |Updated columns: ${updatedColNames.toSeq.sorted.mkString("[", ", ", "]")}
+             |Global-indexed columns: ${globalIndexedFieldNames.toSeq.sorted.mkString("[", ", ", "]")}
+             |Conflicted columns: ${conflicted.toSeq.sorted.mkString("[", ", ", "]")}
+             |""".stripMargin)
+      }
+    }
+    case None => ()
+  }
+
   private val firstRowIds: Seq[Long] = table
     .store()
     .newScan()
@@ -230,18 +274,6 @@ case class MergeIntoPaimonDataEvolutionTable(
       (o1, o2) => {
         o1.toString().compareTo(o2.toString())
       }) ++ mergeFields
-    val updateColumns = mutable.Set[AttributeReference]()
-    for (action <- matchedActions) {
-      action match {
-        case updateAction: UpdateAction =>
-          for (assignment <- updateAction.assignments) {
-            if (!assignment.key.equals(assignment.value)) {
-              val key = assignment.key.asInstanceOf[AttributeReference]
-              updateColumns ++= Seq(key)
-            }
-          }
-      }
-    }
 
     val updateColumnsSorted = updateColumns.toSeq.sortBy(
       s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
