@@ -18,7 +18,6 @@
 import logging
 import os
 import subprocess
-import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -278,7 +277,7 @@ class FileIO:
             return True
         except FileNotFoundError:
             return False
-        except (PermissionError, OSError) as e:
+        except (PermissionError, OSError):
             raise
         except Exception as e:
             self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
