@@ -26,7 +26,6 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
-from pyarrow.fs import LocalFileSystem
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
@@ -332,6 +331,12 @@ class FileIO:
             return input_stream.read().decode('utf-8')
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
+        if self.exists(path):
+            path_str = self.to_filesystem_path(path)
+            file_info = self.filesystem.get_file_info([path_str])[0]
+            if file_info.type == pyarrow.fs.FileType.Directory:
+                return False
+        
         temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:

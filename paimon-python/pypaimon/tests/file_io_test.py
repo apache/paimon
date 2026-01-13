@@ -335,5 +335,29 @@ class FileIOTest(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_try_to_write_atomic(self):
+        temp_dir = tempfile.mkdtemp(prefix="file_io_try_write_atomic_test_")
+        try:
+            warehouse_path = f"file://{temp_dir}"
+            file_io = FileIO(warehouse_path, {})
+
+            target_dir = os.path.join(temp_dir, "target_dir")
+            os.makedirs(target_dir)
+            
+            result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
+            self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
+            
+            self.assertTrue(os.path.isdir(target_dir))
+            self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
+            
+            normal_file = os.path.join(temp_dir, "normal_file.txt")
+            result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
+            self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
+            self.assertTrue(os.path.exists(normal_file))
+            with open(normal_file, "r") as f:
+                self.assertEqual(f.read(), "test content")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 if __name__ == '__main__':
     unittest.main()
