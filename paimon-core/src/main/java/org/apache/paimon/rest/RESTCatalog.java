@@ -74,6 +74,8 @@ import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
+import org.jetbrains.annotations.NotNull;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -537,47 +539,7 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(identifier, "authTable");
         try {
             AuthTableQueryResponse response = api.authTableQuery(identifier, select);
-
-            List<String> predicateJsons = response == null ? null : response.filter();
-            Predicate rowFilter = null;
-            if (predicateJsons != null && !predicateJsons.isEmpty()) {
-                List<Predicate> predicates = new ArrayList<>();
-                for (String json : predicateJsons) {
-                    if (json == null || json.trim().isEmpty()) {
-                        continue;
-                    }
-                    Predicate predicate = JsonSerdeUtil.fromJson(json, Predicate.class);
-                    if (predicate != null) {
-                        predicates.add(predicate);
-                    }
-                }
-                if (predicates.size() == 1) {
-                    rowFilter = predicates.get(0);
-                } else if (!predicates.isEmpty()) {
-                    rowFilter = new CompoundPredicate(And.INSTANCE, predicates);
-                }
-            }
-
-            Map<String, Transform> columnMasking = new TreeMap<>();
-            Map<String, String> maskingJsons = response == null ? null : response.columnMasking();
-            if (maskingJsons != null && !maskingJsons.isEmpty()) {
-                for (Map.Entry<String, String> e : maskingJsons.entrySet()) {
-                    String column = e.getKey();
-                    String json = e.getValue();
-                    if (column == null
-                            || column.trim().isEmpty()
-                            || json == null
-                            || json.trim().isEmpty()) {
-                        continue;
-                    }
-                    Transform transform = JsonSerdeUtil.fromJson(json, Transform.class);
-                    if (transform == null) {
-                        continue;
-                    }
-                    columnMasking.put(column, transform);
-                }
-            }
-            return new TableQueryAuthResult(rowFilter, columnMasking);
+            return getTableQueryAuthResult(response);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -1202,5 +1164,46 @@ public class RESTCatalog implements Catalog {
             }
         }
         return schema;
+    }
+
+    private static @NotNull TableQueryAuthResult getTableQueryAuthResult(
+            AuthTableQueryResponse response) {
+        List<String> predicateJsons = response == null ? null : response.filter();
+        Predicate rowFilter = null;
+        if (predicateJsons != null && !predicateJsons.isEmpty()) {
+            List<Predicate> predicates = new ArrayList<>();
+            for (String json : predicateJsons) {
+                if (StringUtils.isEmpty(json)) {
+                    continue;
+                }
+                Predicate predicate = JsonSerdeUtil.fromJson(json, Predicate.class);
+                if (predicate != null) {
+                    predicates.add(predicate);
+                }
+            }
+            if (predicates.size() == 1) {
+                rowFilter = predicates.get(0);
+            } else if (!predicates.isEmpty()) {
+                rowFilter = new CompoundPredicate(And.INSTANCE, predicates);
+            }
+        }
+
+        Map<String, Transform> columnMasking = new TreeMap<>();
+        Map<String, String> maskingJsons = response == null ? null : response.columnMasking();
+        if (maskingJsons != null && !maskingJsons.isEmpty()) {
+            for (Map.Entry<String, String> e : maskingJsons.entrySet()) {
+                String column = e.getKey();
+                String json = e.getValue();
+                if (StringUtils.isEmpty(column) || StringUtils.isEmpty(json)) {
+                    continue;
+                }
+                Transform transform = JsonSerdeUtil.fromJson(json, Transform.class);
+                if (transform == null) {
+                    continue;
+                }
+                columnMasking.put(column, transform);
+            }
+        }
+        return new TableQueryAuthResult(rowFilter, columnMasking);
     }
 }
