@@ -2597,7 +2597,7 @@ public class CoreOptions implements Serializable {
     public boolean blobSplitByFileSize() {
         return options.contains(BLOB_SPLIT_BY_FILE_SIZE)
                 ? options.get(BLOB_SPLIT_BY_FILE_SIZE)
-                : options.get(BLOB_AS_DESCRIPTOR);
+                : !options.get(BLOB_AS_DESCRIPTOR);
     }
 
     public long compactionFileSize(boolean hasPrimaryKey) {
