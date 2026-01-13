@@ -655,6 +655,16 @@ public class CoreOptions implements Serializable {
                                             "Target size of a blob file. Default is value of TARGET_FILE_SIZE.")
                                     .build());
 
+    public static final ConfigOption<Boolean> BLOB_FILE_SIZE_COUNT_IN_SPLITTING =
+            key("blob.file-size-count-in-splitting")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Target size of a blob file. Default is value of TARGET_FILE_SIZE.")
+                                    .build());
+
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
             key("num-sorted-run.compaction-trigger")
                     .intType()
@@ -2582,6 +2592,12 @@ public class CoreOptions implements Serializable {
         return options.getOptional(BLOB_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)
                 .orElse(targetFileSize(false));
+    }
+
+    public boolean blobFileSizeCountInSplitting() {
+        return options.contains(BLOB_FILE_SIZE_COUNT_IN_SPLITTING)
+                ? options.get(BLOB_FILE_SIZE_COUNT_IN_SPLITTING)
+                : options.get(BLOB_AS_DESCRIPTOR);
     }
 
     public long compactionFileSize(boolean hasPrimaryKey) {
