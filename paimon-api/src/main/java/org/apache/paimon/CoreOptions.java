@@ -2594,7 +2594,7 @@ public class CoreOptions implements Serializable {
                 .orElse(targetFileSize(false));
     }
 
-    public boolean blobFileSizeCountInSplitting() {
+    public boolean blobSplitByFileSize() {
         return options.contains(BLOB_SPLIT_BY_FILE_SIZE)
                 ? options.get(BLOB_SPLIT_BY_FILE_SIZE)
                 : options.get(BLOB_AS_DESCRIPTOR);
