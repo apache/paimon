@@ -173,7 +173,8 @@ public class DataFileIndexWriterTest {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
-                        false);
+                        false,
+                        null);
 
         Table table = fileSystemCatalog.getTable(Identifier.create(tableName, tableName));
         ReadBuilder readBuilder = table.newReadBuilder();

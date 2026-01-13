@@ -237,7 +237,8 @@ public class FaissVectorGlobalIndexScanTest {
                             entry.fileName(),
                             fileSize,
                             entry.rowCount(),
-                            globalMeta));
+                            globalMeta,
+                            null));
         }
 
         // Commit index
@@ -323,7 +324,8 @@ public class FaissVectorGlobalIndexScanTest {
                             entry.fileName(),
                             fileSize,
                             entry.rowCount(),
-                            globalMeta));
+                            globalMeta,
+                            null));
         }
         return metas;
     }

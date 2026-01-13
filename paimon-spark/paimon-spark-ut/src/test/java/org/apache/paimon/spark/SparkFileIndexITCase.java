@@ -211,7 +211,8 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
-                        false);
+                        false,
+                        null);
 
         Table table = fileSystemCatalog.getTable(Identifier.create("db", tableName));
         ReadBuilder readBuilder = table.newReadBuilder();

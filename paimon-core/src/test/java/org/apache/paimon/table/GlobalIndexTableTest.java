@@ -283,7 +283,7 @@ public class GlobalIndexTableTest extends DataEvolutionTestBase {
         ResultEntry result = results.get(0);
 
         String fileName = result.fileName();
-        long fileSize = fileIO.getFileSize(indexFileReadWrite.filePath(fileName));
+        long fileSize = indexFileReadWrite.fileSize(fileName);
         GlobalIndexMeta globalIndexMeta =
                 new GlobalIndexMeta(0, result.rowCount() - 1, indexField.id(), null, result.meta());
         return Collections.singletonList(
@@ -292,7 +292,8 @@ public class GlobalIndexTableTest extends DataEvolutionTestBase {
                         fileName,
                         fileSize,
                         result.rowCount(),
-                        globalIndexMeta));
+                        globalIndexMeta,
+                        null));
     }
 
     private List<IndexFileMeta> createBTreeIndex(
@@ -375,7 +376,7 @@ public class GlobalIndexTableTest extends DataEvolutionTestBase {
             ResultEntry entry = entries.get(0);
 
             String fileName = entry.fileName();
-            long fileSize = fileIO.getFileSize(indexFileReadWrite.filePath(fileName));
+            long fileSize = indexFileReadWrite.fileSize(fileName);
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(range.from, range.to, indexField.id(), null, entry.meta());
 
@@ -385,7 +386,8 @@ public class GlobalIndexTableTest extends DataEvolutionTestBase {
                             fileName,
                             fileSize,
                             entry.rowCount(),
-                            globalIndexMeta));
+                            globalIndexMeta,
+                            null));
         }
 
         return indexFileMetas;

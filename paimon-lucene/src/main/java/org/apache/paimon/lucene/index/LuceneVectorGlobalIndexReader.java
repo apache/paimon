@@ -227,7 +227,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             synchronized (this) {
                 if (!indicesLoaded) {
                     for (GlobalIndexIOMeta meta : files) {
-                        try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
+                        try (SeekableInputStream in = fileReader.getInputStream(meta)) {
                             LuceneIndexMMapDirectory directory = null;
                             IndexReader reader = null;
                             try {
