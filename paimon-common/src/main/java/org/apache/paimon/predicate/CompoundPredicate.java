@@ -43,8 +43,6 @@ public class CompoundPredicate implements Predicate {
     private static final String FIELD_CHILDREN = "children";
 
     private static final String FUNCTION_TYPE_PROPERTY = "type";
-    private static final String FUNCTION_TYPE_AND = "and";
-    private static final String FUNCTION_TYPE_OR = "or";
 
     @JsonProperty(FIELD_FUNCTION)
     private final Function function;
@@ -114,8 +112,8 @@ public class CompoundPredicate implements Predicate {
             include = JsonTypeInfo.As.PROPERTY,
             property = FUNCTION_TYPE_PROPERTY)
     @JsonSubTypes({
-        @JsonSubTypes.Type(value = And.class, name = FUNCTION_TYPE_AND),
-        @JsonSubTypes.Type(value = Or.class, name = FUNCTION_TYPE_OR)
+        @JsonSubTypes.Type(value = And.class, name = And.NAME),
+        @JsonSubTypes.Type(value = Or.class, name = Or.NAME)
     })
     public abstract static class Function implements Serializable {
 

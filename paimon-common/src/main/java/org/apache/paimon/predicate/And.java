@@ -32,6 +32,7 @@ public class And extends CompoundPredicate.Function {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "AND";
     public static final And INSTANCE = new And();
 
     @JsonCreator
