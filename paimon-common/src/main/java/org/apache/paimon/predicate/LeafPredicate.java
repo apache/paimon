@@ -32,6 +32,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.InternalRowUtils.get;
@@ -150,6 +151,22 @@ public class LeafPredicate implements Predicate {
     @Override
     public <T> T visit(PredicateVisitor<T> visitor) {
         return visitor.visit(this);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        LeafPredicate that = (LeafPredicate) o;
+        return Objects.equals(transform, that.transform)
+                && Objects.equals(function, that.function)
+                && Objects.equals(literals, that.literals);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(transform, function, literals);
     }
 
     @Override

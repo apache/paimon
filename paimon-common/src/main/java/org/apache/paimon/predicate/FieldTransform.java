@@ -77,4 +77,9 @@ public class FieldTransform implements Transform {
     public int hashCode() {
         return Objects.hashCode(fieldRef);
     }
+
+    @Override
+    public String toString() {
+        return "FieldTransform{" + "fieldRef=" + fieldRef + '}';
+    }
 }
