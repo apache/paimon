@@ -1393,6 +1393,42 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.</td>
         </tr>
         <tr>
+            <td><h5>variant.inferShreddingSchema</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to automatically infer the shredding schema when writing Variant columns.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxInferBufferRow</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Integer</td>
+            <td>Maximum number of rows to buffer for schema inference.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxSchemaDepth</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>Maximum traversal depth in Variant values during schema inference.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxSchemaWidth</h5></td>
+            <td style="word-wrap: break-word;">300</td>
+            <td>Integer</td>
+            <td>Maximum number of shredded fields allowed in an inferred schema.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.minFieldCardinalityRatio</h5></td>
+            <td style="word-wrap: break-word;">0.1</td>
+            <td>Double</td>
+            <td>Minimum fraction of rows that must contain a field for it to be shredded. Fields below this threshold will remain in the un-shredded Variant binary.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shreddingSchema</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The Variant shredding schema for writing.</td>
+        </tr>
+        <tr>
             <td><h5>write-buffer-for-append</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

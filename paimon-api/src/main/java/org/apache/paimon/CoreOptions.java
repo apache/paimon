@@ -359,6 +359,48 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription("Whether enabled read file index.");
 
+    public static final ConfigOption<String> VARIANT_SHREDDING_SCHEMA =
+            key("variant.shreddingSchema")
+                    .stringType()
+                    .noDefaultValue()
+                    .withFallbackKeys("parquet.variant.shreddingSchema")
+                    .withDescription("The Variant shredding schema for writing.");
+
+    public static final ConfigOption<Boolean> VARIANT_INFER_SHREDDING_SCHEMA =
+            key("variant.inferShreddingSchema")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to automatically infer the shredding schema when writing Variant columns.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_SCHEMA_WIDTH =
+            key("variant.shredding.maxSchemaWidth")
+                    .intType()
+                    .defaultValue(300)
+                    .withDescription(
+                            "Maximum number of shredded fields allowed in an inferred schema.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_SCHEMA_DEPTH =
+            key("variant.shredding.maxSchemaDepth")
+                    .intType()
+                    .defaultValue(50)
+                    .withDescription(
+                            "Maximum traversal depth in Variant values during schema inference.");
+
+    public static final ConfigOption<Double> VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO =
+            key("variant.shredding.minFieldCardinalityRatio")
+                    .doubleType()
+                    .defaultValue(0.1)
+                    .withDescription(
+                            "Minimum fraction of rows that must contain a field for it to be shredded. "
+                                    + "Fields below this threshold will remain in the un-shredded Variant binary.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW =
+            key("variant.shredding.maxInferBufferRow")
+                    .intType()
+                    .defaultValue(4096)
+                    .withDescription("Maximum number of rows to buffer for schema inference.");
+
     public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
                     .stringType()
