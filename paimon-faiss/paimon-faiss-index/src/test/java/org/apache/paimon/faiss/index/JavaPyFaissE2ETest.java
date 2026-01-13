@@ -230,7 +230,8 @@ public class JavaPyFaissE2ETest {
                             entry.fileName(),
                             fileSize,
                             entry.rowCount(),
-                            globalMeta));
+                            globalMeta,
+                            null));
         }
         return metas;
     }

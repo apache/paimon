@@ -200,6 +200,7 @@ jobs:
             py4j==0.10.9.9 \
             requests \
             parameterized==0.9.0 \
+            faiss \
             packaging
             
 

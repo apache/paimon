@@ -49,7 +49,13 @@ class IndexManifestFile:
 
         with self.file_io.new_input_stream(index_manifest_path) as input_stream:
             file_bytes = input_stream.read()
-        return self._read_avro(file_bytes, index_manifest_path)
+
+        # Detect format: Avro files start with 'Obj' magic bytes
+        if file_bytes.startswith(b'Obj'):
+            return self._read_avro(file_bytes, index_manifest_path)
+        else:
+            # Fallback to JSON format (used by Python tests)
+            return self._read_json(file_bytes, index_manifest_path)
 
     def _read_avro(self, file_bytes: bytes, index_manifest_path: str) -> List[IndexManifestEntry]:
         entries = []
@@ -101,6 +107,58 @@ class IndexManifestFile:
         except Exception as e:
             raise RuntimeError(
                 f"Failed to read Avro index manifest file {index_manifest_path}: {e}"
+            ) from e
+
+        return entries
+
+    def _read_json(
+        self, file_bytes: bytes, index_manifest_path: str
+    ) -> List[IndexManifestEntry]:
+        """Read JSON formatted index manifest (used by Python tests)."""
+        import json
+
+        entries = []
+        try:
+            data = json.loads(file_bytes.decode('utf-8'))
+            for record in data:
+                index_file_data = record.get('index_file', {})
+                global_index_data = index_file_data.get('global_index_meta')
+
+                global_index_meta = None
+                if global_index_data:
+                    global_index_meta = GlobalIndexMeta(
+                        row_range_start=global_index_data.get('row_range_start', 0),
+                        row_range_end=global_index_data.get('row_range_end', 0),
+                        index_field_id=global_index_data.get('index_field_id', 0),
+                        index_meta=global_index_data.get('index_meta')
+                    )
+
+                index_file_meta = IndexFileMeta(
+                    index_type=index_file_data.get('index_type', ''),
+                    file_name=index_file_data.get('file_name', ''),
+                    file_size=index_file_data.get('file_size', 0),
+                    row_count=index_file_data.get('row_count', 0),
+                    dv_ranges=None,
+                    external_path=index_file_data.get('external_path'),
+                    global_index_meta=global_index_meta
+                )
+
+                from pypaimon.table.row.generic_row import GenericRow
+                partition_values = record.get('partition', [])
+                # Use partition key fields from table schema
+                partition = GenericRow(partition_values, self.partition_keys_fields)
+
+                entry = IndexManifestEntry(
+                    kind=record.get('kind', 0),
+                    partition=partition,
+                    bucket=record.get('bucket', 0),
+                    index_file=index_file_meta
+                )
+                entries.append(entry)
+
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to read JSON index manifest file {index_manifest_path}: {e}"
             ) from e
 
         return entries

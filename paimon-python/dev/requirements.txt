@@ -40,3 +40,4 @@ readerwriterlock>=1,<2
 torch
 zstandard>=0.19,<1
 cramjam>=1.3.0,<3; python_version>="3.7"
+faiss
