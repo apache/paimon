@@ -655,14 +655,14 @@ public class CoreOptions implements Serializable {
                                             "Target size of a blob file. Default is value of TARGET_FILE_SIZE.")
                                     .build());
 
-    public static final ConfigOption<Boolean> BLOB_FILE_SIZE_COUNT_IN_SPLITTING =
-            key("blob.file-size-count-in-splitting")
+    public static final ConfigOption<Boolean> BLOB_SPLIT_BY_FILE_SIZE =
+            key("blob.split-by-file-size")
                     .booleanType()
                     .noDefaultValue()
                     .withDescription(
                             Description.builder()
                                     .text(
-                                            "Target size of a blob file. Default is value of TARGET_FILE_SIZE.")
+                                            "Whether to consider blob file size as a factor when performing scan splitting.")
                                     .build());
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
@@ -2595,8 +2595,8 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean blobFileSizeCountInSplitting() {
-        return options.contains(BLOB_FILE_SIZE_COUNT_IN_SPLITTING)
-                ? options.get(BLOB_FILE_SIZE_COUNT_IN_SPLITTING)
+        return options.contains(BLOB_SPLIT_BY_FILE_SIZE)
+                ? options.get(BLOB_SPLIT_BY_FILE_SIZE)
                 : options.get(BLOB_AS_DESCRIPTOR);
     }
 
