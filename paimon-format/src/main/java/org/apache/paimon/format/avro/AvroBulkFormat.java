@@ -20,7 +20,6 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.fs.ByteArraySeekableStream;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordReader;
@@ -34,24 +33,14 @@ import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.SeekableInput;
 import org.apache.avro.io.DatumReader;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.function.Supplier;
 
 /** Provides a {@link FormatReaderFactory} for Avro records. */
 public class AvroBulkFormat implements FormatReaderFactory {
-
-    private static final Logger LOG = LoggerFactory.getLogger(AvroBulkFormat.class);
-
-    private static final String CACHE_DIR =
-            System.getProperty("java.io.tmpdir") + "/paimon_avro_cache";
 
     protected final RowType projectedRowType;
 
@@ -89,52 +78,8 @@ public class AvroBulkFormat implements FormatReaderFactory {
         private DataFileReader<InternalRow> createReaderFromPath(Path path, long fileSize)
                 throws IOException {
             DatumReader<InternalRow> datumReader = new AvroRowDatumReader(projectedRowType);
-
-            // LOG.info("createReaderFromPath for {}, {}", path, fileSize);
-            // long startTime = System.currentTimeMillis();
-
-            // byte[] content = new byte[(int) fileSize];
-            // File localCacheFile = getLocalCacheFile(path);
-            // if (localCacheFile.exists() && localCacheFile.length() == fileSize) {
-            //     LOG.info("Using local cache for {}: {}", path, localCacheFile);
-            //     try (InputStream inputStream =
-            //             new LocalFileIO.LocalSeekableInputStream(localCacheFile)) {
-            //         IOUtils.readFully(inputStream, content);
-            //     }
-            //     LOG.info(
-            //             "Loaded local cache for {}: {}, duration: {}ms",
-            //             path,
-            //             localCacheFile,
-            //             System.currentTimeMillis() - startTime);
-            // } else {
-            //     LOG.info("Downloading remote file to local cache for {}: {}", path,
-            // localCacheFile);
-            //     try (InputStream inputStream = fileIO.newInputStream(path)) {
-            //         IOUtils.readFully(inputStream, content);
-            //     }
-            //     LOG.info(
-            //             "createReaderFromPath read byteArray for {}, bytes: {}, duration: {}ms",
-            //             path,
-            //             content.length,
-            //             System.currentTimeMillis() - startTime);
-            //     saveToLocalCache(localCacheFile, content);
-            //     LOG.info(
-            //             "Downloaded remote file to local cache for {}: {}, duration: {}ms",
-            //             path,
-            //             localCacheFile,
-            //             System.currentTimeMillis() - startTime);
-            // }
-
-            SeekableInput in;
-            if (fileSize > Integer.MAX_VALUE) {
-                in = new SeekableInputStreamWrapper(fileIO.newInputStream(path), fileSize);
-            } else {
-                byte[] content = new byte[(int) fileSize];
-                try (InputStream inputStream = fileIO.newInputStream(path)) {
-                    IOUtils.readFully(inputStream, content);
-                }
-                in = new SeekableInputStreamWrapper(new ByteArraySeekableStream(content), fileSize);
-            }
+            SeekableInput in =
+                    new SeekableInputStreamWrapper(fileIO.newInputStream(path), fileSize);
             try {
                 return (DataFileReader<InternalRow>) DataFileReader.openReader(in, datumReader);
             } catch (Throwable e) {
@@ -143,38 +88,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
             }
         }
 
-        private File getLocalCacheFile(Path path) {
-            if (path.toUri().getScheme() == null) {
-                // already a local file
-                return new File(path.toString());
-            }
-            String fsPath = path.toString().split("://")[1];
-            return new File(CACHE_DIR, fsPath);
-        }
-
-        private void saveToLocalCache(File localFile, byte[] content) {
-            try {
-                if (!localFile.getParentFile().exists()) {
-                    localFile.getParentFile().mkdirs();
-                }
-                File tempFile = new File(localFile.getPath() + ".tmp." + System.nanoTime());
-                try (FileOutputStream out = new FileOutputStream(tempFile)) {
-                    out.write(content);
-                }
-                if (!tempFile.renameTo(localFile)) {
-                    tempFile.delete();
-                }
-            } catch (IOException e) {
-                LOG.warn("Failed to save local cache for {}: {}", localFile, e.getMessage());
-            }
-        }
-
         @Nullable
         @Override
         public IteratorResultIterator readBatch() throws IOException {
-
-            // LOG.info("readBatch started for {}", filePath);
-
             Object ticket;
             try {
                 ticket = pool.pollEntry();
@@ -191,18 +107,10 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
             long rowPosition = currentRowPosition;
             currentRowPosition += reader.getBlockCount();
-
-            //            LOG.info("readBatch for {} found block of {}", reader.getBlockCount());
-
             IteratorWithException<InternalRow, IOException> iterator =
                     new AvroBlockIterator(reader.getBlockCount(), reader);
-            IteratorResultIterator out =
-                    new IteratorResultIterator(
-                            iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition);
-
-            // LOG.info("readBatch finished for {}", filePath);
-
-            return out;
+            return new IteratorResultIterator(
+                    iterator, () -> pool.recycler().recycle(ticket), filePath, rowPosition);
         }
 
         private boolean readNextBlock() throws IOException {
