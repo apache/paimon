@@ -41,7 +41,6 @@ import java.util.Optional;
         property = Predicate.Types.FIELD_TYPE)
 @JsonSubTypes({
     @JsonSubTypes.Type(value = LeafPredicate.class, name = Predicate.Types.LEAF),
-    @JsonSubTypes.Type(value = TransformPredicate.class, name = Predicate.Types.TRANSFORM),
     @JsonSubTypes.Type(value = CompoundPredicate.class, name = Predicate.Types.COMPOUND)
 })
 public interface Predicate extends Serializable {
@@ -71,7 +70,6 @@ public interface Predicate extends Serializable {
     class Types {
         public static final String FIELD_TYPE = "type";
         public static final String LEAF = "leaf";
-        public static final String TRANSFORM = "transform";
         public static final String COMPOUND = "compound";
 
         private Types() {}

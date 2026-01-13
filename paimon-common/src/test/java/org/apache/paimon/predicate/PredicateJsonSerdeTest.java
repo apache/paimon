@@ -94,7 +94,7 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"type\":\"compound\",\"function\":{\"type\":\"and\"},\"children\":[{\"type\":\"compound\",\"function\":{\"type\":\"and\"},\"children\":[{\"type\":\"leaf\",\"transform\":{\"type\":\"field\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":{\"type\":\"notEqual\"},\"literals\":[1]},{\"type\":\"leaf\",\"transform\":{\"type\":\"field\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":{\"type\":\"notEqual\"},\"literals\":[2]}]},{\"type\":\"leaf\",\"transform\":{\"type\":\"field\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"}},\"function\":{\"type\":\"notEqual\"},\"literals\":[3]}]}"),
 
-                // TransformPredicate - CastTransform
+                // LeafPredicate - CastTransform
                 TestSpec.forPredicate(
                                 builder.greaterThan(
                                         new CastTransform(
@@ -102,9 +102,9 @@ class PredicateJsonSerdeTest {
                                                 DataTypes.BIGINT()),
                                         10L))
                         .expectJson(
-                                "{\"type\":\"transform\",\"transform\":{\"type\":\"cast\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"},\"type\":\"BIGINT\"},\"function\":{\"type\":\"greaterThan\"},\"literals\":[10]}"),
+                                "{\"type\":\"leaf\",\"transform\":{\"type\":\"cast\",\"fieldRef\":{\"index\":0,\"name\":\"f0\",\"type\":\"INT\"},\"type\":\"BIGINT\"},\"function\":{\"type\":\"greaterThan\"},\"literals\":[10]}"),
 
-                // TransformPredicate - UpperTransform
+                // LeafPredicate - UpperTransform
                 TestSpec.forPredicate(
                                 builder.startsWith(
                                         new UpperTransform(
@@ -112,9 +112,9 @@ class PredicateJsonSerdeTest {
                                                         new FieldRef(2, "f2", DataTypes.STRING()))),
                                         BinaryString.fromString("ABC")))
                         .expectJson(
-                                "{\"type\":\"transform\",\"transform\":{\"type\":\"upper\",\"inputs\":[{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":{\"type\":\"startsWith\"},\"literals\":[\"ABC\"]}"),
+                                "{\"type\":\"leaf\",\"transform\":{\"type\":\"upper\",\"inputs\":[{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":{\"type\":\"startsWith\"},\"literals\":[\"ABC\"]}"),
 
-                // TransformPredicate - ConcatTransform
+                // LeafPredicate - ConcatTransform
                 TestSpec.forPredicate(
                                 builder.contains(
                                         new ConcatTransform(
@@ -125,9 +125,9 @@ class PredicateJsonSerdeTest {
                                                         null)),
                                         BinaryString.fromString("m")))
                         .expectJson(
-                                "{\"type\":\"transform\",\"transform\":{\"type\":\"concat\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"-\",{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"},null]},\"function\":{\"type\":\"contains\"},\"literals\":[\"m\"]}"),
+                                "{\"type\":\"leaf\",\"transform\":{\"type\":\"concat\",\"inputs\":[{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"-\",{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"},null]},\"function\":{\"type\":\"contains\"},\"literals\":[\"m\"]}"),
 
-                // TransformPredicate - ConcatWsTransform
+                // LeafPredicate - ConcatWsTransform
                 TestSpec.forPredicate(
                                 builder.endsWith(
                                         new ConcatWsTransform(
@@ -139,14 +139,14 @@ class PredicateJsonSerdeTest {
                                                         new FieldRef(2, "f2", DataTypes.STRING()))),
                                         BinaryString.fromString("z")))
                         .expectJson(
-                                "{\"type\":\"transform\",\"transform\":{\"type\":\"concat_ws\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":{\"type\":\"endsWith\"},\"literals\":[\"z\"]}"),
+                                "{\"type\":\"leaf\",\"transform\":{\"type\":\"concat_ws\",\"inputs\":[\"|\",{\"index\":1,\"name\":\"f1\",\"type\":\"STRING\"},\"X\",null,{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":{\"type\":\"endsWith\"},\"literals\":[\"z\"]}"),
 
                 // LeafPredicate - Like (non-negatable)
                 TestSpec.forPredicate(builder.like(2, BinaryString.fromString("%a%b%")))
                         .expectJson(
                                 "{\"type\":\"leaf\",\"transform\":{\"type\":\"field\",\"fieldRef\":{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}},\"function\":{\"type\":\"like\"},\"literals\":[\"%a%b%\"]}"),
 
-                // TransformPredicate - In with many values including nulls
+                // LeafPredicate - In with many values including nulls
                 TestSpec.forPredicate(
                                 builder.in(
                                         new UpperTransform(
@@ -154,7 +154,7 @@ class PredicateJsonSerdeTest {
                                                         new FieldRef(2, "f2", DataTypes.STRING()))),
                                         manyUpperStringsWithNulls()))
                         .expectJson(
-                                "{\"type\":\"transform\",\"transform\":{\"type\":\"upper\",\"inputs\":[{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":{\"type\":\"in\"},\"literals\":[null,\"S1\",\"S2\",\"S3\",\"S4\",null,\"S6\",\"S7\",\"S8\",\"S9\",null,\"S11\",\"S12\",\"S13\",\"S14\",null,\"S16\",\"S17\",\"S18\",\"S19\",null]}"),
+                                "{\"type\":\"leaf\",\"transform\":{\"type\":\"upper\",\"inputs\":[{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":{\"type\":\"in\"},\"literals\":[null,\"S1\",\"S2\",\"S3\",\"S4\",null,\"S6\",\"S7\",\"S8\",\"S9\",null,\"S11\",\"S12\",\"S13\",\"S14\",null,\"S16\",\"S17\",\"S18\",\"S19\",null]}"),
 
                 // CompoundPredicate - Complex combination with empty list
                 TestSpec.forPredicate(

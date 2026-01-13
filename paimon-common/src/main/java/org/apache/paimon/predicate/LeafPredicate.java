@@ -25,13 +25,11 @@ import org.apache.paimon.data.serializer.ListSerializer;
 import org.apache.paimon.data.serializer.NullableSerializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.IOException;
@@ -57,16 +55,18 @@ public class LeafPredicate implements Predicate {
 
     @JsonProperty(FIELD_TRANSFORM)
     private final Transform transform;
+
     @JsonProperty(FIELD_FUNCTION)
     private final LeafFunction function;
+
     private transient List<Object> literals;
 
     public LeafPredicate(
-        LeafFunction function,
-        DataType type,
-        int fieldIndex,
-        String fieldName,
-        List<Object> literals) {
+            LeafFunction function,
+            DataType type,
+            int fieldIndex,
+            String fieldName,
+            List<Object> literals) {
         this(new FieldTransform(new FieldRef(fieldIndex, fieldName, type)), function, literals);
     }
 
@@ -77,16 +77,15 @@ public class LeafPredicate implements Predicate {
     }
 
     public static LeafPredicate of(
-        Transform transform, LeafFunction function, List<Object> literals) {
+            Transform transform, LeafFunction function, List<Object> literals) {
         return new LeafPredicate(transform, function, literals);
     }
 
-
     @JsonCreator
-    protected static Predicate fromJson(
-        @JsonProperty(FIELD_TRANSFORM) Transform transform,
-        @JsonProperty(FIELD_FUNCTION) LeafFunction function,
-        @JsonProperty(FIELD_LITERALS) List<Object> literals) {
+    protected static LeafPredicate fromJson(
+            @JsonProperty(FIELD_TRANSFORM) Transform transform,
+            @JsonProperty(FIELD_FUNCTION) LeafFunction function,
+            @JsonProperty(FIELD_LITERALS) List<Object> literals) {
         List<Object> convertedLiterals = deserializeLiterals(transform.outputType(), literals);
         return new LeafPredicate(transform, function, convertedLiterals);
     }
@@ -139,7 +138,7 @@ public class LeafPredicate implements Predicate {
 
     @Override
     public boolean test(
-        long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts) {
+            long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts) {
         Optional<FieldRef> fieldRefOptional = fieldRefOptional();
         if (!fieldRefOptional.isPresent()) {
             return true;
@@ -170,14 +169,14 @@ public class LeafPredicate implements Predicate {
         }
         FieldRef fieldRef = fieldRefOptional.get();
         return function.negate()
-            .map(
-                negate ->
-                    new LeafPredicate(
-                        negate,
-                        fieldRef.type(),
-                        fieldRef.index(),
-                        fieldRef.name(),
-                        literals));
+                .map(
+                        negate ->
+                                new LeafPredicate(
+                                        negate,
+                                        fieldRef.type(),
+                                        fieldRef.index(),
+                                        fieldRef.name(),
+                                        literals));
     }
 
     @Override
@@ -192,8 +191,8 @@ public class LeafPredicate implements Predicate {
         }
         LeafPredicate that = (LeafPredicate) o;
         return Objects.equals(transform, that.transform)
-            && Objects.equals(function, that.function)
-            && Objects.equals(literals, that.literals);
+                && Objects.equals(function, that.function)
+                && Objects.equals(literals, that.literals);
     }
 
     @Override
@@ -213,14 +212,14 @@ public class LeafPredicate implements Predicate {
             literalsStr = StringUtils.truncatedString(literals, "[", ", ", "]");
         }
         return literalsStr.isEmpty()
-            ? function + "(" + transform + ")"
-            : function + "(" + transform + ", " + literalsStr + ")";
+                ? function + "(" + transform + ")"
+                : function + "(" + transform + ", " + literalsStr + ")";
     }
 
     private ListSerializer<Object> literalsSerializer() {
         return new ListSerializer<>(
-            NullableSerializer.wrapIfNullIsNotSupported(
-                InternalSerializers.create(transform.outputType())));
+                NullableSerializer.wrapIfNullIsNotSupported(
+                        InternalSerializers.create(transform.outputType())));
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
