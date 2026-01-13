@@ -20,6 +20,9 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.io.Serializable;
 import java.util.Objects;
 
@@ -28,24 +31,35 @@ public class FieldRef implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final String FIELD_INDEX = "index";
+    private static final String FIELD_NAME = "name";
+    private static final String FIELD_TYPE = "type";
+
     private final int index;
     private final String name;
     private final DataType type;
 
-    public FieldRef(int index, String name, DataType type) {
+    @JsonCreator
+    public FieldRef(
+            @JsonProperty(FIELD_INDEX) int index,
+            @JsonProperty(FIELD_NAME) String name,
+            @JsonProperty(FIELD_TYPE) DataType type) {
         this.index = index;
         this.name = name;
         this.type = type;
     }
 
+    @JsonProperty(FIELD_INDEX)
     public int index() {
         return index;
     }
 
+    @JsonProperty(FIELD_NAME)
     public String name() {
         return name;
     }
 
+    @JsonProperty(FIELD_TYPE)
     public DataType type() {
         return type;
     }
