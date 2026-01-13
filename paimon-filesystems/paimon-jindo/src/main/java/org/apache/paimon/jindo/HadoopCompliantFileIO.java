@@ -62,6 +62,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     private static final String META_CACHE_ENABLED_TAG = "meta";
     private static final String READ_CACHE_ENABLED_TAG = "read";
     private static final String WRITE_CACHE_ENABLED_TAG = "write";
+    private static final String DISABLE_CACHE_TAG = "none";
 
     protected boolean metaCacheEnabled = false;
     protected boolean readCacheEnabled = false;
@@ -89,7 +90,8 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public void configure(CatalogContext context) {
         if (context.options().get(DLF_FILE_IO_CACHE_ENABLED)
-                && context.options().get(FILE_IO_CACHE_POLICY) != null) {
+                && context.options().get(FILE_IO_CACHE_POLICY) != null
+                && !context.options().get(FILE_IO_CACHE_POLICY).contains(DISABLE_CACHE_TAG)) {
             if (context.options().get("fs.jindocache.namespace.rpc.address") == null) {
                 LOG.info(
                         "FileIO cache is enabled but JindoCache RPC address is not set, fallback to no-cache");
