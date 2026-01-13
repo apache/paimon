@@ -26,6 +26,7 @@ from urllib.parse import splitport, urlparse
 import pyarrow
 from packaging.version import parse
 from pyarrow._fs import FileSystem
+from pyarrow.fs import LocalFileSystem
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
@@ -202,7 +203,7 @@ class FileIO:
         file_info = file_infos[0]
         
         if file_info.type == pyarrow.fs.FileType.NotFound:
-            raise FileNotFoundError(f"File {path} does not exist")
+            raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
         
         return file_info
 
@@ -232,7 +233,7 @@ class FileIO:
                 selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
                 dir_contents = self.filesystem.get_file_info(selector)
                 if len(dir_contents) > 0:
-                    raise OSError(f"Directory {path_str} is not empty")
+                    raise OSError(f"Directory {path} is not empty")
             if recursive:
                 self.filesystem.delete_dir_contents(path_str)
                 self.filesystem.delete_dir(path_str)
@@ -249,26 +250,31 @@ class FileIO:
         if file_info.type == pyarrow.fs.FileType.Directory:
             return True
         elif file_info.type == pyarrow.fs.FileType.File:
-            raise FileExistsError(f"Path exists but is not a directory: {path_str}")
+            raise FileExistsError(f"Path exists but is not a directory: {path}")
         
         self.filesystem.create_dir(path_str, recursive=True)
         return True
 
     def rename(self, src: str, dst: str) -> bool:
+        dst_str = self.to_filesystem_path(dst)
+        dst_parent = Path(dst_str).parent
+        if str(dst_parent) and not self.exists(str(dst_parent)):
+            self.mkdirs(str(dst_parent))
+        
+        src_str = self.to_filesystem_path(src)
+        
         try:
-            dst_str = self.to_filesystem_path(dst)
-            dst_parent = Path(dst_str).parent
-            if str(dst_parent) and not self.exists(str(dst_parent)):
-                self.mkdirs(str(dst_parent))
-
-            src_str = self.to_filesystem_path(src)
+            if hasattr(self.filesystem, 'rename'):
+                return self.filesystem.rename(src_str, dst_str)
             
             dst_file_info = self.filesystem.get_file_info([dst_str])[0]
             if dst_file_info.type != pyarrow.fs.FileType.NotFound:
                 if dst_file_info.type == pyarrow.fs.FileType.File:
                     return False
+                # Make it compatible with HadoopFileIO: if dst is an existing directory,
+                # dst=dst/srcFileName
                 src_name = Path(src_str).name
-                dst_str = f"{dst_str.rstrip('/')}/{src_name}"
+                dst_str = str(Path(dst_str) / src_name)
                 final_dst_info = self.filesystem.get_file_info([dst_str])[0]
                 if final_dst_info.type != pyarrow.fs.FileType.NotFound:
                     return False
@@ -278,9 +284,6 @@ class FileIO:
         except FileNotFoundError:
             return False
         except (PermissionError, OSError):
-            raise
-        except Exception as e:
-            self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
             return False
 
     def delete_quietly(self, path: str):
@@ -354,13 +357,13 @@ class FileIO:
         if not overwrite and self.exists(target_path):
             raise FileExistsError(f"Target file {target_path} already exists and overwrite=False")
 
+        source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
         target_parent = Path(target_str).parent
         
         if str(target_parent) and not self.exists(str(target_parent)):
             self.mkdirs(str(target_parent))
 
-        source_str = self.to_filesystem_path(source_path)
         self.filesystem.copy_file(source_str, target_str)
 
     def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
