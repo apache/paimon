@@ -1020,6 +1020,32 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testIncrementScanModeWithInsertOverwrite() throws Exception {
+
+        sql("CREATE TABLE test_scan_mode (id INT PRIMARY KEY NOT ENFORCED, v STRING)");
+
+        // snapshot 1
+        sql("INSERT OVERWRITE test_scan_mode VALUES (1, 'A'), (1, 'B'), (1, 'C')");
+        // snapshot 2
+        sql("INSERT OVERWRITE test_scan_mode VALUES (1, 'C'), (1, 'D')");
+
+        List<Row> result =
+                sql(
+                        "SELECT * FROM `test_scan_mode$audit_log` "
+                                + "/*+ OPTIONS('incremental-between'='1,2','incremental-between-scan-mode'='diff') */");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("+I", 1, "D"));
+
+        // snapshot 3
+        sql("INSERT OVERWRITE test_scan_mode VALUES (1, 'D')");
+
+        result =
+                sql(
+                        "SELECT * FROM `test_scan_mode$audit_log` "
+                                + "/*+ OPTIONS('incremental-between'='2,2','incremental-between-scan-mode'='diff') */");
+        assertThat(result).isEmpty();
+    }
+
+    @Test
     public void testAuditLogTableWithComputedColumn() throws Exception {
         sql("CREATE TABLE test_table (a int, b int, c AS a + b);");
         String ddl = sql("SHOW CREATE TABLE `test_table$audit_log`").get(0).getFieldAs(0);
