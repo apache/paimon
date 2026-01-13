@@ -26,7 +26,7 @@ import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.MergeRows
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeRows, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.streaming.runtime.MetadataLogFileIndex
@@ -52,6 +52,12 @@ object MinorVersionShim {
     }
 
     MergeRows.Keep(ctx, condition, output)
+  }
+
+  def createUpdateAction(
+      condition: Option[Expression],
+      assignments: Seq[Assignment]): UpdateAction = {
+    UpdateAction(condition, assignments)
   }
 
   def createSparkInternalRow(rowType: RowType): SparkInternalRow = {

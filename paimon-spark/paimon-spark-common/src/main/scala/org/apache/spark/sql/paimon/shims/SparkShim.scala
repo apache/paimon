@@ -27,7 +27,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
@@ -92,6 +92,8 @@ trait SparkShim {
       withSchemaEvolution: Boolean): MergeIntoTable
 
   def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction
+
+  def createUpdateAction(condition: Option[Expression], assignments: Seq[Assignment]): UpdateAction
 
   // for variant
   def toPaimonVariant(o: Object): Variant
