@@ -90,3 +90,12 @@ class TableScan:
     def with_slice(self, start_pos, end_pos) -> 'TableScan':
         self.starting_scanner.with_slice(start_pos, end_pos)
         return self
+
+    def with_sample(self, num_rows: int) -> 'TableScan':
+        """Sample the table with the given number of rows.
+
+        params:
+            num_rows: The number of rows to sample.
+        """
+        self.starting_scanner.with_sample(num_rows)
+        return self

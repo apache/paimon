@@ -16,6 +16,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import os
+import random
+from collections import defaultdict
+from typing import Callable, List, Optional, Dict, Set
 from typing import List, Optional, Dict, Set
 
 from pypaimon.common.predicate import Predicate
@@ -66,11 +69,15 @@ class FullStartingScanner(StartingScanner):
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
         self.open_file_cost = options.source_split_open_file_cost()
-
+        # for shard
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
         self.start_pos_of_this_subtask = None
         self.end_pos_of_this_subtask = None
+        # for sample
+        self.sample_num_rows = None
+        self.sample_indexes = None
+        self.file_positions = None
 
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
@@ -238,6 +245,14 @@ class FullStartingScanner(StartingScanner):
             raise Exception("with_slice and with_shard cannot be used simultaneously")
         self.start_pos_of_this_subtask = start_pos
         self.end_pos_of_this_subtask = end_pos
+        return self
+
+    def with_sample(self, num_rows: int) -> 'FullStartingScanner':
+        if self.idx_of_this_subtask is not None:
+            raise Exception("with_sample and with_shard cannot be used simultaneously now")
+        if self.start_pos_of_this_subtask is not None:
+            raise Exception("with_sample and with_slice cannot be used simultaneously now")
+        self.sample_num_rows = num_rows
         return self
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:

@@ -48,7 +48,7 @@ from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
-from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
+from pypaimon.read.reader.shard_batch_reader import ShardBatchReader, SampleBatchReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
@@ -348,6 +348,26 @@ class RawFileSplitRead(SplitRead):
                     for_merge_read=False,
                     read_fields=read_fields,
                     row_tracking_enabled=True), start_pos, end_pos)
+        if file.file_name in self.split.shard_file_idx_map:
+            read_ranges = self.split.shard_file_idx_map[file.file_name]
+            if len(read_ranges) == 1:
+                read_range = read_ranges[0]
+                (start_pos, end_pos) = read_range.start, read_range.stop
+                if (start_pos, end_pos) == (-1, -1):
+                    return None
+                else:
+                    file_batch_reader = ShardBatchReader(self.file_reader_supplier(
+                        file=file,
+                        for_merge_read=False,
+                        read_fields=read_fields,
+                        row_tracking_enabled=True), start_pos, end_pos)
+            else:
+                sample_positions = [read_range.start for read_range in read_ranges]
+                file_batch_reader = SampleBatchReader(self.file_reader_supplier(
+                    file=file,
+                    for_merge_read=False,
+                    read_fields=read_fields,
+                    row_tracking_enabled=True), sample_positions)
         else:
             file_batch_reader = self.file_reader_supplier(
                 file=file,
@@ -496,18 +516,6 @@ class DataEvolutionSplitRead(SplitRead):
         # Split field bunches
         fields_files = self._split_field_bunches(need_merge_files)
 
-        # Validate row counts and first row IDs
-        row_count = fields_files[0].row_count()
-        first_row_id = fields_files[0].files()[0].first_row_id
-
-        for bunch in fields_files:
-            if bunch.row_count() != row_count:
-                raise ValueError("All files in a field merge split should have the same row count.")
-            if bunch.files()[0].first_row_id != first_row_id:
-                raise ValueError(
-                    "All files in a field merge split should have the same first row id and could not be null."
-                )
-
         # Create the union reader
         all_read_fields = self.read_fields
         file_record_readers = [None] * len(fields_files)
@@ -582,10 +590,26 @@ class DataEvolutionSplitRead(SplitRead):
                 return None
             else:
                 return ShardBatchReader(self.file_reader_supplier(
+        if file.file_name in self.split.shard_file_idx_map:
+            read_ranges = self.split.shard_file_idx_map[file.file_name]
+            if len(read_ranges) == 1:
+                read_range = read_ranges[0]
+                (start_pos, end_pos) = read_range.start, read_range.stop
+                if (start_pos, end_pos) == (-1, -1):
+                    return None
+                else:
+                    return ShardBatchReader(self.file_reader_supplier(
+                        file=file,
+                        for_merge_read=False,
+                        read_fields=read_fields,
+                        row_tracking_enabled=True), start_pos, end_pos)
+            else:
+                sample_positions = [read_range.start for read_range in read_ranges]
+                return SampleBatchReader(self.file_reader_supplier(
                     file=file,
                     for_merge_read=False,
                     read_fields=read_fields,
-                    row_tracking_enabled=True), begin_pos, end_pos)
+                    row_tracking_enabled=True), sample_positions)
         else:
             return self.file_reader_supplier(
                 file=file,
