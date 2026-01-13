@@ -19,8 +19,15 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Transform;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -35,7 +42,11 @@ import org.apache.flink.table.resource.ResourceUri;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -82,7 +93,6 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of("1", 11.0D), Row.of("2", 22.0D));
     }
 
-    @Test
     public void testExpiredDataToken() {
         Identifier identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
         RESTToken expiredDataToken =
@@ -198,5 +208,150 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
             assertThat(partitions).isNotEmpty();
             assertThat(partitions.get(0).totalBuckets()).isEqualTo(expectedTotalBuckets);
         }
+    }
+
+    public void testColumnMasking() {
+        String maskingTable = "column_masking_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, secret STRING, email STRING, phone STRING, salary STRING) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, maskingTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 's1', 'user1@example.com', '12345678901', '50000.0'), (2, 's2', 'user2@example.com', '12345678902', '60000.0')",
+                        DATABASE_NAME, maskingTable));
+
+        // Test single column masking
+        Transform maskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("secret", maskTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        assertThat(batchSql(String.format("SELECT secret FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("****"), Row.of("****"));
+        assertThat(batchSql(String.format("SELECT id FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of(1), Row.of(2));
+
+        // Test multiple columns masking
+        Transform emailMaskTransform =
+                new ConcatTransform(
+                        Collections.singletonList(BinaryString.fromString("***@***.com")));
+        Transform phoneMaskTransform =
+                new ConcatTransform(
+                        Collections.singletonList(BinaryString.fromString("***********")));
+        Transform salaryMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("0.0")));
+
+        columnMasking.put("email", emailMaskTransform);
+        columnMasking.put("phone", phoneMaskTransform);
+        columnMasking.put("salary", salaryMaskTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        assertThat(batchSql(String.format("SELECT email FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("***@***.com"), Row.of("***@***.com"));
+        assertThat(batchSql(String.format("SELECT phone FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("***********"), Row.of("***********"));
+        assertThat(batchSql(String.format("SELECT salary FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("0.0"), Row.of("0.0"));
+
+        // Test SELECT * with column masking
+        List<Row> allRows =
+                batchSql(
+                        String.format(
+                                "SELECT * FROM %s.%s ORDER BY id", DATABASE_NAME, maskingTable));
+        assertThat(allRows.size()).isEqualTo(2);
+        assertThat(allRows.get(0).getField(1)).isEqualTo("****");
+        assertThat(allRows.get(0).getField(2)).isEqualTo("***@***.com");
+        assertThat(allRows.get(0).getField(3)).isEqualTo("***********");
+        assertThat(allRows.get(0).getField(4)).isEqualTo("0.0");
+
+        // Test WHERE clause with masked column
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT id FROM %s.%s WHERE id = 1",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of(1));
+
+        // Test aggregation with masked columns
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(*) FROM %s.%s", DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of(2L));
+
+        // Test JOIN with masked columns
+        String joinTable = "join_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, name STRING)", DATABASE_NAME, joinTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 'Alice'), (2, 'Bob')",
+                        DATABASE_NAME, joinTable));
+
+        List<Row> joinResult =
+                batchSql(
+                        String.format(
+                                "SELECT t1.id, t1.secret, t2.name FROM %s.%s t1 JOIN %s.%s t2 ON t1.id = t2.id ORDER BY t1.id",
+                                DATABASE_NAME, maskingTable, DATABASE_NAME, joinTable));
+        assertThat(joinResult.size()).isEqualTo(2);
+        assertThat(joinResult.get(0).getField(1)).isEqualTo("****");
+        assertThat(joinResult.get(0).getField(2)).isEqualTo("Alice");
+
+        // Test UpperTransform
+        Transform upperTransform =
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "secret", DataTypes.STRING())));
+        columnMasking.clear();
+        columnMasking.put("secret", upperTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT secret FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("S1"), Row.of("S2"));
+
+        // Test ConcatWsTransform
+        Transform concatWsTransform =
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new FieldRef(1, "secret", DataTypes.STRING()),
+                                BinaryString.fromString("masked")));
+        columnMasking.clear();
+        columnMasking.put("secret", concatWsTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), columnMasking);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT secret FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("s1-masked"), Row.of("s2-masked"));
+
+        // Clear masking and verify original data
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, maskingTable), new HashMap<>());
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT secret FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(Row.of("s1"), Row.of("s2"));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT email FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, maskingTable)))
+                .containsExactlyInAnyOrder(
+                        Row.of("user1@example.com"), Row.of("user2@example.com"));
     }
 }

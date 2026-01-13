@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.data.variant.VariantAccessInfoUtils;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -26,6 +27,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -255,6 +257,20 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (variantAccessInfo != null) {
             read.withVariantAccess(variantAccessInfo);
+        }
+        if (table instanceof FileStoreTable) {
+            CoreOptions options = new CoreOptions(table.options());
+            if (options.queryAuthEnabled()) {
+                TableQueryAuth queryAuth =
+                        ((FileStoreTable) table).catalogEnvironment().tableQueryAuth(options);
+                TableQueryAuthResult authResult =
+                        queryAuth.auth(readType == null ? null : readType.getFieldNames());
+                if (authResult != null
+                        && authResult.columnMasking() != null
+                        && !authResult.columnMasking().isEmpty()) {
+                    return new MaskingTableRead(read, readType(), authResult.columnMasking());
+                }
+            }
         }
         return read;
     }

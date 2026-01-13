@@ -26,13 +26,20 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.CastTransform;
+import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -41,9 +48,17 @@ import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
-import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -56,12 +71,14 @@ import org.junit.jupiter.api.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -273,14 +290,13 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         Transform transform =
                 new UpperTransform(
                         Collections.singletonList(new FieldRef(1, "col2", DataTypes.STRING())));
-        String transformJson = JsonSerdeUtil.toFlatJson(transform);
 
         // Set up mock response with filter and columnMasking
-        List<String> filter = Collections.singletonList(predicateJson);
-        Map<String, String> columnMasking = new HashMap<>();
-        columnMasking.put("col2", transformJson);
-        AuthTableQueryResponse response = new AuthTableQueryResponse(filter, columnMasking);
-        restCatalogServer.setTableQueryAuthResponse(identifier, response);
+        List<Predicate> rowFilters = Collections.singletonList(predicate);
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("col2", transform);
+        restCatalogServer.setRowFilterAuth(identifier, rowFilters);
+        restCatalogServer.setColumnMaskingAuth(identifier, columnMasking);
 
         TableQueryAuthResult result = catalog.authTableQuery(identifier, null);
         assertThat(result.rowFilter()).isEqualTo(predicate);
@@ -290,6 +306,124 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
         catalog.dropTable(identifier, true);
         catalog.dropDatabase(identifier.getDatabaseName(), true, true);
+    }
+
+    @Test
+    void testColumnMaskingApplyOnRead() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_apply");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create table with multiple columns of different types
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "col1", DataTypes.STRING()));
+        fields.add(new DataField(1, "col2", DataTypes.STRING()));
+        fields.add(new DataField(2, "col3", DataTypes.INT()));
+        fields.add(new DataField(3, "col4", DataTypes.STRING()));
+        fields.add(new DataField(4, "col5", DataTypes.STRING()));
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Write test data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("hello"),
+                        BinaryString.fromString("world"),
+                        100,
+                        BinaryString.fromString("test"),
+                        BinaryString.fromString("data")));
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("foo"),
+                        BinaryString.fromString("bar"),
+                        200,
+                        BinaryString.fromString("example"),
+                        BinaryString.fromString("value")));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Set up column masking with various transform types
+        Map<String, Transform> columnMasking = new HashMap<>();
+
+        // Test 1: ConcatTransform - mask col1 with "****"
+        ConcatTransform concatTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        columnMasking.put("col1", concatTransform);
+
+        // Test 2: UpperTransform - convert col2 to uppercase
+        UpperTransform upperTransform =
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "col2", DataTypes.STRING())));
+        columnMasking.put("col2", upperTransform);
+
+        // Test 3: CastTransform - cast col3 (INT) to STRING
+        CastTransform castTransform =
+                new CastTransform(new FieldRef(2, "col3", DataTypes.INT()), DataTypes.STRING());
+        columnMasking.put("col3", castTransform);
+
+        // Test 4: ConcatWsTransform - concatenate col4 with separator
+        ConcatWsTransform concatWsTransform =
+                new ConcatWsTransform(
+                        java.util.Arrays.asList(
+                                BinaryString.fromString("-"),
+                                BinaryString.fromString("prefix"),
+                                new FieldRef(3, "col4", DataTypes.STRING())));
+        columnMasking.put("col4", concatWsTransform);
+
+        // col5 is intentionally not masked to verify unmasked columns work correctly
+
+        restCatalogServer.setColumnMaskingAuth(identifier, columnMasking);
+
+        // Read and verify masked data
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+
+        assertThat(rows).hasSize(2);
+
+        // Verify first row
+        InternalRow row1 = rows.get(0);
+        assertThat(row1.getString(0).toString())
+                .isEqualTo("****"); // col1 masked with ConcatTransform
+        assertThat(row1.getString(1).toString())
+                .isEqualTo("WORLD"); // col2 masked with UpperTransform
+        assertThat(row1.getString(2).toString())
+                .isEqualTo("100"); // col3 masked with CastTransform (INT->STRING)
+        assertThat(row1.getString(3).toString())
+                .isEqualTo("prefix-test"); // col4 masked with ConcatWsTransform
+        assertThat(row1.getString(4).toString())
+                .isEqualTo("data"); // col5 NOT masked - original value
+
+        // Verify second row
+        InternalRow row2 = rows.get(1);
+        assertThat(row2.getString(0).toString())
+                .isEqualTo("****"); // col1 masked with ConcatTransform
+        assertThat(row2.getString(1).toString())
+                .isEqualTo("BAR"); // col2 masked with UpperTransform
+        assertThat(row2.getString(2).toString())
+                .isEqualTo("200"); // col3 masked with CastTransform (INT->STRING)
+        assertThat(row2.getString(3).toString())
+                .isEqualTo("prefix-example"); // col4 masked with ConcatWsTransform
+        assertThat(row2.getString(4).toString())
+                .isEqualTo("value"); // col5 NOT masked - original value
     }
 
     private void checkHeader(String headerName, String headerValue) {

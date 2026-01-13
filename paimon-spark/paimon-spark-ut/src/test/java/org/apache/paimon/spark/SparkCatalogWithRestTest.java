@@ -20,11 +20,16 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.Transform;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
 import org.apache.paimon.rest.RESTCatalogServer;
 import org.apache.paimon.rest.auth.AuthProvider;
@@ -48,7 +53,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -235,6 +244,116 @@ public class SparkCatalogWithRestTest {
                                 .toString())
                 .isEqualTo("[1]");
         cleanFunction(functionName);
+    }
+
+    @Test
+    public void testColumnMasking() {
+        spark.sql(
+                "CREATE TABLE t_column_masking (id INT, secret STRING, email STRING, phone STRING) TBLPROPERTIES"
+                        + " ('bucket'='1', 'bucket-key'='id', 'file.format'='avro', 'query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_column_masking VALUES (1, 's1', 'user1@example.com', '12345678901'), (2, 's2', 'user2@example.com', '12345678902')");
+
+        // Test single column masking
+        Transform maskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("secret", maskTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_column_masking"), columnMasking);
+
+        assertThat(spark.sql("SELECT secret FROM t_column_masking").collectAsList().toString())
+                .isEqualTo("[[****], [****]]");
+        assertThat(spark.sql("SELECT id FROM t_column_masking").collectAsList().toString())
+                .isEqualTo("[[1], [2]]");
+
+        // Test multiple columns masking
+        Transform emailMaskTransform =
+                new ConcatTransform(
+                        Collections.singletonList(BinaryString.fromString("***@***.com")));
+        Transform phoneMaskTransform =
+                new ConcatTransform(
+                        Collections.singletonList(BinaryString.fromString("***********")));
+
+        columnMasking.put("email", emailMaskTransform);
+        columnMasking.put("phone", phoneMaskTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_column_masking"), columnMasking);
+
+        assertThat(spark.sql("SELECT email FROM t_column_masking").collectAsList().toString())
+                .isEqualTo("[[***@***.com], [***@***.com]]");
+        assertThat(spark.sql("SELECT phone FROM t_column_masking").collectAsList().toString())
+                .isEqualTo("[[***********], [***********]]");
+
+        // Test SELECT * with column masking
+        List<org.apache.spark.sql.Row> allRows =
+                spark.sql("SELECT * FROM t_column_masking").collectAsList();
+        assertThat(allRows.size()).isEqualTo(2);
+        assertThat(allRows.get(0).getString(1)).isEqualTo("****");
+        assertThat(allRows.get(0).getString(2)).isEqualTo("***@***.com");
+        assertThat(allRows.get(0).getString(3)).isEqualTo("***********");
+
+        // Test WHERE clause with masked column
+        assertThat(
+                        spark.sql("SELECT id FROM t_column_masking WHERE id = 1")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[1]]");
+
+        // Test aggregation with masked columns
+        assertThat(spark.sql("SELECT COUNT(*) FROM t_column_masking").collectAsList().toString())
+                .isEqualTo("[[2]]");
+
+        // Test UpperTransform
+        Transform upperTransform =
+                new UpperTransform(
+                        Collections.singletonList(
+                                new org.apache.paimon.predicate.FieldRef(
+                                        1, "secret", org.apache.paimon.types.DataTypes.STRING())));
+        columnMasking.clear();
+        columnMasking.put("secret", upperTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_column_masking"), columnMasking);
+
+        assertThat(
+                        spark.sql("SELECT secret FROM t_column_masking ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[S1], [S2]]");
+
+        // Test ConcatWsTransform
+        Transform concatWsTransform =
+                new ConcatWsTransform(
+                        Arrays.asList(
+                                BinaryString.fromString("-"),
+                                new org.apache.paimon.predicate.FieldRef(
+                                        1, "secret", org.apache.paimon.types.DataTypes.STRING()),
+                                BinaryString.fromString("masked")));
+        columnMasking.clear();
+        columnMasking.put("secret", concatWsTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_column_masking"), columnMasking);
+
+        assertThat(
+                        spark.sql("SELECT secret FROM t_column_masking ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[s1-masked], [s2-masked]]");
+
+        // Clear masking and verify original data
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_column_masking"), new HashMap<>());
+        assertThat(
+                        spark.sql("SELECT secret FROM t_column_masking ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[s1], [s2]]");
+        assertThat(
+                        spark.sql("SELECT email FROM t_column_masking ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[user1@example.com], [user2@example.com]]");
     }
 
     private Catalog getPaimonCatalog() {
