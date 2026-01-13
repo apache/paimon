@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateBuilder.convertJavaObject;
 
-/** Conversion from {@link Filter} to {@link Predicate}, remove it when Spark 3.2 is dropped. */
+/** Conversion from {@link Filter} to {@link Predicate}, remove it when Spark 3.3 is dropped. */
 public class SparkFilterConverter {
 
     public static final List<String> SUPPORT_FILTERS =
