@@ -107,6 +107,7 @@ import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
@@ -116,7 +117,6 @@ import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import javax.annotation.Nullable;
 
@@ -185,6 +185,8 @@ public class RESTCatalogServer {
     private final List<String> noPermissionTables = new ArrayList<>();
     private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
+    private final Map<String, AuthTableQueryResponse> tableQueryAuthResponseHandler =
+            new HashMap<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
@@ -264,6 +266,10 @@ public class RESTCatalogServer {
 
     public void addTableColumnAuth(Identifier identifier, List<String> select) {
         columnAuthHandler.put(identifier.getFullName(), select);
+    }
+
+    public void setTableQueryAuthResponse(Identifier identifier, AuthTableQueryResponse response) {
+        tableQueryAuthResponseHandler.put(identifier.getFullName(), response);
     }
 
     public RESTToken getDataToken(Identifier identifier) {
@@ -829,7 +835,11 @@ public class RESTCatalogServer {
                         }
                     });
         }
-        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        AuthTableQueryResponse response =
+                tableQueryAuthResponseHandler.get(identifier.getFullName());
+        if (response == null) {
+            response = new AuthTableQueryResponse(Collections.emptyList(), ImmutableMap.of());
+        }
         return mockResponse(response, 200);
     }
 
