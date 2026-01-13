@@ -63,17 +63,17 @@ public class NativeLibraryLoader {
         "libgcc_s.so.1",
         // Quadmath library (needed by gfortran)
         "libquadmath.so.0",
-        // Fortran runtime (needed by OpenBLAS) - try multiple versions
-        "libgfortran.so.5",
-        "libgfortran.so.4",
+        // Fortran runtime (needed by OpenBLAS)
         "libgfortran.so.3",
         // OpenMP runtime
         "libgomp.so.1",
         // BLAS/LAPACK
         "libblas.so.3",
         "liblapack.so.3",
-        // OpenBLAS for FAISS (load last as it depends on above)
+        // OpenBLAS for FAISS
         "libopenblas.so.0",
+        // FAISS library (depends on all above)
+        "libfaiss.so",
     };
 
     /** Whether the native library has been loaded. */
