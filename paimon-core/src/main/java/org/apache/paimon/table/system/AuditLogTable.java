@@ -35,6 +35,7 @@ import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -111,15 +112,20 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     /** Creates a PredicateReplaceVisitor that adjusts field indices by systemFieldCount. */
     private PredicateReplaceVisitor createPredicateConverter() {
         return p -> {
-            if (p.index() < specialFields.size()) {
+            Optional<FieldRef> fieldRefOptional = p.fieldRefOptional();
+            if (!fieldRefOptional.isPresent()) {
+                return Optional.empty();
+            }
+            FieldRef fieldRef = fieldRefOptional.get();
+            if (fieldRef.index() < specialFields.size()) {
                 return Optional.empty();
             }
             return Optional.of(
                     new LeafPredicate(
                             p.function(),
-                            p.type(),
-                            p.index() - specialFields.size(),
-                            p.fieldName(),
+                            fieldRef.type(),
+                            fieldRef.index() - specialFields.size(),
+                            fieldRef.name(),
                             p.literals()));
         };
     }
@@ -765,11 +771,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
                 return false;
             }
             return super.isNullAt(pos);
-        }
-
-        @Override
-        public long getLong(int pos) {
-            return super.getLong(pos);
         }
 
         @Override

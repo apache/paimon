@@ -136,11 +136,15 @@ SELECT * FROM my_table$audit_log;
 */
 ```
 
-#### Reading with Sequence Number
-
 For primary key tables, you can enable the `table-read.sequence-number.enabled` option to include the `_SEQUENCE_NUMBER` field in the output.
 
 {{< tabs "audit-log-sequence-number" >}}
+
+{{< tab "Enable via ALTER TABLE" >}}
+```sql
+ALTER TABLE my_table SET ('table-read.sequence-number.enabled' = 'true');
+```
+{{< /tab >}}
 
 {{< tab "Enable via CREATE TABLE" >}}
 ```sql
@@ -149,12 +153,6 @@ CREATE TABLE my_table (
 ) WITH (
     'table-read.sequence-number.enabled' = 'true'
 );
-```
-{{< /tab >}}
-
-{{< tab "Enable via ALTER TABLE" >}}
-```sql
-ALTER TABLE my_table SET ('table-read.sequence-number.enabled' = 'true');
 ```
 {{< /tab >}}
 
