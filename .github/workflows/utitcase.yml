@@ -101,7 +101,7 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           
           TEST_MODULES="!paimon-e2e-tests,"
-          for suffix in ut 3.5 3.4 3.3 3.2; do
+          for suffix in ut 3.5 3.4 3.3; do
             TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
           TEST_MODULES="${TEST_MODULES%,}"
