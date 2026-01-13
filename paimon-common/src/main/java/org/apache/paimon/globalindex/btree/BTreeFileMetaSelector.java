@@ -22,7 +22,7 @@ import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
@@ -212,7 +212,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     }
 
     @Override
-    public Optional<List<GlobalIndexIOMeta>> visit(TransformPredicate predicate) {
+    public Optional<List<GlobalIndexIOMeta>> visitNonFieldLeaf(LeafPredicate predicate) {
         return Optional.empty();
     }
 

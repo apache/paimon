@@ -181,7 +181,7 @@ public class PredicateBuilder {
     }
 
     private Predicate leaf(LeafFunction function, Transform transform, Object literal) {
-        return TransformPredicate.of(transform, function, singletonList(literal));
+        return LeafPredicate.of(transform, function, singletonList(literal));
     }
 
     private Predicate leaf(LeafUnaryFunction function, int idx) {
@@ -191,7 +191,7 @@ public class PredicateBuilder {
     }
 
     private Predicate leaf(LeafFunction function, Transform transform) {
-        return TransformPredicate.of(transform, function, Collections.emptyList());
+        return LeafPredicate.of(transform, function, Collections.emptyList());
     }
 
     public Predicate in(int idx, List<Object> literals) {
@@ -213,7 +213,7 @@ public class PredicateBuilder {
         // In the IN predicate, 20 literals are critical for performance.
         // If there are more than 20 literals, the performance will decrease.
         if (literals.size() > 20) {
-            return TransformPredicate.of(transform, In.INSTANCE, literals);
+            return LeafPredicate.of(transform, In.INSTANCE, literals);
         }
 
         List<Predicate> equals = new ArrayList<>(literals.size());
@@ -441,9 +441,9 @@ public class PredicateBuilder {
                 }
             }
             return Optional.of(new CompoundPredicate(compoundPredicate.function(), children));
-        } else if (predicate instanceof TransformPredicate) {
-            TransformPredicate transformPredicate = (TransformPredicate) predicate;
-            List<Object> inputs = transformPredicate.transform.inputs();
+        } else if (predicate instanceof LeafPredicate) {
+            LeafPredicate leafPredicate = (LeafPredicate) predicate;
+            List<Object> inputs = leafPredicate.transform().inputs();
             List<Object> newInputs = new ArrayList<>(inputs.size());
             for (Object input : inputs) {
                 if (input instanceof FieldRef) {
@@ -458,7 +458,7 @@ public class PredicateBuilder {
                     newInputs.add(input);
                 }
             }
-            return Optional.of(transformPredicate.copyWithNewInputs(newInputs));
+            return Optional.of(leafPredicate.copyWithNewInputs(newInputs));
         } else {
             return Optional.empty();
         }
@@ -473,8 +473,8 @@ public class PredicateBuilder {
             }
             return false;
         } else {
-            TransformPredicate transformPredicate = (TransformPredicate) predicate;
-            return fields.containsAll(transformPredicate.fieldNames());
+            LeafPredicate leafPredicate = (LeafPredicate) predicate;
+            return fields.containsAll(leafPredicate.fieldNames());
         }
     }
 

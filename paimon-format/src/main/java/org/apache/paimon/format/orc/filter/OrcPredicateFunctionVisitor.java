@@ -22,7 +22,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
@@ -245,7 +245,7 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Override
-    public Optional<OrcFilters.Predicate> visit(TransformPredicate predicate) {
+    public Optional<OrcFilters.Predicate> visitNonFieldLeaf(LeafPredicate predicate) {
         return Optional.empty();
     }
 

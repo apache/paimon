@@ -27,6 +27,8 @@ import java.util.List;
 /** Represents a transform function. */
 public interface Transform extends Serializable {
 
+    String name();
+
     List<Object> inputs();
 
     DataType outputType();
