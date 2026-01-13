@@ -23,6 +23,10 @@ import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
@@ -36,9 +40,29 @@ public class CastTransform implements Transform {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "CAST";
+
     private final FieldRef fieldRef;
     private final DataType type;
     private transient CastExecutor<Object, Object> cast;
+
+    public static final String FIELD_FIELD_REF = "fieldRef";
+    public static final String FIELD_TYPE = "type";
+
+    @JsonCreator
+    public CastTransform(
+            @JsonProperty(FIELD_FIELD_REF) FieldRef fieldRef,
+            @JsonProperty(FIELD_TYPE) DataType type) {
+        this.fieldRef = fieldRef;
+        this.type = type;
+        @SuppressWarnings("unchecked")
+        CastExecutor<Object, Object> resolved =
+                (CastExecutor<Object, Object>) CastExecutors.resolve(fieldRef.type(), type);
+        if (resolved == null) {
+            throw new IllegalArgumentException("Cannot create CastTransform");
+        }
+        this.cast = resolved;
+    }
 
     private CastTransform(FieldRef fieldRef, DataType type, CastExecutor<Object, Object> cast) {
         this.fieldRef = fieldRef;
@@ -61,9 +85,19 @@ public class CastTransform implements Transform {
         }
     }
 
+    @JsonGetter(FIELD_FIELD_REF)
+    public FieldRef fieldRef() {
+        return fieldRef;
+    }
+
+    @JsonGetter(FIELD_TYPE)
+    public DataType type() {
+        return type;
+    }
+
     @Override
     public String name() {
-        return "CAST";
+        return NAME;
     }
 
     @Override

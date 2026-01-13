@@ -21,11 +21,26 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonSubTypes;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTypeInfo;
+
 import java.io.Serializable;
 import java.util.List;
 
 /** Represents a transform function. */
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = Transform.FIELD_NAME)
+@JsonSubTypes({
+    @JsonSubTypes.Type(value = FieldTransform.class, name = FieldTransform.NAME),
+    @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),
+    @JsonSubTypes.Type(value = ConcatTransform.class, name = ConcatTransform.NAME),
+    @JsonSubTypes.Type(value = ConcatWsTransform.class, name = ConcatWsTransform.NAME),
+    @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME)
+})
 public interface Transform extends Serializable {
+    String FIELD_NAME = "name";
 
     String name();
 

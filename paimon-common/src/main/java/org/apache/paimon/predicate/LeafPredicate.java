@@ -28,6 +28,10 @@ import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -43,8 +47,20 @@ public class LeafPredicate implements Predicate {
 
     private static final long serialVersionUID = 3L;
 
+    public static final String NAME = "LEAF";
+
+    public static final String FIELD_TRANSFORM = "transform";
+
+    public static final String FIELD_FUNCTION = "function";
+
+    public static final String FIELD_LITERALS = "literals";
+
+    @JsonProperty(FIELD_TRANSFORM)
     private final Transform transform;
+
+    @JsonProperty(FIELD_FUNCTION)
     private final LeafFunction function;
+
     private transient List<Object> literals;
 
     public LeafPredicate(
@@ -67,16 +83,32 @@ public class LeafPredicate implements Predicate {
         return new LeafPredicate(transform, function, literals);
     }
 
+    @JsonCreator
+    protected static LeafPredicate fromJson(
+            @JsonProperty(FIELD_TRANSFORM) Transform transform,
+            @JsonProperty(FIELD_FUNCTION) LeafFunction function,
+            @JsonProperty(FIELD_LITERALS) List<Object> literals) {
+        List<Object> convertedLiterals = deserializeLiterals(transform.outputType(), literals);
+        return new LeafPredicate(transform, function, convertedLiterals);
+    }
+
     public LeafPredicate copyWithNewInputs(List<Object> newInputs) {
         return new LeafPredicate(transform.copyWithNewInputs(newInputs), function, literals);
     }
 
+    @JsonGetter(FIELD_TRANSFORM)
     public Transform transform() {
         return transform;
     }
 
+    @JsonGetter(FIELD_FUNCTION)
     public LeafFunction function() {
         return function;
+    }
+
+    @JsonGetter(FIELD_LITERALS)
+    public List<Object> literalsForJson() {
+        return serializeLiterals(transform.outputType(), literals);
     }
 
     public List<String> fieldNames() {
@@ -234,5 +266,31 @@ public class LeafPredicate implements Predicate {
     @Deprecated
     public LeafPredicate copyWithNewIndex(int fieldIndex) {
         return new LeafPredicate(function, type(), fieldIndex, fieldName(), literals);
+    }
+
+    protected static List<Object> serializeLiterals(DataType type, List<Object> literals) {
+        if (literals == null) {
+            return null;
+        }
+        List<Object> serialized = new ArrayList<>(literals.size());
+        for (Object lit : literals) {
+            serialized.add(PredicateBuilder.convertToJavaObject(type, lit));
+        }
+        return serialized;
+    }
+
+    protected static List<Object> deserializeLiterals(DataType type, List<Object> literals) {
+        if (literals == null) {
+            return null;
+        }
+        List<Object> converted = new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            if (literal instanceof DataType) {
+                converted.add(literal);
+                continue;
+            }
+            converted.add(PredicateBuilder.convertJavaObject(type, literal));
+        }
+        return converted;
     }
 }

@@ -20,6 +20,8 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -28,8 +30,11 @@ import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 /** A {@link LeafFunction} to eval greater. */
 public class GreaterThan extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "GREATER_THAN";
+
     public static final GreaterThan INSTANCE = new GreaterThan();
 
+    @JsonCreator
     private GreaterThan() {}
 
     @Override

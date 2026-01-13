@@ -21,6 +21,8 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -30,8 +32,11 @@ import java.util.Optional;
  */
 public class EndsWith extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "ENDS_WITH";
+
     public static final EndsWith INSTANCE = new EndsWith();
 
+    @JsonCreator
     private EndsWith() {}
 
     @Override

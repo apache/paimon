@@ -20,6 +20,10 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryString;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+
 import java.util.List;
 
 /** Concat {@link Transform}. */
@@ -27,13 +31,19 @@ public class ConcatTransform extends StringTransform {
 
     private static final long serialVersionUID = 1L;
 
-    public ConcatTransform(List<Object> inputs) {
+    public static final String NAME = "CONCAT";
+
+    @JsonCreator
+    public ConcatTransform(
+            @JsonProperty(StringTransform.FIELD_INPUTS)
+                    @JsonDeserialize(contentUsing = StringTransform.InputDeserializer.class)
+                    List<Object> inputs) {
         super(inputs);
     }
 
     @Override
     public String name() {
-        return "CONCAT";
+        return NAME;
     }
 
     @Override

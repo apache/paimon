@@ -25,6 +25,7 @@ import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -35,11 +36,14 @@ import java.util.regex.Pattern;
 /** A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like}. */
 public class Like extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "LIKE";
+
     public static final Like INSTANCE = new Like();
 
     private static final Cache<BinaryString, Filter<BinaryString>> CACHE =
             Caffeine.newBuilder().softValues().executor(Runnable::run).build();
 
+    @JsonCreator
     private Like() {}
 
     @Override

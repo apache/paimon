@@ -410,6 +410,45 @@ public class PredicateBuilder {
         }
     }
 
+    public static Object convertToJavaObject(DataType dataType, Object o) {
+        if (o == null) {
+            return null;
+        }
+        switch (dataType.getTypeRoot()) {
+            case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+                return o;
+            case CHAR:
+            case VARCHAR:
+                return o instanceof BinaryString ? o.toString() : String.valueOf(o);
+            case DATE:
+                return LocalDate.ofEpochDay(((Number) o).intValue());
+            case TIME_WITHOUT_TIME_ZONE:
+                long millisOfDay = ((Number) o).intValue();
+                return LocalTime.ofNanoOfDay(millisOfDay * 1_000_000L);
+            case DECIMAL:
+                return ((Decimal) o).toBigDecimal();
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return ((Timestamp) o).toLocalDateTime();
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                Timestamp ts = (Timestamp) o;
+                long millisecond = ts.getMillisecond();
+                int nanoOfMillisecond = ts.getNanoOfMillisecond();
+                long epochSecond = Math.floorDiv(millisecond, 1000L);
+                int milliOfSecond = (int) Math.floorMod(millisecond, 1000L);
+                long nanoAdjustment = milliOfSecond * 1_000_000L + nanoOfMillisecond;
+                return Instant.ofEpochSecond(epochSecond, nanoAdjustment);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported type " + dataType.getTypeRoot().name());
+        }
+    }
+
     public static List<Predicate> pickTransformFieldMapping(
             List<Predicate> predicates, List<String> inputFields, List<String> pickedFields) {
         return pickTransformFieldMapping(

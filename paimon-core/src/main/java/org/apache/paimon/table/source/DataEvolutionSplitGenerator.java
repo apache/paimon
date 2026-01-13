@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.RangeHelper;
@@ -32,10 +33,13 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     private final long targetSplitSize;
     private final long openFileCost;
+    private final boolean countBlobSize;
 
-    public DataEvolutionSplitGenerator(long targetSplitSize, long openFileCost) {
+    public DataEvolutionSplitGenerator(
+            long targetSplitSize, long openFileCost, boolean countBlobSize) {
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
+        this.countBlobSize = countBlobSize;
     }
 
     @Override
@@ -53,7 +57,15 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
         Function<List<DataFileMeta>, Long> weightFunc =
                 file ->
                         Math.max(
-                                file.stream().mapToLong(DataFileMeta::fileSize).sum(),
+                                file.stream()
+                                        .mapToLong(
+                                                meta ->
+                                                        BlobFileFormat.isBlobFile(meta.fileName())
+                                                                ? countBlobSize
+                                                                        ? meta.fileSize()
+                                                                        : openFileCost
+                                                                : meta.fileSize())
+                                        .sum(),
                                 openFileCost);
         return BinPacking.packForOrdered(ranges, weightFunc, targetSplitSize).stream()
                 .map(
