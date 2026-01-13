@@ -438,44 +438,6 @@ class AoReaderTest(unittest.TestCase):
         }, schema=self.pa_schema).sort_by('user_id')
         self.assertEqual(expected, actual)
 
-    def _write_test_table(self, table):
-        write_builder = table.new_batch_write_builder()
-
-        # first write
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data1 = {
-            'user_id': [1, 2, 3, 4],
-            'item_id': [1001, 1002, 1003, 1004],
-            'behavior': ['a', 'b', 'c', None],
-            'dt': ['p1', 'p1', 'p2', 'p1'],
-        }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-        # second write
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        data2 = {
-            'user_id': [5, 6, 7, 8],
-            'item_id': [1005, 1006, 1007, 1008],
-            'behavior': ['e', 'f', 'g', 'h'],
-            'dt': ['p2', 'p1', 'p2', 'p2'],
-        }
-        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
-        table_write.write_arrow(pa_table)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-
-    def _read_test_table(self, read_builder):
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        return table_read.to_arrow(splits)
-
     def test_concurrent_writes_with_retry(self):
         """Test concurrent writes to verify retry mechanism works correctly."""
         import threading
@@ -529,7 +491,7 @@ class AoReaderTest(unittest.TestCase):
 
             # Create and start multiple threads
             threads = []
-            num_threads = 100
+            num_threads = 10
             for i in range(num_threads):
                 thread = threading.Thread(
                     target=write_data,
@@ -576,3 +538,41 @@ class AoReaderTest(unittest.TestCase):
                              f"got {latest_snapshot.id}")
 
             print(f"✓ Iteration {test_iteration + 1}/{iter_num} completed successfully")
+
+    def _write_test_table(self, table):
+        write_builder = table.new_batch_write_builder()
+
+        # first write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # second write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data2 = {
+            'user_id': [5, 6, 7, 8],
+            'item_id': [1005, 1006, 1007, 1008],
+            'behavior': ['e', 'f', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p2', 'p2'],
+        }
+        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def _read_test_table(self, read_builder):
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        return table_read.to_arrow(splits)

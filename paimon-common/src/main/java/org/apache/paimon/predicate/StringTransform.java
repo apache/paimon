@@ -26,6 +26,7 @@ import org.apache.paimon.types.DataTypes;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.DataTypeFamily.CHARACTER_STRING;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -95,6 +96,8 @@ public abstract class StringTransform implements Transform {
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "{" + "inputs=" + inputs + '}';
+        List<String> inputs =
+                this.inputs.stream().map(Object::toString).collect(Collectors.toList());
+        return name() + "(" + String.join(", ", inputs) + ')';
     }
 }

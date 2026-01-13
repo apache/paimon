@@ -24,7 +24,6 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
@@ -90,10 +89,13 @@ public class GlobalIndexEvaluator
 
     @Override
     public Optional<GlobalIndexResult> visit(LeafPredicate predicate) {
+        Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+        if (!fieldRefOptional.isPresent()) {
+            return Optional.empty();
+        }
         Optional<GlobalIndexResult> compoundResult = Optional.empty();
-        FieldRef fieldRef =
-                new FieldRef(predicate.index(), predicate.fieldName(), predicate.type());
-        int fieldId = rowType.getField(predicate.fieldName()).id();
+        FieldRef fieldRef = fieldRefOptional.get();
+        int fieldId = rowType.getField(fieldRef.name()).id();
         Collection<GlobalIndexReader> readers =
                 indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
         for (GlobalIndexReader fileIndexReader : readers) {
@@ -156,11 +158,6 @@ public class GlobalIndexEvaluator
             }
             return compoundResult;
         }
-    }
-
-    @Override
-    public Optional<GlobalIndexResult> visit(TransformPredicate predicate) {
-        return Optional.empty();
     }
 
     public void close() {

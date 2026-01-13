@@ -51,7 +51,6 @@ import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.PartitionEventType;
 import org.junit.Rule;
 import org.junit.Test;
@@ -202,9 +201,8 @@ public abstract class HiveCatalogITCaseBase {
         properties.put("location", dbLocation);
 
         assertThatThrownBy(() -> catalog.createDatabase("location_test_db", false, properties))
-                .hasRootCauseInstanceOf(MetaException.class)
-                .hasRootCauseMessage(
-                        "Got exception: java.io.IOException No FileSystem for scheme: s3");
+                .hasMessageContaining(
+                        "Could not find a file io implementation for scheme 's3' in the classpath.");
     }
 
     @Test

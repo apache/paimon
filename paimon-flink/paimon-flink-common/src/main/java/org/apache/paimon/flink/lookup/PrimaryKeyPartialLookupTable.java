@@ -198,6 +198,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
     }
 
     @Override
+    public Long nextSnapshotId() {
+        return this.queryExecutor.nextSnapshotId();
+    }
+
+    @Override
     public void close() throws IOException {
         if (queryExecutor != null) {
             queryExecutor.close();
@@ -243,6 +248,10 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
 
         void refresh();
+
+        default Long nextSnapshotId() {
+            return Long.MAX_VALUE;
+        }
     }
 
     static class LocalQueryExecutor implements QueryExecutor {
@@ -332,6 +341,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                 totalBuckets = defaultNumBuckets;
             }
             numBuckets.put(partition, totalBuckets);
+        }
+
+        @Override
+        public Long nextSnapshotId() {
+            return this.scan.checkpoint();
         }
 
         @Override

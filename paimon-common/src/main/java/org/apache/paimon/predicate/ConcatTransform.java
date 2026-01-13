@@ -32,6 +32,11 @@ public class ConcatTransform extends StringTransform {
     }
 
     @Override
+    public String name() {
+        return "CONCAT";
+    }
+
+    @Override
     public BinaryString transform(List<BinaryString> inputs) {
         return BinaryString.concat(inputs);
     }

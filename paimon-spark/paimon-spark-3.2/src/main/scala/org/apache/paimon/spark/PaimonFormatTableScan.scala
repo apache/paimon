@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.table.FormatTable
 
 import org.apache.spark.sql.PaimonUtils.fieldReference
@@ -51,17 +51,20 @@ case class PaimonFormatTableScan(
   }
 
   override def filter(filters: Array[Filter]): Unit = {
-    val converter = new SparkFilterConverter(table.rowType())
-    val partitionFilter = filters.flatMap {
-      case in @ In(attr, _) if table.partitionKeys().contains(attr) =>
-        Some(converter.convert(in))
-      case _ => None
-    }
-    if (partitionFilter.nonEmpty) {
-      readBuilder.withFilter(partitionFilter.head)
+    val partitionType = table.rowType().project(table.partitionKeys())
+    val converter = new SparkFilterConverter(partitionType)
+    val runtimePartitionFilters = filters.toSeq
+      .map(converter.convertIgnoreFailure)
+      .filter(_ != null)
+      .map(PartitionPredicate.fromPredicate(partitionType, _))
+    if (runtimePartitionFilters.nonEmpty) {
+      pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)
+      readBuilder.withPartitionFilter(
+        PartitionPredicate.and(
+          (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
       // set inputPartitions null to trigger to get the new splits.
-      _inputSplits = null
       _inputPartitions = null
+      _inputSplits = null
     }
   }
 }

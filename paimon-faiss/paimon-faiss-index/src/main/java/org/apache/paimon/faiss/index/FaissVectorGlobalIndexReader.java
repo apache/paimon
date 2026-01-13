@@ -304,7 +304,7 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
     private void loadIndexAt(int position) throws IOException {
         GlobalIndexIOMeta ioMeta = ioMetas.get(position);
         FaissIndex index = null;
-        try (SeekableInputStream in = fileReader.getInputStream(ioMeta.fileName())) {
+        try (SeekableInputStream in = fileReader.getInputStream(ioMeta)) {
             index = loadIndex(in);
             if (indices.size() <= position) {
                 while (indices.size() < position) {

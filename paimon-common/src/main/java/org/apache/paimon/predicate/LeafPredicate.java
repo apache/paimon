@@ -26,11 +26,12 @@ import org.apache.paimon.data.serializer.NullableSerializer;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -38,9 +39,13 @@ import java.util.Optional;
 import static org.apache.paimon.utils.InternalRowUtils.get;
 
 /** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
-public class LeafPredicate extends TransformPredicate {
+public class LeafPredicate implements Predicate {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
+
+    private final Transform transform;
+    private final LeafFunction function;
+    private transient List<Object> literals;
 
     public LeafPredicate(
             LeafFunction function,
@@ -51,49 +56,70 @@ public class LeafPredicate extends TransformPredicate {
         this(new FieldTransform(new FieldRef(fieldIndex, fieldName, type)), function, literals);
     }
 
-    public LeafPredicate(
-            FieldTransform fieldTransform, LeafFunction function, List<Object> literals) {
-        super(fieldTransform, function, literals);
+    public LeafPredicate(Transform transform, LeafFunction function, List<Object> literals) {
+        this.transform = transform;
+        this.function = function;
+        this.literals = literals;
+    }
+
+    public static LeafPredicate of(
+            Transform transform, LeafFunction function, List<Object> literals) {
+        return new LeafPredicate(transform, function, literals);
+    }
+
+    public LeafPredicate copyWithNewInputs(List<Object> newInputs) {
+        return new LeafPredicate(transform.copyWithNewInputs(newInputs), function, literals);
+    }
+
+    public Transform transform() {
+        return transform;
     }
 
     public LeafFunction function() {
         return function;
     }
 
-    public DataType type() {
-        return fieldRef().type();
-    }
-
-    public int index() {
-        return fieldRef().index();
-    }
-
-    public String fieldName() {
-        return fieldRef().name();
-    }
-
     public List<String> fieldNames() {
-        return Collections.singletonList(fieldRef().name());
+        List<String> names = new ArrayList<>();
+        for (Object input : transform.inputs()) {
+            if (input instanceof FieldRef) {
+                names.add(((FieldRef) input).name());
+            }
+        }
+        return names;
     }
 
-    public FieldRef fieldRef() {
-        return ((FieldTransform) transform).fieldRef();
+    public Optional<FieldRef> fieldRefOptional() {
+        if (transform instanceof FieldTransform) {
+            return Optional.of(((FieldTransform) transform).fieldRef());
+        }
+        return Optional.empty();
     }
 
     public List<Object> literals() {
         return literals;
     }
 
-    public LeafPredicate copyWithNewIndex(int fieldIndex) {
-        return new LeafPredicate(function, type(), fieldIndex, fieldName(), literals);
+    @Override
+    public boolean test(InternalRow row) {
+        Object value = transform.transform(row);
+        return function.test(transform.outputType(), value, literals);
     }
 
     @Override
     public boolean test(
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts) {
-        Object min = get(minValues, index(), type());
-        Object max = get(maxValues, index(), type());
-        Long nullCount = nullCounts.isNullAt(index()) ? null : nullCounts.getLong(index());
+        Optional<FieldRef> fieldRefOptional = fieldRefOptional();
+        if (!fieldRefOptional.isPresent()) {
+            return true;
+        }
+        FieldRef fieldRef = fieldRefOptional.get();
+        int index = fieldRef.index();
+        DataType type = fieldRef.type();
+
+        Object min = get(minValues, index, type);
+        Object max = get(maxValues, index, type);
+        Long nullCount = nullCounts.isNullAt(index) ? null : nullCounts.getLong(index);
         if (nullCount == null || rowCount != nullCount) {
             // not all null
             // min or max is null
@@ -102,13 +128,25 @@ public class LeafPredicate extends TransformPredicate {
                 return true;
             }
         }
-        return function.test(type(), rowCount, min, max, nullCount, literals);
+        return function.test(type, rowCount, min, max, nullCount, literals);
     }
 
     @Override
     public Optional<Predicate> negate() {
+        Optional<FieldRef> fieldRefOptional = fieldRefOptional();
+        if (!fieldRefOptional.isPresent()) {
+            return Optional.empty();
+        }
+        FieldRef fieldRef = fieldRefOptional.get();
         return function.negate()
-                .map(negate -> new LeafPredicate(negate, type(), index(), fieldName(), literals));
+                .map(
+                        negate ->
+                                new LeafPredicate(
+                                        negate,
+                                        fieldRef.type(),
+                                        fieldRef.index(),
+                                        fieldRef.name(),
+                                        literals));
     }
 
     @Override
@@ -117,32 +155,84 @@ public class LeafPredicate extends TransformPredicate {
     }
 
     @Override
-    public String toString() {
-        String literalsStr;
-        if (literals == null || literals.isEmpty()) {
-            literalsStr = "";
-        } else if (literals.size() == 1) {
-            literalsStr = Objects.toString(literals.get(0));
-        } else {
-            literalsStr = literals.toString();
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
         }
-        return literalsStr.isEmpty()
-                ? function + "(" + fieldName() + ")"
-                : function + "(" + fieldName() + ", " + literalsStr + ")";
+        LeafPredicate that = (LeafPredicate) o;
+        return Objects.equals(transform, that.transform)
+                && Objects.equals(function, that.function)
+                && Objects.equals(literals, that.literals);
     }
 
-    private ListSerializer<Object> objectsSerializer() {
+    @Override
+    public int hashCode() {
+        return Objects.hash(transform, function, literals);
+    }
+
+    @Override
+    public String toString() {
+        String literalsStr;
+        int literalsSize = literals == null ? 0 : literals.size();
+        if (literalsSize == 0) {
+            literalsStr = "";
+        } else if (literalsSize == 1) {
+            literalsStr = Objects.toString(literals.get(0));
+        } else {
+            literalsStr = StringUtils.truncatedString(literals, "[", ", ", "]");
+        }
+        return literalsStr.isEmpty()
+                ? function + "(" + transform + ")"
+                : function + "(" + transform + ", " + literalsStr + ")";
+    }
+
+    private ListSerializer<Object> literalsSerializer() {
         return new ListSerializer<>(
-                NullableSerializer.wrapIfNullIsNotSupported(InternalSerializers.create(type())));
+                NullableSerializer.wrapIfNullIsNotSupported(
+                        InternalSerializers.create(transform.outputType())));
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
         out.defaultWriteObject();
-        objectsSerializer().serialize(literals, new DataOutputViewStreamWrapper(out));
+        literalsSerializer().serialize(literals, new DataOutputViewStreamWrapper(out));
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         in.defaultReadObject();
-        literals = objectsSerializer().deserialize(new DataInputViewStreamWrapper(in));
+        literals = literalsSerializer().deserialize(new DataInputViewStreamWrapper(in));
+    }
+
+    // ====================== Deprecated methods ===============================
+    // ================ Will be removed in Next Version ========================
+
+    /** Use {@link #fieldRefOptional()} instead. */
+    @Deprecated
+    public DataType type() {
+        return fieldRef().type();
+    }
+
+    /** Use {@link #fieldRefOptional()} instead. */
+    @Deprecated
+    public int index() {
+        return fieldRef().index();
+    }
+
+    /** Use {@link #fieldRefOptional()} instead. */
+    @Deprecated
+    public String fieldName() {
+        return fieldRef().name();
+    }
+
+    /** Use {@link #fieldRefOptional()} instead. */
+    @Deprecated
+    public FieldRef fieldRef() {
+        //noinspection OptionalGetWithoutIsPresent
+        return fieldRefOptional().get();
+    }
+
+    /** Use {@link #fieldRefOptional()} instead. */
+    @Deprecated
+    public LeafPredicate copyWithNewIndex(int fieldIndex) {
+        return new LeafPredicate(function, type(), fieldIndex, fieldName(), literals);
     }
 }

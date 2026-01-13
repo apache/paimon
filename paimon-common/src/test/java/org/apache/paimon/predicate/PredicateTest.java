@@ -568,7 +568,7 @@ public class PredicateTest {
     private LeafFunction getLikeFunc(String pattern) {
         PredicateBuilder builder = new PredicateBuilder(RowType.of(new VarCharType()));
         Predicate predicate = builder.like(0, fromString(pattern));
-        return ((LeafPredicate) predicate).function;
+        return ((LeafPredicate) predicate).function();
     }
 
     @Test
@@ -711,5 +711,18 @@ public class PredicateTest {
         assertThat(p9.toString())
                 .isEqualTo(
                         "NotIn(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])");
+    }
+
+    @Test
+    public void testPredicateToStringWithManyFields() {
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        List<Object> literals = new ArrayList<>();
+        for (int i = 1; i <= 100; i++) {
+            literals.add(i);
+        }
+        Predicate p = builder.in(0, literals);
+        assertThat(p.toString())
+                .isEqualTo(
+                        "In(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, ... 76 more fields])");
     }
 }

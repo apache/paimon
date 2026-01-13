@@ -35,6 +35,11 @@ public class ConcatWsTransform extends StringTransform {
     }
 
     @Override
+    public String name() {
+        return "CONCAT_WS";
+    }
+
+    @Override
     public BinaryString transform(List<BinaryString> inputs) {
         BinaryString separator = inputs.get(0);
         return BinaryString.concatWs(separator, inputs.subList(1, inputs.size()));

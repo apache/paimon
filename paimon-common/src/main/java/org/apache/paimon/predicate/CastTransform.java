@@ -62,6 +62,11 @@ public class CastTransform implements Transform {
     }
 
     @Override
+    public String name() {
+        return "CAST";
+    }
+
+    @Override
     public List<Object> inputs() {
         return Collections.singletonList(fieldRef);
     }

@@ -27,6 +27,7 @@ from typing import List, Optional, Iterable
 import pyarrow
 from packaging.version import parse
 import ray
+import torch
 
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
@@ -40,8 +41,10 @@ RAY_VERSION_PER_TASK_ROW_LIMIT = "2.52.0"  # per_task_row_limit parameter introd
 
 from ray.data.datasource import Datasource
 
+from torch.utils.data import Dataset, IterableDataset
 
-class PaimonDatasource(Datasource):
+
+class RayDatasource(Datasource):
     """
     Ray Data Datasource implementation for reading Paimon tables.
 
@@ -76,7 +79,7 @@ class PaimonDatasource(Datasource):
 
     @staticmethod
     def _distribute_splits_into_equal_chunks(
-        splits: Iterable[Split], n_chunks: int
+            splits: Iterable[Split], n_chunks: int
     ) -> List[List[Split]]:
         """
         Implement a greedy knapsack algorithm to distribute the splits across tasks,
@@ -88,7 +91,7 @@ class PaimonDatasource(Datasource):
 
         # From largest to smallest, add the splits to the smallest chunk one at a time
         for split in sorted(
-            splits, key=lambda s: s.file_size if hasattr(s, 'file_size') and s.file_size > 0 else 0, reverse=True
+                splits, key=lambda s: s.file_size if hasattr(s, 'file_size') and s.file_size > 0 else 0, reverse=True
         ):
             smallest_chunk = heapq.heappop(chunk_sizes)
             chunks[smallest_chunk[1]].append(split)
@@ -132,11 +135,11 @@ class PaimonDatasource(Datasource):
         # Create a partial function to avoid capturing self in closure
         # This reduces serialization overhead (see https://github.com/ray-project/ray/issues/49107)
         def _get_read_task(
-            splits: List[Split],
-            table=table,
-            predicate=predicate,
-            read_type=read_type,
-            schema=schema,
+                splits: List[Split],
+                table=table,
+                predicate=predicate,
+                read_type=read_type,
+                schema=schema,
         ) -> Iterable[pyarrow.Table]:
             """Read function that will be executed by Ray workers."""
             from pypaimon.read.table_read import TableRead
@@ -216,13 +219,128 @@ class PaimonDatasource(Datasource):
                 'read_fn': read_fn,
                 'metadata': metadata,
             }
-            
+
             if parse(ray.__version__) >= parse(RAY_VERSION_SCHEMA_IN_READ_TASK):
                 read_task_kwargs['schema'] = schema
-            
+
             if parse(ray.__version__) >= parse(RAY_VERSION_PER_TASK_ROW_LIMIT) and per_task_row_limit is not None:
                 read_task_kwargs['per_task_row_limit'] = per_task_row_limit
 
             read_tasks.append(ReadTask(**read_task_kwargs))
 
         return read_tasks
+
+
+class TorchDataset(Dataset):
+    """
+    PyTorch Dataset implementation for reading Paimon table data.
+
+    This class enables Paimon table data to be used directly with PyTorch's
+    training pipeline, allowing for efficient data loading and batching.
+    """
+
+    def __init__(self, table_read: TableRead, splits: List[Split]):
+        """
+        Initialize TorchDataset.
+
+        Args:
+            table_read: TableRead instance for reading data
+            splits: List of splits to read
+        """
+        arrow_table = table_read.to_arrow(splits)
+        if arrow_table is None or arrow_table.num_rows == 0:
+            self._data = []
+        else:
+            self._data = arrow_table.to_pylist()
+
+    def __len__(self) -> int:
+        """
+        Return the total number of rows in the dataset.
+
+        Returns:
+            Total number of rows across all splits
+        """
+        return len(self._data)
+
+    def __getitem__(self, index: int):
+        """
+        Get a single item from the dataset.
+
+        Args:
+            index: Index of the item to retrieve
+
+        Returns:
+            Dictionary containing the row data
+        """
+        if not self._data:
+            return None
+
+        return self._data[index]
+
+
+class TorchIterDataset(IterableDataset):
+    """
+    PyTorch IterableDataset implementation for reading Paimon table data.
+
+    This class enables streaming data loading from Paimon tables, which is more
+    memory-efficient for large datasets. Data is read on-the-fly as needed,
+    rather than loading everything into memory upfront.
+    """
+
+    def __init__(self, table_read: TableRead, splits: List[Split]):
+        """
+        Initialize TorchIterDataset.
+
+        Args:
+            table_read: TableRead instance for reading data
+            splits: List of splits to read
+        """
+        self.table_read = table_read
+        self.splits = splits
+        # Get field names from read_type
+        self.field_names = [field.name for field in table_read.read_type]
+
+    def __iter__(self):
+        """
+        Iterate over the dataset, converting each OffsetRow to a dictionary.
+
+        Supports multi-worker data loading by partitioning splits across workers.
+        When num_workers > 0 in DataLoader, each worker will process a subset of splits.
+
+        Yields:
+            row data of dict type, where keys are column names
+        """
+        worker_info = torch.utils.data.get_worker_info()
+
+        if worker_info is None:
+            # Single-process data loading, iterate over all splits
+            splits_to_process = self.splits
+        else:
+            # Multi-process data loading, partition splits across workers
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+
+            # Calculate start and end indices for this worker
+            # Distribute splits evenly by slicing
+            total_splits = len(self.splits)
+            splits_per_worker = total_splits // num_workers
+            remainder = total_splits % num_workers
+
+            # Workers with id < remainder get one extra split
+            if worker_id < remainder:
+                start_idx = worker_id * (splits_per_worker + 1)
+                end_idx = start_idx + splits_per_worker + 1
+            else:
+                start_idx = worker_id * splits_per_worker + remainder
+                end_idx = start_idx + splits_per_worker
+
+            splits_to_process = self.splits[start_idx:end_idx]
+
+        worker_iterator = self.table_read.to_iterator(splits_to_process)
+
+        for offset_row in worker_iterator:
+            row_dict = {}
+            for i, field_name in enumerate(self.field_names):
+                value = offset_row.get_field(i)
+                row_dict[field_name] = value
+            yield row_dict

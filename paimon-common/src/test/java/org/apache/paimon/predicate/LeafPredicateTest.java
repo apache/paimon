@@ -31,11 +31,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TransformPredicateTest {
+class LeafPredicateTest {
 
     @Test
     public void testReturnTrue() {
-        TransformPredicate predicate = create();
+        LeafPredicate predicate = create();
         boolean result =
                 predicate.test(
                         GenericRow.of(
@@ -45,7 +45,7 @@ class TransformPredicateTest {
 
     @Test
     public void testReturnFalse() {
-        TransformPredicate predicate = create();
+        LeafPredicate predicate = create();
         boolean result =
                 predicate.test(
                         GenericRow.of(
@@ -55,27 +55,27 @@ class TransformPredicateTest {
 
     @Test
     public void testMinMax() {
-        TransformPredicate predicate = create();
+        LeafPredicate predicate = create();
         boolean result = predicate.test(1, null, null, null);
         assertThat(result).isTrue();
     }
 
     @Test
     public void testClass() throws IOException, ClassNotFoundException {
-        TransformPredicate predicate = create();
-        TransformPredicate clone = InstantiationUtil.clone(predicate);
+        LeafPredicate predicate = create();
+        LeafPredicate clone = InstantiationUtil.clone(predicate);
         assertThat(clone).isEqualTo(predicate);
         assertThat(clone.hashCode()).isEqualTo(predicate.hashCode());
         assertThat(clone.toString()).isEqualTo(predicate.toString());
     }
 
-    private TransformPredicate create() {
+    private LeafPredicate create() {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(0, "f0", DataTypes.STRING()));
         inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));
         ConcatTransform transform = new ConcatTransform(inputs);
         List<Object> literals = new ArrayList<>();
         literals.add(BinaryString.fromString("ha-he"));
-        return TransformPredicate.of(transform, Equal.INSTANCE, literals);
+        return LeafPredicate.of(transform, Equal.INSTANCE, literals);
     }
 }

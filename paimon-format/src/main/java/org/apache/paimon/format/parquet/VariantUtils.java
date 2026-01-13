@@ -88,7 +88,7 @@ public class VariantUtils {
         RowType shreddingFields = shreddingFields(conf);
         if (shreddingFields != null && shreddingFields.containsField(fieldName)) {
             return PaimonShreddingUtils.variantShreddingSchema(
-                    (RowType) shreddingFields.getField(fieldName).type());
+                    shreddingFields.getField(fieldName).type());
         } else {
             return null;
         }
@@ -106,7 +106,7 @@ public class VariantUtils {
                     && shreddingFields.containsField(field.name())) {
                 RowType shreddingSchema =
                         PaimonShreddingUtils.variantShreddingSchema(
-                                (RowType) shreddingFields.getField(field.name()).type());
+                                shreddingFields.getField(field.name()).type());
                 newFields.add(field.newType(shreddingSchema));
             } else {
                 newFields.add(field);

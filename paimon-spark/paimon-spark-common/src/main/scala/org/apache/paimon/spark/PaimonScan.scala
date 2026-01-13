@@ -64,16 +64,16 @@ case class PaimonScan(
   }
 
   override def filter(predicates: Array[SparkPredicate]): Unit = {
-    val converter = SparkV2FilterConverter(table.rowType())
-    val partitionKeys = table.partitionKeys().asScala.toSeq
-    val partitionFilter = predicates.flatMap {
-      case p
-          if SparkV2FilterConverter(table.rowType()).isSupportedRuntimeFilter(p, partitionKeys) =>
-        converter.convert(p)
-      case _ => None
-    }
-    if (partitionFilter.nonEmpty) {
-      readBuilder.withFilter(partitionFilter.toList.asJava)
+    val partitionType = table.rowType().project(table.partitionKeys())
+    val converter = SparkV2FilterConverter(partitionType)
+    val runtimePartitionFilters = predicates.toSeq
+      .flatMap(converter.convert(_))
+      .map(PartitionPredicate.fromPredicate(partitionType, _))
+    if (runtimePartitionFilters.nonEmpty) {
+      pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)
+      readBuilder.withPartitionFilter(
+        PartitionPredicate.and(
+          (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
       // set inputPartitions null to trigger to get the new splits.
       _inputPartitions = null
       _inputSplits = null

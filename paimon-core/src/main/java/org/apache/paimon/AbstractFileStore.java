@@ -137,7 +137,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.dataFilePathDirectory(),
                 createExternalPaths(),
                 options.externalPathStrategy(),
-                options.indexFileInDataFileDir());
+                options.indexFileInDataFileDir(),
+                options.globalIndexExternalPath());
     }
 
     private List<Path> createExternalPaths() {

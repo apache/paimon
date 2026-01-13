@@ -186,7 +186,8 @@ public class LuceneVectorGlobalIndexScanTest {
                             entry.fileName(),
                             fileSize,
                             entry.rowCount(),
-                            globalMeta));
+                            globalMeta,
+                            null));
         }
         return metas;
     }

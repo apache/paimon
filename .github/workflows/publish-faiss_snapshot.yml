@@ -43,10 +43,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
@@ -57,7 +57,7 @@ jobs:
           platform: linux-amd64
 
       - name: Upload native library
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: native-linux-amd64
           path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
@@ -68,10 +68,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
@@ -82,7 +82,7 @@ jobs:
           platform: linux-aarch64
 
       - name: Upload native library
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: native-linux-aarch64
           path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/aarch64/
@@ -93,13 +93,13 @@ jobs:
     runs-on: macos-14
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ env.JDK_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
 
       - name: Build FAISS native library
         uses: ./.github/actions/build-faiss-native
@@ -108,7 +108,7 @@ jobs:
           use-homebrew: 'true'
 
       - name: Upload native library
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: native-darwin-aarch64
           path: paimon-faiss/paimon-faiss-jni/src/main/resources/darwin/aarch64/
@@ -121,28 +121,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ env.JDK_VERSION }}
-          distribution: 'temurin'
+          distribution: 'zulu'
 
       - name: Download Linux AMD64 native library
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: native-linux-amd64
           path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
 
       - name: Download Linux AARCH64 native library
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: native-linux-aarch64
           path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/aarch64/
 
       - name: Download macOS ARM native library
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: native-darwin-aarch64
           path: paimon-faiss/paimon-faiss-jni/src/main/resources/darwin/aarch64/
@@ -153,7 +153,7 @@ jobs:
           find paimon-faiss/paimon-faiss-jni/src/main/resources -type f \( -name "*.so" -o -name "*.so.*" -o -name "*.dylib" \) -exec ls -la {} \;
 
       - name: Cache local Maven repository
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.m2/repository
           key: faiss-snapshot-maven-${{ hashFiles('**/pom.xml') }}

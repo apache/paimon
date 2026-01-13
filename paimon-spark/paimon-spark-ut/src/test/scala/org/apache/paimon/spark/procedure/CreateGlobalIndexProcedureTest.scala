@@ -24,7 +24,10 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.VarCharType
 import org.apache.paimon.utils.Range
 
+import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.streaming.StreamTest
+
+import java.io.File
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable
@@ -294,6 +297,52 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       assert(output.getBoolean(0))
 
       assertMultiplePartitionsResult("T", 100000L, 2)
+    }
+  }
+
+  test("create bitmap global index with external path") {
+    withTable("T") {
+      val tempIndexDir: File = Utils.createTempDir
+      val indexPath = "file:" + tempIndexDir.toString
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, name STRING)
+                   |TBLPROPERTIES (
+                   |  'bucket' = '-1',
+                   |  'global-index.row-count-per-shard' = '10000',
+                   |  'global-index.external-path' = '$indexPath',
+                   |  'row-tracking.enabled' = 'true',
+                   |  'data-evolution.enabled' = 'true')
+                   |""".stripMargin)
+
+      val values =
+        (0 until 100000).map(i => s"($i, 'name_$i')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      val output =
+        spark
+          .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'bitmap')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+
+      val table = loadTable("T")
+      val bitmapEntries = table
+        .store()
+        .newIndexFileHandler()
+        .scanEntries()
+        .asScala
+        .filter(_.indexFile().indexType() == "bitmap")
+      assert(bitmapEntries.nonEmpty)
+      val totalRowCount = bitmapEntries.map(_.indexFile().rowCount()).sum
+      assert(totalRowCount == 100000L)
+      for (entry <- bitmapEntries) {
+        assert(
+          entry
+            .indexFile()
+            .externalPath()
+            .startsWith(indexPath + "/" + entry.indexFile().fileName()))
+      }
     }
   }
 

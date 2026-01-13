@@ -24,7 +24,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
@@ -109,18 +108,9 @@ public class AbstractIndexReaderTest {
                     }
                 };
         fileReader =
-                new GlobalIndexFileReader() {
-                    @Override
-                    public SeekableInputStream getInputStream(String fileName) throws IOException {
-                        return fileIO.newInputStream(
-                                new Path(new Path(tempPath.toUri()), fileName));
-                    }
-
-                    @Override
-                    public Path filePath(String fileName) {
-                        return new Path(new Path(tempPath.toUri()), fileName);
-                    }
-                };
+                meta ->
+                        fileIO.newInputStream(
+                                new Path(new Path(tempPath.toUri()), meta.filePath()));
         options = new Options();
         options.set(BTreeIndexOptions.BTREE_INDEX_CACHE_SIZE, MemorySize.ofMebiBytes(8));
         globalIndexer = new BTreeGlobalIndexer(new DataField(1, "testField", dataType), options);
@@ -147,7 +137,7 @@ public class AbstractIndexReaderTest {
         ResultEntry resultEntry = results.get(0);
         String fileName = resultEntry.fileName();
         return new GlobalIndexIOMeta(
-                fileName,
+                new Path(new Path(tempPath.toUri()), fileName),
                 fileIO.getFileSize(new Path(new Path(tempPath.toUri()), fileName)),
                 resultEntry.meta());
     }

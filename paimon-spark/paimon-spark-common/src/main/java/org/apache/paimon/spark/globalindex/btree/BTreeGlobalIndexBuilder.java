@@ -118,7 +118,10 @@ public class BTreeGlobalIndexBuilder implements Serializable {
             if (currentWriter == null) {
                 currentWriter = createWriter();
             }
-            currentWriter.write(extractor.extractIndexField(row), extractor.extractRowId(row));
+
+            // convert the original rowId to local rowId
+            long localRowId = extractor.extractRowId(row) - rowRange.from;
+            currentWriter.write(extractor.extractIndexField(row), localRowId);
         }
 
         if (counter > 0) {
