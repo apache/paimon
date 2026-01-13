@@ -30,6 +30,8 @@ import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 /** A {@link NullFalseLeafBinaryFunction} to eval equal. */
 public class Equal extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "EQUAL";
+
     public static final Equal INSTANCE = new Equal();
 
     @JsonCreator

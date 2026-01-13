@@ -37,6 +37,8 @@ public class FieldTransform implements Transform {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "FIELD_REF";
+
     private final FieldRef fieldRef;
 
     public static final String FIELD_FIELD_REF = "fieldRef";
@@ -49,7 +51,7 @@ public class FieldTransform implements Transform {
 
     @Override
     public String name() {
-        return "FIELD_REF";
+        return NAME;
     }
 
     @JsonProperty(FIELD_FIELD_REF)

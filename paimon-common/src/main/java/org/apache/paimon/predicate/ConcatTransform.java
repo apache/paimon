@@ -31,6 +31,8 @@ public class ConcatTransform extends StringTransform {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "CONCAT";
+
     @JsonCreator
     public ConcatTransform(
             @JsonProperty(StringTransform.FIELD_INPUTS)
@@ -41,7 +43,7 @@ public class ConcatTransform extends StringTransform {
 
     @Override
     public String name() {
-        return "CONCAT";
+        return NAME;
     }
 
     @Override

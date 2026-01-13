@@ -30,6 +30,8 @@ import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 /** A {@link NullFalseLeafBinaryFunction} to eval greater or equal. */
 public class GreaterOrEqual extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "GREATER_OR_EQUAL";
+
     public static final GreaterOrEqual INSTANCE = new GreaterOrEqual();
 
     @JsonCreator

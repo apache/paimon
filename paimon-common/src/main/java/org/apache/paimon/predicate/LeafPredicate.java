@@ -47,6 +47,8 @@ public class LeafPredicate implements Predicate {
 
     private static final long serialVersionUID = 3L;
 
+    public static final String NAME = "LEAF";
+
     public static final String FIELD_TRANSFORM = "transform";
 
     public static final String FIELD_FUNCTION = "function";

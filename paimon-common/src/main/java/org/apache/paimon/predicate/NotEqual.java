@@ -30,6 +30,8 @@ import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 /** A {@link NullFalseLeafBinaryFunction} to eval not equal. */
 public class NotEqual extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "NOT_EQUAL";
+
     public static final NotEqual INSTANCE = new NotEqual();
 
     @JsonCreator

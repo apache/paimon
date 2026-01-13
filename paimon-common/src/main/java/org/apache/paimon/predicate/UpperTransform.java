@@ -33,6 +33,8 @@ public class UpperTransform extends StringTransform {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "UPPER";
+
     @JsonCreator
     public UpperTransform(
             @JsonProperty(StringTransform.FIELD_INPUTS)
@@ -44,7 +46,7 @@ public class UpperTransform extends StringTransform {
 
     @Override
     public String name() {
-        return "UPPER";
+        return NAME;
     }
 
     @Override

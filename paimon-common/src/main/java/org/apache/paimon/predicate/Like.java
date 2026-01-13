@@ -36,6 +36,8 @@ import java.util.regex.Pattern;
 /** A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like}. */
 public class Like extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "LIKE";
+
     public static final Like INSTANCE = new Like();
 
     private static final Cache<BinaryString, Filter<BinaryString>> CACHE =

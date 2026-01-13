@@ -30,6 +30,8 @@ import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 /** A {@link LeafFunction} to eval greater. */
 public class GreaterThan extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "GREATER_THAN";
+
     public static final GreaterThan INSTANCE = new GreaterThan();
 
     @JsonCreator

@@ -27,49 +27,28 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.predicate.LeafFunction.FIELD_TYPE;
+
 /** Function to test a field with literals. */
-@JsonTypeInfo(
-        use = JsonTypeInfo.Id.NAME,
-        include = JsonTypeInfo.As.PROPERTY,
-        property = LeafFunction.Types.FIELD_TYPE)
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = FIELD_TYPE)
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = Equal.class, name = LeafFunction.Types.EQUAL),
-    @JsonSubTypes.Type(value = NotEqual.class, name = LeafFunction.Types.NOT_EQUAL),
-    @JsonSubTypes.Type(value = LessThan.class, name = LeafFunction.Types.LESS_THAN),
-    @JsonSubTypes.Type(value = LessOrEqual.class, name = LeafFunction.Types.LESS_OR_EQUAL),
-    @JsonSubTypes.Type(value = GreaterThan.class, name = LeafFunction.Types.GREATER_THAN),
-    @JsonSubTypes.Type(value = GreaterOrEqual.class, name = LeafFunction.Types.GREATER_OR_EQUAL),
-    @JsonSubTypes.Type(value = IsNull.class, name = LeafFunction.Types.IS_NULL),
-    @JsonSubTypes.Type(value = IsNotNull.class, name = LeafFunction.Types.IS_NOT_NULL),
-    @JsonSubTypes.Type(value = StartsWith.class, name = LeafFunction.Types.STARTS_WITH),
-    @JsonSubTypes.Type(value = EndsWith.class, name = LeafFunction.Types.ENDS_WITH),
-    @JsonSubTypes.Type(value = Contains.class, name = LeafFunction.Types.CONTAINS),
-    @JsonSubTypes.Type(value = Like.class, name = LeafFunction.Types.LIKE),
-    @JsonSubTypes.Type(value = In.class, name = LeafFunction.Types.IN),
-    @JsonSubTypes.Type(value = NotIn.class, name = LeafFunction.Types.NOT_IN)
+    @JsonSubTypes.Type(value = Equal.class, name = Equal.NAME),
+    @JsonSubTypes.Type(value = NotEqual.class, name = NotEqual.NAME),
+    @JsonSubTypes.Type(value = LessThan.class, name = LessThan.NAME),
+    @JsonSubTypes.Type(value = LessOrEqual.class, name = LessOrEqual.NAME),
+    @JsonSubTypes.Type(value = GreaterThan.class, name = GreaterThan.NAME),
+    @JsonSubTypes.Type(value = GreaterOrEqual.class, name = GreaterOrEqual.NAME),
+    @JsonSubTypes.Type(value = IsNull.class, name = IsNull.NAME),
+    @JsonSubTypes.Type(value = IsNotNull.class, name = IsNotNull.NAME),
+    @JsonSubTypes.Type(value = StartsWith.class, name = StartsWith.NAME),
+    @JsonSubTypes.Type(value = EndsWith.class, name = EndsWith.NAME),
+    @JsonSubTypes.Type(value = Contains.class, name = Contains.NAME),
+    @JsonSubTypes.Type(value = Like.class, name = Like.NAME),
+    @JsonSubTypes.Type(value = In.class, name = In.NAME),
+    @JsonSubTypes.Type(value = NotIn.class, name = NotIn.NAME)
 })
 public abstract class LeafFunction implements Serializable {
-    /** Types for function. */
-    class Types {
-        public static final String FIELD_TYPE = "type";
-
-        public static final String EQUAL = "equal";
-        public static final String NOT_EQUAL = "notEqual";
-        public static final String LESS_THAN = "lessThan";
-        public static final String LESS_OR_EQUAL = "lessOrEqual";
-        public static final String GREATER_THAN = "greaterThan";
-        public static final String GREATER_OR_EQUAL = "greaterOrEqual";
-        public static final String IS_NULL = "isNull";
-        public static final String IS_NOT_NULL = "isNotNull";
-        public static final String STARTS_WITH = "startsWith";
-        public static final String ENDS_WITH = "endsWith";
-        public static final String CONTAINS = "contains";
-        public static final String LIKE = "like";
-        public static final String IN = "in";
-        public static final String NOT_IN = "notIn";
-
-        private Types() {}
-    }
+    public static final String FIELD_TYPE = "type";
 
     public abstract boolean test(DataType type, Object field, List<Object> literals);
 

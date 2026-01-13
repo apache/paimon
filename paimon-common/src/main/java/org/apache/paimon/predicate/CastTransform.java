@@ -40,6 +40,8 @@ public class CastTransform implements Transform {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "CAST";
+
     private final FieldRef fieldRef;
     private final DataType type;
     private transient CastExecutor<Object, Object> cast;
@@ -95,7 +97,7 @@ public class CastTransform implements Transform {
 
     @Override
     public String name() {
-        return "CAST";
+        return NAME;
     }
 
     @Override

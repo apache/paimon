@@ -32,6 +32,8 @@ public class In extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "IN";
+
     public static final In INSTANCE = new In();
 
     @JsonCreator

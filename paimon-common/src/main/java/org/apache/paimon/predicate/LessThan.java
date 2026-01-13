@@ -30,6 +30,8 @@ import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 /** A {@link NullFalseLeafBinaryFunction} to eval less or equal. */
 public class LessThan extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "LESS_THAN";
+
     public static final LessThan INSTANCE = new LessThan();
 
     @JsonCreator

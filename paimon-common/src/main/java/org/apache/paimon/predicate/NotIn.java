@@ -32,6 +32,8 @@ public class NotIn extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "NOT_IN";
+
     public static final NotIn INSTANCE = new NotIn();
 
     @JsonCreator

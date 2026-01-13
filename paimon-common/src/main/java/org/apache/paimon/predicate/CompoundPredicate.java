@@ -37,6 +37,8 @@ import java.util.Optional;
  */
 public class CompoundPredicate implements Predicate {
 
+    public static final String NAME = "COMPOUND";
+
     private static final String FIELD_FUNCTION = "function";
     private static final String FIELD_CHILDREN = "children";
 

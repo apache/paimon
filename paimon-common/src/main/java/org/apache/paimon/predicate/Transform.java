@@ -27,19 +27,19 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTyp
 import java.io.Serializable;
 import java.util.List;
 
+import static org.apache.paimon.predicate.Transform.FIELD_TYPE;
+
 /** Represents a transform function. */
-@JsonTypeInfo(
-        use = JsonTypeInfo.Id.NAME,
-        include = JsonTypeInfo.As.PROPERTY,
-        property = Transform.Types.FIELD_TYPE)
+@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = FIELD_TYPE)
 @JsonSubTypes({
-    @JsonSubTypes.Type(value = FieldTransform.class, name = Transform.Types.FIELD),
-    @JsonSubTypes.Type(value = CastTransform.class, name = Transform.Types.CAST),
-    @JsonSubTypes.Type(value = ConcatTransform.class, name = Transform.Types.CONCAT),
-    @JsonSubTypes.Type(value = ConcatWsTransform.class, name = Transform.Types.CONCAT_WS),
-    @JsonSubTypes.Type(value = UpperTransform.class, name = Transform.Types.UPPER)
+    @JsonSubTypes.Type(value = FieldTransform.class, name = FieldTransform.NAME),
+    @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),
+    @JsonSubTypes.Type(value = ConcatTransform.class, name = ConcatTransform.NAME),
+    @JsonSubTypes.Type(value = ConcatWsTransform.class, name = ConcatWsTransform.NAME),
+    @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME)
 })
 public interface Transform extends Serializable {
+    public static final String FIELD_TYPE = "type";
 
     String name();
 
@@ -50,16 +50,4 @@ public interface Transform extends Serializable {
     Object transform(InternalRow row);
 
     Transform copyWithNewInputs(List<Object> inputs);
-
-    /** Types for transform. */
-    class Types {
-        public static final String FIELD_TYPE = "type";
-        public static final String FIELD = "field";
-        public static final String CAST = "cast";
-        public static final String CONCAT = "concat";
-        public static final String CONCAT_WS = "concat_ws";
-        public static final String UPPER = "upper";
-
-        private Types() {}
-    }
 }

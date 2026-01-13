@@ -32,6 +32,8 @@ import java.util.Optional;
  */
 public class EndsWith extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "ENDS_WITH";
+
     public static final EndsWith INSTANCE = new EndsWith();
 
     @JsonCreator

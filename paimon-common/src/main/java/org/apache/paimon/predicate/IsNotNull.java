@@ -28,6 +28,8 @@ import java.util.Optional;
 /** A {@link NullFalseLeafBinaryFunction} to eval is not null. */
 public class IsNotNull extends LeafUnaryFunction {
 
+    public static final String NAME = "IS_NOT_NULL";
+
     public static final IsNotNull INSTANCE = new IsNotNull();
 
     @JsonCreator

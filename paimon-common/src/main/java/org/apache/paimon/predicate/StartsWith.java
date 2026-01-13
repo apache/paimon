@@ -32,6 +32,8 @@ import java.util.Optional;
  */
 public class StartsWith extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "STARTS_WITH";
+
     public static final StartsWith INSTANCE = new StartsWith();
 
     @JsonCreator

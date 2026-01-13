@@ -29,6 +29,8 @@ import java.util.Optional;
 /** A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like '%abc%'}. */
 public class Contains extends NullFalseLeafBinaryFunction {
 
+    public static final String NAME = "CONTAINS";
+
     public static final Contains INSTANCE = new Contains();
 
     @JsonCreator
