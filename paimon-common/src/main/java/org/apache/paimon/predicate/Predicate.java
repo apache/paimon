@@ -28,8 +28,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTyp
 import java.io.Serializable;
 import java.util.Optional;
 
-import static org.apache.paimon.predicate.Predicate.FIELD_TYPE;
-
 /**
  * Predicate which returns Boolean and provides testing by stats.
  *
@@ -37,13 +35,16 @@ import static org.apache.paimon.predicate.Predicate.FIELD_TYPE;
  * @since 0.4.0
  */
 @Public
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = FIELD_TYPE)
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = Predicate.FIELD_TYPE)
 @JsonSubTypes({
     @JsonSubTypes.Type(value = LeafPredicate.class, name = LeafPredicate.NAME),
     @JsonSubTypes.Type(value = CompoundPredicate.class, name = CompoundPredicate.NAME)
 })
 public interface Predicate extends Serializable {
-    public static final String FIELD_TYPE = "type";
+    String FIELD_TYPE = "type";
     /**
      * Test based on the specific input row.
      *

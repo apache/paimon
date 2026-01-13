@@ -27,10 +27,11 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.paimon.predicate.LeafFunction.FIELD_TYPE;
-
 /** Function to test a field with literals. */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = FIELD_TYPE)
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = LeafFunction.FIELD_TYPE)
 @JsonSubTypes({
     @JsonSubTypes.Type(value = Equal.class, name = Equal.NAME),
     @JsonSubTypes.Type(value = NotEqual.class, name = NotEqual.NAME),

@@ -27,10 +27,11 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonTyp
 import java.io.Serializable;
 import java.util.List;
 
-import static org.apache.paimon.predicate.Transform.FIELD_TYPE;
-
 /** Represents a transform function. */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = FIELD_TYPE)
+@JsonTypeInfo(
+        use = JsonTypeInfo.Id.NAME,
+        include = JsonTypeInfo.As.PROPERTY,
+        property = Transform.FIELD_TYPE)
 @JsonSubTypes({
     @JsonSubTypes.Type(value = FieldTransform.class, name = FieldTransform.NAME),
     @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),
@@ -39,7 +40,7 @@ import static org.apache.paimon.predicate.Transform.FIELD_TYPE;
     @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME)
 })
 public interface Transform extends Serializable {
-    public static final String FIELD_TYPE = "type";
+    String FIELD_TYPE = "type";
 
     String name();
 
