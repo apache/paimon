@@ -20,8 +20,6 @@ import threading
 import time
 from typing import Optional
 
-from pyarrow._fs import FileSystem
-
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
@@ -42,6 +40,7 @@ class RESTTokenFileIO(FileIO):
         self.identifier = identifier
         self.path = path
         self.catalog_options = catalog_options
+        self.properties = catalog_options or Options({})  # For compatibility with refresh_token()
         self.token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
         self.lock = threading.Lock()

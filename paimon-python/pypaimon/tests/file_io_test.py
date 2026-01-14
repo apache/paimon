@@ -23,9 +23,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pyarrow
-from pyarrow.fs import S3FileSystem, LocalFileSystem
+from pyarrow.fs import S3FileSystem
 
-from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
@@ -340,22 +339,26 @@ class FileIOTest(unittest.TestCase):
     def test_try_to_write_atomic(self):
         temp_dir = tempfile.mkdtemp(prefix="file_io_try_write_atomic_test_")
         try:
-            warehouse_path = f"file://{temp_dir}"
-            file_io = PyArrowFileIO(warehouse_path, {})
-
             target_dir = os.path.join(temp_dir, "target_dir")
+            normal_file = os.path.join(temp_dir, "normal_file.txt")
+            
+            pyarrow_file_io = PyArrowFileIO(f"file://{temp_dir}", {})
             os.makedirs(target_dir)
-            
-            result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
-            self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
-            
-            self.assertTrue(os.path.isdir(target_dir))
+            self.assertFalse(pyarrow_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                           "PyArrowFileIO should return False when target is a directory")
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
             
-            normal_file = os.path.join(temp_dir, "normal_file.txt")
-            result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
-            self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
-            self.assertTrue(os.path.exists(normal_file))
+            self.assertTrue(pyarrow_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
+            with open(normal_file, "r") as f:
+                self.assertEqual(f.read(), "test content")
+            
+            os.remove(normal_file)
+            local_file_io = LocalFileIO(f"file://{temp_dir}", {})
+            self.assertFalse(local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                           "LocalFileIO should return False when target is a directory")
+            self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
+            
+            self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
             with open(normal_file, "r") as f:
                 self.assertEqual(f.read(), "test content")
         finally:

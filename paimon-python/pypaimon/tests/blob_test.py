@@ -613,7 +613,6 @@ class BlobEndToEndTest(unittest.TestCase):
         """Test that complex types containing BLOB elements throw exceptions during read/write operations."""
         from pypaimon.schema.data_types import DataField, AtomicType, ArrayType, MultisetType, MapType
         from pypaimon.table.row.blob import BlobData
-        from pypaimon.common.file_io import FileIO
         from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
         from pypaimon.table.row.row_kind import RowKind
 
@@ -756,7 +755,6 @@ class BlobEndToEndTest(unittest.TestCase):
     def test_blob_advanced_scenarios(self):
         """Test advanced blob scenarios: corruption, truncation, zero-length, large blobs, compression, cross-format."""
         from pypaimon.schema.data_types import DataField, AtomicType
-        from pypaimon.common.file_io import FileIO
         from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
         # Set up file I/O

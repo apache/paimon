@@ -111,6 +111,10 @@ class FileIO(ABC):
             return input_stream.read().decode('utf-8')
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
+        if self.exists(path):
+            if self.is_dir(path):
+                return False
+        
         temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
@@ -136,7 +140,6 @@ class FileIO(ABC):
         if not overwrite and self.exists(target_path):
             raise FileExistsError(f"Target file {target_path} already exists and overwrite=False")
 
-        source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
         target_parent = Path(target_str).parent
         
@@ -204,5 +207,3 @@ class FileIO(ABC):
         
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
         return PyArrowFileIO(path, catalog_options or Options({}))
-
-

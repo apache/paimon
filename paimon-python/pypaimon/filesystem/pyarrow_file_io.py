@@ -510,4 +510,3 @@ class PyArrowFileIO(FileIO):
             return normalized_path
 
         return str(path)
-

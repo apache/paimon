@@ -93,6 +93,30 @@ class RESTTokenFileIOTest(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_try_to_write_atomic_directory_check(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+
+            target_dir = os.path.join(self.temp_dir, "target_dir")
+            os.makedirs(target_dir)
+            
+            result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
+            self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
+            
+            self.assertTrue(os.path.isdir(target_dir))
+            self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
+            
+            normal_file = os.path.join(self.temp_dir, "normal_file.txt")
+            result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
+            self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
+            self.assertTrue(os.path.exists(normal_file))
+            with open(normal_file, "r") as f:
+                self.assertEqual(f.read(), "test content")
+
     def test_new_output_stream_behavior_matches_parent(self):
         """Test that RESTTokenFileIO.new_output_stream behaves like FileIO.new_output_stream."""
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):

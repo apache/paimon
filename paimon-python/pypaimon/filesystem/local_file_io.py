@@ -21,7 +21,7 @@ import shutil
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import pyarrow
@@ -55,6 +55,18 @@ class LocalFileIO(FileIO):
     
     def _to_file(self, path: str) -> Path:
         parsed = urlparse(path)
+        
+        if parsed.scheme and len(parsed.scheme) == 1 and not parsed.netloc:
+            return Path(path)
+        
+        if parsed.scheme == 'file' and parsed.netloc and parsed.netloc.endswith(':'):
+            drive_letter = parsed.netloc.rstrip(':')
+            path_part = parsed.path.lstrip('/') if parsed.path else ''
+            if path_part:
+                return Path(f"{drive_letter}:/{path_part}")
+            else:
+                return Path(f"{drive_letter}:")
+        
         local_path = parsed.path if parsed.scheme else path
         
         if not local_path:
@@ -418,4 +430,3 @@ class LocalFileIO(FileIO):
 
 
 LocalFileIO.INSTANCE = LocalFileIO()
-
