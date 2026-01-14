@@ -23,6 +23,8 @@ from typing import List, Optional
 
 import pyarrow
 
+from common.options import Options
+
 
 class FileIO(ABC):
     """
@@ -188,8 +190,6 @@ class FileIO(ABC):
     def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
         """
         Returns a FileIO instance for accessing the file system identified by the given path.
-        
-        This method automatically selects the appropriate FileIO implementation:
         - LocalFileIO for local file system (file:// or no scheme)
         - PyArrowFileIO for remote file systems (oss://, s3://, hdfs://, etc.)
         """
@@ -198,12 +198,10 @@ class FileIO(ABC):
         uri = urlparse(path)
         scheme = uri.scheme
         
-        # If no scheme or file:// scheme, use LocalFileIO
         if not scheme or scheme == "file":
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
         
-        # For other schemes (oss, s3, hdfs, etc.), use PyArrowFileIO
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
         return PyArrowFileIO(path, catalog_options or Options({}))
 

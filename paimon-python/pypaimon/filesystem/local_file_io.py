@@ -220,27 +220,6 @@ class LocalFileIO(FileIO):
         except (PermissionError, OSError):
             return False
     
-    def get_file_size(self, path: str) -> int:
-        file_info = self.get_file_status(path)
-        if file_info.size is None:
-            raise ValueError(f"File size not available for {path}")
-        return file_info.size
-    
-    def is_dir(self, path: str) -> bool:
-        file_info = self.get_file_status(path)
-        return file_info.type == pyarrow.fs.FileType.Directory
-    
-    def check_or_mkdirs(self, path: str):
-        if self.exists(path):
-            if not self.is_dir(path):
-                raise ValueError(f"The path '{path}' should be a directory.")
-        else:
-            self.mkdirs(path)
-    
-    def read_file_utf8(self, path: str) -> str:
-        with self.new_input_stream(path) as input_stream:
-            return input_stream.read().decode('utf-8')
-    
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         file_path = self._to_file(path)
         if file_path.exists() and file_path.is_dir():
@@ -257,17 +236,6 @@ class LocalFileIO(FileIO):
                 self.delete_quietly(str(temp_path))
         return success
     
-    def write_file(self, path: str, content: str, overwrite: bool = False):
-        if not overwrite and self.exists(path):
-            raise FileExistsError(f"File {path} already exists and overwrite=False")
-        
-        with self.new_output_stream(path) as output_stream:
-            output_stream.write(content.encode('utf-8'))
-    
-    def overwrite_file_utf8(self, path: str, content: str):
-        with self.new_output_stream(path) as output_stream:
-            output_stream.write(content.encode('utf-8'))
-    
     def copy_file(self, source_path: str, target_path: str, overwrite: bool = False):
         if not overwrite and self.exists(target_path):
             raise FileExistsError(f"Target file {target_path} already exists and overwrite=False")
@@ -280,43 +248,6 @@ class LocalFileIO(FileIO):
             target_parent.mkdir(parents=True, exist_ok=True)
         
         shutil.copy2(source_file, target_file)
-    
-    def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
-        file_infos = self.list_status(source_directory)
-        target_dir = self._to_file(target_directory)
-        for file_info in file_infos:
-            if file_info.type == pyarrow.fs.FileType.File:
-                source_file = file_info.original_path
-                file_name = Path(file_info.path).name
-                target_file = target_dir / file_name
-                self.copy_file(source_file, str(target_file), overwrite)
-    
-    def read_overwritten_file_utf8(self, path: str) -> Optional[str]:
-        retry_number = 0
-        exception = None
-        while retry_number < 5:
-            try:
-                return self.read_file_utf8(path)
-            except FileNotFoundError:
-                return None
-            except Exception as e:
-                if not self.exists(path):
-                    return None
-                
-                if (str(type(e).__name__).endswith("RemoteFileChangedException") or
-                        (str(e) and "Blocklist for" in str(e) and "has changed" in str(e))):
-                    exception = e
-                    retry_number += 1
-                else:
-                    raise e
-        
-        if exception:
-            if isinstance(exception, Exception):
-                raise exception
-            else:
-                raise RuntimeError(exception)
-        
-        return None
     
     def to_filesystem_path(self, path: str) -> str:
         file_path = self._to_file(path)
