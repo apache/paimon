@@ -25,7 +25,7 @@ from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
 
 
-class AppendOnlySplitGenerator(AbstractSplitGenerator):
+class AppendTableSplitGenerator(AbstractSplitGenerator):
     """
     Split generator for append-only tables.
     """
@@ -162,12 +162,12 @@ class AppendOnlySplitGenerator(AbstractSplitGenerator):
             file_end_pos += file.row_count  # Update to row position after current file
 
             # Use shared helper to compute file range
-            file_range = AppendOnlySplitGenerator._compute_file_range(
+            file_range = AppendTableSplitGenerator._compute_file_range(
                 plan_start_pos, plan_end_pos, file_begin_pos, file.row_count
             )
             
             if file_range is not None:
                 shard_file_idx_map[file.file_name] = file_range
 
-        shard_file_idx_map[AppendOnlySplitGenerator.NEXT_POS_KEY] = file_end_pos
+        shard_file_idx_map[AppendTableSplitGenerator.NEXT_POS_KEY] = file_end_pos
         return shard_file_idx_map

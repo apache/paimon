@@ -28,9 +28,9 @@ from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.read.plan import Plan
 from pypaimon.read.push_down_utils import (trim_and_transform_predicate)
-from pypaimon.read.scanner.append_only_split_generator import AppendOnlySplitGenerator
+from pypaimon.read.scanner.append_table_split_generator import AppendTableSplitGenerator
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
-from pypaimon.read.scanner.primary_key_split_generator import PrimaryKeySplitGenerator
+from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
 from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.read.split import Split
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
@@ -101,7 +101,7 @@ class FullStartingScanner(StartingScanner):
 
         # Create appropriate split generator based on table type
         if self.table.is_primary_key_table:
-            split_generator = PrimaryKeySplitGenerator(
+            split_generator = PrimaryKeyTableSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
@@ -124,7 +124,7 @@ class FullStartingScanner(StartingScanner):
                 score_getter
             )
         else:
-            split_generator = AppendOnlySplitGenerator(
+            split_generator = AppendTableSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,

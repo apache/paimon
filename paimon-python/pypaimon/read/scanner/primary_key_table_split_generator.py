@@ -26,21 +26,28 @@ from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import Split
 
 
-class PrimaryKeySplitGenerator(AbstractSplitGenerator):
+class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
     """
     Split generator for primary key tables.
     """
 
     def __init__(
-        self,
-        table,
-        target_split_size: int,
-        open_file_cost: int,
-        deletion_files_map=None
+            self,
+            table,
+            target_split_size: int,
+            open_file_cost: int,
+            deletion_files_map=None
     ):
         super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
         self.deletion_vectors_enabled = table.options.deletion_vectors_enabled()
         self.merge_engine = table.options.merge_engine()
+
+    def with_slice(self, start_pos: int, end_pos: int):
+        """Primary key tables do not support slice-based sharding."""
+        raise NotImplementedError(
+            "Primary key tables do not support with_slice(). "
+            "Use with_shard() for bucket-based parallel processing instead."
+        )
 
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
         """
