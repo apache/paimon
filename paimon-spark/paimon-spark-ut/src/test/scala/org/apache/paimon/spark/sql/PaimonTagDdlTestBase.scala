@@ -190,6 +190,7 @@ abstract class PaimonTagDdlTestBase extends PaimonSparkTestBase {
   test("Tag expiration: batch write expire tag") {
     for (useV2Write <- Seq("true", "false")) {
       withSparkSQLConf("spark.paimon.write.use-v2-write" -> useV2Write) {
+        assume(useV2Write == "true" && gteqSpark4_1)
         withTable("T") {
           spark.sql("""CREATE TABLE T (id INT, name STRING)
                       |USING PAIMON

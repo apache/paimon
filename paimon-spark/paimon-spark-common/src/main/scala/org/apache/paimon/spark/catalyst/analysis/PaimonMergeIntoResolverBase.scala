@@ -58,7 +58,9 @@ trait PaimonMergeIntoResolverBase extends ExpressionHelper {
         // The condition can be from both target and source tables
         val resolvedCond = condition.map(resolveCondition(resolve, _, merge, ALL))
         DeleteAction(resolvedCond)
-      case UpdateAction(condition, assignments) =>
+      case u: UpdateAction =>
+        val condition = u.condition
+        val assignments = u.assignments
         // The condition and value can be from both target and source tables
         val resolvedCond = condition.map(resolveCondition(resolve, _, merge, ALL))
         val resolvedAssignments = resolveAssignments(resolve, assignments, merge, ALL)

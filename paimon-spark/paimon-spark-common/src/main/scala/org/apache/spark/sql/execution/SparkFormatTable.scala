@@ -20,7 +20,6 @@ package org.apache.spark.sql.execution
 
 import org.apache.paimon.utils.StringUtils
 
-import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
@@ -32,7 +31,7 @@ import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
 import org.apache.spark.sql.execution.datasources.v2.orc.OrcTable
 import org.apache.spark.sql.execution.datasources.v2.parquet.ParquetTable
 import org.apache.spark.sql.execution.datasources.v2.text.{TextScanBuilder, TextTable}
-import org.apache.spark.sql.execution.streaming.{FileStreamSink, MetadataLogFileIndex}
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -50,71 +49,13 @@ object SparkFormatTable {
       paths: Seq[String],
       userSpecifiedSchema: Option[StructType],
       partitionSchema: StructType): PartitioningAwareFileIndex = {
-
-    def globPaths: Boolean = {
-      val entry = options.get(DataSource.GLOB_PATHS_KEY)
-      Option(entry).forall(_ == "true")
-    }
-
-    val caseSensitiveMap = options.asCaseSensitiveMap.asScala.toMap
-    // Hadoop Configurations are case-sensitive.
-    val hadoopConf = sparkSession.sessionState.newHadoopConfWithOptions(caseSensitiveMap)
-    if (FileStreamSink.hasMetadata(paths, hadoopConf, sparkSession.sessionState.conf)) {
-      // We are reading from the results of a streaming query. We will load files from
-      // the metadata log instead of listing them using HDFS APIs.
-      new PartitionedMetadataLogFileIndex(
-        sparkSession,
-        new Path(paths.head),
-        options.asScala.toMap,
-        userSpecifiedSchema,
-        partitionSchema = partitionSchema)
-    } else {
-      // This is a non-streaming file based datasource.
-      val rootPathsSpecified = DataSource.checkAndGlobPathIfNecessary(
-        paths,
-        hadoopConf,
-        checkEmptyGlobPath = true,
-        checkFilesExist = true,
-        enableGlobbing = globPaths)
-      val fileStatusCache = FileStatusCache.getOrCreate(sparkSession)
-
-      new PartitionedInMemoryFileIndex(
-        sparkSession,
-        rootPathsSpecified,
-        caseSensitiveMap,
-        userSpecifiedSchema,
-        fileStatusCache,
-        partitionSchema = partitionSchema)
-    }
-  }
-
-  // Extend from MetadataLogFileIndex to override partitionSchema
-  private class PartitionedMetadataLogFileIndex(
-      sparkSession: SparkSession,
-      path: Path,
-      parameters: Map[String, String],
-      userSpecifiedSchema: Option[StructType],
-      override val partitionSchema: StructType)
-    extends MetadataLogFileIndex(sparkSession, path, parameters, userSpecifiedSchema)
-
-  // Extend from InMemoryFileIndex to override partitionSchema
-  private class PartitionedInMemoryFileIndex(
-      sparkSession: SparkSession,
-      rootPathsSpecified: Seq[Path],
-      parameters: Map[String, String],
-      userSpecifiedSchema: Option[StructType],
-      fileStatusCache: FileStatusCache = NoopCache,
-      userSpecifiedPartitionSpec: Option[PartitionSpec] = None,
-      metadataOpsTimeNs: Option[Long] = None,
-      override val partitionSchema: StructType)
-    extends InMemoryFileIndex(
+    SparkShimLoader.shim.createFileIndex(
+      options,
       sparkSession,
-      rootPathsSpecified,
-      parameters,
+      paths,
       userSpecifiedSchema,
-      fileStatusCache,
-      userSpecifiedPartitionSpec,
-      metadataOpsTimeNs)
+      partitionSchema)
+  }
 }
 
 trait PartitionedFormatTable extends SupportsPartitionManagement {

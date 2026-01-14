@@ -26,6 +26,7 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 import scala.collection.JavaConverters._
 
@@ -106,8 +107,10 @@ trait PaimonMergeIntoBase
       dataEvolutionEnabled: Boolean): MergeAction = {
     action match {
       case d @ DeleteAction(_) => d
-      case u @ UpdateAction(_, assignments) =>
-        u.copy(assignments = alignAssignments(targetOutput, assignments))
+      case u: UpdateAction =>
+        SparkShimLoader.shim.createUpdateAction(
+          u.condition,
+          alignAssignments(targetOutput, u.assignments))
 
       case i @ InsertAction(_, assignments) =>
         i.copy(assignments = alignAssignments(targetOutput, assignments))

@@ -51,7 +51,7 @@ jobs:
           distribution: 'temurin'
 
       - name: Build Spark
-        run:  mvn -T 2C -B clean install -DskipTests -Pspark4,flink1,paimon-lucene
+        run:  mvn -T 2C -B clean install -DskipTests -Pspark4.0,flink1,paimon-lucene
 
       - name: Test Spark
         timeout-minutes: 60
@@ -65,6 +65,6 @@ jobs:
           test_modules+="org.apache.paimon:paimon-spark-${suffix}_2.13,"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark4,flink1,paimon-lucene
+          mvn -T 2C -B verify -pl "${test_modules}" -Duser.timezone=$jvm_timezone -Pspark4.0,flink1,paimon-lucene -X
         env:
           MAVEN_OPTS: -Xmx4096m

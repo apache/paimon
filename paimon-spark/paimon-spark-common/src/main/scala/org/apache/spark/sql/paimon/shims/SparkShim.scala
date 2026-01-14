@@ -27,12 +27,16 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.ArrayData
 import org.apache.spark.sql.connector.catalog.{Identifier, Table, TableCatalog}
 import org.apache.spark.sql.connector.expressions.Transform
+import org.apache.spark.sql.execution.datasources.PartitioningAwareFileIndex
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
 import java.util.{Map => JMap}
 
@@ -88,6 +92,12 @@ trait SparkShim {
       notMatchedBySourceActions: Seq[MergeAction],
       withSchemaEvolution: Boolean): MergeIntoTable
 
+  def createKeep(context: String, condition: Expression, output: Seq[Expression]): Instruction
+
+  def createUpdateAction(condition: Option[Expression], assignments: Seq[Assignment]): UpdateAction
+
+  def createDataSourceV2Relation(relation: DataSourceV2Relation, table: Table): DataSourceV2Relation
+
   // for variant
   def toPaimonVariant(o: Object): Variant
 
@@ -98,4 +108,11 @@ trait SparkShim {
   def isSparkVariantType(dataType: org.apache.spark.sql.types.DataType): Boolean
 
   def SparkVariantType(): org.apache.spark.sql.types.DataType
+
+  def createFileIndex(
+      options: CaseInsensitiveStringMap,
+      sparkSession: SparkSession,
+      paths: Seq[String],
+      userSpecifiedSchema: Option[StructType],
+      partitionSchema: StructType): PartitioningAwareFileIndex
 }

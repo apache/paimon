@@ -30,6 +30,7 @@ import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.col
+import org.apache.spark.sql.paimon.shims.SparkShimLoader
 
 trait ScanPlanHelper extends SQLConfHelper {
 
@@ -51,7 +52,9 @@ trait ScanPlanHelper extends SQLConfHelper {
     relation.table match {
       case sparkTable @ SparkTable(table: InnerTable) =>
         val knownSplitsTable = KnownSplitsTable.create(table, dataSplits.toArray)
-        relation.copy(table = sparkTable.copy(table = knownSplitsTable))
+        SparkShimLoader.shim.createDataSourceV2Relation(
+          relation,
+          table = sparkTable.copy(table = knownSplitsTable))
       case _ => throw new RuntimeException()
     }
   }

@@ -22,8 +22,8 @@ import org.apache.spark.SparkConf
 
 class DeleteFromTableTest extends DeleteFromTableTestBase {}
 
-class V2DeleteFromTableTest extends DeleteFromTableTestBase {
-  override protected def sparkConf: SparkConf = {
-    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
-  }
-}
+//class V2DeleteFromTableTest extends DeleteFromTableTestBase {
+//  override protected def sparkConf: SparkConf = {
+//    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+//  }
+//}

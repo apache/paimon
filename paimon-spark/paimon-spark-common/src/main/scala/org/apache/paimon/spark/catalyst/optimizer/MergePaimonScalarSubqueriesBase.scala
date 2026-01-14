@@ -85,9 +85,8 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     cache.zipWithIndex.foreach {
       case (header, i) =>
         cache(i) = cache(i).copy(plan = if (header.merged) {
-          CTERelationDef(
-            createProject(header.attributes, removeReferences(header.plan, cache)),
-            underSubquery = true)
+          createCTERelationDef(
+            createProject(header.attributes, removeReferences(header.plan, cache)))
         } else {
           removeReferences(header.plan, cache)
         })
@@ -99,6 +98,10 @@ trait MergePaimonScalarSubqueriesBase extends Rule[LogicalPlan] with PredicateHe
     } else {
       newPlan
     }
+  }
+
+  protected def createCTERelationDef(prj: Project): CTERelationDef = {
+    CTERelationDef(prj, underSubquery = true)
   }
 
   // First traversal builds up the cache and inserts `ScalarSubqueryReference`s to the plan.
