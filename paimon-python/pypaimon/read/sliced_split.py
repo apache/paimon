@@ -22,10 +22,10 @@ SlicedSplit wraps a Split with file index ranges for shard/slice processing.
 
 from typing import List, Dict, Tuple
 
-from pypaimon.read.split import SplitBase
+from pypaimon.read.split import Split
 
 
-class SlicedSplit(SplitBase):
+class SlicedSplit(Split):
     """
     Wrapper for Split that adds file-level slicing information.
     

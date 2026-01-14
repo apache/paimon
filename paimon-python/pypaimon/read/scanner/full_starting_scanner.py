@@ -32,7 +32,7 @@ from pypaimon.read.scanner.append_table_split_generator import AppendTableSplitG
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
 from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
 from pypaimon.read.scanner.starting_scanner import StartingScanner
-from pypaimon.read.split import Split
+from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
@@ -240,7 +240,7 @@ class FullStartingScanner(StartingScanner):
         self.end_pos_of_this_subtask = end_pos
         return self
 
-    def _apply_push_down_limit(self, splits: List[Split]) -> List[Split]:
+    def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
         if self.limit is None:
             return splits
         scanned_row_count = 0

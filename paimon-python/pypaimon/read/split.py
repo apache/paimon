@@ -24,7 +24,7 @@ from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
 
 
-class SplitBase(ABC):
+class Split(ABC):
     """
     Base interface for Split following Java's org.apache.paimon.table.source.Split.
 
@@ -56,7 +56,7 @@ class SplitBase(ABC):
         pass
 
 
-class Split(SplitBase):
+class DataSplit(Split):
     """
     Implementation of Split for native Python reading.
 

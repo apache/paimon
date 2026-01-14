@@ -21,6 +21,7 @@ from typing import Callable, List, Optional, Dict, Tuple
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.split import Split
+from pypaimon.read.split import DataSplit
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
 
@@ -121,7 +122,7 @@ class AbstractSplitGenerator(ABC):
                         file_entries[0].bucket
                     )
 
-                split = Split(
+                split = DataSplit(
                     files=file_group,
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,

@@ -22,10 +22,10 @@ IndexedSplit wraps a Split with row ranges and optional scores.
 
 from typing import List, Optional
 
-from pypaimon.read.split import SplitBase
+from pypaimon.read.split import Split
 
 
-class IndexedSplit(SplitBase):
+class IndexedSplit(Split):
 
     def __init__(
         self,
