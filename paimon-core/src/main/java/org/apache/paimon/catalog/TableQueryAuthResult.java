@@ -50,4 +50,8 @@ public class TableQueryAuthResult {
     public Map<String, Transform> columnMasking() {
         return columnMasking;
     }
+
+    public boolean isEmpty() {
+        return rowFilter == null && (columnMasking == null || columnMasking.isEmpty());
+    }
 }

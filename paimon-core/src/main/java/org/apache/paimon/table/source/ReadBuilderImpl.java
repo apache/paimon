@@ -26,6 +26,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -255,6 +256,12 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (variantAccessInfo != null) {
             read.withVariantAccess(variantAccessInfo);
+        }
+        if (table instanceof FileStoreTable) {
+            CoreOptions options = new CoreOptions(table.options());
+            if (options.queryAuthEnabled()) {
+                return new AuthAwareTableRead(read, readType());
+            }
         }
         return read;
     }

@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
@@ -64,14 +65,13 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
-import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.CHANGELOG;
-import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DELTA;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -87,6 +87,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private final TableQueryAuth queryAuth;
 
     @Nullable private RowType readType;
+    @Nullable private TableQueryAuthResult authResult;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -165,12 +166,34 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
-    protected void authQuery() {
+    protected TableQueryAuthResult authQuery() {
         if (!options.queryAuthEnabled()) {
-            return;
+            return null;
         }
-        queryAuth.auth(readType == null ? null : readType.getFieldNames());
-        // TODO add support for row level access control
+        if (authResult == null) {
+            authResult = queryAuth.auth(readType == null ? null : readType.getFieldNames());
+        }
+        return authResult;
+    }
+
+    protected TableScan.Plan applyAuthToSplits(Plan plan) {
+        TableQueryAuthResult authResult = authQuery();
+        if (authResult == null || authResult.isEmpty()) {
+            return plan;
+        }
+
+        List<Split> splits = plan.splits();
+        List<Split> authSplits = new ArrayList<>(splits.size());
+        for (Split split : splits) {
+            if (split instanceof DataSplit) {
+                DataSplit dataSplit = (DataSplit) split;
+                authSplits.add(QueryAuthSplit.wrap(dataSplit, authResult));
+            } else {
+                authSplits.add(split);
+            }
+        }
+
+        return new DataFilePlan<>(authSplits);
     }
 
     @Override

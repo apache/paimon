@@ -91,8 +91,6 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
     @Override
     public TableScan.Plan plan() {
-        authQuery();
-
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
         }
@@ -101,13 +99,13 @@ public class DataTableBatchScan extends AbstractDataTableScan {
             hasNext = false;
             Optional<StartingScanner.Result> pushed = applyPushDownLimit();
             if (pushed.isPresent()) {
-                return DataFilePlan.fromResult(pushed.get());
+                return applyAuthToSplits(DataFilePlan.fromResult(pushed.get()));
             }
             pushed = applyPushDownTopN();
             if (pushed.isPresent()) {
-                return DataFilePlan.fromResult(pushed.get());
+                return applyAuthToSplits(DataFilePlan.fromResult(pushed.get()));
             }
-            return DataFilePlan.fromResult(startingScanner.scan(snapshotReader));
+            return applyAuthToSplits(DataFilePlan.fromResult(startingScanner.scan(snapshotReader)));
         } else {
             throw new EndOfScanException();
         }
