@@ -61,6 +61,8 @@ public class PartitionStatistics implements Serializable {
     @JsonProperty(FIELD_LAST_FILE_CREATION_TIME)
     protected final long lastFileCreationTime;
 
+    // defaults to 0 if this field is absent in the serialized data (e.g., from an older Paimon
+    // version)
     @JsonProperty(FIELD_TOTAL_BUCKETS)
     protected final int totalBuckets;
 
