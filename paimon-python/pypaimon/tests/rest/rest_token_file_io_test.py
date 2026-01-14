@@ -300,9 +300,9 @@ class RESTTokenFileIOTest(unittest.TestCase):
             restored_file_io = pickle.loads(pickled)
             
             self.assertIsNotNone(restored_file_io.filesystem,
-                                  "filesystem should work after deserialization")
+                                 "filesystem should work after deserialization")
             self.assertIsNotNone(restored_file_io.uri_reader_factory,
-                                  "uri_reader_factory should work after deserialization")
+                                 "uri_reader_factory should work after deserialization")
 
 
 if __name__ == '__main__':
