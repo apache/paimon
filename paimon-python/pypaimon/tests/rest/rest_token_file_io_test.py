@@ -28,6 +28,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.filesystem.local_file_io import LocalFileIO
 
 
 class RESTTokenFileIOTest(unittest.TestCase):
@@ -100,7 +101,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-            regular_file_io = FileIO(self.warehouse_path, self.catalog_options)
+            regular_file_io = LocalFileIO(self.warehouse_path, self.catalog_options)
 
             test_file_path = f"file://{self.temp_dir}/comparison/test.txt"
             test_content = b"comparison content"

@@ -46,7 +46,7 @@ class FileSystemCatalog(Catalog):
             raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE.key()}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
-        self.file_io = FileIO(self.warehouse, self.catalog_options)
+        self.file_io = FileIO.get(self.warehouse, self.catalog_options)
 
     def get_database(self, name: str) -> Database:
         if self.file_io.exists(self.get_database_path(name)):

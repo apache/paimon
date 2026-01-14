@@ -800,7 +800,7 @@ class RESTCatalogServer:
         from pypaimon.common.options import Options
         warehouse_path = str(Path(self.data_path) / self.warehouse)
         options = Options({"warehouse": warehouse_path})
-        return FileIO(warehouse_path, options)
+        return FileIO.get(warehouse_path, options)
 
     def _create_table_metadata(self, identifier: Identifier, schema_id: int,
                                schema: Schema, uuid_str: str, is_external: bool) -> TableMetadata:

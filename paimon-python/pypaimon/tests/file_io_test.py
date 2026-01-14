@@ -26,6 +26,8 @@ import pyarrow
 from pyarrow.fs import S3FileSystem, LocalFileSystem
 
 from pypaimon.common.file_io import FileIO
+from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 
 class FileIOTest(unittest.TestCase):
@@ -33,7 +35,7 @@ class FileIOTest(unittest.TestCase):
 
     def test_s3_filesystem_path_conversion(self):
         """Test S3FileSystem path conversion with various formats."""
-        file_io = FileIO("s3://bucket/warehouse", {})
+        file_io = PyArrowFileIO("s3://bucket/warehouse", {})
         self.assertIsInstance(file_io.filesystem, S3FileSystem)
 
         # Test bucket and path
@@ -64,9 +66,9 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
     def test_local_filesystem_path_conversion(self):
-        """Test LocalFileSystem path conversion with various formats."""
-        file_io = FileIO("file:///tmp/warehouse", {})
-        self.assertIsInstance(file_io.filesystem, LocalFileSystem)
+        """Test LocalFileIO path conversion with various formats."""
+        file_io = LocalFileIO("file:///tmp/warehouse", {})
+        self.assertIsInstance(file_io, LocalFileIO)
 
         # Test file:// scheme
         self.assertEqual(file_io.to_filesystem_path("file:///tmp/path/to/file.txt"),
@@ -94,8 +96,8 @@ class FileIOTest(unittest.TestCase):
 
     def test_windows_path_handling(self):
         """Test Windows path handling (drive letters, file:// scheme)."""
-        file_io = FileIO("file:///tmp/warehouse", {})
-        self.assertIsInstance(file_io.filesystem, LocalFileSystem)
+        file_io = LocalFileIO("file:///tmp/warehouse", {})
+        self.assertIsInstance(file_io, LocalFileIO)
 
         # Windows absolute paths
         self.assertEqual(file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
@@ -113,17 +115,17 @@ class FileIOTest(unittest.TestCase):
                          "/C:/path/to/file.txt")
 
         # Windows path with S3FileSystem (should preserve)
-        s3_file_io = FileIO("s3://bucket/warehouse", {})
+        s3_file_io = PyArrowFileIO("s3://bucket/warehouse", {})
         self.assertEqual(s3_file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
 
     def test_path_normalization(self):
         """Test path normalization (multiple slashes)."""
-        file_io = FileIO("file:///tmp/warehouse", {})
+        file_io = LocalFileIO("file:///tmp/warehouse", {})
         self.assertEqual(file_io.to_filesystem_path("file://///tmp///path///file.txt"),
                          "/tmp/path/file.txt")
 
-        s3_file_io = FileIO("s3://bucket/warehouse", {})
+        s3_file_io = PyArrowFileIO("s3://bucket/warehouse", {})
         self.assertEqual(s3_file_io.to_filesystem_path("s3://my-bucket///path///to///file.txt"),
                          "my-bucket/path/to/file.txt")
 
@@ -131,7 +133,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_write_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             test_file_uri = f"file://{temp_dir}/overwrite_test.txt"
             expected_path = os.path.join(temp_dir, "overwrite_test.txt")
@@ -161,7 +163,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_exists_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             test_file = os.path.join(temp_dir, "test_file.txt")
             with open(test_file, "w") as f:
@@ -208,7 +210,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             test_dir = os.path.join(temp_dir, "test_dir")
             os.makedirs(test_dir)
@@ -226,7 +228,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             result = file_io.delete(f"file://{temp_dir}/nonexistent.txt")
             self.assertFalse(result, "delete() should return False when file does not exist")
@@ -240,7 +242,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_mkdirs_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             test_file = os.path.join(temp_dir, "test_file.txt")
             with open(test_file, "w") as f:
@@ -256,7 +258,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_rename_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             src_file = os.path.join(temp_dir, "src.txt")
             dst_file = os.path.join(temp_dir, "dst.txt")
@@ -274,7 +276,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_get_file_status_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             with self.assertRaises(FileNotFoundError) as context:
                 file_io.get_file_status(f"file://{temp_dir}/nonexistent.txt")
@@ -302,7 +304,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_copy_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             source_file = os.path.join(temp_dir, "source.txt")
             target_file = os.path.join(temp_dir, "target.txt")
@@ -339,7 +341,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_try_write_atomic_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = PyArrowFileIO(warehouse_path, {})
 
             target_dir = os.path.join(temp_dir, "target_dir")
             os.makedirs(target_dir)

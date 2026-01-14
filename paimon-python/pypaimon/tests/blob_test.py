@@ -25,6 +25,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory
 from pypaimon.common.file_io import FileIO
+from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.common.options import Options
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.schema.data_types import AtomicType, DataField
@@ -108,7 +109,7 @@ class BlobTest(unittest.TestCase):
 
     def test_from_file_with_offset_and_length(self):
         """Test Blob.from_file() method with offset and length."""
-        file_io = FileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", Options({}))
+        file_io = LocalFileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", Options({}))
         blob = Blob.from_file(file_io, self.file, 0, 4)
 
         # Verify it returns a BlobRef instance
@@ -204,7 +205,7 @@ class BlobTest(unittest.TestCase):
         self.assertIsInstance(blob_ref, Blob)
 
         # from_file should return BlobRef
-        file_io = FileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", Options({}))
+        file_io = LocalFileIO(self.file if self.file.startswith('file://') else f"file://{self.file}", Options({}))
         blob_file = Blob.from_file(file_io, self.file, 0, os.path.getsize(self.file))
         self.assertIsInstance(blob_file, BlobRef)
         self.assertIsInstance(blob_file, Blob)
@@ -563,7 +564,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
     def test_blob_end_to_end(self):
         # Set up file I/O
-        file_io = FileIO(self.temp_dir, Options({}))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
 
         blob_field_name = "blob_field"
         # ========== Step 1: Check Type Validation ==========
@@ -617,7 +618,7 @@ class BlobEndToEndTest(unittest.TestCase):
         from pypaimon.table.row.row_kind import RowKind
 
         # Set up file I/O
-        file_io = FileIO(self.temp_dir, Options({}))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
 
         # ========== Test ArrayType(nullable=True, element_type=AtomicType("BLOB")) ==========
         array_fields = [
@@ -759,7 +760,7 @@ class BlobEndToEndTest(unittest.TestCase):
         from pypaimon.common.delta_varint_compressor import DeltaVarintCompressor
 
         # Set up file I/O
-        file_io = FileIO(self.temp_dir, Options({}))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
 
         # ========== Test 1: Corrupted file header test ==========
 
@@ -999,7 +1000,7 @@ class BlobEndToEndTest(unittest.TestCase):
 
     def test_blob_end_to_end_with_descriptor(self):
         # Set up file I/O
-        file_io = FileIO(self.temp_dir, Options({}))
+        file_io = LocalFileIO(self.temp_dir, Options({}))
 
         # ========== Step 1: Write data to local file ==========
         # Create test data and write it to a local file
