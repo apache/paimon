@@ -187,27 +187,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
         for (Split split : splits) {
             if (split instanceof DataSplit) {
                 DataSplit dataSplit = (DataSplit) split;
-                DataSplit.Builder builder =
-                        DataSplit.builder()
-                                .withSnapshot(dataSplit.snapshotId())
-                                .withPartition(dataSplit.partition())
-                                .withBucket(dataSplit.bucket())
-                                .withBucketPath(dataSplit.bucketPath())
-                                .withTotalBuckets(dataSplit.totalBuckets())
-                                .withBeforeFiles(dataSplit.beforeFiles())
-                                .withDataFiles(dataSplit.dataFiles())
-                                .isStreaming(dataSplit.isStreaming())
-                                .rawConvertible(dataSplit.rawConvertible())
-                                .withAuthResult(authResult);
-
-                if (dataSplit.beforeDeletionFiles().isPresent()) {
-                    builder.withBeforeDeletionFiles(dataSplit.beforeDeletionFiles().get());
-                }
-                if (dataSplit.deletionFiles().isPresent()) {
-                    builder.withDataDeletionFiles(dataSplit.deletionFiles().get());
-                }
-
-                authSplits.add(builder.build());
+                authSplits.add(QueryAuthSplit.wrap(dataSplit, authResult));
             } else {
                 authSplits.add(split);
             }

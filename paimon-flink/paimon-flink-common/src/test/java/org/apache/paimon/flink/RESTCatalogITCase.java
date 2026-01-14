@@ -26,14 +26,16 @@ import org.apache.paimon.predicate.ConcatWsTransform;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LessThan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -373,13 +375,12 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         "INSERT INTO %s.%s VALUES (1, 'Alice', 25, 'IT'), (2, 'Bob', 30, 'HR'), (3, 'Charlie', 35, 'IT'), (4, 'David', 28, 'Finance')",
                         DATABASE_NAME, filterTable));
 
-        RowType rowType =
-                RowType.of(
-                        DataTypes.INT(), DataTypes.STRING(), DataTypes.INT(), DataTypes.STRING());
-        PredicateBuilder builder = new PredicateBuilder(rowType);
-
         // Test single condition row filter (age > 28)
-        Predicate agePredicate = builder.greaterThan(2, 28);
+        Predicate agePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(28));
         restCatalogServer.setRowFilterAuth(
                 Identifier.create(DATABASE_NAME, filterTable),
                 Collections.singletonList(agePredicate));
@@ -393,7 +394,11 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         Row.of(2, "Bob", 30, "HR"), Row.of(3, "Charlie", 35, "IT"));
 
         // Test string condition row filter (department = 'IT')
-        Predicate deptPredicate = builder.equal(3, BinaryString.fromString("IT"));
+        Predicate deptPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("IT")));
         restCatalogServer.setRowFilterAuth(
                 Identifier.create(DATABASE_NAME, filterTable),
                 Collections.singletonList(deptPredicate));
@@ -407,7 +412,11 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         Row.of(1, "Alice", 25, "IT"), Row.of(3, "Charlie", 35, "IT"));
 
         // Test combined conditions (age >= 30 AND department = 'IT')
-        Predicate ageGePredicate = builder.greaterOrEqual(2, 30);
+        Predicate ageGePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
         Predicate combinedPredicate = PredicateBuilder.and(ageGePredicate, deptPredicate);
         restCatalogServer.setRowFilterAuth(
                 Identifier.create(DATABASE_NAME, filterTable),
@@ -421,8 +430,16 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(3, "Charlie", 35, "IT"));
 
         // Test OR condition (age < 27 OR department = 'Finance')
-        Predicate ageLtPredicate = builder.lessThan(2, 27);
-        Predicate financePredicate = builder.equal(3, BinaryString.fromString("Finance"));
+        Predicate ageLtPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        LessThan.INSTANCE,
+                        Collections.singletonList(27));
+        Predicate financePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("Finance")));
         Predicate orPredicate = PredicateBuilder.or(ageLtPredicate, financePredicate);
         restCatalogServer.setRowFilterAuth(
                 Identifier.create(DATABASE_NAME, filterTable),
@@ -437,7 +454,11 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         Row.of(1, "Alice", 25, "IT"), Row.of(4, "David", 28, "Finance"));
 
         // Test WHERE clause combined with row filter
-        Predicate ageGt25Predicate = builder.greaterThan(2, 25);
+        Predicate ageGt25Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(25));
         restCatalogServer.setRowFilterAuth(
                 Identifier.create(DATABASE_NAME, filterTable),
                 Collections.singletonList(ageGt25Predicate));
@@ -459,7 +480,11 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                         "INSERT INTO %s.%s VALUES (1, 50000.0), (2, 60000.0), (3, 70000.0), (4, 55000.0)",
                         DATABASE_NAME, joinTable));
 
-        Predicate ageGe30Predicate = builder.greaterOrEqual(2, 30);
+        Predicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
         restCatalogServer.setRowFilterAuth(
                 Identifier.create(DATABASE_NAME, filterTable),
                 Collections.singletonList(ageGe30Predicate));

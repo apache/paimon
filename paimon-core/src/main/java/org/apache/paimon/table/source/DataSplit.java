@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
@@ -59,11 +58,11 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Input splits. Needed by most batch computation engines. */
-public class DataSplit implements QueryAuthSplit {
+public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 8L;
+    private static final long serialVersionUID = 7L;
     private static final long MAGIC = -2394839472490812314L;
-    private static final int VERSION = 9;
+    private static final int VERSION = 8;
 
     private long snapshotId = 0;
     private BinaryRow partition;
@@ -79,8 +78,6 @@ public class DataSplit implements QueryAuthSplit {
 
     private boolean isStreaming = false;
     private boolean rawConvertible;
-
-    @Nullable private TableQueryAuthResult authResult;
 
     public DataSplit() {}
 
@@ -127,12 +124,6 @@ public class DataSplit implements QueryAuthSplit {
 
     public boolean rawConvertible() {
         return rawConvertible;
-    }
-
-    @Override
-    @Nullable
-    public TableQueryAuthResult authResult() {
-        return authResult;
     }
 
     public OptionalLong latestFileCreationEpochMillis() {
@@ -318,8 +309,7 @@ public class DataSplit implements QueryAuthSplit {
                 && Objects.equals(beforeFiles, dataSplit.beforeFiles)
                 && Objects.equals(beforeDeletionFiles, dataSplit.beforeDeletionFiles)
                 && Objects.equals(dataFiles, dataSplit.dataFiles)
-                && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles)
-                && Objects.equals(authResult, dataSplit.authResult);
+                && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles);
     }
 
     @Override
@@ -335,8 +325,7 @@ public class DataSplit implements QueryAuthSplit {
                 dataFiles,
                 dataDeletionFiles,
                 isStreaming,
-                rawConvertible,
-                authResult);
+                rawConvertible);
     }
 
     @Override
@@ -375,7 +364,6 @@ public class DataSplit implements QueryAuthSplit {
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
-        this.authResult = other.authResult;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -410,13 +398,6 @@ public class DataSplit implements QueryAuthSplit {
         out.writeBoolean(isStreaming);
 
         out.writeBoolean(rawConvertible);
-
-        if (authResult != null) {
-            out.writeBoolean(true);
-            TableQueryAuthResultSerializer.serialize(authResult, out);
-        } else {
-            out.writeBoolean(false);
-        }
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -453,12 +434,6 @@ public class DataSplit implements QueryAuthSplit {
         boolean isStreaming = in.readBoolean();
         boolean rawConvertible = in.readBoolean();
 
-        // Deserialize authResult (version >= 9)
-        TableQueryAuthResult authResult = null;
-        if (version >= 9 && in.readBoolean()) {
-            authResult = TableQueryAuthResultSerializer.deserialize(in);
-        }
-
         DataSplit.Builder builder =
                 builder()
                         .withSnapshot(snapshotId)
@@ -469,8 +444,7 @@ public class DataSplit implements QueryAuthSplit {
                         .withBeforeFiles(beforeFiles)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
-                        .rawConvertible(rawConvertible)
-                        .withAuthResult(authResult);
+                        .rawConvertible(rawConvertible);
 
         if (beforeDeletionFiles != null) {
             builder.withBeforeDeletionFiles(beforeDeletionFiles);
@@ -499,7 +473,7 @@ public class DataSplit implements QueryAuthSplit {
             DataFileMetaFirstRowIdLegacySerializer serializer =
                     new DataFileMetaFirstRowIdLegacySerializer();
             return serializer::deserialize;
-        } else if (version == 8 || version == 9) {
+        } else if (version == 8) {
             DataFileMetaSerializer serializer = new DataFileMetaSerializer();
             return serializer::deserialize;
         } else {
@@ -579,11 +553,6 @@ public class DataSplit implements QueryAuthSplit {
 
         public Builder rawConvertible(boolean rawConvertible) {
             this.split.rawConvertible = rawConvertible;
-            return this;
-        }
-
-        public Builder withAuthResult(@Nullable TableQueryAuthResult authResult) {
-            this.split.authResult = authResult;
             return this;
         }
 

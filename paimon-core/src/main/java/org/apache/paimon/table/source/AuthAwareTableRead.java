@@ -74,8 +74,8 @@ public class AuthAwareTableRead implements TableRead {
         if (split instanceof QueryAuthSplit) {
             TableQueryAuthResult authResult = ((QueryAuthSplit) split).authResult();
             if (authResult != null) {
-                RecordReader<InternalRow> reader = wrapped.createReader(split);
-
+                RecordReader<InternalRow> reader =
+                        wrapped.createReader(((QueryAuthSplit) split).dataSplit());
                 // Apply row-level filter if present
                 Predicate rowFilter = authResult.rowFilter();
                 if (rowFilter != null) {
