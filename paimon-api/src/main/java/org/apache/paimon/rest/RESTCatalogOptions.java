@@ -104,20 +104,20 @@ public class RESTCatalogOptions {
                     .noDefaultValue()
                     .withDescription("REST Catalog DLF OSS endpoint.");
 
-    public static final ConfigOption<Boolean> DLF_FILE_IO_CACHE_ENABLED =
-            ConfigOptions.key("dlf.io-cache-enabled")
+    public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
+            ConfigOptions.key("io-cache.enabled")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
                             "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
-    public static final ConfigOption<String> DLF_FILE_IO_CACHE_WHITELIST_PATH =
-            ConfigOptions.key("dlf.io-cache.whitelist-path")
+    public static final ConfigOption<String> IO_CACHE_WHITELIST_PATH =
+            ConfigOptions.key("io-cache.whitelist-path")
                     .stringType()
                     .defaultValue("bucket-,manifest")
                     .withDescription(
                             "Cache is only applied to paths which contain the specified pattern, and * means all paths.");
-    public static final ConfigOption<String> DLF_FILE_IO_CACHE_POLICY =
-            ConfigOptions.key("dlf.io-cache.policy")
+    public static final ConfigOption<String> IO_CACHE_POLICY =
+            ConfigOptions.key("io-cache.policy")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(

@@ -26,9 +26,9 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_ENABLED;
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_WHITELIST_PATH;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for Jindo cache enable configuration. */
@@ -42,15 +42,15 @@ public class TestJindoCacheEnable {
             boolean setRpcAddress,
             String cacheWhitelist) {
         Options options = new Options();
-        options.set(DLF_FILE_IO_CACHE_ENABLED, cacheEnabled);
+        options.set(IO_CACHE_ENABLED, cacheEnabled);
         if (cachePolicy != null) {
-            options.set(DLF_FILE_IO_CACHE_POLICY, cachePolicy);
+            options.set(IO_CACHE_POLICY, cachePolicy);
         }
         if (setRpcAddress) {
             options.set(JINDO_CACHE_RPC_ADDRESS, "test-rpc-address:8080");
         }
         if (cacheWhitelist != null) {
-            options.set(DLF_FILE_IO_CACHE_WHITELIST_PATH, cacheWhitelist);
+            options.set(IO_CACHE_WHITELIST_PATH, cacheWhitelist);
         }
         return CatalogContext.create(options);
     }

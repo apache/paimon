@@ -44,9 +44,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_ENABLED;
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_POLICY;
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_FILE_IO_CACHE_WHITELIST_PATH;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_POLICY;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_WHITELIST_PATH;
 
 /**
  * Hadoop {@link FileIO}.
@@ -90,9 +90,13 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     @Override
     public void configure(CatalogContext context) {
         // Process file io cache configuration
-        if (!context.options().get(DLF_FILE_IO_CACHE_ENABLED)
-                || context.options().get(DLF_FILE_IO_CACHE_POLICY) == null
-                || context.options().get(DLF_FILE_IO_CACHE_POLICY).contains(DISABLE_CACHE_TAG)) {
+        if (!context.options().get(IO_CACHE_ENABLED)
+                || context.options().get(IO_CACHE_POLICY) == null
+                || context.options().get(IO_CACHE_POLICY).contains(DISABLE_CACHE_TAG)) {
+            LOG.debug(
+                    "Cache is disabled with io-cache.enabled={}, io-cache.policy={}",
+                    context.options().get(IO_CACHE_ENABLED),
+                    context.options().get(IO_CACHE_POLICY));
             return;
         }
         // Enable file io cache
@@ -101,18 +105,12 @@ public abstract class HadoopCompliantFileIO implements FileIO {
                     "FileIO cache is enabled but JindoCache RPC address is not set, fallback to no-cache");
         } else {
             metaCacheEnabled =
-                    context.options()
-                            .get(DLF_FILE_IO_CACHE_POLICY)
-                            .contains(META_CACHE_ENABLED_TAG);
+                    context.options().get(IO_CACHE_POLICY).contains(META_CACHE_ENABLED_TAG);
             readCacheEnabled =
-                    context.options()
-                            .get(DLF_FILE_IO_CACHE_POLICY)
-                            .contains(READ_CACHE_ENABLED_TAG);
+                    context.options().get(IO_CACHE_POLICY).contains(READ_CACHE_ENABLED_TAG);
             writeCacheEnabled =
-                    context.options()
-                            .get(DLF_FILE_IO_CACHE_POLICY)
-                            .contains(WRITE_CACHE_ENABLED_TAG);
-            String whitelist = context.options().get(DLF_FILE_IO_CACHE_WHITELIST_PATH);
+                    context.options().get(IO_CACHE_POLICY).contains(WRITE_CACHE_ENABLED_TAG);
+            String whitelist = context.options().get(IO_CACHE_WHITELIST_PATH);
             if (!whitelist.equals("*")) {
                 cacheWhitelistPaths = Lists.newArrayList(whitelist.split(","));
             }
