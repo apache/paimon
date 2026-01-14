@@ -26,6 +26,7 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastNonNullValueAggFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -450,11 +451,15 @@ public class SchemaValidation {
 
     private static void validateSequenceGroup(TableSchema schema, CoreOptions options) {
         Map<String, Set<String>> fields2Group = new HashMap<>();
+        Set<Integer> sequenceGroupFieldIndexs = new HashSet<>();
+        List<String> fieldNames = schema.fieldNames();
         for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
             String k = entry.getKey();
             String v = entry.getValue();
-            List<String> fieldNames = schema.fieldNames();
             if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
+                Arrays.stream(v.split(FIELDS_SEPARATOR))
+                        .map(fieldName -> requireField(fieldName, fieldNames))
+                        .forEach(sequenceGroupFieldIndexs::add);
                 String[] sequenceFieldNames =
                         k.substring(
                                         FIELDS_PREFIX.length() + 1,
@@ -492,8 +497,33 @@ public class SchemaValidation {
                     Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
                     group.addAll(sequenceFieldsList);
                 }
+
+                // add self
+                Arrays.stream(sequenceFieldNames)
+                        .mapToInt(fieldName -> requireField(fieldName, fieldNames))
+                        .forEach(sequenceGroupFieldIndexs::add);
             }
         }
+
+        if (options.mergeEngine() == MergeEngine.PARTIAL_UPDATE) {
+            for (String fieldName : fieldNames) {
+                String aggFunc = options.fieldAggFunc(fieldName);
+                String aggFuncName = aggFunc == null ? options.fieldsDefaultFunc() : aggFunc;
+                if (schema.primaryKeys().contains(fieldName)) {
+                    continue;
+                }
+                if (aggFuncName != null) {
+                    // last_non_null_value doesn't require sequence group
+                    checkArgument(
+                            aggFuncName.equals(FieldLastNonNullValueAggFactory.NAME)
+                                    || sequenceGroupFieldIndexs.contains(
+                                            fieldNames.indexOf(fieldName)),
+                            "Must use sequence group for aggregation functions but not found for field %s.",
+                            fieldName);
+                }
+            }
+        }
+
         Set<String> illegalGroup =
                 fields2Group.values().stream()
                         .flatMap(Collection::stream)
@@ -687,6 +717,15 @@ public class SchemaValidation {
                         "Cannot enable deletion-vectors for incremental clustering table which bucket is not -1.");
             }
         }
+    }
+
+    private static int requireField(String fieldName, List<String> fieldNames) {
+        int field = fieldNames.indexOf(fieldName);
+        if (field == -1) {
+            throw new IllegalArgumentException(
+                    String.format("Field %s can not be found in table schema.", fieldName));
+        }
+        return field;
     }
 
     public static void validateChainTable(TableSchema schema, CoreOptions options) {
