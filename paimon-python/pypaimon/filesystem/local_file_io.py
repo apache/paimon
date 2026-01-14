@@ -263,7 +263,12 @@ class LocalFileIO(FileIO):
     
     def to_filesystem_path(self, path: str) -> str:
         file_path = self._to_file(path)
-        return str(file_path)
+        result = str(file_path)
+        parsed = urlparse(path)
+        original_path = parsed.path if parsed.scheme else path
+        if original_path.startswith('./') and not result.startswith('./'):
+            result = './' + result
+        return result
     
     @staticmethod
     def parse_location(location: str):

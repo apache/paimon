@@ -65,7 +65,6 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
     def test_local_filesystem_path_conversion(self):
-        """Test LocalFileIO path conversion with various formats."""
         file_io = LocalFileIO("file:///tmp/warehouse", {})
         self.assertIsInstance(file_io, LocalFileIO)
 

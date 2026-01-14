@@ -23,7 +23,7 @@ from typing import List, Optional
 
 import pyarrow
 
-from common.options import Options
+from pypaimon.common.options import Options
 
 
 class FileIO(ABC):
