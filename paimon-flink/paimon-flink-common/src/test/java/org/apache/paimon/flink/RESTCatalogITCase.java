@@ -58,6 +58,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** ITCase for REST catalog. */
@@ -549,13 +550,23 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         assertThat(combinedResult.get(0).getField(3)).isEqualTo(25); // age not masked
         assertThat(combinedResult.get(0).getField(4)).isEqualTo("IT"); // department not masked
 
+        // Test must read with row filter columns
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        String.format(
+                                                "SELECT id, name FROM %s.%s WHERE age > 30 ORDER BY id",
+                                                DATABASE_NAME, combinedTable)))
+                .rootCause()
+                .hasMessageContaining("Unable to read data without column department");
+
         // Test WHERE clause with both features
         assertThat(
                         batchSql(
                                 String.format(
-                                        "SELECT id, name FROM %s.%s WHERE age > 30 ORDER BY id",
+                                        "SELECT id, name, department FROM %s.%s WHERE age > 30 ORDER BY id",
                                         DATABASE_NAME, combinedTable)))
-                .containsExactlyInAnyOrder(Row.of(3, "***"));
+                .containsExactlyInAnyOrder(Row.of(3, "***", "IT"));
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(

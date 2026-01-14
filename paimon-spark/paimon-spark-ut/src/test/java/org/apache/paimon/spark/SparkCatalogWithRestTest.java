@@ -71,6 +71,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for spark read from Rest catalog. */
 public class SparkCatalogWithRestTest {
@@ -511,12 +512,21 @@ public class SparkCatalogWithRestTest {
         assertThat(combinedResult.get(0).getInt(3)).isEqualTo(25); // age not masked
         assertThat(combinedResult.get(0).getString(4)).isEqualTo("IT"); // department not masked
 
+        // Test must read with row filter columns
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                                "SELECT id, name FROM t_combined WHERE age > 30 ORDER BY id")
+                                        .collectAsList())
+                .hasMessageContaining("Unable to read data without column department");
+
         // Test WHERE clause with both features
         assertThat(
-                        spark.sql("SELECT id, name FROM t_combined WHERE age > 30 ORDER BY id")
+                        spark.sql(
+                                        "SELECT id, name, department FROM t_combined WHERE age > 30 ORDER BY id")
                                 .collectAsList()
                                 .toString())
-                .isEqualTo("[[3,***]]");
+                .isEqualTo("[[3,***,IT]]");
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(

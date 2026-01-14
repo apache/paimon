@@ -39,6 +39,7 @@ import static org.apache.paimon.table.source.KeyValueTableRead.unwrap;
 
 /** An {@link InnerTableRead} that reads the data changed before and after compaction. */
 public class LookupCompactDiffRead extends AbstractDataTableRead {
+
     private final SplitRead<InternalRow> fullPhaseMergeRead;
     private final SplitRead<InternalRow> incrementalDiffRead;
 
@@ -67,7 +68,7 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
         if (dataSplit.beforeFiles().isEmpty()) {
             return fullPhaseMergeRead.createReader(dataSplit); // full reading phase
         } else {
-            return incrementalDiffRead.createReader((DataSplit) split);
+            return incrementalDiffRead.createReader(split);
         }
     }
 

@@ -40,6 +40,10 @@ public class AuthTableQueryResponse implements RESTResponse {
     @JsonProperty(FIELD_FILTER)
     private final List<String> filter;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_COLUMN_MASKING)
+    private final Map<String, String> columnMasking;
+
     @JsonCreator
     public AuthTableQueryResponse(
             @JsonProperty(FIELD_FILTER) List<String> filter,
@@ -52,10 +56,6 @@ public class AuthTableQueryResponse implements RESTResponse {
     public List<String> filter() {
         return filter;
     }
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty(FIELD_COLUMN_MASKING)
-    private final Map<String, String> columnMasking;
 
     @JsonGetter(FIELD_COLUMN_MASKING)
     public Map<String, String> columnMasking() {

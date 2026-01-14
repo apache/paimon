@@ -38,10 +38,6 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.predicate.And;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.rest.exceptions.AlreadyExistsException;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
@@ -64,7 +60,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
@@ -73,8 +68,6 @@ import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
-
-import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
 
@@ -88,7 +81,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BRANCH;
@@ -539,7 +531,7 @@ public class RESTCatalog implements Catalog {
         checkNotSystemTable(identifier, "authTable");
         try {
             AuthTableQueryResponse response = api.authTableQuery(identifier, select);
-            return getTableQueryAuthResult(response);
+            return new TableQueryAuthResult(response.filter(), response.columnMasking());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -1164,46 +1156,5 @@ public class RESTCatalog implements Catalog {
             }
         }
         return schema;
-    }
-
-    private static @NotNull TableQueryAuthResult getTableQueryAuthResult(
-            AuthTableQueryResponse response) {
-        List<String> predicateJsons = response == null ? null : response.filter();
-        Predicate rowFilter = null;
-        if (predicateJsons != null && !predicateJsons.isEmpty()) {
-            List<Predicate> predicates = new ArrayList<>();
-            for (String json : predicateJsons) {
-                if (StringUtils.isEmpty(json)) {
-                    continue;
-                }
-                Predicate predicate = JsonSerdeUtil.fromJson(json, Predicate.class);
-                if (predicate != null) {
-                    predicates.add(predicate);
-                }
-            }
-            if (predicates.size() == 1) {
-                rowFilter = predicates.get(0);
-            } else if (!predicates.isEmpty()) {
-                rowFilter = new CompoundPredicate(And.INSTANCE, predicates);
-            }
-        }
-
-        Map<String, Transform> columnMasking = new TreeMap<>();
-        Map<String, String> maskingJsons = response == null ? null : response.columnMasking();
-        if (maskingJsons != null && !maskingJsons.isEmpty()) {
-            for (Map.Entry<String, String> e : maskingJsons.entrySet()) {
-                String column = e.getKey();
-                String json = e.getValue();
-                if (StringUtils.isEmpty(column) || StringUtils.isEmpty(json)) {
-                    continue;
-                }
-                Transform transform = JsonSerdeUtil.fromJson(json, Transform.class);
-                if (transform == null) {
-                    continue;
-                }
-                columnMasking.put(column, transform);
-            }
-        }
-        return new TableQueryAuthResult(rowFilter, columnMasking);
     }
 }

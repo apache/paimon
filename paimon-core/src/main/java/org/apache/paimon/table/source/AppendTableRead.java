@@ -122,6 +122,6 @@ public final class AppendTableRead extends AbstractDataTableRead {
             }
         }
 
-        throw new RuntimeException("Should not happen.");
+        throw new RuntimeException("Unsupported split: " + split.getClass());
     }
 }

@@ -30,6 +30,7 @@ import java.util.Optional;
 
 /** Function to test a field with literals. */
 public abstract class LeafFunction implements Serializable {
+
     @JsonCreator
     public static LeafFunction fromJson(String name) throws IOException {
         switch (name) {

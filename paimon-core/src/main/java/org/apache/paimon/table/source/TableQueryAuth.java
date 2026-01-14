@@ -27,5 +27,6 @@ import java.util.List;
 /** Table query auth. */
 public interface TableQueryAuth {
 
+    @Nullable
     TableQueryAuthResult auth(@Nullable List<String> select);
 }

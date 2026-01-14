@@ -65,7 +65,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -87,7 +86,6 @@ abstract class AbstractDataTableScan implements DataTableScan {
     private final TableQueryAuth queryAuth;
 
     @Nullable private RowType readType;
-    @Nullable private TableQueryAuthResult authResult;
 
     protected AbstractDataTableScan(
             TableSchema schema,
@@ -99,6 +97,18 @@ abstract class AbstractDataTableScan implements DataTableScan {
         this.snapshotReader = snapshotReader;
         this.queryAuth = queryAuth;
     }
+
+    @Override
+    public final TableScan.Plan plan() {
+        TableQueryAuthResult queryAuthResult = authQuery();
+        Plan plan = planWithoutAuth();
+        if (queryAuthResult != null) {
+            plan = queryAuthResult.convertPlan(plan);
+        }
+        return plan;
+    }
+
+    protected abstract TableScan.Plan planWithoutAuth();
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
@@ -166,34 +176,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
+    @Nullable
     protected TableQueryAuthResult authQuery() {
         if (!options.queryAuthEnabled()) {
             return null;
         }
-        if (authResult == null) {
-            authResult = queryAuth.auth(readType == null ? null : readType.getFieldNames());
-        }
-        return authResult;
-    }
-
-    protected TableScan.Plan applyAuthToSplits(Plan plan) {
-        TableQueryAuthResult authResult = authQuery();
-        if (authResult == null || authResult.isEmpty()) {
-            return plan;
-        }
-
-        List<Split> splits = plan.splits();
-        List<Split> authSplits = new ArrayList<>(splits.size());
-        for (Split split : splits) {
-            if (split instanceof DataSplit) {
-                DataSplit dataSplit = (DataSplit) split;
-                authSplits.add(QueryAuthSplit.wrap(dataSplit, authResult));
-            } else {
-                authSplits.add(split);
-            }
-        }
-
-        return new DataFilePlan<>(authSplits);
+        return queryAuth.auth(readType == null ? null : readType.getFieldNames());
     }
 
     @Override

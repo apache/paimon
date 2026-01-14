@@ -296,6 +296,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         Transform transform =
                 new UpperTransform(
                         Collections.singletonList(new FieldRef(1, "col2", DataTypes.STRING())));
+        String transformJson = JsonSerdeUtil.toFlatJson(transform);
 
         // Set up mock response with filter and columnMasking
         List<Predicate> rowFilters = Collections.singletonList(predicate);
@@ -305,10 +306,10 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         restCatalogServer.setColumnMaskingAuth(identifier, columnMasking);
 
         TableQueryAuthResult result = catalog.authTableQuery(identifier, null);
-        assertThat(result.rowFilter()).isEqualTo(predicate);
+        assertThat(result.filter()).containsOnly(predicateJson);
         assertThat(result.columnMasking()).isNotEmpty();
         assertThat(result.columnMasking()).containsKey("col2");
-        assertThat(result.columnMasking().get("col2")).isEqualTo(transform);
+        assertThat(result.columnMasking().get("col2")).isEqualTo(transformJson);
 
         catalog.dropTable(identifier, true);
         catalog.dropDatabase(identifier.getDatabaseName(), true, true);

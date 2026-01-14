@@ -25,7 +25,7 @@ import org.apache.paimon.spark.PaimonInputPartition
 import org.apache.paimon.spark.util.SplitUtils
 import org.apache.paimon.table.FallbackReadFileStoreTable.FallbackSplit
 import org.apache.paimon.table.format.FormatDataSplit
-import org.apache.paimon.table.source.{DataSplit, DeletionFile, QueryAuthSplit, Split}
+import org.apache.paimon.table.source.{DataSplit, DeletionFile, Split}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.PaimonSparkSession
@@ -160,32 +160,19 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
       split: DataSplit,
       dataFiles: Seq[DataFileMeta],
       deletionFiles: Seq[DeletionFile]): DataSplit = {
-    val (actualSplit, authResult) = split match {
-      case queryAuthSplit: QueryAuthSplit =>
-        (queryAuthSplit.dataSplit(), queryAuthSplit.authResult())
-      case _ =>
-        (split, null)
-    }
-
     val builder = DataSplit
       .builder()
-      .withSnapshot(actualSplit.snapshotId())
-      .withPartition(actualSplit.partition())
-      .withBucket(actualSplit.bucket())
-      .withTotalBuckets(actualSplit.totalBuckets())
+      .withSnapshot(split.snapshotId())
+      .withPartition(split.partition())
+      .withBucket(split.bucket())
+      .withTotalBuckets(split.totalBuckets())
       .withDataFiles(dataFiles.toList.asJava)
-      .rawConvertible(actualSplit.rawConvertible)
-      .withBucketPath(actualSplit.bucketPath)
+      .rawConvertible(split.rawConvertible)
+      .withBucketPath(split.bucketPath)
     if (deletionVectors) {
       builder.withDataDeletionFiles(deletionFiles.toList.asJava)
     }
-    val newDataSplit = builder.build()
-
-    if (authResult != null) {
-      new QueryAuthSplit(newDataSplit, authResult)
-    } else {
-      newDataSplit
-    }
+    builder.build()
   }
 
   private def withSamePartitionAndBucket(split1: DataSplit, split2: DataSplit): Boolean = {

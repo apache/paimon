@@ -44,7 +44,9 @@ import java.util.Optional;
     @JsonSubTypes.Type(value = CompoundPredicate.class, name = CompoundPredicate.NAME)
 })
 public interface Predicate extends Serializable {
+
     String FIELD_KIND = "kind";
+
     /**
      * Test based on the specific input row.
      *

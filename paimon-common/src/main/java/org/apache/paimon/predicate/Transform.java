@@ -40,6 +40,7 @@ import java.util.List;
     @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME)
 })
 public interface Transform extends Serializable {
+
     String FIELD_NAME = "name";
 
     String name();
