@@ -79,8 +79,8 @@ class AppendOnlySplitGenerator(AbstractSplitGenerator):
             shard_file_idx_map = self.__compute_split_file_idx_map(
                 plan_start_pos, plan_end_pos, split, file_end_pos
             )
-            file_end_pos = shard_file_idx_map['_next_pos']
-            del shard_file_idx_map['_next_pos']
+            file_end_pos = shard_file_idx_map[self.NEXT_POS_KEY]
+            del shard_file_idx_map[self.NEXT_POS_KEY]
             
             if shard_file_idx_map:
                 sliced_splits.append(SlicedSplit(split, shard_file_idx_map))
@@ -162,12 +162,12 @@ class AppendOnlySplitGenerator(AbstractSplitGenerator):
             file_end_pos += file.row_count  # Update to row position after current file
 
             # Use shared helper to compute file range
-            file_range = AbstractSplitGenerator._compute_file_range(
+            file_range = AppendOnlySplitGenerator._compute_file_range(
                 plan_start_pos, plan_end_pos, file_begin_pos, file.row_count
             )
             
             if file_range is not None:
                 shard_file_idx_map[file.file_name] = file_range
 
-        shard_file_idx_map['_next_pos'] = file_end_pos
+        shard_file_idx_map[AppendOnlySplitGenerator.NEXT_POS_KEY] = file_end_pos
         return shard_file_idx_map

@@ -224,7 +224,7 @@ class FullStartingScanner(StartingScanner):
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FullStartingScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
-            raise Exception("idx_of_this_subtask must be less than number_of_para_subtasks")
+            raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
         if self.start_pos_of_this_subtask is not None:
             raise Exception("with_shard and with_slice cannot be used simultaneously")
         self.idx_of_this_subtask = idx_of_this_subtask
@@ -233,7 +233,7 @@ class FullStartingScanner(StartingScanner):
 
     def with_slice(self, start_pos: int, end_pos: int) -> 'FullStartingScanner':
         if start_pos >= end_pos:
-            raise Exception("start_pos must be less than end_pos")
+            raise ValueError("start_pos must be less than end_pos")
         if self.idx_of_this_subtask is not None:
             raise Exception("with_slice and with_shard cannot be used simultaneously")
         self.start_pos_of_this_subtask = start_pos

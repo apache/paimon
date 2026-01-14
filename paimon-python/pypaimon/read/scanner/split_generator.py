@@ -29,6 +29,9 @@ class AbstractSplitGenerator(ABC):
     """
     Abstract base class for generating splits.
     """
+    
+    # Special key for tracking file end position in split file index map
+    NEXT_POS_KEY = '_next_pos'
 
     def __init__(
         self,
