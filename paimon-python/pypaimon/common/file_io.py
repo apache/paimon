@@ -188,6 +188,25 @@ class FileIO(ABC):
 
     def to_filesystem_path(self, path: str) -> str:
         return path
+
+    def write_parquet(self, path: str, data, compression: str = 'zstd',
+                      zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_parquet must be implemented by FileIO subclasses")
+
+    def write_orc(self, path: str, data, compression: str = 'zstd',
+                  zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_orc must be implemented by FileIO subclasses")
+
+    def write_avro(self, path: str, data, avro_schema=None,
+                   compression: str = 'zstd', zstd_level: int = 1, **kwargs):
+        raise NotImplementedError("write_avro must be implemented by FileIO subclasses")
+
+    def write_lance(self, path: str, data, **kwargs):
+        raise NotImplementedError("write_lance must be implemented by FileIO subclasses")
+
+    def write_blob(self, path: str, data, blob_as_descriptor: bool, **kwargs):
+        """Write Blob format file. Must be implemented by subclasses."""
+        raise NotImplementedError("write_blob must be implemented by FileIO subclasses")
     
     @staticmethod
     def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':

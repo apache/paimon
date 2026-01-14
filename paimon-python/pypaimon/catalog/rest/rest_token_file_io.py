@@ -132,6 +132,24 @@ class RESTTokenFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         return self._file_io().try_to_write_atomic(path, content)
 
+    def write_parquet(self, path: str, data, compression: str = 'zstd',
+                      zstd_level: int = 1, **kwargs):
+        return self._file_io().write_parquet(path, data, compression, zstd_level, **kwargs)
+
+    def write_orc(self, path: str, data, compression: str = 'zstd',
+                  zstd_level: int = 1, **kwargs):
+        return self._file_io().write_orc(path, data, compression, zstd_level, **kwargs)
+
+    def write_avro(self, path: str, data, avro_schema=None,
+                   compression: str = 'zstd', zstd_level: int = 1, **kwargs):
+        return self._file_io().write_avro(path, data, avro_schema, compression, zstd_level, **kwargs)
+
+    def write_lance(self, path: str, data, **kwargs):
+        return self._file_io().write_lance(path, data, **kwargs)
+
+    def write_blob(self, path: str, data, blob_as_descriptor: bool, **kwargs):
+        return self._file_io().write_blob(path, data, blob_as_descriptor, **kwargs)
+
     def try_to_refresh_token(self):
         if self.should_refresh():
             with self.lock:

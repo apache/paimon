@@ -342,8 +342,9 @@ class FileIOTest(unittest.TestCase):
             
             pyarrow_file_io = PyArrowFileIO(f"file://{temp_dir}", Options({}))
             os.makedirs(target_dir)
-            self.assertFalse(pyarrow_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
-                           "PyArrowFileIO should return False when target is a directory")
+            self.assertFalse(
+                pyarrow_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                "PyArrowFileIO should return False when target is a directory")
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
             
             self.assertTrue(pyarrow_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
@@ -352,8 +353,9 @@ class FileIOTest(unittest.TestCase):
             
             os.remove(normal_file)
             local_file_io = LocalFileIO(f"file://{temp_dir}", Options({}))
-            self.assertFalse(local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
-                           "LocalFileIO should return False when target is a directory")
+            self.assertFalse(
+                local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                "LocalFileIO should return False when target is a directory")
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
             
             self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
