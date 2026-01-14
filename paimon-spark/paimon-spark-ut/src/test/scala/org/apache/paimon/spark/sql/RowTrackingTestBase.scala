@@ -625,4 +625,44 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       )
     }
   }
+
+  test("Data Evolution: Should not update indexed columns") {
+    withTable("T") {
+      spark.sql("""
+                  |CREATE TABLE T (id INT, name STRING)
+                  |TBLPROPERTIES (
+                  |  'bucket' = '-1',
+                  |  'global-index.row-count-per-shard' = '10000',
+                  |  'row-tracking.enabled' = 'true',
+                  |  'data-evolution.enabled' = 'true',
+                  |  'btree-index.records-per-range' = '1000')
+                  |""".stripMargin)
+
+      val values =
+        (0 until 100000).map(i => s"($i, 'name_$i')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      // create global index for table
+      val output =
+        spark
+          .sql(
+            "CALL sys.create_global_index(table => 'test.T', index_column => 'name', index_type => 'btree'," +
+              " options => 'btree-index.records-per-range=1000')")
+          .collect()
+          .head
+
+      assert(output.getBoolean(0))
+
+      // call merge into to update data
+      assert(intercept[RuntimeException] {
+        sql(s"""
+               |MERGE INTO T
+               |USING T AS source
+               |ON T._ROW_ID = source._ROW_ID
+               |WHEN MATCHED AND T.id = 500 THEN UPDATE SET name = "updatedName"
+               |""".stripMargin)
+      }.getMessage
+        .contains("MergeInto: update columns contain globally indexed columns, not supported now."))
+    }
+  }
 }
