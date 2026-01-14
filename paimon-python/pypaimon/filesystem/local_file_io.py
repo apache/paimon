@@ -25,6 +25,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import pyarrow
+import pyarrow.fs
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
