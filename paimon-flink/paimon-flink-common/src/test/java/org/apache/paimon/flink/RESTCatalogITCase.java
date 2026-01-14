@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.partition.Partition;
 import org.apache.paimon.rest.RESTToken;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -150,5 +151,52 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         assertThat(getFunction.getClassName()).isEqualTo(identifier);
         sql(String.format("DROP FUNCTION %s.%s", DATABASE_NAME, functionName));
         assertThat(catalog.functionExists(functionObjectPath)).isFalse();
+    }
+
+    @Test
+    public void testTotalBucketsStatistics() throws Exception {
+        String fixedBucketTableName = "fixed_bucket_tbl";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='2', 'bucket-key'='a')",
+                        DATABASE_NAME, fixedBucketTableName));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 10, 1), (2, 20, 1)",
+                        DATABASE_NAME, fixedBucketTableName));
+        validateTotalBuckets(DATABASE_NAME, fixedBucketTableName, 2);
+
+        String dynamicBucketTableName = "dynamic_bucket_tbl";
+        sql(
+                String.format(
+                        "CREATE TABLE %s.%s (a INT, b INT, p INT) PARTITIONED BY (p) WITH ('bucket'='-1')",
+                        DATABASE_NAME, dynamicBucketTableName));
+        sql(
+                String.format(
+                        "INSERT INTO %s.dynamic_bucket_tbl VALUES (1, 10, 1), (2, 20, 1)",
+                        DATABASE_NAME));
+        validateTotalBuckets(DATABASE_NAME, "dynamic_bucket_tbl", -1);
+
+        String postponeBucketTableName = "postpone_bucket_tbl";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (a INT, b INT, p INT, PRIMARY KEY (p, a) NOT ENFORCED) PARTITIONED BY (p) WITH ('bucket'='-2')",
+                        DATABASE_NAME, postponeBucketTableName));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 10, 1), (2, 20, 1)",
+                        DATABASE_NAME, postponeBucketTableName));
+        validateTotalBuckets(DATABASE_NAME, postponeBucketTableName, 1);
+    }
+
+    private void validateTotalBuckets(
+            String databaseName, String tableName, Integer expectedTotalBuckets) throws Exception {
+        Catalog flinkCatalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
+        try (org.apache.paimon.catalog.Catalog catalog = ((FlinkCatalog) flinkCatalog).catalog()) {
+            List<Partition> partitions =
+                    catalog.listPartitions(Identifier.create(databaseName, tableName));
+            assertThat(partitions).isNotEmpty();
+            assertThat(partitions.get(0).totalBuckets()).isEqualTo(expectedTotalBuckets);
+        }
     }
 }

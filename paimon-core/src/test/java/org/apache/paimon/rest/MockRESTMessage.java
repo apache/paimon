@@ -156,7 +156,7 @@ public class MockRESTMessage {
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        Partition partition = new Partition(spec, 1, 1, 1, 1, false);
+        Partition partition = new Partition(spec, 1, 1, 1, 1, 1, false);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 

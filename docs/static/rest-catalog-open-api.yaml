@@ -3257,6 +3257,9 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
+        totalBuckets:
+          type: integer
+          format: int32
         done:
           type: boolean
         createdAt:
@@ -3290,6 +3293,9 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
+        totalBuckets:
+          type: integer
+          format: int32
   #######################################
   # Examples of different values #
   #######################################

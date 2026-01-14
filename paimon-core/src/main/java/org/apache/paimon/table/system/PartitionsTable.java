@@ -301,7 +301,8 @@ public class PartitionsTable implements ReadonlyTable {
                     partition.recordCount(),
                     partition.fileSizeInBytes(),
                     partition.fileCount(),
-                    partition.lastFileCreationTime());
+                    partition.lastFileCreationTime(),
+                    partition.totalBuckets());
         }
 
         private Timestamp toTimestamp(Long epochMillis) {
