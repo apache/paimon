@@ -74,7 +74,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     // Only enable cache for path which is generated with uuid
     private List<String> cacheWhitelistPaths = new ArrayList<>();
 
-    protected boolean shouldCache(Path path) {
+    boolean shouldCache(Path path) {
         if (cacheWhitelistPaths.isEmpty()) {
             return true;
         }

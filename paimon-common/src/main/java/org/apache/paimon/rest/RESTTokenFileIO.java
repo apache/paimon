@@ -239,7 +239,6 @@ public class RESTTokenFileIO implements FileIO {
         if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
-
         return ImmutableMap.copyOf(newToken);
     }
 
