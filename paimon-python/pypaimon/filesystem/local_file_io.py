@@ -237,6 +237,10 @@ class LocalFileIO(FileIO):
         if file_path.exists() and file_path.is_dir():
             return False
         
+        parent = file_path.parent
+        if parent and not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+        
         temp_path = file_path.parent / f"{file_path.name}.{uuid.uuid4()}.tmp"
         success = False
         try:
