@@ -20,6 +20,8 @@ from collections import defaultdict
 from typing import Callable, List, Optional, Dict, Set
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.globalindex import VectorSearchGlobalIndexResult, Range
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
@@ -40,12 +42,19 @@ from pypaimon.common.options.core_options import MergeEngine
 
 
 class FullStartingScanner(StartingScanner):
-    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int]):
+    def __init__(
+        self,
+        table,
+        predicate: Optional[Predicate],
+        limit: Optional[int],
+        vector_search: Optional['VectorSearch'] = None
+    ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
+        self.vector_search = vector_search
 
         self.snapshot_manager = SnapshotManager(table)
         self.manifest_list_manager = ManifestListManager(table)
@@ -83,6 +92,16 @@ class FullStartingScanner(StartingScanner):
         if not file_entries:
             return Plan([])
 
+        # Evaluate global index if enabled (for data evolution tables)
+        row_ranges = None
+        score_getter = None
+        if self.data_evolution:
+            global_index_result = self._eval_global_index()
+            if global_index_result is not None:
+                row_ranges = global_index_result.results().to_range_list()
+                if isinstance(global_index_result, VectorSearchGlobalIndexResult):
+                    score_getter = global_index_result.score_getter()
+
         # Get deletion files map if deletion vectors are enabled.
         # {partition-bucket -> {filename -> DeletionFile}}
         deletion_files_map: dict[tuple, dict[str, DeletionFile]] = {}
@@ -97,7 +116,9 @@ class FullStartingScanner(StartingScanner):
         if self.table.is_primary_key_table:
             splits = self._create_primary_key_splits(file_entries, deletion_files_map)
         elif self.data_evolution:
-            splits = self._create_data_evolution_splits(file_entries, deletion_files_map)
+            splits = self._create_data_evolution_splits(
+                file_entries, deletion_files_map, row_ranges, score_getter
+            )
         else:
             splits = self._create_append_only_splits(file_entries, deletion_files_map)
 
@@ -110,6 +131,69 @@ class FullStartingScanner(StartingScanner):
             return []
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
         return self.read_manifest_entries(manifest_files)
+
+    def _eval_global_index(self):
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.globalindex.global_index_scan_builder import (
+            GlobalIndexScanBuilder
+        )
+        from pypaimon.globalindex.range import Range
+
+        # No filter and no vector search - nothing to evaluate
+        if self.predicate is None and self.vector_search is None:
+            return None
+
+        # Check if global index is enabled
+        if not self.table.options.global_index_enabled():
+            return None
+
+        # Get latest snapshot
+        snapshot = self.snapshot_manager.get_latest_snapshot()
+        if snapshot is None:
+            return None
+
+        # Check if table has store with global index scan builder
+        index_scan_builder = self.table.new_global_index_scan_builder()
+        if index_scan_builder is None:
+            return None
+
+        # Set partition predicate and snapshot
+        index_scan_builder.with_partition_predicate(
+            self.partition_key_predicate
+        ).with_snapshot(snapshot)
+
+        # Get indexed row ranges
+        indexed_row_ranges = index_scan_builder.shard_list()
+        if not indexed_row_ranges:
+            return None
+
+        # Get next row ID from snapshot
+        next_row_id = snapshot.next_row_id
+        if next_row_id is None:
+            return None
+
+        # Calculate non-indexed row ranges
+        non_indexed_row_ranges = Range(0, next_row_id - 1).exclude(indexed_row_ranges)
+
+        # Get thread number from options (can be None, meaning use default)
+        thread_num = self.table.options.global_index_thread_num()
+
+        # Scan global index in parallel
+        result = GlobalIndexScanBuilder.parallel_scan(
+            indexed_row_ranges,
+            index_scan_builder,
+            self.predicate,
+            self.vector_search,
+            thread_num
+        )
+
+        if result is None:
+            return None
+
+        for row_range in non_indexed_row_ranges:
+            result = result.or_(GlobalIndexResult.from_range(row_range))
+
+        return result
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
@@ -568,7 +652,8 @@ class FullStartingScanner(StartingScanner):
         return splits
 
     def _create_data_evolution_splits(
-            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None,
+            row_ranges: List = None, score_getter=None) -> List['Split']:
         def sort_key(manifest_entry: ManifestEntry) -> tuple:
             first_row_id = manifest_entry.file.first_row_id if manifest_entry.file.first_row_id is not None else float(
                 '-inf')
@@ -621,7 +706,59 @@ class FullStartingScanner(StartingScanner):
 
         if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
             self._compute_split_start_end_pos(splits, plan_start_pos, plan_end_pos)
+
+        # Wrap splits with IndexedSplit if row_ranges is provided
+        if row_ranges:
+            splits = self._wrap_to_indexed_splits(splits, row_ranges, score_getter)
+
         return splits
+
+    def _wrap_to_indexed_splits(
+        self,
+        splits: List['Split'],
+        row_ranges: List,
+        score_getter
+    ) -> List['Split']:
+
+        indexed_splits = []
+        for split in splits:
+            # Calculate file ranges for this split
+            file_ranges = []
+            for file in split.files:
+                first_row_id = file.first_row_id
+                if first_row_id is not None:
+                    file_ranges.append(Range(
+                        first_row_id,
+                        first_row_id + file.row_count - 1
+                    ))
+
+            if not file_ranges:
+                # No row IDs, keep original split
+                indexed_splits.append(split)
+                continue
+
+            # Merge file ranges
+            file_ranges = Range.merge_sorted_as_possible(file_ranges)
+
+            # Intersect with row_ranges from global index
+            expected = Range.and_(file_ranges, row_ranges)
+
+            if not expected:
+                # No intersection, skip this split
+                continue
+
+            # Create scores array if score_getter is provided
+            scores = None
+            if score_getter is not None:
+                scores = []
+                for r in expected:
+                    for row_id in range(r.from_, r.to + 1):
+                        score = score_getter(row_id)
+                        scores.append(score if score is not None else 0.0)
+
+            indexed_splits.append(IndexedSplit(split, expected, scores))
+
+        return indexed_splits
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         split_by_row_id = []
@@ -701,9 +838,9 @@ class FullStartingScanner(StartingScanner):
                     files=file_group,
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
-                    _file_paths=file_paths,
-                    _row_count=total_record_count,
-                    _file_size=total_file_size,
+                    file_paths=file_paths,
+                    row_count=total_record_count,
+                    file_size=total_file_size,
                     raw_convertible=raw_convertible,
                     data_deletion_files=data_deletion_files
                 )
