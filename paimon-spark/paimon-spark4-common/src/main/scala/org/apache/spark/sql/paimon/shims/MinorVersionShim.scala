@@ -24,9 +24,9 @@ import org.apache.paimon.types.{DataType, RowType}
 
 import org.apache.hadoop.fs.Path
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeRows, UpdateAction}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, CTERelationRef, MergeRows, UpdateAction}
 import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Instruction
 import org.apache.spark.sql.connector.catalog.Table
 import org.apache.spark.sql.execution.datasources._
@@ -149,4 +149,11 @@ object MinorVersionShim {
     }
   }
 
+  def createCTERelationRef(
+      cteId: Long,
+      resolved: Boolean,
+      output: Seq[Attribute],
+      isStreaming: Boolean): CTERelationRef = {
+    CTERelationRef(cteId, resolved, output.toSeq, isStreaming)
+  }
 }

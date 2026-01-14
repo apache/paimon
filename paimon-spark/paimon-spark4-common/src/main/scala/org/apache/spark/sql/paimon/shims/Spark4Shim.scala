@@ -84,7 +84,7 @@ class Spark4Shim extends SparkShim {
       resolved: Boolean,
       output: Seq[Attribute],
       isStreaming: Boolean): CTERelationRef = {
-    CTERelationRef(cteId, resolved, output.toSeq, isStreaming)
+    MinorVersionShim.createCTERelationRef(cteId, resolved, output, isStreaming)
   }
 
   override def supportsHashAggregate(
