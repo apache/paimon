@@ -588,8 +588,11 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
   }
 
   test("Paimon Variant: edge case json - deeply nested structures") {
-    val deepJson =
-      "{" + (1 to 10).map(i => s"\"level$i\":{").mkString + "\"value\":\"deep\"" + "}" * 10 + "}"
+    val deepJson = {
+      val opens = (1 to 10).map(i => s""""level$i":{""").mkString
+      val closes = "}" * 10
+      s"""{$opens"value":"deep"$closes}"""
+    }
     sql("CREATE TABLE T (id INT, v VARIANT)")
     sql(s"""
            |INSERT INTO T VALUES
