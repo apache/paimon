@@ -18,9 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.Snapshot.CommitKind
-import org.apache.paimon.format.FileFormat
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -397,7 +395,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       Seq("parquet", "avro").foreach {
         format =>
           {
-            test(s"Data Evolution: merge into table with data-evolution, bucket: $bucketEnable") {
+            test(s"Data Evolution: merge into table with data-evolution, bucket: $bucketEnable, format: $format") {
               withTable("s", "t") {
                 sql("CREATE TABLE s (id INT, b INT)")
                 sql("INSERT INTO s VALUES (1, 11), (2, 22)")
