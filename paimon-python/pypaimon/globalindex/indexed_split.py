@@ -89,11 +89,6 @@ class IndexedSplit(SplitBase):
         return self._data_split.file_size
 
     @property
-    def shard_file_idx_map(self):
-        """Delegate to data_split."""
-        return self._data_split.shard_file_idx_map
-
-    @property
     def raw_convertible(self):
         """Delegate to data_split."""
         return self._data_split.raw_convertible

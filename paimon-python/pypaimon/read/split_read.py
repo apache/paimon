@@ -51,6 +51,7 @@ from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
 from pypaimon.read.split import Split
+from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.special_fields import SpecialFields
 
@@ -333,8 +334,12 @@ class RawFileSplitRead(SplitRead):
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
         # If the current file needs to be further divided for reading, use ShardBatchReader
-        if file.file_name in self.split.shard_file_idx_map:
-            (start_pos, end_pos) = self.split.shard_file_idx_map[file.file_name]
+        # Check if this is a SlicedSplit to get shard_file_idx_map
+        shard_file_idx_map = (
+            self.split.shard_file_idx_map() if isinstance(self.split, SlicedSplit) else {}
+        )
+        if file.file_name in shard_file_idx_map:
+            (start_pos, end_pos) = shard_file_idx_map[file.file_name]
             if (start_pos, end_pos) == (-1, -1):
                 return None
             else:
@@ -567,8 +572,12 @@ class DataEvolutionSplitRead(SplitRead):
     def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> Optional[RecordReader]:
         """Create a file reader for a single file."""
         # If the current file needs to be further divided for reading, use ShardBatchReader
-        if file.file_name in self.split.shard_file_idx_map:
-            (begin_pos, end_pos) = self.split.shard_file_idx_map[file.file_name]
+        # Check if this is a SlicedSplit to get shard_file_idx_map
+        shard_file_idx_map = (
+            self.split.shard_file_idx_map() if isinstance(self.split, SlicedSplit) else {}
+        )
+        if file.file_name in shard_file_idx_map:
+            (begin_pos, end_pos) = shard_file_idx_map[file.file_name]
             if (begin_pos, end_pos) == (-1, -1):
                 return None
             else:

@@ -17,7 +17,7 @@
 ################################################################################
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
@@ -71,7 +71,6 @@ class Split(SplitBase):
         file_paths: List[str],
         row_count: int,
         file_size: int,
-        shard_file_idx_map: Optional[Dict[str, Tuple[int, int]]] = None,
         raw_convertible: bool = False,
         data_deletion_files: Optional[List[DeletionFile]] = None
     ):
@@ -81,7 +80,6 @@ class Split(SplitBase):
         self._file_paths = file_paths
         self._row_count = row_count
         self._file_size = file_size
-        self.shard_file_idx_map = shard_file_idx_map or {}
         self.raw_convertible = raw_convertible
         self.data_deletion_files = data_deletion_files
 
