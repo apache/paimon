@@ -28,6 +28,8 @@ import pyarrow
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
+from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
 from pypaimon.table.row.generic_row import GenericRow
@@ -48,6 +50,8 @@ class LocalFileIO(FileIO):
         self.logger = logging.getLogger(__name__)
         self.path = path
         self.properties = catalog_options or Options({})
+        self.filesystem = PaimonLocalFileSystem()
+        self.uri_reader_factory = UriReaderFactory(self.properties)
     
     @staticmethod
     def create():

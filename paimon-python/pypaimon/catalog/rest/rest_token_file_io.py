@@ -28,6 +28,7 @@ from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.common.uri_reader import UriReaderFactory
 
 
 class RESTTokenFileIO(FileIO):
@@ -46,6 +47,7 @@ class RESTTokenFileIO(FileIO):
         self.lock = threading.Lock()
         self.log = logging.getLogger(__name__)
         self._file_io_cache: dict = {}  # token -> FileIO instance
+        self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -53,6 +55,7 @@ class RESTTokenFileIO(FileIO):
         state.pop('lock', None)
         state.pop('api_instance', None)
         state.pop('_file_io_cache', None)  # Cache should be recreated after deserialization
+        state.pop('_uri_reader_factory_cache', None)
         # token can be serialized, but we'll refresh it on deserialization
         return state
 
@@ -61,6 +64,7 @@ class RESTTokenFileIO(FileIO):
         # Recreate lock and cache after deserialization
         self.lock = threading.Lock()
         self._file_io_cache = {}
+        self._uri_reader_factory_cache = None
         # api_instance will be recreated when needed
         self.api_instance = None
 
@@ -149,6 +153,18 @@ class RESTTokenFileIO(FileIO):
 
     def write_blob(self, path: str, data, blob_as_descriptor: bool, **kwargs):
         return self._file_io().write_blob(path, data, blob_as_descriptor, **kwargs)
+
+    @property
+    def uri_reader_factory(self):
+        if self._uri_reader_factory_cache is None:
+            catalog_options = self.catalog_options or Options({})
+            self._uri_reader_factory_cache = UriReaderFactory(catalog_options)
+        
+        return self._uri_reader_factory_cache
+
+    @property
+    def filesystem(self):
+        return self._file_io().filesystem
 
     def try_to_refresh_token(self):
         if self.should_refresh():
