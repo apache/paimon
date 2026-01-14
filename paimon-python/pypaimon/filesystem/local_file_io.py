@@ -420,9 +420,7 @@ class LocalFileIO(FileIO):
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
                         if blob_as_descriptor:
                             blob_descriptor = BlobDescriptor.deserialize(col_data)
-                            from pypaimon.common.uri_reader import UriReaderFactory
-                            uri_reader_factory = UriReaderFactory(self.properties)
-                            uri_reader = uri_reader_factory.create(blob_descriptor.uri)
+                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
                             blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
                         elif isinstance(col_data, bytes):
                             blob_data = BlobData(col_data)
