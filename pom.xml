@@ -532,6 +532,12 @@ under the License.
                 <activeByDefault>true</activeByDefault>
             </activation>
         </profile>
+        <profile>
+            <id>hadoop3</id>
+            <properties>
+                <hadoop.version>3.4.2</hadoop.version>
+            </properties>
+        </profile>
     </profiles>
 
     <build>
