@@ -71,4 +71,8 @@ public class VariantInferenceConfig {
     public int getMaxBufferRow() {
         return options.get(CoreOptions.VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW);
     }
+
+    public RowType rowType() {
+        return rowType;
+    }
 }
