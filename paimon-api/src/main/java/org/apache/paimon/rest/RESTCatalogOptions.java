@@ -116,4 +116,14 @@ public class RESTCatalogOptions {
                     .defaultValue("bucket-,manifest")
                     .withDescription(
                             "Cache is only applied to paths which contain the specified pattern, and * means all paths.");
+    public static final ConfigOption<String> DLF_FILE_IO_CACHE_POLICY =
+            ConfigOptions.key("dlf.io-cache.policy")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The table-level cache policy provided by the REST server, combined with: meta,read,write."
+                                    + "`meta`: meta cache is enabled for visiting files; "
+                                    + "`read`: cache is enabled when reading files; "
+                                    + "`write`: data is also cached when writing files; "
+                                    + "`none`: cache is all disabled.");
 }

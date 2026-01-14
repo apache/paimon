@@ -133,6 +133,10 @@ public class JindoFileIO extends HadoopCompliantFileIO {
         // another config when enable cache
         hadoopOptionsWithCache = new Options(hadoopOptions.toMap());
         hadoopOptionsWithCache.set("fs.xengine", "jindocache");
+        if (!hadoopOptionsWithCache.containsKey("fs.jindocache.client.metrics.enable")) {
+            // enable metrics report by default
+            hadoopOptionsWithCache.set("fs.jindocache.client.metrics.enable", "true");
+        }
         // Workaround: following configurations to avoid bug in some JindoSDK versions
         hadoopOptionsWithCache.set("fs.oss.read.profile.columnar.use-pread", "false");
         hadoopOptionsWithCache.set(
