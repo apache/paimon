@@ -301,11 +301,7 @@ class JavaPyFaissE2ETest(unittest.TestCase):
         try:
             table = self.catalog.get_table('default.faiss_vector_table_j')
         except TableNotExistException:
-            self.skipTest(
-                "Table 'default.faiss_vector_table_j' not found. "
-                "Run Java test first: mvn test -Dtest=JavaPyFaissE2ETest#testJavaWriteFaissVectorIndex "
-                "-pl paimon-faiss/paimon-faiss-index -Drun.e2e.tests=true"
-            )
+            self.skipTest("Table 'default.faiss_vector_table_j' not found. ")
 
         vector_field_name = 'vec'
 

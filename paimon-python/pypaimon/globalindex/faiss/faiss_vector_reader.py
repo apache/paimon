@@ -241,15 +241,18 @@ class FaissVectorGlobalIndexReader(GlobalIndexReader):
         index_file_path = f"{self._index_path}/{io_meta.file_name}"
         
         # Create a temp file for the FAISS index
-        temp_file = tempfile.NamedTemporaryFile(
-            prefix=f"paimon-faiss-{uuid.uuid4()}-",
-            suffix=".faiss",
-            delete=False
-        )
-        temp_path = temp_file.name
-        self._local_index_files.append(temp_path)
-        
+        # Add to tracking list immediately to ensure cleanup on any failure
+        temp_path = None
         try:
+            temp_file = tempfile.NamedTemporaryFile(
+                prefix=f"paimon-faiss-{uuid.uuid4()}-",
+                suffix=".faiss",
+                delete=False
+            )
+            temp_path = temp_file.name
+            # Track immediately after creation to prevent leaks
+            self._local_index_files.append(temp_path)
+            
             # Copy index data to temp file
             with self._file_io.new_input_stream(index_file_path) as input_stream:
                 data = input_stream.read()
@@ -266,9 +269,17 @@ class FaissVectorGlobalIndexReader(GlobalIndexReader):
             self._indices[position] = index
             
         except Exception as e:
-            temp_file.close()
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+            # Clean up on failure
+            if temp_path is not None:
+                try:
+                    temp_file.close()
+                except Exception:
+                    pass
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                # Remove from tracking list since we've already cleaned it up
+                if temp_path in self._local_index_files:
+                    self._local_index_files.remove(temp_path)
             raise e
 
     def close(self) -> None:

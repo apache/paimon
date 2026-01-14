@@ -117,6 +117,12 @@ class FaissIndex:
 
     @classmethod
     def from_file(cls, file_path: str) -> 'FaissIndex':
+        """
+        Load a FAISS index from a file using memory-mapped I/O.
+
+        This method uses `faiss.IO_FLAG_MMAP` to memory-map the index file instead
+        of loading it entirely into RAM.
+        """
         index = faiss.read_index(file_path, faiss.IO_FLAG_MMAP)
         index_type, metric = cls._detect_index_type(index)
 

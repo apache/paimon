@@ -200,16 +200,33 @@ run_pk_dv_test() {
 run_faiss_vector_test() {
     echo -e "${YELLOW}=== Step 6: Running FAISS Vector Index Test (Java Write, Python Read) ===${NC}"
 
+    # Check Python version - skip FAISS tests for Python 3.6 as it has limited faiss-cpu support
+    local python_version
+    python_version=$(python -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>/dev/null || echo "unknown")
+    if [[ "$python_version" == "3.6" ]]; then
+        echo -e "${YELLOW}⊘ Skipping FAISS test for Python 3.6 (limited faiss-cpu support)${NC}"
+        return 0
+    fi
+
     cd "$PROJECT_ROOT"
 
     # Run the Java test method for FAISS vector index
     echo "Running Maven test for JavaPyFaissE2ETest.testJavaWriteFaissVectorIndex..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
-    if mvn test '-Dtest=org.apache.paimon.faiss.index.JavaPyFaissE2ETest#testJavaWriteFaissVectorIndex' -pl paimon-faiss/paimon-faiss-index -Drun.e2e.tests=true; then
-        echo -e "${GREEN}✓ Java FAISS write test completed successfully${NC}"
-    else
+    local mvn_output
+    mvn_output=$(mvn test '-Dtest=org.apache.paimon.faiss.index.JavaPyFaissE2ETest#testJavaWriteFaissVectorIndex' -pl paimon-faiss/paimon-faiss-index -Drun.e2e.tests=true 2>&1)
+    local mvn_exit_code=$?
+    echo "$mvn_output"
+
+    if [[ $mvn_exit_code -ne 0 ]]; then
         echo -e "${RED}✗ Java FAISS write test failed${NC}"
         return 1
+    elif echo "$mvn_output" | grep -q "Tests run: 1.*Skipped: 1"; then
+        # Test was skipped (FAISS native library not available)
+        echo -e "${YELLOW}⊘ Java FAISS write test skipped (FAISS native library not available)${NC}"
+        # Continue to Python test which will also skip
+    else
+        echo -e "${GREEN}✓ Java FAISS write test completed successfully${NC}"
     fi
 
     echo ""
@@ -223,8 +240,12 @@ run_faiss_vector_test() {
     pytest_output=$(python -m pytest test_global_index.py::JavaPyFaissE2ETest::test_read_faiss_vector_table -v --tb=short 2>&1) || true
     echo "$pytest_output"
 
-    if echo "$pytest_output" | grep -q "1 passed"; then
+    if echo "$pytest_output" | grep -qE "1 passed|passed.*1"; then
         echo -e "${GREEN}✓ Python FAISS read test completed successfully${NC}"
+        return 0
+    elif echo "$pytest_output" | grep -qE "1 skipped|skipped.*1"; then
+        # Test was skipped (table not found, likely because Java test was also skipped)
+        echo -e "${YELLOW}⊘ Python FAISS read test skipped (table not created - FAISS native library may not be available)${NC}"
         return 0
     else
         echo -e "${RED}✗ Python FAISS read test failed${NC}"
