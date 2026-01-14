@@ -21,7 +21,7 @@ package org.apache.paimon.spark.catalyst.optimizer
 import org.apache.paimon.spark.PaimonScan
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeMap, AttributeReference, ExprId, ScalarSubquery, SortOrder}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 
 object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
@@ -88,5 +88,9 @@ object MergePaimonScalarSubqueries extends MergePaimonScalarSubqueriesBase {
 
   override protected def createScalarSubquery(plan: LogicalPlan, exprId: ExprId): ScalarSubquery = {
     ScalarSubquery(plan, exprId = exprId)
+  }
+
+  override protected def createCTERelationDef(prj: Project): CTERelationDef = {
+    CTERelationDef(prj, underSubquery = true)
   }
 }
