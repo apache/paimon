@@ -169,6 +169,7 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
       .withDataFiles(dataFiles.toList.asJava)
       .rawConvertible(split.rawConvertible)
       .withBucketPath(split.bucketPath)
+      .withAuthResult(split.authResult())
     if (deletionVectors) {
       builder.withDataDeletionFiles(deletionFiles.toList.asJava)
     }

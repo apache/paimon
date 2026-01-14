@@ -23,11 +23,17 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTToken;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -353,5 +359,195 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                         DATABASE_NAME, maskingTable)))
                 .containsExactlyInAnyOrder(
                         Row.of("user1@example.com"), Row.of("user2@example.com"));
+    }
+
+    @Test
+    public void testRowFilter() {
+        String filterTable = "row_filter_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, name STRING, age INT, department STRING) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, filterTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 'Alice', 25, 'IT'), (2, 'Bob', 30, 'HR'), (3, 'Charlie', 35, 'IT'), (4, 'David', 28, 'Finance')",
+                        DATABASE_NAME, filterTable));
+
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(), DataTypes.STRING(), DataTypes.INT(), DataTypes.STRING());
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        // Test single condition row filter (age > 28)
+        Predicate agePredicate = builder.greaterThan(2, 28);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(agePredicate));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(
+                        Row.of(2, "Bob", 30, "HR"), Row.of(3, "Charlie", 35, "IT"));
+
+        // Test string condition row filter (department = 'IT')
+        Predicate deptPredicate = builder.equal(3, BinaryString.fromString("IT"));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(deptPredicate));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "Alice", 25, "IT"), Row.of(3, "Charlie", 35, "IT"));
+
+        // Test combined conditions (age >= 30 AND department = 'IT')
+        Predicate ageGePredicate = builder.greaterOrEqual(2, 30);
+        Predicate combinedPredicate = PredicateBuilder.and(ageGePredicate, deptPredicate);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(combinedPredicate));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(Row.of(3, "Charlie", 35, "IT"));
+
+        // Test OR condition (age < 27 OR department = 'Finance')
+        Predicate ageLtPredicate = builder.lessThan(2, 27);
+        Predicate financePredicate = builder.equal(3, BinaryString.fromString("Finance"));
+        Predicate orPredicate = PredicateBuilder.or(ageLtPredicate, financePredicate);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(orPredicate));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s ORDER BY id",
+                                        DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "Alice", 25, "IT"), Row.of(4, "David", 28, "Finance"));
+
+        // Test WHERE clause combined with row filter
+        Predicate ageGt25Predicate = builder.greaterThan(2, 25);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(ageGt25Predicate));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM %s.%s WHERE department = 'IT' ORDER BY id",
+                                        DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(Row.of(3, "Charlie", 35, "IT"));
+
+        // Test JOIN with row filter
+        String joinTable = "join_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, salary DOUBLE)", DATABASE_NAME, joinTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 50000.0), (2, 60000.0), (3, 70000.0), (4, 55000.0)",
+                        DATABASE_NAME, joinTable));
+
+        Predicate ageGe30Predicate = builder.greaterOrEqual(2, 30);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(ageGe30Predicate));
+
+        List<Row> joinResult =
+                batchSql(
+                        String.format(
+                                "SELECT t1.id, t1.name, t1.age, t2.salary FROM %s.%s t1 JOIN %s.%s t2 ON t1.id = t2.id ORDER BY t1.id",
+                                DATABASE_NAME, filterTable, DATABASE_NAME, joinTable));
+        assertThat(joinResult.size()).isEqualTo(2);
+        assertThat(joinResult.get(0)).isEqualTo(Row.of(2, "Bob", 30, 60000.0));
+        assertThat(joinResult.get(1)).isEqualTo(Row.of(3, "Charlie", 35, 70000.0));
+
+        // Clear row filter and verify original data
+        restCatalogServer.setRowFilterAuth(Identifier.create(DATABASE_NAME, filterTable), null);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(*) FROM %s.%s", DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(Row.of(4L));
+    }
+
+    @Test
+    public void testColumnMaskingAndRowFilter() {
+        String combinedTable = "combined_auth_table";
+        batchSql(
+                String.format(
+                        "CREATE TABLE %s.%s (id INT, name STRING, salary STRING, age INT, department STRING) WITH ('query-auth.enabled' = 'true')",
+                        DATABASE_NAME, combinedTable));
+        batchSql(
+                String.format(
+                        "INSERT INTO %s.%s VALUES (1, 'Alice', '50000.0', 25, 'IT'), (2, 'Bob', '60000.0', 30, 'HR'), (3, 'Charlie', '70000.0', 35, 'IT'), (4, 'David', '55000.0', 28, 'Finance')",
+                        DATABASE_NAME, combinedTable));
+        Transform salaryMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("salary", salaryMaskTransform);
+        Transform nameMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        columnMasking.put("name", nameMaskTransform);
+        Predicate deptPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("IT")));
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, combinedTable), columnMasking);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, combinedTable),
+                Collections.singletonList(deptPredicate));
+
+        // Test both column masking and row filter together
+        List<Row> combinedResult =
+                batchSql(
+                        String.format(
+                                "SELECT * FROM %s.%s ORDER BY id", DATABASE_NAME, combinedTable));
+        assertThat(combinedResult.size()).isEqualTo(2);
+        assertThat(combinedResult.get(0).getField(0)).isEqualTo(1); // id
+        assertThat(combinedResult.get(0).getField(1)).isEqualTo("***"); // name masked
+        assertThat(combinedResult.get(0).getField(2)).isEqualTo("***"); // salary masked
+        assertThat(combinedResult.get(0).getField(3)).isEqualTo(25); // age not masked
+        assertThat(combinedResult.get(0).getField(4)).isEqualTo("IT"); // department not masked
+
+        // Test WHERE clause with both features
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT id, name FROM %s.%s WHERE age > 30 ORDER BY id",
+                                        DATABASE_NAME, combinedTable)))
+                .containsExactlyInAnyOrder(Row.of(3, "***"));
+
+        // Clear both column masking and row filter
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, combinedTable), new HashMap<>());
+        restCatalogServer.setRowFilterAuth(Identifier.create(DATABASE_NAME, combinedTable), null);
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(*) FROM %s.%s",
+                                        DATABASE_NAME, combinedTable)))
+                .containsExactlyInAnyOrder(Row.of(4L));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT name FROM %s.%s WHERE id = 1",
+                                        DATABASE_NAME, combinedTable)))
+                .containsExactlyInAnyOrder(Row.of("Alice"));
     }
 }

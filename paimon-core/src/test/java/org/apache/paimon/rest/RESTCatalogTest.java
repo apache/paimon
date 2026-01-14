@@ -3030,11 +3030,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
         List<String> result = new ArrayList<>();
+
+        // Create field getters for each column
+        InternalRow.FieldGetter[] fieldGetters =
+                new InternalRow.FieldGetter[table.rowType().getFieldCount()];
+        for (int i = 0; i < table.rowType().getFieldCount(); i++) {
+            fieldGetters[i] = InternalRow.createFieldGetter(table.rowType().getTypeAt(i), i);
+        }
+
         reader.forEachRemaining(
                 row -> {
-                    String rowStr =
-                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
-                    result.add(rowStr);
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(row.getRowKind().shortString()).append("[");
+                    for (int i = 0; i < row.getFieldCount(); i++) {
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
+                        Object value = fieldGetters[i].getFieldOrNull(row);
+                        sb.append(value);
+                    }
+                    sb.append("]");
+                    result.add(sb.toString());
                 });
         return result;
     }

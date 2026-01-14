@@ -28,6 +28,15 @@ import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.predicate.ConcatTransform;
 import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.RESTCatalogInternalOptions;
@@ -43,6 +52,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.CatalogManager;
 import org.junit.jupiter.api.AfterEach;
@@ -250,7 +260,7 @@ public class SparkCatalogWithRestTest {
     public void testColumnMasking() {
         spark.sql(
                 "CREATE TABLE t_column_masking (id INT, secret STRING, email STRING, phone STRING) TBLPROPERTIES"
-                        + " ('bucket'='1', 'bucket-key'='id', 'file.format'='avro', 'query-auth.enabled'='true')");
+                        + " ('query-auth.enabled'='true')");
         spark.sql(
                 "INSERT INTO t_column_masking VALUES (1, 's1', 'user1@example.com', '12345678901'), (2, 's2', 'user2@example.com', '12345678902')");
 
@@ -287,8 +297,7 @@ public class SparkCatalogWithRestTest {
                 .isEqualTo("[[***********], [***********]]");
 
         // Test SELECT * with column masking
-        List<org.apache.spark.sql.Row> allRows =
-                spark.sql("SELECT * FROM t_column_masking").collectAsList();
+        List<Row> allRows = spark.sql("SELECT * FROM t_column_masking").collectAsList();
         assertThat(allRows.size()).isEqualTo(2);
         assertThat(allRows.get(0).getString(1)).isEqualTo("****");
         assertThat(allRows.get(0).getString(2)).isEqualTo("***@***.com");
@@ -308,9 +317,7 @@ public class SparkCatalogWithRestTest {
         // Test UpperTransform
         Transform upperTransform =
                 new UpperTransform(
-                        Collections.singletonList(
-                                new org.apache.paimon.predicate.FieldRef(
-                                        1, "secret", org.apache.paimon.types.DataTypes.STRING())));
+                        Collections.singletonList(new FieldRef(1, "secret", DataTypes.STRING())));
         columnMasking.clear();
         columnMasking.put("secret", upperTransform);
         restCatalogServer.setColumnMaskingAuth(
@@ -327,8 +334,7 @@ public class SparkCatalogWithRestTest {
                 new ConcatWsTransform(
                         Arrays.asList(
                                 BinaryString.fromString("-"),
-                                new org.apache.paimon.predicate.FieldRef(
-                                        1, "secret", org.apache.paimon.types.DataTypes.STRING()),
+                                new FieldRef(1, "secret", DataTypes.STRING()),
                                 BinaryString.fromString("masked")));
         columnMasking.clear();
         columnMasking.put("secret", concatWsTransform);
@@ -354,6 +360,173 @@ public class SparkCatalogWithRestTest {
                                 .collectAsList()
                                 .toString())
                 .isEqualTo("[[user1@example.com], [user2@example.com]]");
+    }
+
+    @Test
+    public void testRowFilter() {
+        spark.sql(
+                "CREATE TABLE t_row_filter (id INT, name STRING, age INT, department STRING) TBLPROPERTIES"
+                        + " ('query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_row_filter VALUES (1, 'Alice', 25, 'IT'), (2, 'Bob', 30, 'HR'), (3, 'Charlie', 35, 'IT'), (4, 'David', 28, 'Finance')");
+
+        // Test single condition row filter (age > 28)
+        Predicate agePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(28));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"), Collections.singletonList(agePredicate));
+
+        assertThat(spark.sql("SELECT * FROM t_row_filter ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[2,Bob,30,HR], [3,Charlie,35,IT]]");
+
+        // Test string condition row filter (department = 'IT')
+        Predicate deptPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("IT")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"), Collections.singletonList(deptPredicate));
+
+        assertThat(spark.sql("SELECT * FROM t_row_filter ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[1,Alice,25,IT], [3,Charlie,35,IT]]");
+
+        // Test combined conditions (age >= 30 AND department = 'IT')
+        Predicate ageGePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
+        Predicate combinedPredicate = PredicateBuilder.and(ageGePredicate, deptPredicate);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"),
+                Collections.singletonList(combinedPredicate));
+
+        assertThat(spark.sql("SELECT * FROM t_row_filter ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[3,Charlie,35,IT]]");
+
+        // Test OR condition (age < 27 OR department = 'Finance')
+        Predicate ageLtPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        LessThan.INSTANCE,
+                        Collections.singletonList(27));
+        Predicate financePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("Finance")));
+        Predicate orPredicate = PredicateBuilder.or(ageLtPredicate, financePredicate);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"), Collections.singletonList(orPredicate));
+
+        assertThat(spark.sql("SELECT * FROM t_row_filter ORDER BY id").collectAsList().toString())
+                .isEqualTo("[[1,Alice,25,IT], [4,David,28,Finance]]");
+
+        // Test WHERE clause combined with row filter
+        Predicate ageGt25Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(25));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"),
+                Collections.singletonList(ageGt25Predicate));
+
+        assertThat(
+                        spark.sql("SELECT * FROM t_row_filter WHERE department = 'IT' ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[3,Charlie,35,IT]]");
+
+        // Test JOIN with row filter
+        spark.sql("CREATE TABLE t_join2 (id INT, salary DOUBLE)");
+        spark.sql(
+                "INSERT INTO t_join2 VALUES (1, 50000.0), (2, 60000.0), (3, 70000.0), (4, 55000.0)");
+
+        Predicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"),
+                Collections.singletonList(ageGe30Predicate));
+
+        List<Row> joinResult =
+                spark.sql(
+                                "SELECT t1.id, t1.name, t1.age, t2.salary FROM t_row_filter t1 JOIN t_join2 t2 ON t1.id = t2.id ORDER BY t1.id")
+                        .collectAsList();
+        assertThat(joinResult.size()).isEqualTo(2);
+        assertThat(joinResult.get(0).toString()).isEqualTo("[2,Bob,30,60000.0]");
+        assertThat(joinResult.get(1).toString()).isEqualTo("[3,Charlie,35,70000.0]");
+
+        // Clear row filter and verify original data
+        restCatalogServer.setRowFilterAuth(Identifier.create("db2", "t_row_filter"), null);
+
+        assertThat(spark.sql("SELECT COUNT(*) FROM t_row_filter").collectAsList().toString())
+                .isEqualTo("[[4]]");
+    }
+
+    @Test
+    public void testColumnMaskingAndRowFilter() {
+        spark.sql(
+                "CREATE TABLE t_combined (id INT, name STRING, salary STRING, age INT, department STRING) TBLPROPERTIES"
+                        + " ('query-auth.enabled'='true')");
+        spark.sql(
+                "INSERT INTO t_combined VALUES (1, 'Alice', '50000.0', 25, 'IT'), (2, 'Bob', '60000.0', 30, 'HR'), (3, 'Charlie', '70000.0', 35, 'IT'), (4, 'David', '55000.0', 28, 'Finance')");
+
+        Transform salaryMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        Map<String, Transform> columnMasking = new HashMap<>();
+        Predicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
+
+        // Test both column masking and row filter together
+        columnMasking.put("salary", salaryMaskTransform);
+        Transform nameMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        columnMasking.put("name", nameMaskTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_combined"), columnMasking);
+        Predicate deptPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("IT")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_combined"), Collections.singletonList(deptPredicate));
+
+        List<Row> combinedResult =
+                spark.sql("SELECT * FROM t_combined ORDER BY id").collectAsList();
+        assertThat(combinedResult.size()).isEqualTo(2);
+        assertThat(combinedResult.get(0).getString(1)).isEqualTo("***"); // name masked
+        assertThat(combinedResult.get(0).getString(2)).isEqualTo("***"); // salary masked
+        assertThat(combinedResult.get(0).getInt(3)).isEqualTo(25); // age not masked
+        assertThat(combinedResult.get(0).getString(4)).isEqualTo("IT"); // department not masked
+
+        // Test WHERE clause with both features
+        assertThat(
+                        spark.sql("SELECT id, name FROM t_combined WHERE age > 30 ORDER BY id")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[3,***]]");
+
+        // Clear both column masking and row filter
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_combined"), new HashMap<>());
+        restCatalogServer.setRowFilterAuth(Identifier.create("db2", "t_combined"), null);
+
+        assertThat(spark.sql("SELECT COUNT(*) FROM t_combined").collectAsList().toString())
+                .isEqualTo("[[4]]");
+        assertThat(spark.sql("SELECT name FROM t_combined WHERE id = 1").collectAsList().toString())
+                .isEqualTo("[[Alice]]");
     }
 
     private Catalog getPaimonCatalog() {

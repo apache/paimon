@@ -118,8 +118,6 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
 
     @Override
     public Plan plan() {
-        authQuery();
-
         if (!initialized) {
             initScanner();
         }
@@ -182,7 +180,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                     "Starting snapshot is {}, next snapshot will be {}.",
                     scannedResult.plan().snapshotId(),
                     nextSnapshotId);
-            return scannedResult.plan();
+            return applyAuthToSplits(scannedResult.plan());
         } else if (result instanceof StartingScanner.NextSnapshot) {
             nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
             isFullPhaseEnd =
@@ -223,7 +221,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                     if (overwritePlan.splits().isEmpty()) {
                         continue;
                     }
-                    return overwritePlan;
+                    return applyAuthToSplits(overwritePlan);
                 }
             }
 
@@ -235,7 +233,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
                 if (plan.splits().isEmpty()) {
                     continue;
                 }
-                return plan;
+                return applyAuthToSplits(plan);
             } else {
                 nextSnapshotId++;
             }

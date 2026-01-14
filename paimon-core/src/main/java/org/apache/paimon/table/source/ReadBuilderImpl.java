@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.data.variant.VariantAccessInfoUtils;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -261,15 +260,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         if (table instanceof FileStoreTable) {
             CoreOptions options = new CoreOptions(table.options());
             if (options.queryAuthEnabled()) {
-                TableQueryAuth queryAuth =
-                        ((FileStoreTable) table).catalogEnvironment().tableQueryAuth(options);
-                TableQueryAuthResult authResult =
-                        queryAuth.auth(readType == null ? null : readType.getFieldNames());
-                if (authResult != null
-                        && authResult.columnMasking() != null
-                        && !authResult.columnMasking().isEmpty()) {
-                    return new MaskingTableRead(read, readType(), authResult.columnMasking());
-                }
+                return new AuthAwareTableRead(read, readType());
             }
         }
         return read;
