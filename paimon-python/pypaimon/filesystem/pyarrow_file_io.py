@@ -318,7 +318,7 @@ class PyArrowFileIO(FileIO):
         finally:
             if not success:
                 self.delete_quietly(temp_path)
-            return success
+        return success
 
     def copy_file(self, source_path: str, target_path: str, overwrite: bool = False):
         if not overwrite and self.exists(target_path):

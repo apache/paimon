@@ -123,7 +123,7 @@ class FileIO(ABC):
         finally:
             if not success:
                 self.delete_quietly(temp_path)
-            return success
+        return success
 
     def write_file(self, path: str, content: str, overwrite: bool = False):
         if not overwrite and self.exists(path):

@@ -123,6 +123,15 @@ class RESTTokenFileIO(FileIO):
     def rename(self, src: str, dst: str) -> bool:
         return self._file_io().rename(src, dst)
 
+    def copy_file(self, source_path: str, target_path: str, overwrite: bool = False):
+        return self._file_io().copy_file(source_path, target_path, overwrite)
+
+    def to_filesystem_path(self, path: str) -> str:
+        return self._file_io().to_filesystem_path(path)
+
+    def try_to_write_atomic(self, path: str, content: str) -> bool:
+        return self._file_io().try_to_write_atomic(path, content)
+
     def try_to_refresh_token(self):
         if self.should_refresh():
             with self.lock:
