@@ -17,6 +17,7 @@
 
 import threading
 import pyarrow
+from pathlib import Path
 from pyarrow._fs import LocalFileSystem
 
 
@@ -24,11 +25,25 @@ class PaimonLocalFileSystem(LocalFileSystem):
     
     rename_lock = threading.Lock()
 
-    def move(self, src, dst):
-        with PaimonLocalFileSystem.rename_lock:
-            file_info = self.get_file_info([dst])[0]
-            result = file_info.type != pyarrow.fs.FileType.NotFound
-            if (result is True):
-                raise Exception("Target file already exists")
-
-            super(PaimonLocalFileSystem, self).move(src, dst)
+    def rename(self, src, dst):
+        try:
+            with PaimonLocalFileSystem.rename_lock:
+                dst_file_info = self.get_file_info([dst])[0]
+                if dst_file_info.type != pyarrow.fs.FileType.NotFound:
+                    if dst_file_info.type == pyarrow.fs.FileType.File:
+                        return False
+                    # Make it compatible with HadoopFileIO: if dst is an existing directory,
+                    # dst=dst/srcFileName
+                    src_name = Path(src).name
+                    dst = str(Path(dst) / src_name)
+                    final_dst_info = self.get_file_info([dst])[0]
+                    if final_dst_info.type != pyarrow.fs.FileType.NotFound:
+                        return False
+                
+                # Perform atomic move
+                super(PaimonLocalFileSystem, self).move(src, dst)
+                return True
+        except FileNotFoundError:
+            return False
+        except (PermissionError, OSError):
+            return False
