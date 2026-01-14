@@ -20,6 +20,8 @@ import threading
 import time
 from typing import Optional
 
+from cachetools import TTLCache
+
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
@@ -36,6 +38,9 @@ class RESTTokenFileIO(FileIO):
     A FileIO to support getting token from REST Server.
     """
     
+    _FILE_IO_CACHE_MAXSIZE = 1000
+    _FILE_IO_CACHE_TTL = 36000  # 10 hours in seconds
+    
     def __init__(self, identifier: Identifier, path: str,
                  catalog_options: Optional[Options] = None):
         self.identifier = identifier
@@ -47,20 +52,29 @@ class RESTTokenFileIO(FileIO):
         self.lock = threading.Lock()
         self.log = logging.getLogger(__name__)
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
+        self._file_io_cache: TTLCache = TTLCache(
+            maxsize=self._FILE_IO_CACHE_MAXSIZE,
+            ttl=self._FILE_IO_CACHE_TTL
+        )
 
     def __getstate__(self):
         state = self.__dict__.copy()
         # Remove non-serializable objects
         state.pop('lock', None)
         state.pop('api_instance', None)
+        state.pop('_file_io_cache', None)
         state.pop('_uri_reader_factory_cache', None)
         # token can be serialized, but we'll refresh it on deserialization
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        # Recreate lock after deserialization
+        # Recreate lock and cache after deserialization
         self.lock = threading.Lock()
+        self._file_io_cache = TTLCache(
+            maxsize=self._FILE_IO_CACHE_MAXSIZE,
+            ttl=self._FILE_IO_CACHE_TTL
+        )
         self._uri_reader_factory_cache = None
         # api_instance will be recreated when needed
         self.api_instance = None
@@ -71,14 +85,27 @@ class RESTTokenFileIO(FileIO):
         if self.token is None:
             return FileIO.get(self.path, self.catalog_options or Options({}))
         
-        merged_token = self._merge_token_with_catalog_options(self.token.token)
-        merged_properties = RESTUtil.merge(
-            self.catalog_options.to_map() if self.catalog_options else {},
-            merged_token
-        )
-        merged_options = Options(merged_properties)
+        cache_key = self.token
         
-        return PyArrowFileIO(self.path, merged_options)
+        file_io = self._file_io_cache.get(cache_key)
+        if file_io is not None:
+            return file_io
+        
+        with self.lock:
+            file_io = self._file_io_cache.get(cache_key)
+            if file_io is not None:
+                return file_io
+            
+            merged_token = self._merge_token_with_catalog_options(self.token.token)
+            merged_properties = RESTUtil.merge(
+                self.catalog_options.to_map() if self.catalog_options else {},
+                merged_token
+            )
+            merged_options = Options(merged_properties)
+            
+            file_io = PyArrowFileIO(self.path, merged_options)
+            self._file_io_cache[cache_key] = file_io
+            return file_io
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""
@@ -178,3 +205,12 @@ class RESTTokenFileIO(FileIO):
     def valid_token(self):
         self.try_to_refresh_token()
         return self.token
+
+    def close(self):
+        with self.lock:
+            for file_io in self._file_io_cache.values():
+                try:
+                    file_io.close()
+                except Exception as e:
+                    self.log.warning(f"Error closing cached FileIO: {e}")
+            self._file_io_cache.clear()
