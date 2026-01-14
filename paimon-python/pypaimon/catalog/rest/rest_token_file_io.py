@@ -46,7 +46,6 @@ class RESTTokenFileIO(FileIO):
         self.api_instance: Optional[RESTApi] = None
         self.lock = threading.Lock()
         self.log = logging.getLogger(__name__)
-        self._file_io_cache: dict = {}  # token -> FileIO instance
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
 
     def __getstate__(self):
@@ -54,16 +53,14 @@ class RESTTokenFileIO(FileIO):
         # Remove non-serializable objects
         state.pop('lock', None)
         state.pop('api_instance', None)
-        state.pop('_file_io_cache', None)  # Cache should be recreated after deserialization
         state.pop('_uri_reader_factory_cache', None)
         # token can be serialized, but we'll refresh it on deserialization
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        # Recreate lock and cache after deserialization
+        # Recreate lock after deserialization
         self.lock = threading.Lock()
-        self._file_io_cache = {}
         self._uri_reader_factory_cache = None
         # api_instance will be recreated when needed
         self.api_instance = None
@@ -74,25 +71,14 @@ class RESTTokenFileIO(FileIO):
         if self.token is None:
             return FileIO.get(self.path, self.catalog_options or Options({}))
         
-        cache_key = self.token
+        merged_token = self._merge_token_with_catalog_options(self.token.token)
+        merged_properties = RESTUtil.merge(
+            self.catalog_options.to_map() if self.catalog_options else {},
+            merged_token
+        )
+        merged_options = Options(merged_properties)
         
-        if cache_key in self._file_io_cache:
-            return self._file_io_cache[cache_key]
-        
-        with self.lock:
-            if cache_key in self._file_io_cache:
-                return self._file_io_cache[cache_key]
-            
-            merged_token = self._merge_token_with_catalog_options(self.token.token)
-            merged_properties = RESTUtil.merge(
-                self.catalog_options.to_map() if self.catalog_options else {},
-                merged_token
-            )
-            merged_options = Options(merged_properties)
-            
-            file_io = PyArrowFileIO(self.path, merged_options)
-            self._file_io_cache[cache_key] = file_io
-            return file_io
+        return PyArrowFileIO(self.path, merged_options)
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
         """Merge token with catalog options, DLF OSS endpoint should override the standard OSS endpoint."""

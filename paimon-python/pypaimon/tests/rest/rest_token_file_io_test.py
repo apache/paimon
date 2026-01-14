@@ -18,7 +18,6 @@
 import os
 import pickle
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
@@ -271,7 +270,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertIsNotNone(filesystem, "filesystem should not be None")
             
             self.assertTrue(hasattr(filesystem, 'open_input_file'),
-                          "filesystem should support open_input_file method")
+                            "filesystem should support open_input_file method")
 
     def test_uri_reader_factory_property(self):
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
@@ -282,12 +281,12 @@ class RESTTokenFileIOTest(unittest.TestCase):
             )
             
             self.assertTrue(hasattr(file_io, 'uri_reader_factory'),
-                          "RESTTokenFileIO should have uri_reader_factory property")
+                            "RESTTokenFileIO should have uri_reader_factory property")
             uri_reader_factory = file_io.uri_reader_factory
             self.assertIsNotNone(uri_reader_factory, "uri_reader_factory should not be None")
             
             self.assertTrue(hasattr(uri_reader_factory, 'create'),
-                          "uri_reader_factory should support create method")
+                            "uri_reader_factory should support create method")
 
     def test_filesystem_and_uri_reader_factory_after_serialization(self):
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
@@ -301,9 +300,9 @@ class RESTTokenFileIOTest(unittest.TestCase):
             restored_file_io = pickle.loads(pickled)
             
             self.assertIsNotNone(restored_file_io.filesystem,
-                               "filesystem should work after deserialization")
-            self.assertIsNotNone(restored_file_io.uri_reader_factory, 
-                               "uri_reader_factory should work after deserialization")
+                                  "filesystem should work after deserialization")
+            self.assertIsNotNone(restored_file_io.uri_reader_factory,
+                                  "uri_reader_factory should work after deserialization")
 
 
 if __name__ == '__main__':
