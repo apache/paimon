@@ -638,11 +638,6 @@ public class SchemaValidation {
                     schema.primaryKeys().isEmpty(),
                     "Cannot define %s for row tracking table.",
                     PRIMARY_KEY.key());
-            if (options.bucket() != -1) {
-                checkArgument(
-                        !options.bucketAppendOrdered(),
-                        "Row tracking config must disabled bucket-append-ordered in bucket table");
-            }
         }
 
         if (options.dataEvolutionEnabled()) {
