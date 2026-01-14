@@ -395,7 +395,8 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       Seq("parquet", "avro").foreach {
         format =>
           {
-            test(s"Data Evolution: merge into table with data-evolution, bucket: $bucketEnable, format: $format") {
+            test(
+              s"Data Evolution: merge into table with data-evolution, bucket: $bucketEnable, format: $format") {
               withTable("s", "t") {
                 sql("CREATE TABLE s (id INT, b INT)")
                 sql("INSERT INTO s VALUES (1, 11), (2, 22)")
