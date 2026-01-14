@@ -422,22 +422,21 @@ under the License.
         </profile>
 
         <profile>
-            <id>spark4</id>
+            <id>spark4.0</id>
             <modules>
                 <module>paimon-spark/paimon-spark4-common</module>
                 <module>paimon-spark/paimon-spark-4.0</module>
-                <module>paimon-spark/paimon-spark-4.1</module>
             </modules>
             <properties>
                 <target.java.version>17</target.java.version>
                 <antlr4.version>4.13.1</antlr4.version>
                 <scala.binary.version>2.13</scala.binary.version>
                 <scala.version>${scala213.version}</scala.version>
-                <paimon-spark-common.spark.version>4.1.0</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>4.0.1</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
                 <arrow.version>18.1.0</arrow.version>
-                <test.spark.main.version>4.1</test.spark.main.version>
-                <test.spark.version>4.1.0</test.spark.version>
+                <test.spark.main.version>4.0</test.spark.main.version>
+                <test.spark.version>4.0.1</test.spark.version>
             </properties>
             <activation>
                 <property>
@@ -446,7 +445,32 @@ under the License.
             </activation>
         </profile>
 
-        <profile>
+      <profile>
+        <id>spark4.1</id>
+        <modules>
+          <module>paimon-spark/paimon-spark4-common</module>
+          <module>paimon-spark/paimon-spark-4.1</module>
+        </modules>
+        <properties>
+          <target.java.version>17</target.java.version>
+          <antlr4.version>4.13.1</antlr4.version>
+          <scala.binary.version>2.13</scala.binary.version>
+          <scala.version>${scala213.version}</scala.version>
+          <paimon-spark-common.spark.version>4.1.0</paimon-spark-common.spark.version>
+          <paimon-sparkx-common>paimon-spark4-common_2.13</paimon-sparkx-common>
+          <arrow.version>18.1.0</arrow.version>
+          <test.spark.main.version>4.1</test.spark.main.version>
+          <test.spark.version>4.1.0</test.spark.version>
+        </properties>
+        <activation>
+          <property>
+            <name>spark4</name>
+          </property>
+        </activation>
+      </profile>
+
+
+      <profile>
             <id>flink1</id>
             <properties>
                 <paimon-flinkx-common>paimon-flink1-common</paimon-flinkx-common>
