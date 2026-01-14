@@ -25,6 +25,7 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,6 +41,7 @@ import java.util.List;
 public class InferVariantShreddingWriter implements BundleFormatWriter {
 
     private final SupportsVariantInference writerFactory;
+    private final RowType rowType;
     private final InferVariantShreddingSchema shreddingSchemaInfer;
     private final int maxBufferRow;
     private final PositionOutputStream out;
@@ -54,11 +56,13 @@ public class InferVariantShreddingWriter implements BundleFormatWriter {
 
     public InferVariantShreddingWriter(
             SupportsVariantInference writerFactory,
+            RowType rowType,
             InferVariantShreddingSchema shreddingSchemaInfer,
             int maxBufferRow,
             PositionOutputStream out,
             String compression) {
         this.writerFactory = writerFactory;
+        this.rowType = rowType;
         this.shreddingSchemaInfer = shreddingSchemaInfer;
         this.maxBufferRow = maxBufferRow;
         this.out = out;
@@ -70,7 +74,7 @@ public class InferVariantShreddingWriter implements BundleFormatWriter {
     @Override
     public void addElement(InternalRow row) throws IOException {
         if (!schemaFinalized) {
-            bufferedRows.add(row);
+            bufferedRows.add(InternalRowUtils.copyInternalRow(row, rowType));
             totalBufferedRowCount++;
             if (totalBufferedRowCount >= maxBufferRow) {
                 finalizeSchemaAndFlush();

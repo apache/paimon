@@ -55,6 +55,7 @@ public class VariantInferenceWriterFactory implements FormatWriterFactory {
 
         return new InferVariantShreddingWriter(
                 (SupportsVariantInference) delegate,
+                config.rowType(),
                 config.createInferrer(),
                 config.getMaxBufferRow(),
                 out,
