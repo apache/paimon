@@ -126,11 +126,10 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
           s"'format-table.implementation'='paimon') PARTITIONED BY (`ds`, `ds1`, `ds2`)")
       val table =
         paimonCatalog.getTable(Identifier.create("test_db", tableName)).asInstanceOf[FormatTable]
-      val partition = 20250920
       table.fileIO().mkdirs(new Path(table.location()))
       spark.sql(s"INSERT INTO $tableName  VALUES (5, 11, 12, 'ab', 13), (7, 11, 12, 'Larry', 13)")
       checkAnswer(
-        spark.sql(s"SELECT ds, age, ds1, name, ds2 FROM $tableName ORDER BY age"),
+        spark.sql(s"SELECT ds, age, ds1, name, ds2 FROM $tableName ORDER BY ds"),
         Row(5, 11, 12, "ab", 13) :: Row(7, 11, 12, "Larry", 13) :: Nil
       )
     }

@@ -15,12 +15,13 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import pandas
 import pyarrow
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
 from pypaimon.read.split_read import (DataEvolutionSplitRead,
@@ -93,10 +94,25 @@ class TableRead:
         chunk_size = 65536
 
         for split in splits:
-            reader = self._create_split_read(split).create_reader()
+            # Get row ranges if this is an IndexedSplit
+            row_ranges = None
+            actual_split = split
+            if isinstance(split, IndexedSplit):
+                row_ranges = split.row_ranges()
+                actual_split = split.data_split()
+
+            reader = self._create_split_read(actual_split).create_reader()
             try:
                 if isinstance(reader, RecordBatchReader):
-                    yield from iter(reader.read_arrow_batch, None)
+                    # For IndexedSplit, filter batches by row ranges
+                    if row_ranges:
+                        yield from self._filter_batches_by_row_ranges(
+                            iter(reader.read_arrow_batch, None),
+                            actual_split,
+                            row_ranges
+                        )
+                    else:
+                        yield from iter(reader.read_arrow_batch, None)
                 else:
                     row_tuple_chunk = []
                     for row_iterator in iter(reader.read_batch, None):
@@ -116,6 +132,46 @@ class TableRead:
             finally:
                 reader.close()
 
+    def _filter_batches_by_row_ranges(
+        self,
+        batch_iterator: Iterator[pyarrow.RecordBatch],
+        split: Split,
+        row_ranges: List
+    ) -> Iterator[pyarrow.RecordBatch]:
+        """Filter batches to only include rows within the given row ranges."""
+        import numpy as np
+
+        # Build a set of allowed row IDs for fast lookup
+        allowed_row_ids = set()
+        for r in row_ranges:
+            for row_id in range(r.from_, r.to + 1):
+                allowed_row_ids.add(row_id)
+
+        # Track current row ID based on file's first_row_id
+        current_row_id = 0
+        for file in split.files:
+            if file.first_row_id is not None:
+                current_row_id = file.first_row_id
+                break
+
+        for batch in batch_iterator:
+            if batch.num_rows == 0:
+                continue
+
+            # Build mask for rows that are in allowed_row_ids
+            mask = np.zeros(batch.num_rows, dtype=bool)
+            for i in range(batch.num_rows):
+                if current_row_id + i in allowed_row_ids:
+                    mask[i] = True
+
+            current_row_id += batch.num_rows
+
+            # Filter batch
+            if np.any(mask):
+                filtered_batch = batch.filter(pyarrow.array(mask))
+                if filtered_batch.num_rows > 0:
+                    yield filtered_batch
+
     def to_pandas(self, splits: List[Split]) -> pandas.DataFrame:
         arrow_table = self.to_arrow(splits)
         return arrow_table.to_pandas()
@@ -128,8 +184,30 @@ class TableRead:
         con.register(table_name, self.to_arrow(splits))
         return con
 
-    def to_ray(self, splits: List[Split], parallelism: int = 1) -> "ray.data.dataset.Dataset":
-        """Convert Paimon table data to Ray Dataset."""
+    def to_ray(
+        self,
+        splits: List[Split],
+        *,
+        ray_remote_args: Optional[Dict[str, Any]] = None,
+        concurrency: Optional[int] = None,
+        override_num_blocks: Optional[int] = None,
+        **read_args,
+    ) -> "ray.data.dataset.Dataset":
+        """Convert Paimon table data to Ray Dataset.
+        Args:
+            splits: List of splits to read from the Paimon table.
+            ray_remote_args: Optional kwargs passed to :func:`ray.remote` in read tasks.
+                For example, ``{"num_cpus": 2, "max_retries": 3}``.
+            concurrency: Optional max number of Ray tasks to run concurrently.
+                By default, dynamically decided based on available resources.
+            override_num_blocks: Optional override for the number of output blocks.
+                You needn't manually set this in most cases.
+            **read_args: Additional kwargs passed to the datasource.
+                For example, ``per_task_row_limit`` (Ray 2.52.0+).
+        
+        See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
+        for details.
+        """
         import ray
 
         if not splits:
@@ -140,13 +218,29 @@ class TableRead:
             )
             return ray.data.from_arrow(empty_table)
 
-        # Validate parallelism parameter
-        if parallelism < 1:
-            raise ValueError(f"parallelism must be at least 1, got {parallelism}")
+        if override_num_blocks is not None and override_num_blocks < 1:
+            raise ValueError(f"override_num_blocks must be at least 1, got {override_num_blocks}")
 
-        from pypaimon.read.ray_datasource import PaimonDatasource
-        datasource = PaimonDatasource(self, splits)
-        return ray.data.read_datasource(datasource, parallelism=parallelism)
+        from pypaimon.read.datasource import RayDatasource
+        datasource = RayDatasource(self, splits)
+        return ray.data.read_datasource(
+            datasource,
+            ray_remote_args=ray_remote_args,
+            concurrency=concurrency,
+            override_num_blocks=override_num_blocks,
+            **read_args
+        )
+
+    def to_torch(self, splits: List[Split], streaming: bool = False) -> "torch.utils.data.Dataset":
+        """Wrap Paimon table data to PyTorch Dataset."""
+        if streaming:
+            from pypaimon.read.datasource import TorchIterDataset
+            dataset = TorchIterDataset(self, splits)
+            return dataset
+        else:
+            from pypaimon.read.datasource import TorchDataset
+            dataset = TorchDataset(self, splits)
+            return dataset
 
     def _create_split_read(self, split: Split) -> SplitRead:
         if self.table.is_primary_key_table and not split.raw_convertible:

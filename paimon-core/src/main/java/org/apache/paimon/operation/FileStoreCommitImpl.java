@@ -42,7 +42,6 @@ import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.commit.CommitChanges;
 import org.apache.paimon.operation.commit.CommitChangesProvider;
 import org.apache.paimon.operation.commit.CommitCleaner;
-import org.apache.paimon.operation.commit.CommitKindProvider;
 import org.apache.paimon.operation.commit.CommitResult;
 import org.apache.paimon.operation.commit.CommitScanner;
 import org.apache.paimon.operation.commit.ConflictDetection;
@@ -71,6 +70,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.RetryWaiter;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -88,8 +88,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
@@ -152,8 +150,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
     private final long commitTimeout;
-    private final long commitMinRetryWait;
-    private final long commitMaxRetryWait;
+    private final RetryWaiter retryWaiter;
     private final int commitMaxRetries;
     private final InternalRowPartitionComputer partitionComputer;
     private final boolean rowTrackingEnabled;
@@ -223,8 +220,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.commitCallbacks = commitCallbacks;
         this.commitMaxRetries = commitMaxRetries;
         this.commitTimeout = commitTimeout;
-        this.commitMinRetryWait = commitMinRetryWait;
-        this.commitMaxRetryWait = commitMaxRetryWait;
+        this.retryWaiter = new RetryWaiter(commitMinRetryWait, commitMaxRetryWait);
         this.partitionComputer =
                 new InternalRowPartitionComputer(
                         options.partitionDefaultName(),
@@ -332,7 +328,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
-                                CommitKindProvider.provider(commitKind),
+                                commitKind,
                                 checkAppendFiles,
                                 null);
                 generatedSnapshot += 1;
@@ -350,7 +346,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
-                                CommitKindProvider.provider(CommitKind.COMPACT),
+                                CommitKind.COMPACT,
                                 true,
                                 null);
                 generatedSnapshot += 1;
@@ -515,7 +511,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.properties(),
-                                CommitKindProvider.provider(CommitKind.COMPACT),
+                                CommitKind.COMPACT,
                                 true,
                                 null);
                 generatedSnapshot += 1;
@@ -654,7 +650,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 commitIdentifier,
                 null,
                 Collections.emptyMap(),
-                CommitKindProvider.provider(CommitKind.ANALYZE),
+                CommitKind.ANALYZE,
                 false,
                 statsFileName);
     }
@@ -681,7 +677,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties,
-            CommitKindProvider commitKindProvider,
+            CommitKind commitKind,
             boolean detectConflicts,
             @Nullable String statsFileName) {
         int retryCount = 0;
@@ -690,7 +686,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             CommitChanges changes = changesProvider.provide(latestSnapshot);
-            CommitKind commitKind = commitKindProvider.provide(changes);
             CommitResult result =
                     tryCommitOnce(
                             retryResult,
@@ -720,7 +715,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 throw new RuntimeException(message, retryResult.exception);
             }
 
-            commitRetryWait(retryCount);
+            retryWaiter.retryWait(retryCount);
             retryCount++;
         }
         return retryCount + 1;
@@ -739,12 +734,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long identifier,
             @Nullable Long watermark,
             Map<String, String> properties) {
-        CommitKindProvider commitKindProvider =
-                commitChanges ->
-                        containsFileDeletionOrDeletionVectors(
-                                        commitChanges.tableFiles, commitChanges.indexFiles)
-                                ? CommitKind.OVERWRITE
-                                : CommitKind.APPEND;
         return tryCommit(
                 latestSnapshot ->
                         scanner.readOverwriteChanges(
@@ -752,7 +741,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 identifier,
                 watermark,
                 properties,
-                commitKindProvider,
+                CommitKind.OVERWRITE,
                 true,
                 null);
     }
@@ -1070,7 +1059,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 commitTimeout, retryCount));
             }
 
-            commitRetryWait(retryCount);
+            retryWaiter.retryWait(retryCount);
             retryCount++;
         }
     }
@@ -1152,19 +1141,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             newSnapshot.commitIdentifier(),
                             newSnapshot.commitKind().name()),
                     e);
-        }
-    }
-
-    private void commitRetryWait(int retryCount) {
-        int retryWait =
-                (int) Math.min(commitMinRetryWait * Math.pow(2, retryCount), commitMaxRetryWait);
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        retryWait += random.nextInt(Math.max(1, (int) (retryWait * 0.2)));
-        try {
-            TimeUnit.MILLISECONDS.sleep(retryWait);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException(ie);
         }
     }
 

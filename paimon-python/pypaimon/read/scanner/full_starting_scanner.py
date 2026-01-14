@@ -20,6 +20,8 @@ from collections import defaultdict
 from typing import Callable, List, Optional, Dict, Set
 
 from pypaimon.common.predicate import Predicate
+from pypaimon.globalindex import VectorSearchGlobalIndexResult, Range
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
@@ -40,12 +42,19 @@ from pypaimon.common.options.core_options import MergeEngine
 
 
 class FullStartingScanner(StartingScanner):
-    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int]):
+    def __init__(
+        self,
+        table,
+        predicate: Optional[Predicate],
+        limit: Optional[int],
+        vector_search: Optional['VectorSearch'] = None
+    ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
+        self.vector_search = vector_search
 
         self.snapshot_manager = SnapshotManager(table)
         self.manifest_list_manager = ManifestListManager(table)
@@ -63,8 +72,8 @@ class FullStartingScanner(StartingScanner):
 
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
-        self.start_row_of_this_subtask = None
-        self.end_row_of_this_subtask = None
+        self.start_pos_of_this_subtask = None
+        self.end_pos_of_this_subtask = None
 
         self.only_read_real_buckets = True if options.bucket() == BucketMode.POSTPONE_BUCKET.value else False
         self.data_evolution = options.data_evolution_enabled()
@@ -83,6 +92,16 @@ class FullStartingScanner(StartingScanner):
         if not file_entries:
             return Plan([])
 
+        # Evaluate global index if enabled (for data evolution tables)
+        row_ranges = None
+        score_getter = None
+        if self.data_evolution:
+            global_index_result = self._eval_global_index()
+            if global_index_result is not None:
+                row_ranges = global_index_result.results().to_range_list()
+                if isinstance(global_index_result, VectorSearchGlobalIndexResult):
+                    score_getter = global_index_result.score_getter()
+
         # Get deletion files map if deletion vectors are enabled.
         # {partition-bucket -> {filename -> DeletionFile}}
         deletion_files_map: dict[tuple, dict[str, DeletionFile]] = {}
@@ -97,7 +116,9 @@ class FullStartingScanner(StartingScanner):
         if self.table.is_primary_key_table:
             splits = self._create_primary_key_splits(file_entries, deletion_files_map)
         elif self.data_evolution:
-            splits = self._create_data_evolution_splits(file_entries, deletion_files_map)
+            splits = self._create_data_evolution_splits(
+                file_entries, deletion_files_map, row_ranges, score_getter
+            )
         else:
             splits = self._create_append_only_splits(file_entries, deletion_files_map)
 
@@ -111,6 +132,69 @@ class FullStartingScanner(StartingScanner):
         manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
         return self.read_manifest_entries(manifest_files)
 
+    def _eval_global_index(self):
+        from pypaimon.globalindex.global_index_result import GlobalIndexResult
+        from pypaimon.globalindex.global_index_scan_builder import (
+            GlobalIndexScanBuilder
+        )
+        from pypaimon.globalindex.range import Range
+
+        # No filter and no vector search - nothing to evaluate
+        if self.predicate is None and self.vector_search is None:
+            return None
+
+        # Check if global index is enabled
+        if not self.table.options.global_index_enabled():
+            return None
+
+        # Get latest snapshot
+        snapshot = self.snapshot_manager.get_latest_snapshot()
+        if snapshot is None:
+            return None
+
+        # Check if table has store with global index scan builder
+        index_scan_builder = self.table.new_global_index_scan_builder()
+        if index_scan_builder is None:
+            return None
+
+        # Set partition predicate and snapshot
+        index_scan_builder.with_partition_predicate(
+            self.partition_key_predicate
+        ).with_snapshot(snapshot)
+
+        # Get indexed row ranges
+        indexed_row_ranges = index_scan_builder.shard_list()
+        if not indexed_row_ranges:
+            return None
+
+        # Get next row ID from snapshot
+        next_row_id = snapshot.next_row_id
+        if next_row_id is None:
+            return None
+
+        # Calculate non-indexed row ranges
+        non_indexed_row_ranges = Range(0, next_row_id - 1).exclude(indexed_row_ranges)
+
+        # Get thread number from options (can be None, meaning use default)
+        thread_num = self.table.options.global_index_thread_num()
+
+        # Scan global index in parallel
+        result = GlobalIndexScanBuilder.parallel_scan(
+            indexed_row_ranges,
+            index_scan_builder,
+            self.predicate,
+            self.vector_search,
+            thread_num
+        )
+
+        if result is None:
+            return None
+
+        for row_range in non_indexed_row_ranges:
+            result = result.or_(GlobalIndexResult.from_range(row_range))
+
+        return result
+
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         if max_workers < 8:
@@ -123,54 +207,55 @@ class FullStartingScanner(StartingScanner):
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'FullStartingScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
             raise Exception("idx_of_this_subtask must be less than number_of_para_subtasks")
-        if self.start_row_of_this_subtask is not None:
-            raise Exception("with_shard and with_row_range cannot be used simultaneously")
+        if self.start_pos_of_this_subtask is not None:
+            raise Exception("with_shard and with_slice cannot be used simultaneously")
         self.idx_of_this_subtask = idx_of_this_subtask
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def with_row_range(self, start_row, end_row) -> 'FullStartingScanner':
-        if start_row >= end_row:
-            raise Exception("start_row must be less than end_row")
+    def with_slice(self, start_pos, end_pos) -> 'FullStartingScanner':
+        if start_pos >= end_pos:
+            raise Exception("start_pos must be less than end_pos")
         if self.idx_of_this_subtask is not None:
-            raise Exception("with_row_range and with_shard cannot be used simultaneously")
-        self.start_row_of_this_subtask = start_row
-        self.end_row_of_this_subtask = end_row
+            raise Exception("with_slice and with_shard cannot be used simultaneously")
+        self.start_pos_of_this_subtask = start_pos
+        self.end_pos_of_this_subtask = end_pos
         return self
 
-    def _append_only_filter_by_row_range(self, partitioned_files: defaultdict,
-                                         start_row: int,
-                                         end_row: int) -> (defaultdict, int, int):
-        plan_start_row = 0
-        plan_end_row = 0
-        entry_end_row = 0  # end row position of current file in all data
-        splits_start_row = 0
+    @staticmethod
+    def _append_only_filter_by_slice(partitioned_files: defaultdict,
+                                     start_pos: int,
+                                     end_pos: int) -> (defaultdict, int, int):
+        plan_start_pos = 0
+        plan_end_pos = 0
+        entry_end_pos = 0  # end row position of current file in all data
+        splits_start_pos = 0
         filtered_partitioned_files = defaultdict(list)
         # Iterate through all file entries to find files that overlap with current shard range
         for key, file_entries in partitioned_files.items():
             filtered_entries = []
             for entry in file_entries:
-                entry_begin_row = entry_end_row  # Starting row position of current file in all data
-                entry_end_row += entry.file.row_count  # Update to row position after current file
+                entry_begin_pos = entry_end_pos  # Starting row position of current file in all data
+                entry_end_pos += entry.file.row_count  # Update to row position after current file
 
                 # If current file is completely after shard range, stop iteration
-                if entry_begin_row >= end_row:
+                if entry_begin_pos >= end_pos:
                     break
                 # If current file is completely before shard range, skip it
-                if entry_end_row <= start_row:
+                if entry_end_pos <= start_pos:
                     continue
-                if entry_begin_row <= start_row < entry_end_row:
-                    splits_start_row = entry_begin_row
-                    plan_start_row = start_row - entry_begin_row
+                if entry_begin_pos <= start_pos < entry_end_pos:
+                    splits_start_pos = entry_begin_pos
+                    plan_start_pos = start_pos - entry_begin_pos
                 # If shard end position is within current file, record relative end position
-                if entry_begin_row < end_row <= entry_end_row:
-                    plan_end_row = end_row - splits_start_row
+                if entry_begin_pos < end_pos <= entry_end_pos:
+                    plan_end_pos = end_pos - splits_start_pos
                 # Add files that overlap with shard range to result
                 filtered_entries.append(entry)
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
 
-        return filtered_partitioned_files, plan_start_row, plan_end_row
+        return filtered_partitioned_files, plan_start_pos, plan_end_pos
 
     def _append_only_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
         """
@@ -191,23 +276,23 @@ class FullStartingScanner(StartingScanner):
         # Each of the first 'remainder' shards gets one extra row
         if self.idx_of_this_subtask < remainder:
             num_row = base_rows_per_shard + 1
-            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
+            start_pos = self.idx_of_this_subtask * (base_rows_per_shard + 1)
         else:
             num_row = base_rows_per_shard
-            start_row = (remainder * (base_rows_per_shard + 1) +
+            start_pos = (remainder * (base_rows_per_shard + 1) +
                          (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
 
-        end_row = start_row + num_row
+        end_pos = start_pos + num_row
 
-        return self._append_only_filter_by_row_range(partitioned_files, start_row, end_row)
+        return self._append_only_filter_by_slice(partitioned_files, start_pos, end_pos)
 
     def _data_evolution_filter_by_row_range(self, partitioned_files: defaultdict,
-                                            start_row: int,
-                                            end_row: int) -> (defaultdict, int, int):
-        plan_start_row = 0
-        plan_end_row = 0
-        entry_end_row = 0  # end row position of current file in all data
-        splits_start_row = 0
+                                            start_pos: int,
+                                            end_pos: int) -> (defaultdict, int, int):
+        plan_start_pos = 0
+        plan_end_pos = 0
+        entry_end_pos = 0  # end row position of current file in all data
+        splits_start_pos = 0
         filtered_partitioned_files = defaultdict(list)
         # Iterate through all file entries to find files that overlap with current shard range
         for key, file_entries in partitioned_files.items():
@@ -219,28 +304,28 @@ class FullStartingScanner(StartingScanner):
                         filtered_entries.append(entry)
                     continue
                 blob_added = False
-                entry_begin_row = entry_end_row  # Starting row position of current file in all data
-                entry_end_row += entry.file.row_count  # Update to row position after current file
+                entry_begin_pos = entry_end_pos  # Starting row position of current file in all data
+                entry_end_pos += entry.file.row_count  # Update to row position after current file
 
                 # If current file is completely after shard range, stop iteration
-                if entry_begin_row >= end_row:
+                if entry_begin_pos >= end_pos:
                     break
                 # If current file is completely before shard range, skip it
-                if entry_end_row <= start_row:
+                if entry_end_pos <= start_pos:
                     continue
-                if entry_begin_row <= start_row < entry_end_row:
-                    splits_start_row = entry_begin_row
-                    plan_start_row = start_row - entry_begin_row
+                if entry_begin_pos <= start_pos < entry_end_pos:
+                    splits_start_pos = entry_begin_pos
+                    plan_start_pos = start_pos - entry_begin_pos
                 # If shard end position is within current file, record relative end position
-                if entry_begin_row < end_row <= entry_end_row:
-                    plan_end_row = end_row - splits_start_row
+                if entry_begin_pos < end_pos <= entry_end_pos:
+                    plan_end_pos = end_pos - splits_start_pos
                 # Add files that overlap with shard range to result
                 filtered_entries.append(entry)
                 blob_added = True
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
 
-        return filtered_partitioned_files, plan_start_row, plan_end_row
+        return filtered_partitioned_files, plan_start_pos, plan_end_pos
 
     def _data_evolution_filter_by_shard(self, partitioned_files: defaultdict) -> (defaultdict, int, int):
         total_row = 0
@@ -257,36 +342,36 @@ class FullStartingScanner(StartingScanner):
         # Each of the first 'remainder' shards gets one extra row
         if self.idx_of_this_subtask < remainder:
             num_row = base_rows_per_shard + 1
-            start_row = self.idx_of_this_subtask * (base_rows_per_shard + 1)
+            start_pos = self.idx_of_this_subtask * (base_rows_per_shard + 1)
         else:
             num_row = base_rows_per_shard
-            start_row = (remainder * (base_rows_per_shard + 1) +
+            start_pos = (remainder * (base_rows_per_shard + 1) +
                          (self.idx_of_this_subtask - remainder) * base_rows_per_shard)
 
-        end_row = start_row + num_row
-        return self._data_evolution_filter_by_row_range(partitioned_files, start_row, end_row)
+        end_pos = start_pos + num_row
+        return self._data_evolution_filter_by_row_range(partitioned_files, start_pos, end_pos)
 
-    def _compute_split_start_end_row(self, splits: List[Split], plan_start_row, plan_end_row):
+    def _compute_split_start_end_pos(self, splits: List[Split], plan_start_pos, plan_end_pos):
         """
         Find files that needs to be divided for each split
         :param splits: splits
-        :param plan_start_row: plan begin row in all splits data
-        :param plan_end_row: plan end row in all splits data
+        :param plan_start_pos: plan begin row in all splits data
+        :param plan_end_pos: plan end row in all splits data
         """
-        file_end_row = 0  # end row position of current file in all splits data
+        file_end_pos = 0  # end row position of current file in all splits data
 
         for split in splits:
-            cur_split_end_row = file_end_row
+            cur_split_end_pos = file_end_pos
             # Compute split_file_idx_map for data files
-            file_end_row = self._compute_split_file_idx_map(plan_start_row, plan_end_row,
-                                                            split, cur_split_end_row, False)
+            file_end_pos = self._compute_split_file_idx_map(plan_start_pos, plan_end_pos,
+                                                            split, cur_split_end_pos, False)
             # Compute split_file_idx_map for blob files
             if self.data_evolution:
-                self._compute_split_file_idx_map(plan_start_row, plan_end_row,
-                                                 split, cur_split_end_row, True)
+                self._compute_split_file_idx_map(plan_start_pos, plan_end_pos,
+                                                 split, cur_split_end_pos, True)
 
-    def _compute_split_file_idx_map(self, plan_start_row, plan_end_row, split: Split,
-                                    file_end_row: int, is_blob: bool = False):
+    def _compute_split_file_idx_map(self, plan_start_pos, plan_end_pos, split: Split,
+                                    file_end_pos: int, is_blob: bool = False):
         """
         Traverse all the files in current split, find the starting shard and ending shard files,
         and add them to shard_file_idx_map;
@@ -301,20 +386,20 @@ class FullStartingScanner(StartingScanner):
             if is_blob and not self._is_blob_file(file.file_name):
                 continue
             row_cnt += file.row_count
-            file_begin_row = file_end_row  # Starting row position of current file in all data
-            file_end_row += file.row_count  # Update to row position after current file
-            if file_begin_row <= plan_start_row < plan_end_row <= file_end_row:
+            file_begin_pos = file_end_pos  # Starting row position of current file in all data
+            file_end_pos += file.row_count  # Update to row position after current file
+            if file_begin_pos <= plan_start_pos < plan_end_pos <= file_end_pos:
                 split.shard_file_idx_map[file.file_name] = (
-                    plan_start_row - file_begin_row, plan_end_row - file_begin_row)
+                    plan_start_pos - file_begin_pos, plan_end_pos - file_begin_pos)
             # If shard start position is within current file, record actual start position and relative offset
-            elif file_begin_row < plan_start_row < file_end_row:
-                split.shard_file_idx_map[file.file_name] = (plan_start_row - file_begin_row, file.row_count)
+            elif file_begin_pos < plan_start_pos < file_end_pos:
+                split.shard_file_idx_map[file.file_name] = (plan_start_pos - file_begin_pos, file.row_count)
             # If shard end position is within current file, record relative end position
-            elif file_begin_row < plan_end_row < file_end_row:
-                split.shard_file_idx_map[file.file_name] = (0, plan_end_row - file_begin_row)
-            elif file_end_row <= plan_start_row or file_begin_row >= plan_end_row:
+            elif file_begin_pos < plan_end_pos < file_end_pos:
+                split.shard_file_idx_map[file.file_name] = (0, plan_end_pos - file_begin_pos)
+            elif file_end_pos <= plan_start_pos or file_begin_pos >= plan_end_pos:
                 split.shard_file_idx_map[file.file_name] = (-1, -1)
-        return file_end_row
+        return file_end_pos
 
     def _primary_key_filter_by_shard(self, file_entries: List[ManifestEntry]) -> List[ManifestEntry]:
         filtered_entries = []
@@ -473,14 +558,14 @@ class FullStartingScanner(StartingScanner):
         for entry in file_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
-        if self.start_row_of_this_subtask is not None:
-            # shard data range: [plan_start_row, plan_end_row)
-            partitioned_files, plan_start_row, plan_end_row = \
-                self._append_only_filter_by_row_range(partitioned_files,
-                                                      self.start_row_of_this_subtask,
-                                                      self.end_row_of_this_subtask)
+        if self.start_pos_of_this_subtask is not None:
+            # shard data range: [plan_start_pos, plan_end_pos)
+            partitioned_files, plan_start_pos, plan_end_pos = \
+                self._append_only_filter_by_slice(partitioned_files,
+                                                  self.start_pos_of_this_subtask,
+                                                  self.end_pos_of_this_subtask)
         elif self.idx_of_this_subtask is not None:
-            partitioned_files, plan_start_row, plan_end_row = self._append_only_filter_by_shard(partitioned_files)
+            partitioned_files, plan_start_pos, plan_end_pos = self._append_only_filter_by_shard(partitioned_files)
 
         def weight_func(f: DataFileMeta) -> int:
             return max(f.file_size, self.open_file_cost)
@@ -495,9 +580,9 @@ class FullStartingScanner(StartingScanner):
             packed_files: List[List[DataFileMeta]] = self._pack_for_ordered(data_files, weight_func,
                                                                             self.target_split_size)
             splits += self._build_split_from_pack(packed_files, file_entries, False, deletion_files_map)
-        if self.start_row_of_this_subtask is not None or self.idx_of_this_subtask is not None:
+        if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
             # When files are combined into splits, it is necessary to find files that needs to be divided for each split
-            self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
+            self._compute_split_start_end_pos(splits, plan_start_pos, plan_end_pos)
         return splits
 
     def _without_delete_row(self, data_file_meta: DataFileMeta) -> bool:
@@ -567,7 +652,8 @@ class FullStartingScanner(StartingScanner):
         return splits
 
     def _create_data_evolution_splits(
-            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None) -> List['Split']:
+            self, file_entries: List[ManifestEntry], deletion_files_map: dict = None,
+            row_ranges: List = None, score_getter=None) -> List['Split']:
         def sort_key(manifest_entry: ManifestEntry) -> tuple:
             first_row_id = manifest_entry.file.first_row_id if manifest_entry.file.first_row_id is not None else float(
                 '-inf')
@@ -583,15 +669,15 @@ class FullStartingScanner(StartingScanner):
         for entry in sorted_entries:
             partitioned_files[(tuple(entry.partition.values), entry.bucket)].append(entry)
 
-        if self.start_row_of_this_subtask is not None:
-            # shard data range: [plan_start_row, plan_end_row)
-            partitioned_files, plan_start_row, plan_end_row = \
+        if self.start_pos_of_this_subtask is not None:
+            # shard data range: [plan_start_pos, plan_end_pos)
+            partitioned_files, plan_start_pos, plan_end_pos = \
                 self._data_evolution_filter_by_row_range(partitioned_files,
-                                                         self.start_row_of_this_subtask,
-                                                         self.end_row_of_this_subtask)
+                                                         self.start_pos_of_this_subtask,
+                                                         self.end_pos_of_this_subtask)
         elif self.idx_of_this_subtask is not None:
-            # shard data range: [plan_start_row, plan_end_row)
-            partitioned_files, plan_start_row, plan_end_row = self._data_evolution_filter_by_shard(partitioned_files)
+            # shard data range: [plan_start_pos, plan_end_pos)
+            partitioned_files, plan_start_pos, plan_end_pos = self._data_evolution_filter_by_shard(partitioned_files)
 
         def weight_func(file_list: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
@@ -618,9 +704,61 @@ class FullStartingScanner(StartingScanner):
 
             splits += self._build_split_from_pack(flatten_packed_files, sorted_entries, False, deletion_files_map)
 
-        if self.start_row_of_this_subtask is not None or self.idx_of_this_subtask is not None:
-            self._compute_split_start_end_row(splits, plan_start_row, plan_end_row)
+        if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
+            self._compute_split_start_end_pos(splits, plan_start_pos, plan_end_pos)
+
+        # Wrap splits with IndexedSplit if row_ranges is provided
+        if row_ranges:
+            splits = self._wrap_to_indexed_splits(splits, row_ranges, score_getter)
+
         return splits
+
+    def _wrap_to_indexed_splits(
+        self,
+        splits: List['Split'],
+        row_ranges: List,
+        score_getter
+    ) -> List['Split']:
+
+        indexed_splits = []
+        for split in splits:
+            # Calculate file ranges for this split
+            file_ranges = []
+            for file in split.files:
+                first_row_id = file.first_row_id
+                if first_row_id is not None:
+                    file_ranges.append(Range(
+                        first_row_id,
+                        first_row_id + file.row_count - 1
+                    ))
+
+            if not file_ranges:
+                # No row IDs, keep original split
+                indexed_splits.append(split)
+                continue
+
+            # Merge file ranges
+            file_ranges = Range.merge_sorted_as_possible(file_ranges)
+
+            # Intersect with row_ranges from global index
+            expected = Range.and_(file_ranges, row_ranges)
+
+            if not expected:
+                # No intersection, skip this split
+                continue
+
+            # Create scores array if score_getter is provided
+            scores = None
+            if score_getter is not None:
+                scores = []
+                for r in expected:
+                    for row_id in range(r.from_, r.to + 1):
+                        score = score_getter(row_id)
+                        scores.append(score if score is not None else 0.0)
+
+            indexed_splits.append(IndexedSplit(split, expected, scores))
+
+        return indexed_splits
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         split_by_row_id = []
@@ -700,9 +838,9 @@ class FullStartingScanner(StartingScanner):
                     files=file_group,
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
-                    _file_paths=file_paths,
-                    _row_count=total_record_count,
-                    _file_size=total_file_size,
+                    file_paths=file_paths,
+                    row_count=total_record_count,
+                    file_size=total_file_size,
                     raw_convertible=raw_convertible,
                     data_deletion_files=data_deletion_files
                 )

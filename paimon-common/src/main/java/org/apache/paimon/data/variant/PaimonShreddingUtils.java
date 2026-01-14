@@ -209,8 +209,8 @@ public class PaimonShreddingUtils {
         }
     }
 
-    public static RowType variantShreddingSchema(RowType rowType) {
-        return variantShreddingSchema(rowType, true, false);
+    public static RowType variantShreddingSchema(DataType dataType) {
+        return variantShreddingSchema(dataType, true, false);
     }
 
     /**

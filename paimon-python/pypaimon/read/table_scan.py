@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -29,16 +29,26 @@ from pypaimon.read.scanner.incremental_starting_scanner import \
 from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
+if TYPE_CHECKING:
+    from pypaimon.globalindex.vector_search import VectorSearch
+
 
 class TableScan:
     """Implementation of TableScan for native Python reading."""
 
-    def __init__(self, table, predicate: Optional[Predicate], limit: Optional[int]):
+    def __init__(
+        self,
+        table,
+        predicate: Optional[Predicate],
+        limit: Optional[int],
+        vector_search: Optional['VectorSearch'] = None
+    ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
+        self.vector_search = vector_search
         self.starting_scanner = self._create_starting_scanner()
 
     def plan(self) -> Plan:
@@ -66,16 +76,17 @@ class TableScan:
                 return EmptyStartingScanner()
             return IncrementalStartingScanner.between_timestamps(self.table, self.predicate, self.limit,
                                                                  start_timestamp, end_timestamp)
-        return FullStartingScanner(self.table, self.predicate, self.limit)
+        return FullStartingScanner(
+            self.table,
+            self.predicate,
+            self.limit,
+            vector_search=self.vector_search
+        )
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         return self
 
-    def with_row_range(self, start_row, end_row) -> 'TableScan':
-        """
-        Filter file entries by row range. The row_id corresponds to the row position of the
-        file in all file entries in table scan's partitioned_files.
-        """
-        self.starting_scanner.with_row_range(start_row, end_row)
+    def with_slice(self, start_pos, end_pos) -> 'TableScan':
+        self.starting_scanner.with_slice(start_pos, end_pos)
         return self

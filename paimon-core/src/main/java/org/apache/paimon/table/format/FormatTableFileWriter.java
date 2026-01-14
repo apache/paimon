@@ -69,7 +69,8 @@ public class FormatTableFileWriter {
                         options.dataFilePathDirectory(),
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
-                        options.indexFileInDataFileDir());
+                        options.indexFileInDataFileDir(),
+                        null);
     }
 
     public void withWriteType(RowType writeType) {

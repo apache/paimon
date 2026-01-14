@@ -19,12 +19,15 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 from pypaimon.api.api_response import GetTableResponse, PagedList
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException
+from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseAlreadyExistException, \
-    TableAlreadyExistException, DatabaseNotExistException
+from pypaimon.catalog.catalog_exception import (
+    TableNotExistException, DatabaseAlreadyExistException,
+    TableAlreadyExistException, DatabaseNotExistException,
+    TableNoPermissionException, DatabaseNoPermissionException
+)
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
@@ -34,6 +37,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -88,11 +92,14 @@ class RESTCatalog(Catalog):
 
         Raises:
             TableNotExistException: If the target table does not exist
+            TableNoPermissionException: If no permission to access this table
         """
         try:
             return self.rest_api.commit_snapshot(identifier, table_uuid, snapshot, statistics)
         except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
         except Exception as e:
             # Handle other exceptions that might be thrown by the API
             raise RuntimeError(f"Failed to commit snapshot for table {identifier.get_full_name()}: {e}") from e
@@ -111,14 +118,21 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 # Convert REST API exception to catalog exception
                 raise DatabaseAlreadyExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
     def get_database(self, name: str) -> Database:
-        response = self.rest_api.get_database(name)
-        options = response.options
-        options[Catalog.DB_LOCATION_PROP] = response.location
-        response.put_audit_options_to(options)
-        if response is not None:
-            return Database(name, options)
+        try:
+            response = self.rest_api.get_database(name)
+            options = response.options
+            options[Catalog.DB_LOCATION_PROP] = response.location
+            response.put_audit_options_to(options)
+            if response is not None:
+                return Database(name, options)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
     def drop_database(self, name: str, ignore_if_not_exists: bool = False):
         try:
@@ -127,13 +141,25 @@ class RESTCatalog(Catalog):
             if not ignore_if_not_exists:
                 # Convert REST API exception to catalog exception
                 raise DatabaseNotExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
     def alter_database(self, name: str, changes: List[PropertyChange]):
-        set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
-        self.rest_api.alter_database(name, list(remove_keys), set_properties)
+        try:
+            set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
+            self.rest_api.alter_database(name, list(remove_keys), set_properties)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
     def list_tables(self, database_name: str) -> List[str]:
-        return self.rest_api.list_tables(database_name)
+        try:
+            return self.rest_api.list_tables(database_name)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
 
     def list_tables_paged(
             self,
@@ -142,12 +168,17 @@ class RESTCatalog(Catalog):
             page_token: Optional[str] = None,
             table_name_pattern: Optional[str] = None
     ) -> PagedList[str]:
-        return self.rest_api.list_tables_paged(
-            database_name,
-            max_results,
-            page_token,
-            table_name_pattern
-        )
+        try:
+            return self.rest_api.list_tables_paged(
+                database_name,
+                max_results,
+                page_token,
+                table_name_pattern
+            )
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
 
     def get_table(self, identifier: Union[str, Identifier]) -> FileStoreTable:
         if not isinstance(identifier, Identifier):
@@ -176,10 +207,33 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
                 raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.alter_table(identifier, changes)
+        except NoSuchResourceException as e:
+            if not ignore_if_not_exists:
+                raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
-        response = self.rest_api.get_table(identifier)
-        return self.to_table_metadata(identifier.get_database_name(), response)
+        try:
+            response = self.rest_api.get_table(identifier)
+            return self.to_table_metadata(identifier.get_database_name(), response)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
 
     def to_table_metadata(self, db: str, response: GetTableResponse) -> TableMetadata:
         schema = TableSchema.from_schema(response.schema_id, response.get_schema())

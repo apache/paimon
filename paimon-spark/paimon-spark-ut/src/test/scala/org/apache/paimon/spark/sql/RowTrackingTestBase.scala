@@ -18,7 +18,9 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.Snapshot.CommitKind
+import org.apache.paimon.format.FileFormat
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -392,28 +394,30 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
   Seq(false, true).foreach {
     bucketEnable =>
-      {
-        test(s"Data Evolution: merge into table with data-evolution, bucket: $bucketEnable") {
-          withTable("s", "t") {
-            sql("CREATE TABLE s (id INT, b INT)")
-            sql("INSERT INTO s VALUES (1, 11), (2, 22)")
+      Seq("parquet", "avro").foreach {
+        format => {
+          test(s"Data Evolution: merge into table with data-evolution, bucket: $bucketEnable") {
+            withTable("s", "t") {
+              sql("CREATE TABLE s (id INT, b INT)")
+              sql("INSERT INTO s VALUES (1, 11), (2, 22)")
 
-            sql(
-              s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true' ${bucketProperties(bucketEnable)})")
-            sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ * FROM VALUES (2, 2, 2),(4, 4, 4)")
+              sql(
+                s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true','file.format' = '$format' ${bucketProperties(bucketEnable)})")
+              sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ * FROM VALUES (2, 2, 2),(4, 4, 4)")
 
-            sql("""
-                  |MERGE INTO t
-                  |USING s
-                  |ON t.id = s.id
-                  |WHEN MATCHED THEN UPDATE SET t.b = s.b
-                  |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
-                  |""".stripMargin)
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
-            checkAnswer(
-              sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-              Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(4, 4, 4, 1, 2))
-            )
+              sql("""
+                    |MERGE INTO t
+                    |USING s
+                    |ON t.id = s.id
+                    |WHEN MATCHED THEN UPDATE SET t.b = s.b
+                    |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
+                    |""".stripMargin)
+              checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
+              checkAnswer(
+                sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+                Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(4, 4, 4, 1, 2))
+              )
+            }
           }
         }
       }

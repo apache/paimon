@@ -19,7 +19,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{Predicate, TopN}
+import org.apache.paimon.predicate.{Predicate, TopN, VectorSearch}
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
@@ -27,7 +27,7 @@ import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions._
 import org.apache.spark.sql.connector.read.{SupportsReportPartitioning, SupportsRuntimeFiltering}
 import org.apache.spark.sql.connector.read.partitioning.{KeyGroupedPartitioning, Partitioning, UnknownPartitioning}
-import org.apache.spark.sql.sources.{Filter, In}
+import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -39,6 +39,7 @@ case class PaimonScan(
     pushedDataFilters: Seq[Predicate],
     override val pushedLimit: Option[Int],
     override val pushedTopN: Option[TopN],
+    override val pushedVectorSearch: Option[VectorSearch],
     bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table)
   with SupportsRuntimeFiltering
@@ -133,14 +134,17 @@ case class PaimonScan(
   }
 
   override def filter(filters: Array[Filter]): Unit = {
-    val converter = new SparkFilterConverter(table.rowType())
-    val partitionFilter = filters.flatMap {
-      case in @ In(attr, _) if table.partitionKeys().contains(attr) =>
-        Some(converter.convert(in))
-      case _ => None
-    }
-    if (partitionFilter.nonEmpty) {
-      readBuilder.withFilter(partitionFilter.head)
+    val partitionType = table.rowType().project(table.partitionKeys())
+    val converter = new SparkFilterConverter(partitionType)
+    val runtimePartitionFilters = filters.toSeq
+      .map(converter.convertIgnoreFailure)
+      .filter(_ != null)
+      .map(PartitionPredicate.fromPredicate(partitionType, _))
+    if (runtimePartitionFilters.nonEmpty) {
+      pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)
+      readBuilder.withPartitionFilter(
+        PartitionPredicate.and(
+          (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
       // set inputPartitions null to trigger to get the new splits.
       _inputPartitions = null
       _inputSplits = null

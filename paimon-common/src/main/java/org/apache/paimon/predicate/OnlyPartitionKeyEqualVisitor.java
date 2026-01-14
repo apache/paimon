@@ -128,7 +128,7 @@ public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
     }
 
     @Override
-    public Boolean visit(TransformPredicate predicate) {
+    public Boolean visitNonFieldLeaf(LeafPredicate predicate) {
         return false;
     }
 }

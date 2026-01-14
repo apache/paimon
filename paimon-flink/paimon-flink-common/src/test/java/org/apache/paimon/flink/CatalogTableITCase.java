@@ -73,7 +73,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testSnapshotsTable() throws Exception {
-        sql("CREATE TABLE T (a INT, b INT)");
+        sql(
+                "CREATE TABLE T (a INT, b INT) WITH ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
         sql("INSERT INTO T VALUES (5, 6)");
@@ -136,6 +137,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         Row.of(1L, 0L, "APPEND"),
                         Row.of(2L, 0L, "APPEND"),
                         Row.of(3L, 0L, "APPEND"));
+
+        result = sql("SELECT next_row_id FROM T$snapshots");
+
+        assertThat(result).contains(Row.of(1L), Row.of(2L), Row.of(3L));
     }
 
     @Test

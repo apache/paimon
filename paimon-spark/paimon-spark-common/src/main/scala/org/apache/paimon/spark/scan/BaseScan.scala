@@ -20,7 +20,7 @@ package org.apache.paimon.spark.scan
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{Predicate, TopN}
+import org.apache.paimon.predicate.{Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.{PaimonBatch, PaimonInputPartition, PaimonNumSplitMetric, PaimonPartitionSizeMetric, PaimonReadBatchTimeMetric, PaimonResultedTableFilesMetric, PaimonResultedTableFilesTaskMetric, SparkTypeUtils}
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.schema.PaimonMetadataColumn._
@@ -35,6 +35,7 @@ import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsRep
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ListBuffer
 
 /** Base scan. */
 trait BaseScan extends Scan with SupportsReportStatistics with Logging {
@@ -49,6 +50,10 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   def pushedDataFilters: Seq[Predicate]
   def pushedLimit: Option[Int] = None
   def pushedTopN: Option[TopN] = None
+  def pushedVectorSearch: Option[VectorSearch] = None
+
+  // Runtime push down
+  val pushedRuntimePartitionFilters: ListBuffer[PartitionPredicate] = ListBuffer.empty
 
   // Input splits
   def inputSplits: Array[Split]
@@ -104,6 +109,7 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
     pushedLimit.foreach(_readBuilder.withLimit)
     pushedTopN.foreach(_readBuilder.withTopN)
+    pushedVectorSearch.foreach(_readBuilder.withVectorSearch)
     _readBuilder.dropStats()
   }
 
@@ -164,6 +170,11 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     } else {
       ""
     }
+    val pushedRuntimePartitionFiltersStr = if (pushedRuntimePartitionFilters.nonEmpty) {
+      ", RuntimePartitionFilters: [" + pushedRuntimePartitionFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
     val pushedDataFiltersStr = if (pushedDataFilters.nonEmpty) {
       ", DataFilters: [" + pushedDataFilters.mkString(",") + "]"
     } else {
@@ -171,8 +182,10 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
     s"${getClass.getSimpleName}: [${table.name}]" +
       pushedPartitionFiltersStr +
+      pushedRuntimePartitionFiltersStr +
       pushedDataFiltersStr +
       pushedTopN.map(topN => s", TopN: [$topN]").getOrElse("") +
-      pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("")
+      pushedLimit.map(limit => s", Limit: [$limit]").getOrElse("") +
+      pushedVectorSearch.map(vs => s", VectorSearch: [$vs]").getOrElse("")
   }
 }

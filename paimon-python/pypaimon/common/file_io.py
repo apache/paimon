@@ -18,6 +18,7 @@
 import logging
 import os
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
@@ -29,6 +30,7 @@ from pyarrow._fs import FileSystem
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.local import PaimonLocalFileSystem
 from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
 from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
 from pypaimon.table.row.generic_row import GenericRow
@@ -179,9 +181,8 @@ class FileIO:
         )
 
     def _initialize_local_fs(self) -> FileSystem:
-        from pyarrow.fs import LocalFileSystem
 
-        return LocalFileSystem()
+        return PaimonLocalFileSystem()
 
     def new_input_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
@@ -198,7 +199,12 @@ class FileIO:
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
         file_infos = self.filesystem.get_file_info([path_str])
-        return file_infos[0]
+        file_info = file_infos[0]
+        
+        if file_info.type == pyarrow.fs.FileType.NotFound:
+            raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
+        
+        return file_info
 
     def list_status(self, path: str):
         path_str = self.to_filesystem_path(path)
@@ -210,51 +216,73 @@ class FileIO:
         return [info for info in file_infos if info.type == pyarrow.fs.FileType.Directory]
 
     def exists(self, path: str) -> bool:
-        try:
-            path_str = self.to_filesystem_path(path)
-            file_info = self.filesystem.get_file_info([path_str])[0]
-            result = file_info.type != pyarrow.fs.FileType.NotFound
-            return result
-        except Exception:
-            return False
+        path_str = self.to_filesystem_path(path)
+        file_info = self.filesystem.get_file_info([path_str])[0]
+        return file_info.type != pyarrow.fs.FileType.NotFound
 
     def delete(self, path: str, recursive: bool = False) -> bool:
-        try:
-            path_str = self.to_filesystem_path(path)
-            file_info = self.filesystem.get_file_info([path_str])[0]
-            if file_info.type == pyarrow.fs.FileType.Directory:
-                if recursive:
-                    self.filesystem.delete_dir_contents(path_str)
-                else:
-                    self.filesystem.delete_dir(path_str)
-            else:
-                self.filesystem.delete_file(path_str)
-            return True
-        except Exception as e:
-            self.logger.warning(f"Failed to delete {path}: {e}")
+        path_str = self.to_filesystem_path(path)
+        file_info = self.filesystem.get_file_info([path_str])[0]
+        
+        if file_info.type == pyarrow.fs.FileType.NotFound:
             return False
+        
+        if file_info.type == pyarrow.fs.FileType.Directory:
+            if not recursive:
+                selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
+                dir_contents = self.filesystem.get_file_info(selector)
+                if len(dir_contents) > 0:
+                    raise OSError(f"Directory {path} is not empty")
+            if recursive:
+                self.filesystem.delete_dir_contents(path_str)
+                self.filesystem.delete_dir(path_str)
+            else:
+                self.filesystem.delete_dir(path_str)
+        else:
+            self.filesystem.delete_file(path_str)
+        return True
 
     def mkdirs(self, path: str) -> bool:
-        try:
-            path_str = self.to_filesystem_path(path)
-            self.filesystem.create_dir(path_str, recursive=True)
+        path_str = self.to_filesystem_path(path)
+        file_info = self.filesystem.get_file_info([path_str])[0]
+        
+        if file_info.type == pyarrow.fs.FileType.Directory:
             return True
-        except Exception as e:
-            self.logger.warning(f"Failed to create directory {path}: {e}")
-            return False
+        elif file_info.type == pyarrow.fs.FileType.File:
+            raise FileExistsError(f"Path exists but is not a directory: {path}")
+        
+        self.filesystem.create_dir(path_str, recursive=True)
+        return True
 
     def rename(self, src: str, dst: str) -> bool:
+        dst_str = self.to_filesystem_path(dst)
+        dst_parent = Path(dst_str).parent
+        if str(dst_parent) and not self.exists(str(dst_parent)):
+            self.mkdirs(str(dst_parent))
+        
+        src_str = self.to_filesystem_path(src)
+        
         try:
-            dst_str = self.to_filesystem_path(dst)
-            dst_parent = Path(dst_str).parent
-            if str(dst_parent) and not self.exists(str(dst_parent)):
-                self.mkdirs(str(dst_parent))
-
-            src_str = self.to_filesystem_path(src)
+            if hasattr(self.filesystem, 'rename'):
+                return self.filesystem.rename(src_str, dst_str)
+            
+            dst_file_info = self.filesystem.get_file_info([dst_str])[0]
+            if dst_file_info.type != pyarrow.fs.FileType.NotFound:
+                if dst_file_info.type == pyarrow.fs.FileType.File:
+                    return False
+                # Make it compatible with HadoopFileIO: if dst is an existing directory,
+                # dst=dst/srcFileName
+                src_name = Path(src_str).name
+                dst_str = str(Path(dst_str) / src_name)
+                final_dst_info = self.filesystem.get_file_info([dst_str])[0]
+                if final_dst_info.type != pyarrow.fs.FileType.NotFound:
+                    return False
+            
             self.filesystem.move(src_str, dst_str)
             return True
-        except Exception as e:
-            self.logger.warning(f"Failed to rename {src} to {dst}: {e}")
+        except FileNotFoundError:
+            return False
+        except (PermissionError, OSError):
             return False
 
     def delete_quietly(self, path: str):
@@ -303,7 +331,13 @@ class FileIO:
             return input_stream.read().decode('utf-8')
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
-        temp_path = path + ".tmp"
+        if self.exists(path):
+            path_str = self.to_filesystem_path(path)
+            file_info = self.filesystem.get_file_info([path_str])[0]
+            if file_info.type == pyarrow.fs.FileType.Directory:
+                return False
+        
+        temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
             self.write_file(temp_path, content, False)
@@ -330,6 +364,11 @@ class FileIO:
 
         source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
+        target_parent = Path(target_str).parent
+        
+        if str(target_parent) and not self.exists(str(target_parent)):
+            self.mkdirs(str(target_parent))
+
         self.filesystem.copy_file(source_str, target_str)
 
     def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
@@ -368,20 +407,30 @@ class FileIO:
 
         return None
 
-    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'snappy', **kwargs):
+    def write_parquet(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                      zstd_level: int = 1, **kwargs):
         try:
             import pyarrow.parquet as pq
 
             with self.new_output_stream(path) as output_stream:
+                if compression.lower() == 'zstd':
+                    kwargs['compression_level'] = zstd_level
                 pq.write_table(data, output_stream, compression=compression, **kwargs)
 
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Parquet file {path}: {e}") from e
 
-    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd', **kwargs):
+    def write_orc(self, path: str, data: pyarrow.Table, compression: str = 'zstd',
+                  zstd_level: int = 1, **kwargs):
         try:
-            """Write ORC file using PyArrow ORC writer."""
+            """Write ORC file using PyArrow ORC writer.
+            
+            Note: PyArrow's ORC writer doesn't support compression_level parameter.
+            ORC files will use zstd compression with default level
+            (which is 3, see https://github.com/facebook/zstd/blob/dev/programs/zstdcli.c)
+            instead of the specified level.
+            """
             import sys
             import pyarrow.orc as orc
 
@@ -401,7 +450,10 @@ class FileIO:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write ORC file {path}: {e}") from e
 
-    def write_avro(self, path: str, data: pyarrow.Table, avro_schema: Optional[Dict[str, Any]] = None, **kwargs):
+    def write_avro(
+            self, path: str, data: pyarrow.Table,
+            avro_schema: Optional[Dict[str, Any]] = None,
+            compression: str = 'zstd', zstd_level: int = 1, **kwargs):
         import fastavro
         if avro_schema is None:
             from pypaimon.schema.data_types import PyarrowFieldParser
@@ -416,8 +468,28 @@ class FileIO:
 
         records = record_generator()
 
+        codec_map = {
+            'null': 'null',
+            'deflate': 'deflate',
+            'snappy': 'snappy',
+            'bzip2': 'bzip2',
+            'xz': 'xz',
+            'zstandard': 'zstandard',
+            'zstd': 'zstandard',  # zstd is commonly used in Paimon
+        }
+        compression_lower = compression.lower()
+        
+        codec = codec_map.get(compression_lower)
+        if codec is None:
+            raise ValueError(
+                f"Unsupported compression '{compression}' for Avro format. "
+                f"Supported compressions: {', '.join(sorted(codec_map.keys()))}."
+            )
+
         with self.new_output_stream(path) as output_stream:
-            fastavro.writer(output_stream, avro_schema, records, **kwargs)
+            if codec == 'zstandard':
+                kwargs['codec_compression_level'] = zstd_level
+            fastavro.writer(output_stream, avro_schema, records, codec=codec, **kwargs)
 
     def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
         try:

@@ -1,0 +1,112 @@
+name: 'Build FAISS Native Library'
+description: 'Build FAISS native library for specified platform'
+inputs:
+  platform:
+    description: 'Target platform (linux-amd64, linux-aarch64, darwin-aarch64)'
+    required: true
+  faiss-version:
+    description: 'FAISS version to build (e.g., 1.7.4)'
+    required: false
+    default: '1.7.4'
+  use-homebrew:
+    description: 'Whether to use Homebrew for dependencies (macOS)'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install native dependencies (Linux)
+      if: inputs.use-homebrew == 'false'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          libopenblas-dev \
+          liblapack-dev \
+          patchelf \
+          libgomp1 \
+          wget
+
+    - name: Install GCC 9 (Linux)
+      if: inputs.use-homebrew == 'false'
+      shell: bash
+      run: |
+        sudo apt-get install -y gcc-9 g++-9 || sudo apt-get install -y gcc g++
+        if command -v gcc-9 &>/dev/null; then
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
+        fi
+        gcc --version
+
+    - name: Install CMake 3.30.1 (Linux)
+      if: inputs.use-homebrew == 'false'
+      shell: bash
+      run: |
+        CMAKE_VERSION="3.30.1"
+        if [[ "${{ inputs.platform }}" == *"amd64"* ]]; then
+          CMAKE_ARCH="x86_64"
+        else
+          CMAKE_ARCH="aarch64"
+        fi
+        wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz
+        tar -xzf cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.tar.gz
+        sudo mv cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH} /opt/cmake
+        sudo ln -sf /opt/cmake/bin/cmake /usr/local/bin/cmake
+        cmake --version
+
+    - name: Install FAISS (Linux)
+      if: inputs.use-homebrew == 'false'
+      shell: bash
+      run: |
+        git clone --depth 1 --branch v${{ inputs.faiss-version }} https://github.com/facebookresearch/faiss.git /tmp/faiss
+        cd /tmp/faiss
+        cmake -B build \
+          -DFAISS_ENABLE_GPU=OFF \
+          -DFAISS_ENABLE_PYTHON=OFF \
+          -DBUILD_TESTING=OFF \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build build -j $(nproc)
+        sudo cmake --install build
+
+    - name: Install dependencies (macOS)
+      if: inputs.use-homebrew == 'true'
+      shell: bash
+      run: |
+        brew install cmake libomp openblas faiss
+
+    - name: Build native library
+      shell: bash
+      run: |
+        ./paimon-faiss/paimon-faiss-jni/scripts/build-native.sh --clean --fat-lib --faiss-version ${{ inputs.faiss-version }}
+
+    - name: List built libraries (Linux)
+      if: inputs.use-homebrew == 'false' && inputs.platform == 'linux-amd64'
+      shell: bash
+      run: |
+        echo "=== Built libraries ==="
+        ls -la paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
+        echo ""
+        echo "=== Library dependencies ==="
+        ldd paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/libpaimon_faiss_jni.so || true
+
+    - name: List built libraries (Linux AARCH64)
+      if: inputs.use-homebrew == 'false' && inputs.platform == 'linux-aarch64'
+      shell: bash
+      run: |
+        echo "=== Built libraries ==="
+        ls -la paimon-faiss/paimon-faiss-jni/src/main/resources/linux/aarch64/
+        echo ""
+        echo "=== Library dependencies ==="
+        ldd paimon-faiss/paimon-faiss-jni/src/main/resources/linux/aarch64/libpaimon_faiss_jni.so || true
+
+    - name: List built libraries (macOS)
+      if: inputs.use-homebrew == 'true'
+      shell: bash
+      run: |
+        echo "=== Built libraries ==="
+        ls -la paimon-faiss/paimon-faiss-jni/src/main/resources/darwin/aarch64/
+        echo ""
+        echo "=== Library dependencies ==="
+        otool -L paimon-faiss/paimon-faiss-jni/src/main/resources/darwin/aarch64/libpaimon_faiss_jni.dylib || true

@@ -54,7 +54,7 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                                 globalIndexMeta.rowRangeStart(),
                                 globalIndexMeta.rowRangeEnd(),
                                 globalIndexMeta.indexFieldId(),
-                                globalIndexMeta.indexMeta() == null
+                                globalIndexMeta.extraFieldIds() == null
                                         ? null
                                         : new GenericArray(globalIndexMeta.extraFieldIds()),
                                 globalIndexMeta.indexMeta());

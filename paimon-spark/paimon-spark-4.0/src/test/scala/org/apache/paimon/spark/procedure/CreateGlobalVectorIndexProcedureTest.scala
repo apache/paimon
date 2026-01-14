@@ -25,10 +25,6 @@ import scala.collection.immutable
 
 class CreateGlobalVectorIndexProcedureTest extends CreateGlobalIndexProcedureTest {
   test("create lucene-vector-knn global index") {
-    import org.apache.paimon.spark.globalindex.GlobalIndexBuilderFactory
-    import java.util.ServiceLoader
-    import scala.collection.JavaConverters._
-
     withTable("T") {
       spark.sql("""
                   |CREATE TABLE T (id INT, v ARRAY<FLOAT>)

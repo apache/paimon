@@ -31,7 +31,15 @@ public class PartitionPredicateVisitor implements PredicateVisitor<Boolean> {
 
     @Override
     public Boolean visit(LeafPredicate predicate) {
-        return partitionKeys.contains(predicate.fieldName());
+        Transform transform = predicate.transform();
+        for (Object input : transform.inputs()) {
+            if (input instanceof FieldRef) {
+                if (!partitionKeys.contains(((FieldRef) input).name())) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     @Override
@@ -41,19 +49,6 @@ public class PartitionPredicateVisitor implements PredicateVisitor<Boolean> {
 
             if (!matched) {
                 return false;
-            }
-        }
-        return true;
-    }
-
-    @Override
-    public Boolean visit(TransformPredicate predicate) {
-        Transform transform = predicate.transform();
-        for (Object input : transform.inputs()) {
-            if (input instanceof FieldRef) {
-                if (!partitionKeys.contains(((FieldRef) input).name())) {
-                    return false;
-                }
             }
         }
         return true;

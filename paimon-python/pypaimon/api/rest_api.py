@@ -18,7 +18,7 @@
 import logging
 from typing import Callable, Dict, List, Optional, Union
 
-from pypaimon.api.api_request import (AlterDatabaseRequest, CommitTableRequest,
+from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest, CommitTableRequest,
                                       CreateDatabaseRequest,
                                       CreateTableRequest, RenameTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
@@ -88,6 +88,7 @@ class RESTApi:
         self.resource_paths = ResourcePaths.for_catalog_properties(options)
 
     def __build_paged_query_params(
+            self,
             max_results: Optional[int],
             page_token: Optional[str],
             name_patterns: Dict[str, str],
@@ -99,7 +100,7 @@ class RESTApi:
         if page_token is not None and page_token.strip():
             query_params[RESTApi.PAGE_TOKEN] = page_token
 
-        for key, value in name_patterns:
+        for key, value in name_patterns.items():
             if key and value and key.strip() and value.strip():
                 query_params[key] = value
 
@@ -286,6 +287,17 @@ class RESTApi:
         request = RenameTableRequest(source_identifier, target_identifier)
         return self.client.post(
             self.resource_paths.rename_table(),
+            request,
+            self.rest_auth_function)
+
+    def alter_table(self, identifier: Identifier, changes: List):
+        database_name, table_name = self.__validate_identifier(identifier)
+        if not changes:
+            raise ValueError("Changes cannot be empty")
+
+        request = AlterTableRequest(changes)
+        return self.client.post(
+            self.resource_paths.table(database_name, table_name),
             request,
             self.rest_auth_function)
 

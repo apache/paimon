@@ -27,24 +27,38 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInc
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
+import java.util.Map;
 
 /** Response for auth table query. */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AuthTableQueryResponse implements RESTResponse {
 
     private static final String FIELD_FILTER = "filter";
+    private static final String FIELD_COLUMN_MASKING = "columnMasking";
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_FILTER)
     private final List<String> filter;
 
     @JsonCreator
-    public AuthTableQueryResponse(@JsonProperty(FIELD_FILTER) List<String> filter) {
+    public AuthTableQueryResponse(
+            @JsonProperty(FIELD_FILTER) List<String> filter,
+            @JsonProperty(FIELD_COLUMN_MASKING) Map<String, String> columnMasking) {
         this.filter = filter;
+        this.columnMasking = columnMasking;
     }
 
     @JsonGetter(FIELD_FILTER)
     public List<String> filter() {
         return filter;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_COLUMN_MASKING)
+    private final Map<String, String> columnMasking;
+
+    @JsonGetter(FIELD_COLUMN_MASKING)
+    public Map<String, String> columnMasking() {
+        return columnMasking;
     }
 }

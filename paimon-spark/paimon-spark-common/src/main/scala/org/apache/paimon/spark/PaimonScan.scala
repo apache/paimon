@@ -20,7 +20,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions.BucketFunctionType
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{Predicate, TopN}
+import org.apache.paimon.predicate.{Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -41,6 +41,7 @@ case class PaimonScan(
     pushedDataFilters: Seq[Predicate],
     override val pushedLimit: Option[Int],
     override val pushedTopN: Option[TopN],
+    override val pushedVectorSearch: Option[VectorSearch],
     bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table)
   with SupportsReportPartitioning
@@ -63,16 +64,16 @@ case class PaimonScan(
   }
 
   override def filter(predicates: Array[SparkPredicate]): Unit = {
-    val converter = SparkV2FilterConverter(table.rowType())
-    val partitionKeys = table.partitionKeys().asScala.toSeq
-    val partitionFilter = predicates.flatMap {
-      case p
-          if SparkV2FilterConverter(table.rowType()).isSupportedRuntimeFilter(p, partitionKeys) =>
-        converter.convert(p)
-      case _ => None
-    }
-    if (partitionFilter.nonEmpty) {
-      readBuilder.withFilter(partitionFilter.toList.asJava)
+    val partitionType = table.rowType().project(table.partitionKeys())
+    val converter = SparkV2FilterConverter(partitionType)
+    val runtimePartitionFilters = predicates.toSeq
+      .flatMap(converter.convert(_))
+      .map(PartitionPredicate.fromPredicate(partitionType, _))
+    if (runtimePartitionFilters.nonEmpty) {
+      pushedRuntimePartitionFilters.appendAll(runtimePartitionFilters)
+      readBuilder.withPartitionFilter(
+        PartitionPredicate.and(
+          (pushedPartitionFilters ++ pushedRuntimePartitionFilters).toList.asJava))
       // set inputPartitions null to trigger to get the new splits.
       _inputPartitions = null
       _inputSplits = null

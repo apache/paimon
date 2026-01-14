@@ -190,10 +190,12 @@ public interface FileEntry {
             Identifier identifier = entry.identifier();
             switch (entry.kind()) {
                 case ADD:
+                    T old = map.get(identifier);
                     checkState(
-                            !map.containsKey(identifier),
-                            "Trying to add file %s which is already added.",
-                            identifier);
+                            old == null,
+                            "Trying to add file %s which is already in the the map: %s",
+                            identifier,
+                            old);
                     map.put(identifier, entry);
                     break;
                 case DELETE:

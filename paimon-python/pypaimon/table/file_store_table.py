@@ -62,6 +62,24 @@ class FileStoreTable(Table):
 
         self.schema_manager = SchemaManager(file_io, table_path)
 
+    @classmethod
+    def from_path(cls, table_path: str) -> 'FileStoreTable':
+        """
+        Create a FileStoreTable from a table path.
+        This is useful for reading tables created by Java without going through a catalog.
+        """
+        file_io = FileIO(table_path, Options({}))
+        schema_manager = SchemaManager(file_io, table_path)
+        table_schema = schema_manager.latest()
+
+        if table_schema is None:
+            raise ValueError(f"No schema found at path: {table_path}")
+
+        # Create a placeholder identifier
+        identifier = Identifier("default", "table")
+
+        return cls(file_io, identifier, table_path, table_schema)
+
     def current_branch(self) -> str:
         """Get the current branch name from options."""
         return self.options.branch()
@@ -120,6 +138,25 @@ class FileStoreTable(Table):
 
     def new_read_builder(self) -> 'ReadBuilder':
         return ReadBuilder(self)
+
+    def new_global_index_scan_builder(self) -> Optional['GlobalIndexScanBuilder']:
+        if not self.options.global_index_enabled():
+            return None
+
+        from pypaimon.globalindex.global_index_scan_builder_impl import (
+            GlobalIndexScanBuilderImpl
+        )
+
+        from pypaimon.index.index_file_handler import IndexFileHandler
+
+        return GlobalIndexScanBuilderImpl(
+            options=self.table_schema.options,
+            row_type=self.fields,
+            file_io=self.file_io,
+            index_path_factory=self.path_factory().global_index_path_factory(),
+            snapshot_manager=self.snapshot_manager(),
+            index_file_handler=IndexFileHandler(table=self)
+        )
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)

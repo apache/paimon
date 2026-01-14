@@ -19,11 +19,14 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.fs.local.LocalFileIOLoader;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -1514,9 +1517,25 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     private void checkBatchResult(int numProducers) throws Exception {
+        FileSystemCatalog catalog = new FileSystemCatalog(LocalFileIO.create(), new Path(path));
+        FileStoreTable table = (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         bEnv.executeSql(createCatalogSql("testCatalog", path));
         bEnv.executeSql("USE CATALOG testCatalog");
+
+        if (table.coreOptions().needLookup()) {
+            // if table needs lookup, batch query will not get data on level = 0,
+            // so we need to wait until all level 0 are compacted
+            while (true) {
+                try (CloseableIterator<Row> it =
+                        bEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0").collect()) {
+                    if (!it.hasNext()) {
+                        break;
+                    }
+                }
+                Thread.sleep(500);
+            }
+        }
 
         ResultChecker checker = new ResultChecker();
         try (CloseableIterator<Row> it = collect(bEnv.executeSql("SELECT * FROM T"))) {

@@ -31,7 +31,6 @@ import org.apache.paimon.operation.BundleFileStoreWriter;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.WriteRestore;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -60,7 +59,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Nullable private final RowKindFilter rowKindFilter;
 
     private boolean batchCommitted = false;
-    private BucketMode bucketMode;
     private RowType writeType;
     private int[] notNullFieldIndex;
 
@@ -132,11 +130,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     public TableWriteImpl<T> withCompactExecutor(ExecutorService compactExecutor) {
         write.withCompactExecutor(compactExecutor);
-        return this;
-    }
-
-    public TableWriteImpl<T> withBucketMode(BucketMode bucketMode) {
-        this.bucketMode = bucketMode;
         return this;
     }
 

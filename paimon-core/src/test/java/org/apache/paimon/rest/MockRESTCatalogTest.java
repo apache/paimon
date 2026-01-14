@@ -25,8 +25,14 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -35,9 +41,12 @@ import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.exceptions.NotAuthorizedException;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -55,6 +64,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -244,6 +254,42 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         restCatalog.createTable(identifier, schema, false);
 
         catalog.dropTable(identifier, true);
+    }
+
+    @Test
+    void testAuthTableQueryResponseWithColumnMasking() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "auth_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                Identifier.create(identifier.getDatabaseName(), identifier.getTableName()),
+                DEFAULT_TABLE_SCHEMA,
+                false);
+
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.STRING()));
+        Predicate predicate = builder.equal(0, 100);
+        String predicateJson = JsonSerdeUtil.toFlatJson(predicate);
+
+        Transform transform =
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "col2", DataTypes.STRING())));
+        String transformJson = JsonSerdeUtil.toFlatJson(transform);
+
+        // Set up mock response with filter and columnMasking
+        List<String> filter = Collections.singletonList(predicateJson);
+        Map<String, String> columnMasking = new HashMap<>();
+        columnMasking.put("col2", transformJson);
+        AuthTableQueryResponse response = new AuthTableQueryResponse(filter, columnMasking);
+        restCatalogServer.setTableQueryAuthResponse(identifier, response);
+
+        TableQueryAuthResult result = catalog.authTableQuery(identifier, null);
+        assertThat(result.rowFilter()).isEqualTo(predicate);
+        assertThat(result.columnMasking()).isNotEmpty();
+        assertThat(result.columnMasking()).containsKey("col2");
+        assertThat(result.columnMasking().get("col2")).isEqualTo(transform);
+
+        catalog.dropTable(identifier, true);
+        catalog.dropDatabase(identifier.getDatabaseName(), true, true);
     }
 
     private void checkHeader(String headerName, String headerValue) {

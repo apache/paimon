@@ -15,8 +15,11 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import sys
 from enum import Enum
-from typing import Dict
+from typing import Dict, Optional
+
+from datetime import timedelta
 
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
@@ -122,8 +125,18 @@ class CoreOptions:
     FILE_COMPRESSION: ConfigOption[str] = (
         ConfigOptions.key("file.compression")
         .string_type()
-        .default_value("lz4")
-        .with_description("Default file compression format.")
+        .default_value("zstd")
+        .with_description("Default file compression format. For faster read and write, it is recommended to use zstd.")
+    )
+
+    FILE_COMPRESSION_ZSTD_LEVEL: ConfigOption[int] = (
+        ConfigOptions.key("file.compression.zstd-level")
+        .int_type()
+        .default_value(1)
+        .with_description(
+            "Default file compression zstd level. For higher compression rates, it can be configured to 9, "
+            "but the read and write speed will significantly decrease."
+        )
     )
 
     FILE_COMPRESSION_PER_LEVEL: ConfigOption[Dict[str, str]] = (
@@ -239,6 +252,34 @@ class CoreOptions:
         .with_description("The prefix for commit user.")
     )
 
+    COMMIT_MAX_RETRIES: ConfigOption[int] = (
+        ConfigOptions.key("commit.max-retries")
+        .int_type()
+        .default_value(10)
+        .with_description("Maximum number of retries for commit operations.")
+    )
+
+    COMMIT_TIMEOUT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.timeout")
+        .duration_type()
+        .no_default_value()
+        .with_description("Timeout for commit operations (e.g., '10s', '5m'). If not set, effectively unlimited.")
+    )
+
+    COMMIT_MIN_RETRY_WAIT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.min-retry-wait")
+        .duration_type()
+        .default_value(timedelta(milliseconds=10))
+        .with_description("Minimum wait time between commit retries (e.g., '10ms', '100ms').")
+    )
+
+    COMMIT_MAX_RETRY_WAIT: ConfigOption[timedelta] = (
+        ConfigOptions.key("commit.max-retry-wait")
+        .duration_type()
+        .default_value(timedelta(seconds=10))
+        .with_description("Maximum wait time between commit retries (e.g., '1s', '10s').")
+    )
+
     ROW_TRACKING_ENABLED: ConfigOption[bool] = (
         ConfigOptions.key("row-tracking.enabled")
         .boolean_type()
@@ -272,6 +313,102 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("Specific filesystem for external paths when using specific-fs strategy.")
+    )
+
+    # Global Index options
+    GLOBAL_INDEX_ENABLED: ConfigOption[bool] = (
+        ConfigOptions.key("global-index.enabled")
+        .boolean_type()
+        .default_value(True)
+        .with_description("Whether to enable global index for scan.")
+    )
+
+    GLOBAL_INDEX_THREAD_NUM: ConfigOption[int] = (
+        ConfigOptions.key("global-index.thread-num")
+        .int_type()
+        .no_default_value()
+        .with_description(
+            "The maximum number of concurrent scanner for global index. "
+            "By default is the number of processors available."
+        )
+    )
+
+    # FAISS Vector Index options
+    VECTOR_DIM: ConfigOption[int] = (
+        ConfigOptions.key("vector.dim")
+        .int_type()
+        .default_value(128)
+        .with_description("The dimension of the vector.")
+    )
+
+    VECTOR_METRIC: ConfigOption[str] = (
+        ConfigOptions.key("vector.metric")
+        .string_type()
+        .default_value("L2")
+        .with_description("The similarity metric for vector search (L2, INNER_PRODUCT).")
+    )
+
+    VECTOR_INDEX_TYPE: ConfigOption[str] = (
+        ConfigOptions.key("vector.index-type")
+        .string_type()
+        .default_value("IVF_SQ8")
+        .with_description("The type of FAISS index (FLAT, HNSW, IVF, IVF_PQ, IVF_SQ8).")
+    )
+
+    VECTOR_M: ConfigOption[int] = (
+        ConfigOptions.key("vector.m")
+        .int_type()
+        .default_value(32)
+        .with_description("Maximum connections per element in HNSW index.")
+    )
+
+    VECTOR_EF_CONSTRUCTION: ConfigOption[int] = (
+        ConfigOptions.key("vector.ef-construction")
+        .int_type()
+        .default_value(40)
+        .with_description("Size of dynamic candidate list during HNSW construction.")
+    )
+
+    VECTOR_EF_SEARCH: ConfigOption[int] = (
+        ConfigOptions.key("vector.ef-search")
+        .int_type()
+        .default_value(16)
+        .with_description("Size of dynamic candidate list during HNSW search.")
+    )
+
+    VECTOR_NLIST: ConfigOption[int] = (
+        ConfigOptions.key("vector.nlist")
+        .int_type()
+        .default_value(100)
+        .with_description("Number of inverted lists (clusters) for IVF index.")
+    )
+
+    VECTOR_NPROBE: ConfigOption[int] = (
+        ConfigOptions.key("vector.nprobe")
+        .int_type()
+        .default_value(64)
+        .with_description("Number of clusters to visit during IVF search.")
+    )
+
+    VECTOR_SIZE_PER_INDEX: ConfigOption[int] = (
+        ConfigOptions.key("vector.size-per-index")
+        .int_type()
+        .default_value(2000000)
+        .with_description("Size of vectors stored in each vector index file.")
+    )
+
+    VECTOR_SEARCH_FACTOR: ConfigOption[int] = (
+        ConfigOptions.key("vector.search-factor")
+        .int_type()
+        .default_value(10)
+        .with_description("Multiplier for search limit when filtering is applied.")
+    )
+
+    VECTOR_NORMALIZE: ConfigOption[bool] = (
+        ConfigOptions.key("vector.normalize")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to L2 normalize vectors for cosine similarity.")
     )
 
     def __init__(self, options: Options):
@@ -314,6 +451,9 @@ class CoreOptions:
 
     def file_compression(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION, default)
+
+    def file_compression_zstd_level(self, default=None):
+        return self.options.get(CoreOptions.FILE_COMPRESSION_ZSTD_LEVEL, default)
 
     def file_compression_per_level(self, default=None):
         return self.options.get(CoreOptions.FILE_COMPRESSION_PER_LEVEL, default)
@@ -390,3 +530,59 @@ class CoreOptions:
 
     def data_file_external_paths_specific_fs(self, default=None):
         return self.options.get(CoreOptions.DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS, default)
+
+    def commit_max_retries(self) -> int:
+        return self.options.get(CoreOptions.COMMIT_MAX_RETRIES)
+
+    def commit_timeout(self) -> int:
+        timeout = self.options.get(CoreOptions.COMMIT_TIMEOUT)
+        if timeout is None:
+            return sys.maxsize
+        return int(timeout.total_seconds() * 1000)
+
+    def commit_min_retry_wait(self) -> int:
+        wait = self.options.get(CoreOptions.COMMIT_MIN_RETRY_WAIT)
+        return int(wait.total_seconds() * 1000)
+
+    def commit_max_retry_wait(self) -> int:
+        wait = self.options.get(CoreOptions.COMMIT_MAX_RETRY_WAIT)
+        return int(wait.total_seconds() * 1000)
+
+    def global_index_enabled(self, default=None):
+        return self.options.get(CoreOptions.GLOBAL_INDEX_ENABLED, default)
+
+    def global_index_thread_num(self) -> Optional[int]:
+        return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
+
+    def vector_dim(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_DIM, default)
+
+    def vector_metric(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_METRIC, default)
+
+    def vector_index_type(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_INDEX_TYPE, default)
+
+    def vector_m(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_M, default)
+
+    def vector_ef_construction(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_EF_CONSTRUCTION, default)
+
+    def vector_ef_search(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_EF_SEARCH, default)
+
+    def vector_nlist(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_NLIST, default)
+
+    def vector_nprobe(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_NPROBE, default)
+
+    def vector_size_per_index(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_SIZE_PER_INDEX, default)
+
+    def vector_search_factor(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_SEARCH_FACTOR, default)
+
+    def vector_normalize(self, default=None):
+        return self.options.get(CoreOptions.VECTOR_NORMALIZE, default)

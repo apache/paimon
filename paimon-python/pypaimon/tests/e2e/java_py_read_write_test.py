@@ -17,6 +17,7 @@
 ################################################################################
 
 import os
+import sys
 import unittest
 
 import pandas as pd
@@ -24,6 +25,19 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
+
+if sys.version_info[:2] == (3, 6):
+    from pypaimon.tests.py36.pyarrow_compat import table_sort_by
+else:
+    def table_sort_by(table: pa.Table, column_name: str, order: str = 'ascending') -> pa.Table:
+        return table.sort_by([(column_name, order)])
+
+
+def get_file_format_params():
+    if sys.version_info[:2] == (3, 6):
+        return [('parquet',)]
+    else:
+        return [('parquet',), ('lance',)]
 
 
 class JavaPyReadWriteTest(unittest.TestCase):
@@ -89,11 +103,13 @@ class JavaPyReadWriteTest(unittest.TestCase):
         res = table_read.to_pandas(table_scan.plan().splits())
         print(res)
 
-    @parameterized.expand([
-        ('parquet',),
-        ('lance',),
-    ])
+    @parameterized.expand(get_file_format_params())
     def test_py_write_read_pk_table(self, file_format):
+        if sys.version_info[:2] == (3, 6):
+            self.skipTest(
+                "Skipping on Python 3.6 due to PyArrow compatibility issue (RecordBatch.add_column not available). "
+                "Will be fixed in next PR."
+            )
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -150,10 +166,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         actual_names = set(initial_result['name'].tolist())
         self.assertEqual(actual_names, expected_names)
 
-    @parameterized.expand([
-        ('parquet',),
-        ('lance',),
-    ])
+    @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):
         # For parquet, read from Java-written table (no format suffix)
         # For lance, read from Java-written table (with format suffix)
@@ -196,7 +209,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits).sort_by('pt')
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
         expected = pa.Table.from_pydict({
             'pt': [1, 2, 2],
             'a': [10, 21, 22],
@@ -219,7 +232,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits).sort_by('pt')
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
         expected = pa.Table.from_pydict({
             'pt': [1] * 9999,
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
@@ -242,7 +255,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-        actual = table_read.to_arrow(splits).sort_by('pt')
+        actual = table_sort_by(table_read.to_arrow(splits), 'pt')
         expected = pa.Table.from_pydict({
             'pt': [1] * 9999,
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],

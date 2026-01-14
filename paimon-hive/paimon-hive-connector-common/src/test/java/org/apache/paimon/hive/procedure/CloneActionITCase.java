@@ -1012,6 +1012,64 @@ public class CloneActionITCase extends ActionITCaseBase {
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
+    @Test
+    public void testMigrateWithMetaOnly() throws Exception {
+        String format = "avro";
+        String dbName = "hivedb" + StringUtils.randomNumericString(10);
+        String tableName = "hivetable" + StringUtils.randomNumericString(10);
+
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
+        tEnv.useCatalog("HIVE");
+        tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE " + dbName);
+        sql(
+                tEnv,
+                "CREATE TABLE %s.%s (id STRING) PARTITIONED BY (id2 INT, id3 INT)"
+                        + "STORED AS %s ",
+                dbName,
+                tableName,
+                format);
+        sql(tEnv, "INSERT INTO %s.%s VALUES %s", dbName, tableName, data(100));
+
+        tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
+        tEnv.useCatalog("PAIMON_GE");
+
+        tEnv.executeSql(
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse' = '" + warehouse + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql("CREATE DATABASE test");
+
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "clone",
+                                "--database",
+                                dbName,
+                                "--table",
+                                tableName,
+                                "--catalog_conf",
+                                "metastore=hive",
+                                "--catalog_conf",
+                                "uri=thrift://localhost:" + PORT,
+                                "--target_database",
+                                "test",
+                                "--target_table",
+                                "test_table",
+                                "--target_catalog_conf",
+                                "warehouse=" + warehouse,
+                                "--meta_only",
+                                "true"));
+
+        createAction(CloneAction.class, args).run();
+        FileStoreTable paimonTable =
+                paimonTable(tEnv, "PAIMON", Identifier.create("test", "test_table"));
+        // table exists but no data
+        assertThat(paimonTable.schema().fieldNames()).containsExactly("id", "id2", "id3");
+        assertThat(paimonTable.snapshotManager().earliestSnapshot()).isNull();
+    }
+
     private String[] ddls(String format) {
         // has primary key
         String ddl0 =

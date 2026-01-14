@@ -577,7 +577,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, List<String> select) {
+    public TableQueryAuthResult authTableQuery(Identifier identifier, List<String> select) {
         throw new UnsupportedOperationException();
     }
 
@@ -700,7 +700,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected List<String> listDatabasesInFileSystem(Path warehouse) throws IOException {
         List<String> databases = new ArrayList<>();
-        for (FileStatus status : fileIO.listDirectories(warehouse)) {
+        for (FileStatus status : fileIO(warehouse).listDirectories(warehouse)) {
             Path path = status.getPath();
             if (status.isDir() && path.getName().endsWith(DB_SUFFIX)) {
                 String fileName = path.getName();
@@ -712,7 +712,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected List<String> listTablesInFileSystem(Path databasePath) throws IOException {
         List<String> tables = new ArrayList<>();
-        for (FileStatus status : fileIO.listDirectories(databasePath)) {
+        for (FileStatus status : fileIO(databasePath).listDirectories(databasePath)) {
             if (status.isDir() && tableExistsInFileSystem(status.getPath(), DEFAULT_MAIN_BRANCH)) {
                 tables.add(status.getPath().getName());
             }
@@ -721,7 +721,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath, branchName);
+        SchemaManager schemaManager = new SchemaManager(fileIO(tablePath), tablePath, branchName);
 
         // in order to improve the performance, check the schema-0 firstly.
         boolean schemaZeroExists = schemaManager.schemaExists(0);
@@ -734,7 +734,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
-        Optional<TableSchema> schema = new SchemaManager(fileIO, tablePath, branchName).latest();
+        Optional<TableSchema> schema =
+                new SchemaManager(fileIO(tablePath), tablePath, branchName).latest();
         if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
             schema =
                     schema.map(

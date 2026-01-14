@@ -40,6 +40,7 @@ public class CloneActionFactory implements ActionFactory {
     private static final String EXCLUDED_TABLES = "excluded_tables";
     private static final String PREFER_FILE_FORMAT = "prefer_file_format";
     private static final String CLONE_FROM = "clone_from";
+    private static final String META_ONLY = "meta_only";
 
     @Override
     public String identifier() {
@@ -76,6 +77,12 @@ public class CloneActionFactory implements ActionFactory {
             cloneFrom = "hive";
         }
         String preferFileFormat = params.get(PREFER_FILE_FORMAT);
+
+        String metaOnlyStr = params.get(META_ONLY);
+        boolean metaOnly =
+                !StringUtils.isNullOrWhitespaceOnly(metaOnlyStr)
+                        && Boolean.parseBoolean(metaOnlyStr);
+
         CloneAction cloneAction =
                 new CloneAction(
                         params.get(DATABASE),
@@ -89,7 +96,8 @@ public class CloneActionFactory implements ActionFactory {
                         includedTables,
                         excludedTables,
                         preferFileFormat,
-                        cloneFrom);
+                        cloneFrom,
+                        metaOnly);
 
         return Optional.of(cloneAction);
     }

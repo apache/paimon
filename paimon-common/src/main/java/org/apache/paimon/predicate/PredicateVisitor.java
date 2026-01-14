@@ -24,6 +24,4 @@ public interface PredicateVisitor<T> {
     T visit(LeafPredicate predicate);
 
     T visit(CompoundPredicate predicate);
-
-    T visit(TransformPredicate predicate);
 }

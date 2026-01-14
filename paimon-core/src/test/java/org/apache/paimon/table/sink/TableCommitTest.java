@@ -808,63 +808,6 @@ public class TableCommitTest {
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    public void testOverwriteEmptyTable(boolean partitioned) throws Exception {
-        String path = tempDir.toString();
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT(), DataTypes.INT()},
-                        new String[] {"k", "v", "pt"});
-
-        Options options = new Options();
-        options.set(CoreOptions.PATH, path);
-        options.set(CoreOptions.BUCKET, 1);
-        options.set(CoreOptions.BUCKET_KEY, "k");
-        options.set(CoreOptions.WRITE_ONLY, true);
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), new Path(path)),
-                        new Schema(
-                                rowType.getFields(),
-                                partitioned
-                                        ? Collections.singletonList("pt")
-                                        : Collections.emptyList(),
-                                Collections.emptyList(),
-                                options.toMap(),
-                                ""));
-        FileStoreTable table =
-                FileStoreTableFactory.create(
-                        LocalFileIO.create(),
-                        new Path(path),
-                        tableSchema,
-                        CatalogEnvironment.empty());
-        SnapshotManager snapshotManager = table.snapshotManager();
-        String user = UUID.randomUUID().toString();
-        TableWriteImpl<?> write = table.newWrite(user);
-        TableCommitImpl commit = table.newCommit(user);
-
-        write.write(GenericRow.of(0, 0L, 1));
-        commit.withOverwrite(partitioned ? singletonMap("pt", "1") : Collections.emptyMap());
-        commit.commit(1, write.prepareCommit(false, 1));
-        assertThat(snapshotManager.latestSnapshot().commitKind())
-                .isEqualTo(Snapshot.CommitKind.APPEND);
-
-        write.write(GenericRow.of(1, 1L, 1));
-        commit.withOverwrite(partitioned ? singletonMap("pt", "1") : Collections.emptyMap());
-        commit.commit(2, write.prepareCommit(false, 2));
-        assertThat(snapshotManager.latestSnapshot().commitKind())
-                .isEqualTo(Snapshot.CommitKind.OVERWRITE);
-
-        if (partitioned) {
-            write.write(GenericRow.of(3, 3L, 2));
-            commit.withOverwrite(singletonMap("pt", "2"));
-            commit.commit(3, write.prepareCommit(false, 3));
-            assertThat(snapshotManager.latestSnapshot().commitKind())
-                    .isEqualTo(Snapshot.CommitKind.APPEND);
-        }
-    }
-
     @Test
     public void testCompactConflictWithUpgrade() throws Exception {
         String path = tempDir.toString();
