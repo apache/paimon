@@ -56,7 +56,8 @@ public class GlobalIndexTopologyBuilderUtils {
     }
 
     @Nullable
-    public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType) {
-        return FACTORIES.get(indexType);
+    public static GlobalIndexTopologyBuilder createTopoBuilder(
+            String indexType, boolean useNative) {
+        return FACTORIES.get(indexType + (useNative ? "_native" : ""));
     }
 }

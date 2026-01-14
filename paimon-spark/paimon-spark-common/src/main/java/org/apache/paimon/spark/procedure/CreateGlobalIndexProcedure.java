@@ -87,7 +87,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                 ProcedureParameter.required("index_column", DataTypes.StringType),
                 ProcedureParameter.required("index_type", DataTypes.StringType),
                 ProcedureParameter.optional("partitions", StringType),
-                ProcedureParameter.optional("options", DataTypes.StringType)
+                ProcedureParameter.optional("options", DataTypes.StringType),
+                ProcedureParameter.optional("use_native", DataTypes.BooleanType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -125,6 +126,7 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         ? null
                         : args.getString(3);
         String optionString = args.isNullAt(4) ? null : args.getString(4);
+        boolean useNative = args.isNullAt(5) ? false : args.getBoolean(5);
 
         String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : null;
 
@@ -170,7 +172,8 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                         List<CommitMessage> indexResults;
                         // Step 1: build index by certain index system
                         GlobalIndexTopologyBuilder topoBuilder =
-                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(indexType);
+                                GlobalIndexTopologyBuilderUtils.createTopoBuilder(
+                                        indexType, useNative);
 
                         if (topoBuilder != null) {
                             // do not need to prepare index shards for custom topo builder
