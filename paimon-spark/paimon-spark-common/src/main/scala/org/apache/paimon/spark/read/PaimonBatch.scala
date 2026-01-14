@@ -16,19 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.catalyst.analysis
+package org.apache.paimon.spark.read
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.AttributeReference
-import org.apache.spark.sql.catalyst.plans.logical.{MergeAction, MergeIntoTable}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn
+import org.apache.paimon.table.source.ReadBuilder
 
-/** A post-hoc resolution rule for MergeInto. */
-case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
+import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
 
-  override def resolveNotMatchedBySourceActions(
-      merge: MergeIntoTable,
-      targetOutput: Seq[AttributeReference],
-      dataEvolutionEnabled: Boolean): Seq[MergeAction] = {
-    Seq.empty
-  }
+/** A Spark [[Batch]] for paimon. */
+case class PaimonBatch(
+    inputPartitions: Seq[PaimonInputPartition],
+    readBuilder: ReadBuilder,
+    blobAsDescriptor: Boolean,
+    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
+  extends Batch {
+
+  override def planInputPartitions(): Array[InputPartition] =
+    inputPartitions.map(_.asInstanceOf[InputPartition]).toArray
+
+  override def createReaderFactory(): PartitionReaderFactory =
+    PaimonPartitionReaderFactory(readBuilder, metadataColumns, blobAsDescriptor)
 }

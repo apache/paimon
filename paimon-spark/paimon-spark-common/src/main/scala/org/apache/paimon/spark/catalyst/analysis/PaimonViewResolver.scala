@@ -79,13 +79,7 @@ case class PaimonViewResolver(spark: SparkSession)
     )
     try {
       CurrentOrigin.withOrigin(origin) {
-        try {
-          spark.sessionState.sqlParser.parseQuery(viewText)
-        } catch {
-          // For compatibility with Spark 3.2 and below
-          case _: NoSuchMethodError =>
-            spark.sessionState.sqlParser.parsePlan(viewText)
-        }
+        spark.sessionState.sqlParser.parseQuery(viewText)
       }
     } catch {
       case _: ParseException =>

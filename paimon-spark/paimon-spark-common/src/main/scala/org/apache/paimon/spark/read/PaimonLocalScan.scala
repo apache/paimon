@@ -16,19 +16,29 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.catalyst.analysis
+package org.apache.paimon.spark.read
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.AttributeReference
-import org.apache.spark.sql.catalyst.plans.logical.{MergeAction, MergeIntoTable}
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.table.Table
 
-/** A post-hoc resolution rule for MergeInto. */
-case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.connector.read.LocalScan
+import org.apache.spark.sql.types.StructType
 
-  override def resolveNotMatchedBySourceActions(
-      merge: MergeIntoTable,
-      targetOutput: Seq[AttributeReference],
-      dataEvolutionEnabled: Boolean): Seq[MergeAction] = {
-    Seq.empty
+/** A scan does not require [[RDD]] to execute */
+case class PaimonLocalScan(
+    rows: Array[InternalRow],
+    readSchema: StructType,
+    table: Table,
+    pushedPartitionFilters: Seq[PartitionPredicate])
+  extends LocalScan {
+
+  override def description(): String = {
+    val pushedPartitionFiltersStr = if (pushedPartitionFilters.nonEmpty) {
+      ", PartitionFilters: [" + pushedPartitionFilters.mkString(",") + "]"
+    } else {
+      ""
+    }
+    s"PaimonLocalScan: [${table.name}]" + pushedPartitionFiltersStr
   }
 }

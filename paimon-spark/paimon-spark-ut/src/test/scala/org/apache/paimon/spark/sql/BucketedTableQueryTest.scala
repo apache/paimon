@@ -53,8 +53,6 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
   }
 
   test("Query on a rescaled bucket table") {
-    assume(gteqSpark3_3)
-
     withTable("t1", "t2") {
 
       spark.sql(
@@ -96,8 +94,6 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
   }
 
   test("Query on a bucketed table - join - positive case") {
-    assume(gteqSpark3_3)
-
     withTable("t1", "t2", "t3", "t4", "t5", "t6") {
       spark.sql(
         "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
@@ -139,8 +135,6 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
   }
 
   test("Query on a bucketed table - join - negative case") {
-    assume(gteqSpark3_3)
-
     withTable("t1", "t2", "t3", "t4", "t5", "t6", "t7") {
       spark.sql(
         "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
@@ -190,8 +184,6 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
   }
 
   test("Query on a bucketed table - other operators") {
-    assume(gteqSpark3_3)
-
     withTable("t1") {
       spark.sql(
         "CREATE TABLE t1 (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
@@ -217,8 +209,6 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
   }
 
   test("Report scan output ordering - rawConvertible") {
-    assume(gteqSpark3_3)
-
     withTable("t") {
       spark.sql(
         "CREATE TABLE t (id INT, c STRING) TBLPROPERTIES ('primary-key' = 'id', 'bucket'='2', 'deletion-vectors.enabled'='true')")

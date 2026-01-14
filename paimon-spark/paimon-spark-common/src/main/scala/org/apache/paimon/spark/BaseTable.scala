@@ -35,7 +35,7 @@ abstract class BaseTable
 
   val table: Table
 
-  override def capabilities(): JSet[TableCapability] = JCollections.emptySet[TableCapability]()
+  override def capabilities: JSet[TableCapability] = JCollections.emptySet[TableCapability]()
 
   override def name: String = table.fullName
 

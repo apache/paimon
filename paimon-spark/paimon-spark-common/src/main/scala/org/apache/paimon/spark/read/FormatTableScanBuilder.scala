@@ -16,19 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.catalyst.analysis
+package org.apache.paimon.spark.read
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.AttributeReference
-import org.apache.spark.sql.catalyst.plans.logical.{MergeAction, MergeIntoTable}
+import org.apache.paimon.table.FormatTable
 
-/** A post-hoc resolution rule for MergeInto. */
-case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
+case class FormatTableScanBuilder(table: FormatTable) extends PaimonBaseScanBuilder {
 
-  override def resolveNotMatchedBySourceActions(
-      merge: MergeIntoTable,
-      targetOutput: Seq[AttributeReference],
-      dataEvolutionEnabled: Boolean): Seq[MergeAction] = {
-    Seq.empty
-  }
+  override def build(): FormatTableScan =
+    FormatTableScan(table, requiredSchema, pushedPartitionFilters, pushedDataFilters, pushedLimit)
 }

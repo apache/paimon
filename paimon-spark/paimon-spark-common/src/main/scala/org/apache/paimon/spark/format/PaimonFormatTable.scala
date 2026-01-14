@@ -19,7 +19,8 @@
 package org.apache.paimon.spark.format
 
 import org.apache.paimon.format.csv.CsvOptions
-import org.apache.paimon.spark.{BaseTable, FormatTableScanBuilder, SparkInternalRowWrapper}
+import org.apache.paimon.spark.{BaseTable, SparkInternalRowWrapper}
+import org.apache.paimon.spark.read.FormatTableScanBuilder
 import org.apache.paimon.spark.write.{BaseV2WriteBuilder, FormatTableWriteTaskResult, V2DataWrite, WriteTaskResult}
 import org.apache.paimon.table.FormatTable
 import org.apache.paimon.table.sink.{BatchTableWrite, BatchWriteBuilder, CommitMessage}
@@ -44,7 +45,7 @@ case class PaimonFormatTable(table: FormatTable)
   with SupportsRead
   with SupportsWrite {
 
-  override def capabilities(): util.Set[TableCapability] = {
+  override def capabilities: util.Set[TableCapability] = {
     util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
   }
 

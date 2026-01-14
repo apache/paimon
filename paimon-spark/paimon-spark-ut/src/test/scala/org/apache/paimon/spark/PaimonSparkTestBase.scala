@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.spark.catalog.WithPaimonCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
+import org.apache.paimon.spark.read.{FormatTableScan, PaimonScan}
 import org.apache.paimon.spark.sql.{SparkVersionSupport, WithTableOptions}
 import org.apache.paimon.table.FileStoreTable
 
@@ -190,8 +191,8 @@ class PaimonSparkTestBase
     getScan(sqlText).asInstanceOf[PaimonScan]
   }
 
-  protected def getFormatTableScan(sqlText: String): PaimonFormatTableScan = {
-    getScan(sqlText).asInstanceOf[PaimonFormatTableScan]
+  protected def getFormatTableScan(sqlText: String): FormatTableScan = {
+    getScan(sqlText).asInstanceOf[FormatTableScan]
   }
 
   object GenericRow {

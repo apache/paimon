@@ -18,7 +18,8 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonInputPartition, PaimonScan, PaimonSparkTestBase, SparkTable}
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkTable}
+import org.apache.paimon.spark.read.{PaimonInputPartition, PaimonScan}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
 import org.apache.spark.sql.Row
@@ -200,7 +201,6 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
   }
 
   test("Paimon pushDown: limit for append-only tables") {
-    assume(gteqSpark3_3)
     spark.sql(s"""
                  |CREATE TABLE T (a INT, b STRING, c STRING)
                  |PARTITIONED BY (c)
@@ -228,7 +228,6 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
   }
 
   test("Paimon pushDown: limit for primary key table") {
-    assume(gteqSpark3_3)
     spark.sql(s"""
                  |CREATE TABLE T (a INT, b STRING, c STRING)
                  |TBLPROPERTIES ('primary-key'='a')
@@ -303,7 +302,6 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
   }
 
   test("Paimon pushDown: limit for table with deletion vector") {
-    assume(gteqSpark3_3)
     Seq(true, false).foreach(
       deletionVectorsEnabled => {
         Seq(true, false).foreach(
@@ -473,7 +471,6 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
   }
 
   test("Paimon pushDown: TopN for append-only tables") {
-    assume(gteqSpark3_3)
     spark.sql("""
                 |CREATE TABLE T (pt INT, id INT, price BIGINT) PARTITIONED BY (pt)
                 |TBLPROPERTIES ('file-index.range-bitmap.columns'='id')
@@ -546,7 +543,6 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
   }
 
   test("Paimon pushDown: multi TopN for append-only tables") {
-    assume(gteqSpark3_3)
     spark.sql("""
                 |CREATE TABLE T (pt INT, id INT, price BIGINT) PARTITIONED BY (pt)
                 |TBLPROPERTIES ('file-index.range-bitmap.columns'='id')
@@ -583,7 +579,6 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
   }
 
   test("Paimon pushDown: TopN for primary-key tables with deletion vector") {
-    assume(gteqSpark3_3)
     withTable("dv_test") {
       spark.sql("""
                   |CREATE TABLE dv_test (id INT, c1 INT, c2 STRING) TBLPROPERTIES (
@@ -626,7 +621,6 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
   }
 
   test("Paimon pushDown: TopN for append-only tables with deletion vector") {
-    assume(gteqSpark3_3)
     withTable("dv_test") {
       spark.sql("""
                   |CREATE TABLE dv_test (c1 INT, c2 STRING) TBLPROPERTIES (
@@ -724,11 +718,8 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
           case p: PaimonScan if p.table.name() == tableName =>
             val filteredPartitionsField = s.getClass.getDeclaredField("filteredPartitions")
             filteredPartitionsField.setAccessible(true)
-            val filteredPartitions = if (gteqSpark3_3) {
+            val filteredPartitions =
               filteredPartitionsField.get(s).asInstanceOf[Seq[Seq[InputPartition]]].flatten
-            } else {
-              filteredPartitionsField.get(s).asInstanceOf[Seq[InputPartition]]
-            }
             filteredPartitions.flatMap { case p: PaimonInputPartition => p.splits }
           case _ => Nil
         }

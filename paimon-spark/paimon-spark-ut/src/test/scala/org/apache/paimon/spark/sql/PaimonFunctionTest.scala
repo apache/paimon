@@ -76,7 +76,6 @@ class PaimonFunctionTest extends PaimonHiveTestBase {
 
   test("Paimon function: bucket join with SparkGenericCatalog") {
     sql(s"use $sparkCatalogName")
-    assume(gteqSpark3_3)
     withTable("t1", "t2") {
       sql(
         "CREATE TABLE t1 (id INT, c STRING) using paimon TBLPROPERTIES ('primary-key' = 'id', 'bucket'='10')")
