@@ -24,7 +24,6 @@ from unittest.mock import patch
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 
-from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
@@ -220,9 +219,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
     def test_catalog_options_not_modified(self):
         from pypaimon.api.rest_util import RESTUtil
-        from pypaimon.catalog.rest.rest_token import RESTToken
-        from pyarrow.fs import LocalFileSystem
-        
+
         original_catalog_options = Options({
             CatalogOptions.URI.key(): "http://test-uri",
             "custom.key": "custom.value"
@@ -242,10 +239,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 OssOptions.OSS_ACCESS_KEY_SECRET.key(): "token-secret-key",
                 OssOptions.OSS_ENDPOINT.key(): "token-endpoint"
             }
-            file_io.token = RESTToken(token_dict, int(time.time() * 1000) + 3600000)
             
-            with patch.object(FileIO, '_initialize_oss_fs', return_value=LocalFileSystem()):
-                file_io._initialize_oss_fs("file:///test/path")
+            merged_token = file_io._merge_token_with_catalog_options(token_dict)
             
             self.assertEqual(
                 original_catalog_options.to_map(),
@@ -255,13 +250,60 @@ class RESTTokenFileIOTest(unittest.TestCase):
             
             merged_properties = RESTUtil.merge(
                 original_catalog_options.to_map(),
-                file_io._merge_token_with_catalog_options(token_dict)
+                merged_token
             )
             
             self.assertIn("custom.key", merged_properties)
             self.assertEqual(merged_properties["custom.key"], "custom.value")
             self.assertIn(OssOptions.OSS_ACCESS_KEY_ID.key(), merged_properties)
             self.assertEqual(merged_properties[OssOptions.OSS_ACCESS_KEY_ID.key()], "token-access-key")
+
+    def test_filesystem_property(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+            
+            self.assertTrue(hasattr(file_io, 'filesystem'), "RESTTokenFileIO should have filesystem property")
+            filesystem = file_io.filesystem
+            self.assertIsNotNone(filesystem, "filesystem should not be None")
+            
+            self.assertTrue(hasattr(filesystem, 'open_input_file'),
+                          "filesystem should support open_input_file method")
+
+    def test_uri_reader_factory_property(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+            
+            self.assertTrue(hasattr(file_io, 'uri_reader_factory'),
+                          "RESTTokenFileIO should have uri_reader_factory property")
+            uri_reader_factory = file_io.uri_reader_factory
+            self.assertIsNotNone(uri_reader_factory, "uri_reader_factory should not be None")
+            
+            self.assertTrue(hasattr(uri_reader_factory, 'create'),
+                          "uri_reader_factory should support create method")
+
+    def test_filesystem_and_uri_reader_factory_after_serialization(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            original_file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+            
+            pickled = pickle.dumps(original_file_io)
+            restored_file_io = pickle.loads(pickled)
+            
+            self.assertIsNotNone(restored_file_io.filesystem,
+                               "filesystem should work after deserialization")
+            self.assertIsNotNone(restored_file_io.uri_reader_factory, 
+                               "uri_reader_factory should work after deserialization")
 
 
 if __name__ == '__main__':
