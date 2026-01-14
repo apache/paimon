@@ -18,8 +18,10 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -27,7 +29,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.parquet.schema.MessageType;
 
 import javax.annotation.Nullable;
@@ -71,42 +72,34 @@ public class VariantUtils {
         return shreddingSchemas;
     }
 
-    @Nullable
-    public static RowType shreddingFields(Configuration conf) {
-        String shreddingSchema =
-                conf.get(ParquetOptions.PARQUET_VARIANT_SHREDDING_SCHEMA.key(), "");
-        if (shreddingSchema.isEmpty()) {
-            return null;
-        } else {
-            return (RowType) JsonSerdeUtil.fromJson(shreddingSchema, DataType.class);
-        }
-    }
-
     /** For writer, extract shredding schemas from conf. */
     @Nullable
-    public static RowType extractShreddingSchemaFromConf(Configuration conf, String fieldName) {
-        RowType shreddingFields = shreddingFields(conf);
-        if (shreddingFields != null && shreddingFields.containsField(fieldName)) {
-            return PaimonShreddingUtils.variantShreddingSchema(
-                    shreddingFields.getField(fieldName).type());
-        } else {
+    public static RowType shreddingSchemasFromOptions(Options options) {
+        if (!options.contains(CoreOptions.VARIANT_SHREDDING_SCHEMA)) {
             return null;
         }
+
+        String shreddingSchema = options.get(CoreOptions.VARIANT_SHREDDING_SCHEMA);
+        RowType rowType = (RowType) JsonSerdeUtil.fromJson(shreddingSchema, DataType.class);
+        ArrayList<DataField> fields = new ArrayList<>();
+        for (DataField field : rowType.getFields()) {
+            fields.add(field.newType(PaimonShreddingUtils.variantShreddingSchema(field.type())));
+        }
+        return new RowType(fields);
     }
 
-    public static RowType replaceWithShreddingType(Configuration conf, RowType rowType) {
-        RowType shreddingFields = shreddingFields(conf);
-        if (shreddingFields == null) {
+    public static RowType replaceWithShreddingType(
+            RowType rowType, @Nullable RowType shreddingSchemas) {
+        if (shreddingSchemas == null) {
             return rowType;
         }
 
         List<DataField> newFields = new ArrayList<>();
         for (DataField field : rowType.getFields()) {
+            // todo: support nested variant.
             if (field.type() instanceof VariantType
-                    && shreddingFields.containsField(field.name())) {
-                RowType shreddingSchema =
-                        PaimonShreddingUtils.variantShreddingSchema(
-                                shreddingFields.getField(field.name()).type());
+                    && shreddingSchemas.containsField(field.name())) {
+                RowType shreddingSchema = (RowType) shreddingSchemas.getField(field.name()).type();
                 newFields.add(field.newType(shreddingSchema));
             } else {
                 newFields.add(field);

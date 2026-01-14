@@ -29,7 +29,6 @@ import org.apache.paimon.data.variant.PaimonShreddingUtils;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
-import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
@@ -70,11 +69,17 @@ public class ParquetRowDataWriter {
     private final Configuration conf;
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
+    @Nullable private final RowType shreddingSchemas;
 
     public ParquetRowDataWriter(
-            RecordConsumer recordConsumer, RowType rowType, GroupType schema, Configuration conf) {
+            RecordConsumer recordConsumer,
+            RowType rowType,
+            GroupType schema,
+            Configuration conf,
+            @Nullable RowType shreddingSchemas) {
         this.conf = conf;
         this.recordConsumer = recordConsumer;
+        this.shreddingSchemas = shreddingSchemas;
         this.rowWriter = new RowWriter(rowType, schema);
     }
 
@@ -144,9 +149,11 @@ public class ParquetRowDataWriter {
             } else if (t instanceof RowType && type instanceof GroupType) {
                 return new RowWriter((RowType) t, groupType);
             } else if (t instanceof VariantType && type instanceof GroupType) {
-                return new VariantWriter(
-                        groupType,
-                        VariantUtils.extractShreddingSchemaFromConf(conf, type.getName()));
+                RowType shreddingSchema =
+                        shreddingSchemas != null && shreddingSchemas.containsField(type.getName())
+                                ? (RowType) shreddingSchemas.getField(type.getName()).type()
+                                : null;
+                return new VariantWriter(groupType, shreddingSchema);
             } else {
                 throw new UnsupportedOperationException("Unsupported type: " + type);
             }
