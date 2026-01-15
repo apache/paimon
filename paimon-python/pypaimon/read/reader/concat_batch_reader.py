@@ -60,7 +60,7 @@ class MergeAllBatchReader(RecordBatchReader):
     into a single batch for processing.
     """
 
-    def __init__(self, reader_suppliers: List[Callable], batch_size: int = 4096):
+    def __init__(self, reader_suppliers: List[Callable], batch_size: int = 1024):
         self.reader_suppliers = reader_suppliers
         self.merged_batch: Optional[RecordBatch] = None
         self.reader = None
