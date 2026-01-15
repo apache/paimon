@@ -1327,7 +1327,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         options = Options({})
         core_options = CoreOptions(options)
-        self.assertEqual(core_options.read_batch_size(), 1024, 
+        self.assertEqual(core_options.read_batch_size(), 1024,
                          "Default read_batch_size should be 1024")
 
         options = Options({CoreOptions.READ_BATCH_SIZE.key(): '512'})
@@ -1387,7 +1387,7 @@ class ReaderBasicTest(unittest.TestCase):
                 reader.close()
             
             self.assertGreater(batch_count, 1,
-                              f"With batch_size=10, should get multiple batches, got {batch_count}")
+                               f"With batch_size=10, should get multiple batches, got {batch_count}")
             self.assertEqual(total_rows, 50, "Should read all 50 rows")
             self.assertLessEqual(max_batch_size, 20,
-                               f"Max batch size should be close to configured 10, got {max_batch_size}")
+                                 f"Max batch size should be close to configured 10, got {max_batch_size}")
