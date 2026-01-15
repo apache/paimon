@@ -34,9 +34,7 @@ class KeyValueDataWriter(DataWriter):
         return self._sort_by_primary_key(combined)
 
     def _add_system_fields(self, data: pa.RecordBatch) -> pa.RecordBatch:
-        """
-        Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND.
-        """
+        """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND."""
         num_rows = data.num_rows
         
         new_arrays = []
