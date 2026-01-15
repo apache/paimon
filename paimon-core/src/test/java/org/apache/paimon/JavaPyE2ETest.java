@@ -53,7 +53,6 @@ import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.nio.file.Files;
@@ -357,7 +356,6 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    @DisabledIfSystemProperty(named = "python.version", matches = "3.6")
     public void testReadPkTable() throws Exception {
         Identifier identifier = identifier("mixed_test_pk_tablep_parquet");
         Table table = catalog.getTable(identifier);

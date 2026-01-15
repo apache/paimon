@@ -105,11 +105,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_pk_table(self, file_format):
-        if sys.version_info[:2] == (3, 6):
-            self.skipTest(
-                "Skipping on Python 3.6 due to PyArrow compatibility issue (RecordBatch.add_column not available). "
-                "Will be fixed in next PR."
-            )
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
