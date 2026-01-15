@@ -138,19 +138,18 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
         if (!sequenceFields.isEmpty()) {
             // make sure actual readType contains sequence fields
             List<String> readFieldNames = readType.getFieldNames();
-            List<DataField> allFields = new ArrayList<>(readType.getFields());
-
+            List<DataField> extraFields = new ArrayList<>();
             for (String seqField : sequenceFields) {
                 if (!readFieldNames.contains(seqField)) {
-                    allFields.add(tableRowType.getField(seqField));
+                    extraFields.add(tableRowType.getField(seqField));
                 }
             }
-
-            if (allFields.size() > readType.getFieldCount()) {
+            if (!extraFields.isEmpty()) {
+                List<DataField> allFields = new ArrayList<>(readType.getFields());
+                allFields.addAll(extraFields);
                 adjustedReadType = new RowType(allFields);
             }
         }
-
         adjustedReadType = mfFactory.adjustReadType(adjustedReadType);
 
         readerFactoryBuilder.withReadValueType(adjustedReadType);

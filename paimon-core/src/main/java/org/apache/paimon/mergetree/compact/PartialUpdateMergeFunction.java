@@ -574,11 +574,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return readType;
             }
 
-            LinkedHashSet<Integer> extraFields = new LinkedHashSet<>();
-            List<DataField> readFields = readType.getFields();
+            LinkedHashSet<DataField> extraFields = new LinkedHashSet<>();
             List<String> readFieldNames = readType.getFieldNames();
-            List<String> rowFieldNames = rowType.getFieldNames();
-            for (DataField readField : readFields) {
+            for (DataField readField : readType.getFields()) {
                 int index = rowType.getFieldIndex(readField.name());
                 Supplier<FieldsComparator> comparatorSupplier = fieldSeqComparators.get(index);
                 if (comparatorSupplier == null) {
@@ -586,9 +584,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 }
 
                 FieldsComparator comparator = comparatorSupplier.get();
-                for (int field : comparator.compareFields()) {
-                    String fieldName = rowFieldNames.get(field);
-                    if (!readFieldNames.contains(fieldName)) {
+                for (int fieldIndex : comparator.compareFields()) {
+                    DataField field = rowType.getFields().get(fieldIndex);
+                    if (!readFieldNames.contains(field.name())) {
                         extraFields.add(field);
                     }
                 }
@@ -598,10 +596,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return readType;
             }
 
-            List<DataField> allFields = new ArrayList<>(readFields);
-            for (int extraField : extraFields) {
-                allFields.add(rowType.getFields().get(extraField));
-            }
+            List<DataField> allFields = new ArrayList<>(readType.getFields());
+            allFields.addAll(extraFields);
             return new RowType(allFields);
         }
 
