@@ -45,8 +45,6 @@ class LocalFileIO(FileIO):
     
     RENAME_LOCK = threading.Lock()
     
-    INSTANCE = None
-    
     def __init__(self, path: str = None, catalog_options: Optional[Options] = None):
         self.logger = logging.getLogger(__name__)
         self.path = path
@@ -202,7 +200,7 @@ class LocalFileIO(FileIO):
         if file_path.is_dir():
             return True
         elif file_path.exists() and not file_path.is_dir():
-            raise FileExistsError(str(file_path.absolute()))
+            raise FileExistsError(f"Path exists but is not a directory: {path}")
         
         file_path.mkdir(parents=True, exist_ok=True)
         return True
@@ -439,6 +437,3 @@ class LocalFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
-
-
-LocalFileIO.INSTANCE = LocalFileIO()
