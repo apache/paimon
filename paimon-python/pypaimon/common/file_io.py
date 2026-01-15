@@ -208,6 +208,9 @@ class FileIO(ABC):
         """Write Blob format file. Must be implemented by subclasses."""
         raise NotImplementedError("write_blob must be implemented by FileIO subclasses")
     
+    def close(self):
+        pass
+    
     @staticmethod
     def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
         """
