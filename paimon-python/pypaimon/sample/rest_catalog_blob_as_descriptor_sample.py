@@ -23,8 +23,8 @@ import pyarrow as pa
 
 from pypaimon import Schema
 from pypaimon.table.row.blob import BlobDescriptor, Blob
-from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 
 def write_table_with_blob(catalog, video_file_path: str, external_oss_options: dict):
@@ -66,7 +66,7 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
 
     # Access external OSS file to get file size
     try:
-        external_file_io = FileIO(video_file_path, Options(external_oss_options))
+        external_file_io = PyArrowFileIO(video_file_path, Options(external_oss_options))
         video_file_size = external_file_io.get_file_size(video_file_path)
     except Exception as e:
         raise FileNotFoundError(

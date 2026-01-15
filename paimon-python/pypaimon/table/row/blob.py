@@ -155,7 +155,7 @@ class Blob(ABC):
             file_uri = file
         else:
             file_uri = f"file://{file}"
-        file_io = FileIO(file_uri, {})
+        file_io = FileIO.get(file_uri, {})
         uri_reader = FileUriReader(file_io)
         descriptor = BlobDescriptor(file, 0, -1)
         return Blob.from_descriptor(uri_reader, descriptor)

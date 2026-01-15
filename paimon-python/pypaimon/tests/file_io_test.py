@@ -23,9 +23,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pyarrow
-from pyarrow.fs import S3FileSystem, LocalFileSystem
+from pyarrow.fs import S3FileSystem
 
-from pypaimon.common.file_io import FileIO
+from pypaimon.common.options import Options
+from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
 
 class FileIOTest(unittest.TestCase):
@@ -33,7 +35,7 @@ class FileIOTest(unittest.TestCase):
 
     def test_s3_filesystem_path_conversion(self):
         """Test S3FileSystem path conversion with various formats."""
-        file_io = FileIO("s3://bucket/warehouse", {})
+        file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertIsInstance(file_io.filesystem, S3FileSystem)
 
         # Test bucket and path
@@ -64,9 +66,8 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
     def test_local_filesystem_path_conversion(self):
-        """Test LocalFileSystem path conversion with various formats."""
-        file_io = FileIO("file:///tmp/warehouse", {})
-        self.assertIsInstance(file_io.filesystem, LocalFileSystem)
+        file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
+        self.assertIsInstance(file_io, LocalFileIO)
 
         # Test file:// scheme
         self.assertEqual(file_io.to_filesystem_path("file:///tmp/path/to/file.txt"),
@@ -93,11 +94,9 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
     def test_windows_path_handling(self):
-        """Test Windows path handling (drive letters, file:// scheme)."""
-        file_io = FileIO("file:///tmp/warehouse", {})
-        self.assertIsInstance(file_io.filesystem, LocalFileSystem)
+        file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
+        self.assertIsInstance(file_io, LocalFileIO)
 
-        # Windows absolute paths
         self.assertEqual(file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
         self.assertEqual(file_io.to_filesystem_path("C:/path/to/file.txt"),
@@ -113,17 +112,17 @@ class FileIOTest(unittest.TestCase):
                          "/C:/path/to/file.txt")
 
         # Windows path with S3FileSystem (should preserve)
-        s3_file_io = FileIO("s3://bucket/warehouse", {})
+        s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertEqual(s3_file_io.to_filesystem_path("C:\\path\\to\\file.txt"),
                          "C:\\path\\to\\file.txt")
 
     def test_path_normalization(self):
         """Test path normalization (multiple slashes)."""
-        file_io = FileIO("file:///tmp/warehouse", {})
+        file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
         self.assertEqual(file_io.to_filesystem_path("file://///tmp///path///file.txt"),
                          "/tmp/path/file.txt")
 
-        s3_file_io = FileIO("s3://bucket/warehouse", {})
+        s3_file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertEqual(s3_file_io.to_filesystem_path("s3://my-bucket///path///to///file.txt"),
                          "my-bucket/path/to/file.txt")
 
@@ -131,7 +130,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_write_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             test_file_uri = f"file://{temp_dir}/overwrite_test.txt"
             expected_path = os.path.join(temp_dir, "overwrite_test.txt")
@@ -161,7 +160,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_exists_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             test_file = os.path.join(temp_dir, "test_file.txt")
             with open(test_file, "w") as f:
@@ -169,35 +168,48 @@ class FileIOTest(unittest.TestCase):
             self.assertTrue(file_io.exists(f"file://{test_file}"))
             self.assertFalse(file_io.exists(f"file://{temp_dir}/nonexistent.txt"))
 
-            mock_filesystem = MagicMock()
-            mock_filesystem.get_file_info.side_effect = OSError("Permission denied")
-            file_io.filesystem = mock_filesystem
+            mock_path = MagicMock(spec=Path)
+            mock_path.exists.side_effect = OSError("Permission denied")
+            with patch.object(file_io, '_to_file', return_value=mock_path):
+                with self.assertRaises(OSError) as context:
+                    file_io.exists("file:///some/path")
+                self.assertIn("Permission denied", str(context.exception))
 
-            with self.assertRaises(OSError) as context:
-                file_io.exists("file:///some/path")
-            self.assertIn("Permission denied", str(context.exception))
-
-            with self.assertRaises(OSError):
-                file_io.new_output_stream("file:///some/path/file.txt")
-
-            with self.assertRaises(OSError):
-                file_io.check_or_mkdirs("file:///some/path")
-
-            with self.assertRaises(OSError):
-                file_io.write_file("file:///some/path", "content", overwrite=False)
-
-            with self.assertRaises(OSError):
-                file_io.copy_file("file:///src", "file:///dst", overwrite=False)
-
-            with patch.object(file_io, 'read_file_utf8', side_effect=Exception("Read error")):
+            with patch('builtins.open', side_effect=OSError("Permission denied")):
                 with self.assertRaises(OSError):
-                    file_io.read_overwritten_file_utf8("file:///some/path")
+                    file_io.new_output_stream("file:///some/path/file.txt")
 
-            mock_filesystem.get_file_info.side_effect = OSError("Network error")
-            file_io.filesystem = mock_filesystem
+            mock_path = MagicMock(spec=Path)
+            mock_path.is_dir.side_effect = OSError("Permission denied")
+            with patch.object(file_io, '_to_file', return_value=mock_path):
+                with self.assertRaises(OSError):
+                    file_io.check_or_mkdirs("file:///some/path")
 
-            with self.assertRaises(OSError):
-                file_io.rename("file:///src", "file:///dst")
+            with patch('builtins.open', side_effect=OSError("Permission denied")):
+                with self.assertRaises(OSError):
+                    file_io.write_file("file:///some/path", "content", overwrite=False)
+
+            with patch('builtins.open', side_effect=OSError("Permission denied")):
+                with self.assertRaises(OSError):
+                    file_io.copy_file("file:///src", "file:///dst", overwrite=False)
+
+            with patch.object(file_io, 'exists', return_value=True):
+                with patch.object(file_io, 'read_file_utf8', side_effect=OSError("Read error")):
+                    with self.assertRaises(OSError) as context:
+                        file_io.read_overwritten_file_utf8("file:///some/path")
+                    self.assertIn("Read error", str(context.exception))
+
+            # rename() catches OSError and returns False (consistent with Java implementation)
+            mock_src_path = MagicMock(spec=Path)
+            mock_dst_path = MagicMock(spec=Path)
+            mock_dst_path.parent = MagicMock()
+            mock_dst_path.parent.exists.return_value = True
+            mock_dst_path.exists.return_value = False
+            mock_src_path.rename.side_effect = OSError("Network error")
+            with patch.object(file_io, '_to_file', side_effect=[mock_src_path, mock_dst_path]):
+                # rename() catches OSError and returns False, doesn't raise
+                result = file_io.rename("file:///src", "file:///dst")
+                self.assertFalse(result, "rename() should return False when OSError occurs")
 
             file_io.delete_quietly("file:///some/path")
             file_io.delete_directory_quietly("file:///some/path")
@@ -208,7 +220,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             test_dir = os.path.join(temp_dir, "test_dir")
             os.makedirs(test_dir)
@@ -226,7 +238,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_delete_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             result = file_io.delete(f"file://{temp_dir}/nonexistent.txt")
             self.assertFalse(result, "delete() should return False when file does not exist")
@@ -240,7 +252,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_mkdirs_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             test_file = os.path.join(temp_dir, "test_file.txt")
             with open(test_file, "w") as f:
@@ -256,7 +268,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_rename_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             src_file = os.path.join(temp_dir, "src.txt")
             dst_file = os.path.join(temp_dir, "dst.txt")
@@ -274,7 +286,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_get_file_status_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             with self.assertRaises(FileNotFoundError) as context:
                 file_io.get_file_status(f"file://{temp_dir}/nonexistent.txt")
@@ -302,7 +314,7 @@ class FileIOTest(unittest.TestCase):
         temp_dir = tempfile.mkdtemp(prefix="file_io_copy_test_")
         try:
             warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
+            file_io = LocalFileIO(warehouse_path, Options({}))
 
             source_file = os.path.join(temp_dir, "source.txt")
             target_file = os.path.join(temp_dir, "target.txt")
@@ -338,22 +350,29 @@ class FileIOTest(unittest.TestCase):
     def test_try_to_write_atomic(self):
         temp_dir = tempfile.mkdtemp(prefix="file_io_try_write_atomic_test_")
         try:
-            warehouse_path = f"file://{temp_dir}"
-            file_io = FileIO(warehouse_path, {})
-
             target_dir = os.path.join(temp_dir, "target_dir")
+            normal_file = os.path.join(temp_dir, "normal_file.txt")
+            
+            from pypaimon.filesystem.local_file_io import LocalFileIO
+            local_file_io = LocalFileIO(f"file://{temp_dir}", Options({}))
             os.makedirs(target_dir)
-            
-            result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
-            self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
-            
-            self.assertTrue(os.path.isdir(target_dir))
+            self.assertFalse(
+                local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                "LocalFileIO should return False when target is a directory")
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
             
-            normal_file = os.path.join(temp_dir, "normal_file.txt")
-            result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
-            self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
-            self.assertTrue(os.path.exists(normal_file))
+            self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
+            with open(normal_file, "r") as f:
+                self.assertEqual(f.read(), "test content")
+            
+            os.remove(normal_file)
+            local_file_io = LocalFileIO(f"file://{temp_dir}", Options({}))
+            self.assertFalse(
+                local_file_io.try_to_write_atomic(f"file://{target_dir}", "test content"),
+                "LocalFileIO should return False when target is a directory")
+            self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
+            
+            self.assertTrue(local_file_io.try_to_write_atomic(f"file://{normal_file}", "test content"))
             with open(normal_file, "r") as f:
                 self.assertEqual(f.read(), "test content")
         finally:
