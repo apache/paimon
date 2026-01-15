@@ -50,6 +50,7 @@ from pypaimon.read.reader.key_value_unwrap_reader import \
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader, SampleBatchReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
+from pypaimon.read.sampled_split import SampledSplit
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.schema.data_types import DataField
@@ -333,41 +334,32 @@ class SplitRead(ABC):
 class RawFileSplitRead(SplitRead):
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
-        # If the current file needs to be further divided for reading, use ShardBatchReader
-        # Check if this is a SlicedSplit to get shard_file_idx_map
-        shard_file_idx_map = (
-            self.split.shard_file_idx_map() if isinstance(self.split, SlicedSplit) else {}
-        )
-        if file.file_name in shard_file_idx_map:
-            (start_pos, end_pos) = shard_file_idx_map[file.file_name]
-            if (start_pos, end_pos) == (-1, -1):
-                return None
-            else:
-                file_batch_reader = ShardBatchReader(self.file_reader_supplier(
-                    file=file,
-                    for_merge_read=False,
-                    read_fields=read_fields,
-                    row_tracking_enabled=True), start_pos, end_pos)
-        if file.file_name in self.split.shard_file_idx_map:
-            read_ranges = self.split.shard_file_idx_map[file.file_name]
-            if len(read_ranges) == 1:
-                read_range = read_ranges[0]
-                (start_pos, end_pos) = read_range.start, read_range.stop
-                if (start_pos, end_pos) == (-1, -1):
+        if isinstance(self.split, SlicedSplit):
+            shard_file_idx_map = self.split.shard_file_idx_map()
+            if file.file_name in shard_file_idx_map:
+                (begin_pos, end_pos) = shard_file_idx_map[file.file_name]
+                if (begin_pos, end_pos) == (-1, -1):
                     return None
                 else:
                     file_batch_reader = ShardBatchReader(self.file_reader_supplier(
                         file=file,
                         for_merge_read=False,
                         read_fields=read_fields,
-                        row_tracking_enabled=True), start_pos, end_pos)
+                        row_tracking_enabled=True), begin_pos, end_pos)
             else:
-                sample_positions = [read_range.start for read_range in read_ranges]
-                file_batch_reader = SampleBatchReader(self.file_reader_supplier(
+                file_batch_reader = self.file_reader_supplier(
                     file=file,
                     for_merge_read=False,
                     read_fields=read_fields,
-                    row_tracking_enabled=True), sample_positions)
+                    row_tracking_enabled=True)
+        elif isinstance(self.split, SampledSplit):
+            sampled_file_idx_map = self.split.sampled_file_idx_map()
+            sample_positions = sampled_file_idx_map[file.file_name]
+            file_batch_reader = SampleBatchReader(self.file_reader_supplier(
+                file=file,
+                for_merge_read=False,
+                read_fields=read_fields,
+                row_tracking_enabled=True), sample_positions)
         else:
             file_batch_reader = self.file_reader_supplier(
                 file=file,
@@ -579,37 +571,32 @@ class DataEvolutionSplitRead(SplitRead):
 
     def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> Optional[RecordReader]:
         """Create a file reader for a single file."""
-        # If the current file needs to be further divided for reading, use ShardBatchReader
-        # Check if this is a SlicedSplit to get shard_file_idx_map
-        shard_file_idx_map = (
-            self.split.shard_file_idx_map() if isinstance(self.split, SlicedSplit) else {}
-        )
-        if file.file_name in shard_file_idx_map:
-            (begin_pos, end_pos) = shard_file_idx_map[file.file_name]
-            if (begin_pos, end_pos) == (-1, -1):
-                return None
-            else:
-                return ShardBatchReader(self.file_reader_supplier(
-        if file.file_name in self.split.shard_file_idx_map:
-            read_ranges = self.split.shard_file_idx_map[file.file_name]
-            if len(read_ranges) == 1:
-                read_range = read_ranges[0]
-                (start_pos, end_pos) = read_range.start, read_range.stop
-                if (start_pos, end_pos) == (-1, -1):
+        if isinstance(self.split, SlicedSplit):
+            shard_file_idx_map = self.split.shard_file_idx_map()
+            if file.file_name in shard_file_idx_map:
+                (begin_pos, end_pos) = shard_file_idx_map[file.file_name]
+                if (begin_pos, end_pos) == (-1, -1):
                     return None
                 else:
                     return ShardBatchReader(self.file_reader_supplier(
                         file=file,
                         for_merge_read=False,
                         read_fields=read_fields,
-                        row_tracking_enabled=True), start_pos, end_pos)
+                        row_tracking_enabled=True), begin_pos, end_pos)
             else:
-                sample_positions = [read_range.start for read_range in read_ranges]
-                return SampleBatchReader(self.file_reader_supplier(
+                return self.file_reader_supplier(
                     file=file,
                     for_merge_read=False,
                     read_fields=read_fields,
-                    row_tracking_enabled=True), sample_positions)
+                    row_tracking_enabled=True)
+        elif isinstance(self.split, SampledSplit):
+            sampled_file_idx_map = self.split.sampled_file_idx_map()
+            sample_positions = sampled_file_idx_map[file.file_name]
+            return SampleBatchReader(self.file_reader_supplier(
+                file=file,
+                for_merge_read=False,
+                read_fields=read_fields,
+                row_tracking_enabled=True), sample_positions)
         else:
             return self.file_reader_supplier(
                 file=file,

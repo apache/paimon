@@ -15,11 +15,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import random
 from collections import defaultdict
 from typing import List, Dict, Tuple
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.read.sampled_split import SampledSplit
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
@@ -41,13 +43,15 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         if self.start_pos_of_this_subtask is not None:
             # shard data range: [plan_start_pos, plan_end_pos)
             partitioned_files, plan_start_pos, plan_end_pos = \
-                self.__filter_by_slice(
+                self._filter_by_slice(
                     partitioned_files,
                     self.start_pos_of_this_subtask,
                     self.end_pos_of_this_subtask
                 )
         elif self.idx_of_this_subtask is not None:
             partitioned_files, plan_start_pos, plan_end_pos = self._filter_by_shard(partitioned_files)
+        elif self.sample_num_rows is not None:
+            partitioned_files, file_positions = self._filter_by_sample(partitioned_files)
 
         def weight_func(f: DataFileMeta) -> int:
             return max(f.file_size, self.open_file_cost)
@@ -68,6 +72,8 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
 
         if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
             splits = self._wrap_to_sliced_splits(splits, plan_start_pos, plan_end_pos)
+        elif self.sample_num_rows is not None:
+            splits = self._wrap_to_sampled_splits(splits, file_positions)
 
         return splits
 
@@ -76,12 +82,12 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         file_end_pos = 0  # end row position of current file in all splits data
 
         for split in splits:
-            shard_file_idx_map = self.__compute_split_file_idx_map(
+            shard_file_idx_map = self._compute_split_file_idx_map(
                 plan_start_pos, plan_end_pos, split, file_end_pos
             )
             file_end_pos = shard_file_idx_map[self.NEXT_POS_KEY]
             del shard_file_idx_map[self.NEXT_POS_KEY]
-            
+
             if shard_file_idx_map:
                 sliced_splits.append(SlicedSplit(split, shard_file_idx_map))
             else:
@@ -90,10 +96,21 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         return sliced_splits
 
     @staticmethod
-    def __filter_by_slice(
-        partitioned_files: defaultdict,
-        start_pos: int,
-        end_pos: int
+    def _wrap_to_sampled_splits(splits: List[Split], file_positions: Dict[str, List[int]]) -> List[Split]:
+        # Set sample file positions for each split
+        sampled_splits = []
+        for split in splits:
+            sampled_file_idx_map = {}
+            for file in split.files:
+                sampled_file_idx_map[file.file_name] = file_positions[file.file_name]
+            sampled_splits.append(SampledSplit(split, sampled_file_idx_map))
+        return sampled_splits
+
+    @staticmethod
+    def _filter_by_slice(
+            partitioned_files: defaultdict,
+            start_pos: int,
+            end_pos: int
     ) -> tuple:
         plan_start_pos = 0
         plan_end_pos = 0
@@ -142,21 +159,44 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         # Calculate shard range using shared helper
         start_pos, end_pos = self._compute_shard_range(total_row)
 
-        return self.__filter_by_slice(partitioned_files, start_pos, end_pos)
+        return self._filter_by_slice(partitioned_files, start_pos, end_pos)
+
+    def _filter_by_sample(self, partitioned_files) -> (defaultdict, Dict[str, List[int]]):
+        """
+        Randomly sample num_rows data from partitioned_files:
+        1. First use random to generate num_rows indexes
+        2. Iterate through partitioned_files, find the file entries where corresponding indexes are located,
+           add them to filtered_partitioned_files, and for each entry, add indexes to the list
+        """
+        # Calculate total number of rows
+        total_rows = 0
+        for key, file_entries in partitioned_files.items():
+            for entry in file_entries:
+                total_rows += entry.file.row_count
+
+        # Generate random sample indexes
+        sample_indexes = sorted(random.sample(range(total_rows), self.sample_num_rows))
+
+        # Map each sample index to its corresponding file and local index
+        filtered_partitioned_files = defaultdict(list)
+        file_positions = {}  # {file_name: [local_indexes]}
+        self._compute_file_sample_idx_map(partitioned_files, filtered_partitioned_files, file_positions,
+                                          sample_indexes, is_blob=False)
+        return filtered_partitioned_files, file_positions
 
     @staticmethod
-    def __compute_split_file_idx_map(
-        plan_start_pos: int,
-        plan_end_pos: int,
-        split: Split,
-        file_end_pos: int
+    def _compute_split_file_idx_map(
+            plan_start_pos: int,
+            plan_end_pos: int,
+            split: Split,
+            file_end_pos: int
     ) -> Dict[str, Tuple[int, int]]:
         """
         Compute file index map for a split, determining which rows to read from each file.
 
         """
         shard_file_idx_map = {}
-        
+
         for file in split.files:
             file_begin_pos = file_end_pos  # Starting row position of current file in all data
             file_end_pos += file.row_count  # Update to row position after current file
@@ -165,7 +205,7 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
             file_range = AppendTableSplitGenerator._compute_file_range(
                 plan_start_pos, plan_end_pos, file_begin_pos, file.row_count
             )
-            
+
             if file_range is not None:
                 shard_file_idx_map[file.file_name] = file_range
 

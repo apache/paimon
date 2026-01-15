@@ -18,8 +18,6 @@
 
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
