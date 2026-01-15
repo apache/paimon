@@ -26,6 +26,9 @@ from pypaimon.common.options.config import OssOptions
 
 def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:
     """Convert path and extract storage options for Lance format."""
+    if hasattr(file_io, 'file_io'):
+        file_io = file_io.file_io()
+    
     scheme, _, _ = file_io.parse_location(file_path)
     storage_options = None
     file_path_for_lance = file_io.to_filesystem_path(file_path)

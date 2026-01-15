@@ -79,7 +79,7 @@ class RESTTokenFileIO(FileIO):
         # api_instance will be recreated when needed
         self.api_instance = None
 
-    def _file_io(self) -> FileIO:
+    def file_io(self) -> FileIO:
         self.try_to_refresh_token()
 
         if self.token is None:
@@ -117,55 +117,55 @@ class RESTTokenFileIO(FileIO):
         return merged_token
 
     def new_input_stream(self, path: str):
-        return self._file_io().new_input_stream(path)
+        return self.file_io().new_input_stream(path)
 
     def new_output_stream(self, path: str):
-        return self._file_io().new_output_stream(path)
+        return self.file_io().new_output_stream(path)
 
     def get_file_status(self, path: str):
-        return self._file_io().get_file_status(path)
+        return self.file_io().get_file_status(path)
 
     def list_status(self, path: str):
-        return self._file_io().list_status(path)
+        return self.file_io().list_status(path)
 
     def exists(self, path: str) -> bool:
-        return self._file_io().exists(path)
+        return self.file_io().exists(path)
 
     def delete(self, path: str, recursive: bool = False) -> bool:
-        return self._file_io().delete(path, recursive)
+        return self.file_io().delete(path, recursive)
 
     def mkdirs(self, path: str) -> bool:
-        return self._file_io().mkdirs(path)
+        return self.file_io().mkdirs(path)
 
     def rename(self, src: str, dst: str) -> bool:
-        return self._file_io().rename(src, dst)
+        return self.file_io().rename(src, dst)
 
     def copy_file(self, source_path: str, target_path: str, overwrite: bool = False):
-        return self._file_io().copy_file(source_path, target_path, overwrite)
+        return self.file_io().copy_file(source_path, target_path, overwrite)
 
     def to_filesystem_path(self, path: str) -> str:
-        return self._file_io().to_filesystem_path(path)
+        return self.file_io().to_filesystem_path(path)
 
     def try_to_write_atomic(self, path: str, content: str) -> bool:
-        return self._file_io().try_to_write_atomic(path, content)
+        return self.file_io().try_to_write_atomic(path, content)
 
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
-        return self._file_io().write_parquet(path, data, compression, zstd_level, **kwargs)
+        return self.file_io().write_parquet(path, data, compression, zstd_level, **kwargs)
 
     def write_orc(self, path: str, data, compression: str = 'zstd',
                   zstd_level: int = 1, **kwargs):
-        return self._file_io().write_orc(path, data, compression, zstd_level, **kwargs)
+        return self.file_io().write_orc(path, data, compression, zstd_level, **kwargs)
 
     def write_avro(self, path: str, data, avro_schema=None,
                    compression: str = 'zstd', zstd_level: int = 1, **kwargs):
-        return self._file_io().write_avro(path, data, avro_schema, compression, zstd_level, **kwargs)
+        return self.file_io().write_avro(path, data, avro_schema, compression, zstd_level, **kwargs)
 
     def write_lance(self, path: str, data, **kwargs):
-        return self._file_io().write_lance(path, data, **kwargs)
+        return self.file_io().write_lance(path, data, **kwargs)
 
     def write_blob(self, path: str, data, blob_as_descriptor: bool, **kwargs):
-        return self._file_io().write_blob(path, data, blob_as_descriptor, **kwargs)
+        return self.file_io().write_blob(path, data, blob_as_descriptor, **kwargs)
 
     @property
     def uri_reader_factory(self):
@@ -177,7 +177,7 @@ class RESTTokenFileIO(FileIO):
 
     @property
     def filesystem(self):
-        return self._file_io().filesystem
+        return self.file_io().filesystem
 
     def try_to_refresh_token(self):
         if self.should_refresh():
