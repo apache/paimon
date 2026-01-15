@@ -1320,3 +1320,74 @@ class ReaderBasicTest(unittest.TestCase):
 
         # Verify the error message contains the expected text
         self.assertIn("Table Type", str(context.exception))
+
+    def test_read_batch_size_config(self):
+        from pypaimon.common.options.core_options import CoreOptions
+        from pypaimon.common.options import Options
+
+        options = Options({})
+        core_options = CoreOptions(options)
+        self.assertEqual(core_options.read_batch_size(), 1024,
+                         "Default read_batch_size should be 1024")
+
+        options = Options({CoreOptions.READ_BATCH_SIZE.key(): '512'})
+        core_options = CoreOptions(options)
+        self.assertEqual(core_options.read_batch_size(), 512,
+                         "read_batch_size should read from options")
+
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('value', pa.string())
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={CoreOptions.READ_BATCH_SIZE.key(): '10'}
+        )
+        self.catalog.create_table('default.test_read_batch_size', schema, False)
+        table = self.catalog.get_table('default.test_read_batch_size')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'id': list(range(50)),
+            'value': [f'value_{i}' for i in range(50)]
+        }, schema=pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        self.assertEqual(table.options.read_batch_size(), 10,
+                         "Table should have read_batch_size=10 from options")
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        
+        if splits:
+            # Use _create_split_read to create reader
+            split_read = table_read._create_split_read(splits[0])
+            reader = split_read.create_reader()
+            batch_count = 0
+            total_rows = 0
+            max_batch_size = 0
+            
+            try:
+                while True:
+                    batch = reader.read_arrow_batch()
+                    if batch is None:
+                        break
+                    batch_count += 1
+                    batch_rows = batch.num_rows
+                    total_rows += batch_rows
+                    max_batch_size = max(max_batch_size, batch_rows)
+            finally:
+                reader.close()
+            
+            self.assertGreater(batch_count, 1,
+                               f"With batch_size=10, should get multiple batches, got {batch_count}")
+            self.assertEqual(total_rows, 50, "Should read all 50 rows")
+            self.assertLessEqual(max_batch_size, 20,
+                                 f"Max batch size should be close to configured 10, got {max_batch_size}")

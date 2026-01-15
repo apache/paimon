@@ -411,6 +411,13 @@ class CoreOptions:
         .with_description("Whether to L2 normalize vectors for cosine similarity.")
     )
 
+    READ_BATCH_SIZE: ConfigOption[int] = (
+        ConfigOptions.key("read.batch-size")
+        .int_type()
+        .default_value(1024)
+        .with_description("Read batch size for any file format if it supports.")
+    )
+
     def __init__(self, options: Options):
         self.options = options
 
@@ -586,3 +593,6 @@ class CoreOptions:
 
     def vector_normalize(self, default=None):
         return self.options.get(CoreOptions.VECTOR_NORMALIZE, default)
+
+    def read_batch_size(self, default=None) -> int:
+        return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
