@@ -21,15 +21,16 @@ from pypaimon.read.split import Split
 
 class SampledSplit(Split):
     """
-    Wrapper for Split that adds file-level slicing information.
+    A Split wrapper that contains sampled row indexes for each file.
 
-    This is used when a split needs to be further divided at the file level,
-    storing the start and end row indices for each file in shard_file_idx_map.
+    This class wraps a data split and maintains a mapping from file names to
+    lists of sampled row indexes. It is used for random sampling scenarios where
+    only specific rows from each file need to be read.
 
-    Maps file_name -> (start_row, end_row) where:
-    - start_row: starting row index within the file (inclusive)
-    - end_row: ending row index within the file (exclusive)
-    - (-1, -1): file should be skipped entirely
+    Attributes:
+        _data_split: The underlying data split being wrapped.
+        _sampled_file_idx_map: A dictionary mapping file names to lists of
+            sampled row indexes within each file.
     """
 
     def __init__(
@@ -87,14 +88,14 @@ class SampledSplit(Split):
         return self._data_split.data_deletion_files
 
     def __eq__(self, other):
-        if not isinstance(other, SlicedSplit):
+        if not isinstance(other, SampledSplit):
             return False
         return (self._data_split == other._data_split and
-                self._shard_file_idx_map == other._shard_file_idx_map)
+                self._sampled_file_idx_map == other._sampled_file_idx_map)
 
     def __hash__(self):
-        return hash((id(self._data_split), tuple(sorted(self._shard_file_idx_map.items()))))
+        return hash((id(self._data_split), tuple(sorted(self._sampled_file_idx_map.items()))))
 
     def __repr__(self):
         return (f"SlicedSplit(data_split={self._data_split}, "
-                f"shard_file_idx_map={self._shard_file_idx_map})")
+                f"shard_file_idx_map={self._sampled_file_idx_map})")
