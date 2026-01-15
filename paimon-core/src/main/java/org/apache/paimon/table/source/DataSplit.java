@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileSplitBoundary;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
@@ -47,7 +48,9 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -78,6 +81,12 @@ public class DataSplit implements Split {
 
     private boolean isStreaming = false;
     private boolean rawConvertible;
+
+    /**
+     * Optional file split boundaries for finer-grained splitting. Maps file index in dataFiles to
+     * list of boundaries. This is transient (not serialized) to maintain backward compatibility.
+     */
+    @Nullable private transient Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries;
 
     public DataSplit() {}
 
@@ -243,24 +252,50 @@ public class DataSplit implements Split {
     @Override
     public Optional<List<RawFile>> convertToRawFiles() {
         if (rawConvertible) {
-            return Optional.of(
-                    dataFiles.stream()
-                            .map(f -> makeRawTableFile(bucketPath, f))
-                            .collect(Collectors.toList()));
+            List<RawFile> rawFiles = new ArrayList<>();
+            for (int i = 0; i < dataFiles.size(); i++) {
+                DataFileMeta file = dataFiles.get(i);
+                List<FileSplitBoundary> boundaries =
+                        fileSplitBoundaries != null ? fileSplitBoundaries.get(i) : null;
+
+                if (boundaries != null && !boundaries.isEmpty()) {
+                    // Create one RawFile per boundary
+                    // For fine-grained splits, there should be exactly one boundary per file
+                    // (each DataSplit represents one row group/stripe)
+                    for (FileSplitBoundary boundary : boundaries) {
+                        rawFiles.add(
+                                makeRawTableFile(
+                                        bucketPath,
+                                        file,
+                                        boundary.offset(),
+                                        boundary.length(),
+                                        boundary.rowCount()));
+                    }
+                } else {
+                    // No boundaries, create single RawFile for whole file
+                    rawFiles.add(makeRawTableFile(bucketPath, file));
+                }
+            }
+            return Optional.of(rawFiles);
         } else {
             return Optional.empty();
         }
     }
 
     private RawFile makeRawTableFile(String bucketPath, DataFileMeta file) {
+        return makeRawTableFile(bucketPath, file, 0, file.fileSize(), file.rowCount());
+    }
+
+    private RawFile makeRawTableFile(
+            String bucketPath, DataFileMeta file, long offset, long length, long rowCount) {
         return new RawFile(
                 file.externalPath().orElse(bucketPath + "/" + file.fileName()),
                 file.fileSize(),
-                0,
-                file.fileSize(),
+                offset,
+                length,
                 file.fileFormat(),
                 file.schemaId(),
-                file.rowCount());
+                rowCount);
     }
 
     @Override
@@ -364,6 +399,7 @@ public class DataSplit implements Split {
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawConvertible = other.rawConvertible;
+        this.fileSplitBoundaries = other.fileSplitBoundaries;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -553,6 +589,14 @@ public class DataSplit implements Split {
 
         public Builder rawConvertible(boolean rawConvertible) {
             this.split.rawConvertible = rawConvertible;
+            return this;
+        }
+
+        public Builder withFileSplitBoundaries(
+                Map<Integer, List<FileSplitBoundary>> fileSplitBoundaries) {
+            if (fileSplitBoundaries != null && !fileSplitBoundaries.isEmpty()) {
+                this.split.fileSplitBoundaries = new HashMap<>(fileSplitBoundaries);
+            }
             return this;
         }
 
