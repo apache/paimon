@@ -189,32 +189,6 @@ public class ProjectedRow implements InternalRow {
     }
 
     /**
-     * Like {@link #from(int[])}, but throws {@link IllegalArgumentException} if the provided {@code
-     * projection} array contains nested projections, which are not supported by {@link
-     * ProjectedRow}.
-     *
-     * <p>The array represents the mapping of the fields of the original {@link DataType}, including
-     * nested rows. For example, {@code [[0, 2, 1], ...]} specifies to include the 2nd field of the
-     * 3rd field of the 1st field in the top-level row.
-     *
-     * @see Projection
-     * @see ProjectedRow
-     */
-    public static ProjectedRow from(int[][] projection) throws IllegalArgumentException {
-        return new ProjectedRow(
-                Arrays.stream(projection)
-                        .mapToInt(
-                                arr -> {
-                                    if (arr.length != 1) {
-                                        throw new IllegalArgumentException(
-                                                "ProjectedRowData doesn't support nested projections");
-                                    }
-                                    return arr[0];
-                                })
-                        .toArray());
-    }
-
-    /**
      * Create an empty {@link ProjectedRow} starting from a {@code projection} array.
      *
      * <p>The array represents the mapping of the fields of the original {@link DataType}. For
@@ -233,18 +207,5 @@ public class ProjectedRow implements InternalRow {
                 readType.getFields().stream()
                         .mapToInt(field -> tableType.getFieldIndexByFieldId(field.id()))
                         .toArray());
-    }
-
-    /**
-     * Create an empty {@link ProjectedRow} starting from a {@link Projection}.
-     *
-     * <p>Throws {@link IllegalStateException} if the provided {@code projection} array contains
-     * nested projections, which are not supported by {@link ProjectedRow}.
-     *
-     * @see Projection
-     * @see ProjectedRow
-     */
-    public static ProjectedRow from(Projection projection) {
-        return new ProjectedRow(projection.toTopLevelIndexes());
     }
 }

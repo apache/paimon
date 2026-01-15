@@ -34,7 +34,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ArrayUtils;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
@@ -51,8 +50,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FIELDS_SEPARATOR;
@@ -379,12 +376,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
 
         private final boolean ignoreDelete;
         private final RowType rowType;
-
-        private final List<DataType> tableTypes;
 
         private final Map<Integer, Supplier<FieldsComparator>> fieldSeqComparators;
 
@@ -397,7 +392,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         private Factory(Options options, RowType rowType, List<String> primaryKeys) {
             this.ignoreDelete = options.get(CoreOptions.IGNORE_DELETE);
             this.rowType = rowType;
-            this.tableTypes = rowType.getFieldTypes();
             this.removeRecordOnDelete = options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_DELETE);
             String removeRecordOnSequenceGroup =
                     options.get(PARTIAL_UPDATE_REMOVE_RECORD_ON_SEQUENCE_GROUP);
@@ -498,26 +492,29 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
 
         @Override
-        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            if (projection != null) {
-                Map<Integer, FieldsComparator> projectedSeqComparators = new HashMap<>();
-                Map<Integer, FieldAggregator> projectedAggregators = new HashMap<>();
-                int[] projects = Projection.of(projection).toTopLevelIndexes();
+        public MergeFunction<KeyValue> create(@Nullable RowType readType) {
+            RowType targetType = readType != null ? readType : rowType;
+            Map<Integer, FieldsComparator> projectedSeqComparators = new HashMap<>();
+            Map<Integer, FieldAggregator> projectedAggregators = new HashMap<>();
+
+            if (readType != null) {
+                // Build index mapping from table schema to read schema
+                List<String> readFieldNames = readType.getFieldNames();
                 Map<Integer, Integer> indexMap = new HashMap<>();
-                List<DataField> dataFields = rowType.getFields();
-                List<DataType> newDataTypes = new ArrayList<>();
-
-                for (int i = 0; i < projects.length; i++) {
-                    indexMap.put(projects[i], i);
-                    newDataTypes.add(dataFields.get(projects[i]).type());
+                for (int i = 0; i < readType.getFieldCount(); i++) {
+                    String fieldName = readFieldNames.get(i);
+                    int oldIndex = rowType.getFieldIndex(fieldName);
+                    if (oldIndex >= 0) {
+                        indexMap.put(oldIndex, i);
+                    }
                 }
-                RowType newRowType = RowType.builder().fields(newDataTypes).build();
 
+                // Remap sequence comparators
                 fieldSeqComparators.forEach(
                         (field, comparatorSupplier) -> {
-                            FieldsComparator comparator = comparatorSupplier.get();
                             int newField = indexMap.getOrDefault(field, -1);
                             if (newField != -1) {
+                                FieldsComparator comparator = comparatorSupplier.get();
                                 int[] newSequenceFields =
                                         Arrays.stream(comparator.compareFields())
                                                 .map(
@@ -532,71 +529,57 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                                                         + "for new field. new field "
                                                                                         + "index is %s",
                                                                                 newField));
-                                                            } else {
-                                                                return newIndex;
                                                             }
+                                                            return newIndex;
                                                         })
                                                 .toArray();
                                 projectedSeqComparators.put(
                                         newField,
                                         UserDefinedSeqComparator.create(
-                                                newRowType, newSequenceFields, true));
+                                                readType, newSequenceFields, true));
                             }
                         });
-                for (int i = 0; i < projects.length; i++) {
-                    if (fieldAggregators.containsKey(projects[i])) {
-                        projectedAggregators.put(i, fieldAggregators.get(projects[i]).get());
+
+                // Remap field aggregators
+                for (int oldIndex : indexMap.keySet()) {
+                    if (fieldAggregators.containsKey(oldIndex)) {
+                        int newIndex = indexMap.get(oldIndex);
+                        projectedAggregators.put(newIndex, fieldAggregators.get(oldIndex).get());
                     }
                 }
-
-                List<DataType> projectedTypes = Projection.of(projection).project(tableTypes);
-                return new PartialUpdateMergeFunction(
-                        createFieldGetters(projectedTypes),
-                        ignoreDelete,
-                        projectedSeqComparators,
-                        projectedAggregators,
-                        !fieldSeqComparators.isEmpty(),
-                        removeRecordOnDelete,
-                        sequenceGroupPartialDelete,
-                        ArrayUtils.toPrimitiveBoolean(
-                                projectedTypes.stream()
-                                        .map(DataType::isNullable)
-                                        .toArray(Boolean[]::new)));
             } else {
-                Map<Integer, FieldsComparator> fieldSeqComparators = new HashMap<>();
+                // Use original mappings
                 this.fieldSeqComparators.forEach(
-                        (f, supplier) -> fieldSeqComparators.put(f, supplier.get()));
-                Map<Integer, FieldAggregator> fieldAggregators = new HashMap<>();
+                        (f, supplier) -> projectedSeqComparators.put(f, supplier.get()));
                 this.fieldAggregators.forEach(
-                        (f, supplier) -> fieldAggregators.put(f, supplier.get()));
-                return new PartialUpdateMergeFunction(
-                        createFieldGetters(tableTypes),
-                        ignoreDelete,
-                        fieldSeqComparators,
-                        fieldAggregators,
-                        !fieldSeqComparators.isEmpty(),
-                        removeRecordOnDelete,
-                        sequenceGroupPartialDelete,
-                        ArrayUtils.toPrimitiveBoolean(
-                                rowType.getFieldTypes().stream()
-                                        .map(DataType::isNullable)
-                                        .toArray(Boolean[]::new)));
+                        (f, supplier) -> projectedAggregators.put(f, supplier.get()));
             }
+
+            List<DataType> fieldTypes = targetType.getFieldTypes();
+            return new PartialUpdateMergeFunction(
+                    createFieldGetters(fieldTypes),
+                    ignoreDelete,
+                    projectedSeqComparators,
+                    projectedAggregators,
+                    !fieldSeqComparators.isEmpty(),
+                    removeRecordOnDelete,
+                    sequenceGroupPartialDelete,
+                    ArrayUtils.toPrimitiveBoolean(
+                            fieldTypes.stream().map(DataType::isNullable).toArray(Boolean[]::new)));
         }
 
         @Override
-        public AdjustedProjection adjustProjection(@Nullable int[][] projection) {
+        public RowType adjustReadType(RowType readType) {
             if (fieldSeqComparators.isEmpty()) {
-                return new AdjustedProjection(projection, null);
+                return readType;
             }
 
-            if (projection == null) {
-                return new AdjustedProjection(null, null);
-            }
             LinkedHashSet<Integer> extraFields = new LinkedHashSet<>();
-            int[] topProjects = Projection.of(projection).toTopLevelIndexes();
-            Set<Integer> indexSet = Arrays.stream(topProjects).boxed().collect(Collectors.toSet());
-            for (int index : topProjects) {
+            List<DataField> readFields = readType.getFields();
+            List<String> readFieldNames = readType.getFieldNames();
+            List<String> rowFieldNames = rowType.getFieldNames();
+            for (DataField readField : readFields) {
+                int index = rowType.getFieldIndex(readField.name());
                 Supplier<FieldsComparator> comparatorSupplier = fieldSeqComparators.get(index);
                 if (comparatorSupplier == null) {
                     continue;
@@ -604,22 +587,22 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
                 FieldsComparator comparator = comparatorSupplier.get();
                 for (int field : comparator.compareFields()) {
-                    if (!indexSet.contains(field)) {
+                    String fieldName = rowFieldNames.get(field);
+                    if (!readFieldNames.contains(fieldName)) {
                         extraFields.add(field);
                     }
                 }
             }
 
-            int[] allProjects =
-                    Stream.concat(Arrays.stream(topProjects).boxed(), extraFields.stream())
-                            .mapToInt(Integer::intValue)
-                            .toArray();
+            if (extraFields.isEmpty()) {
+                return readType;
+            }
 
-            int[][] pushDown = Projection.of(allProjects).toNestedIndexes();
-            int[][] outer =
-                    Projection.of(IntStream.range(0, topProjects.length).toArray())
-                            .toNestedIndexes();
-            return new AdjustedProjection(pushDown, outer);
+            List<DataField> allFields = new ArrayList<>(readFields);
+            for (int extraField : extraFields) {
+                allFields.add(rowType.getFields().get(extraField));
+            }
+            return new RowType(allFields);
         }
 
         private int requireField(String fieldName, List<String> fieldNames) {
