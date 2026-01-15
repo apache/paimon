@@ -18,7 +18,6 @@
 
 package org.apache.paimon.reader;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.IOUtils;
 
@@ -76,12 +75,6 @@ public class DataEvolutionFileReader implements RecordReader<InternalRow> {
 
     /** Whether any inner reader has reached end of input. */
     private boolean endOfInput;
-
-    @SuppressWarnings("unchecked")
-    public DataEvolutionFileReader(
-            int[] rowOffsets, int[] fieldOffsets, RecordReader<InternalRow>[] readers) {
-        this(rowOffsets, fieldOffsets, readers, CoreOptions.READ_BATCH_SIZE.defaultValue());
-    }
 
     @SuppressWarnings("unchecked")
     public DataEvolutionFileReader(
