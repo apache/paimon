@@ -189,6 +189,18 @@ class FileIO(ABC):
     def to_filesystem_path(self, path: str) -> str:
         return path
 
+    def parse_location(self, location: str):
+        from urllib.parse import urlparse
+        import os
+
+        uri = urlparse(location)
+        if not uri.scheme:
+            return "file", uri.netloc, os.path.abspath(location)
+        elif uri.scheme in ("hdfs", "viewfs"):
+            return uri.scheme, uri.netloc, uri.path
+        else:
+            return uri.scheme, uri.netloc, f"{uri.netloc}{uri.path}"
+
     def write_parquet(self, path: str, data, compression: str = 'zstd',
                       zstd_level: int = 1, **kwargs):
         raise NotImplementedError("write_parquet must be implemented by FileIO subclasses")
