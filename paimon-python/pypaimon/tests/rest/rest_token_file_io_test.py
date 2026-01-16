@@ -101,15 +101,13 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             target_dir = os.path.join(self.temp_dir, "target_dir")
             os.makedirs(target_dir)
-<<<<<<< HEAD
-            
+
             result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
             self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
             
             self.assertTrue(os.path.isdir(target_dir))
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
             
-=======
 
             result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
             self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
@@ -117,7 +115,6 @@ class RESTTokenFileIOTest(unittest.TestCase):
             self.assertTrue(os.path.isdir(target_dir))
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
 
->>>>>>> 5b8c6e7f3 (refresh rest token)
             normal_file = os.path.join(self.temp_dir, "normal_file.txt")
             result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
             self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
@@ -248,15 +245,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 OssOptions.OSS_ACCESS_KEY_SECRET.key(): "token-secret-key",
                 OssOptions.OSS_ENDPOINT.key(): "token-endpoint"
             }
-<<<<<<< HEAD
-            
             merged_token = file_io._merge_token_with_catalog_options(token_dict)
-            
-=======
-
-            merged_token = file_io._merge_token_with_catalog_options(token_dict)
-
->>>>>>> 5b8c6e7f3 (refresh rest token)
             self.assertEqual(
                 original_catalog_options.to_map(),
                 catalog_options_copy.to_map(),
@@ -280,19 +269,9 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-<<<<<<< HEAD
-            
             self.assertTrue(hasattr(file_io, 'filesystem'), "RESTTokenFileIO should have filesystem property")
             filesystem = file_io.filesystem
             self.assertIsNotNone(filesystem, "filesystem should not be None")
-            
-=======
-
-            self.assertTrue(hasattr(file_io, 'filesystem'), "RESTTokenFileIO should have filesystem property")
-            filesystem = file_io.filesystem
-            self.assertIsNotNone(filesystem, "filesystem should not be None")
-
->>>>>>> 5b8c6e7f3 (refresh rest token)
             self.assertTrue(hasattr(filesystem, 'open_input_file'),
                             "filesystem should support open_input_file method")
 
@@ -303,20 +282,10 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-<<<<<<< HEAD
-            
-=======
-
->>>>>>> 5b8c6e7f3 (refresh rest token)
             self.assertTrue(hasattr(file_io, 'uri_reader_factory'),
                             "RESTTokenFileIO should have uri_reader_factory property")
             uri_reader_factory = file_io.uri_reader_factory
             self.assertIsNotNone(uri_reader_factory, "uri_reader_factory should not be None")
-<<<<<<< HEAD
-            
-=======
-
->>>>>>> 5b8c6e7f3 (refresh rest token)
             self.assertTrue(hasattr(uri_reader_factory, 'create'),
                             "uri_reader_factory should support create method")
 
@@ -327,17 +296,8 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-<<<<<<< HEAD
-            
             pickled = pickle.dumps(original_file_io)
             restored_file_io = pickle.loads(pickled)
-            
-=======
-
-            pickled = pickle.dumps(original_file_io)
-            restored_file_io = pickle.loads(pickled)
-
->>>>>>> 5b8c6e7f3 (refresh rest token)
             self.assertIsNotNone(restored_file_io.filesystem,
                                  "filesystem should work after deserialization")
             self.assertIsNotNone(restored_file_io.uri_reader_factory,

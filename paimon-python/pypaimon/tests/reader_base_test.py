@@ -1365,23 +1365,13 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
-<<<<<<< HEAD
-        
-=======
-
->>>>>>> 5b8c6e7f3 (refresh rest token)
         if splits:
-            # Use _create_split_read to create reader
             split_read = table_read._create_split_read(splits[0])
             reader = split_read.create_reader()
             batch_count = 0
             total_rows = 0
             max_batch_size = 0
-<<<<<<< HEAD
-            
-=======
 
->>>>>>> 5b8c6e7f3 (refresh rest token)
             try:
                 while True:
                     batch = reader.read_arrow_batch()
@@ -1393,11 +1383,6 @@ class ReaderBasicTest(unittest.TestCase):
                     max_batch_size = max(max_batch_size, batch_rows)
             finally:
                 reader.close()
-<<<<<<< HEAD
-            
-=======
-
->>>>>>> 5b8c6e7f3 (refresh rest token)
             self.assertGreater(batch_count, 1,
                                f"With batch_size=10, should get multiple batches, got {batch_count}")
             self.assertEqual(total_rows, 50, "Should read all 50 rows")

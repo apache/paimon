@@ -26,17 +26,14 @@ from pypaimon.common.options.config import OssOptions
 
 def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[Dict[str, str]]]:
     """Convert path and extract storage options for Lance format."""
-<<<<<<< HEAD
     if hasattr(file_io, 'file_io'):
         file_io = file_io.file_io()
     
-=======
     if hasattr(file_io, 'get_merged_properties'):
         properties = file_io.get_merged_properties()
     else:
         properties = file_io.properties if hasattr(file_io, 'properties') and file_io.properties else None
 
->>>>>>> 5b8c6e7f3 (refresh rest token)
     scheme, _, _ = file_io.parse_location(file_path)
     storage_options = None
     file_path_for_lance = file_io.to_filesystem_path(file_path)
@@ -76,7 +73,7 @@ def to_lance_specified(file_io: FileIO, file_path: str) -> Tuple[str, Optional[D
                 storage_options['oss_endpoint'] = properties.get(OssOptions.OSS_ENDPOINT)
             
             storage_options['virtual_hosted_style_request'] = 'true'
-            
+
             if bucket and path:
                 file_path_for_lance = f"oss://{bucket}/{path}"
             elif bucket:
