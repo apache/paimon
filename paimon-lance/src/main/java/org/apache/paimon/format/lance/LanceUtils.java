@@ -90,7 +90,18 @@ public class LanceUtils {
         hadoopFileIOKlass = klass;
     }
 
-    public static Pair<Path, Map<String, String>> toLanceSpecified(FileIO fileIO, Path path) {
+    public static Pair<Path, Map<String, String>> toLanceSpecifiedForReader(
+            FileIO fileIO, Path path) {
+        return toLanceSpecified(fileIO, path, true);
+    }
+
+    public static Pair<Path, Map<String, String>> toLanceSpecifiedForWriter(
+            FileIO fileIO, Path path) {
+        return toLanceSpecified(fileIO, path, false);
+    }
+
+    private static Pair<Path, Map<String, String>> toLanceSpecified(
+            FileIO fileIO, Path path, boolean isRead) {
 
         URI uri = path.toUri();
         String schema = uri.getScheme();
@@ -107,7 +118,7 @@ public class LanceUtils {
         if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
             originOptions = ((OSSFileIO) fileIO).hadoopOptions();
         } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
-            originOptions = ((JindoFileIO) fileIO).hadoopOptions();
+            originOptions = ((JindoFileIO) fileIO).hadoopOptions(path, isRead ? "read" : "write");
         } else if (pluginFileIOKlass != null && pluginFileIOKlass.isInstance(fileIO)) {
             originOptions = ((PluginFileIO) fileIO).options();
         } else if (hadoopFileIOKlass != null && hadoopFileIOKlass.isInstance(fileIO)) {
