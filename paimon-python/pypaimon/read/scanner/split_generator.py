@@ -220,8 +220,8 @@ class AbstractSplitGenerator(ABC):
         else:
             num_row = base_rows_per_shard
             start_pos = (
-                    remainder * (base_rows_per_shard + 1) +
-                    (self.idx_of_this_subtask - remainder) * base_rows_per_shard
+                remainder * (base_rows_per_shard + 1) +
+                (self.idx_of_this_subtask - remainder) * base_rows_per_shard
             )
 
         end_pos = start_pos + num_row
