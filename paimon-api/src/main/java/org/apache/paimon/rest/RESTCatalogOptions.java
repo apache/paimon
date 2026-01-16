@@ -110,12 +110,14 @@ public class RESTCatalogOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Enable cache for visiting files using file io (currently only JindoFileIO supports cache).");
+
     public static final ConfigOption<String> IO_CACHE_WHITELIST_PATH =
             ConfigOptions.key("io-cache.whitelist-path")
                     .stringType()
-                    .defaultValue("bucket-,manifest")
+                    .defaultValue("bucket,manifest,index")
                     .withDescription(
                             "Cache is only applied to paths which contain the specified pattern, and * means all paths.");
+
     public static final ConfigOption<String> IO_CACHE_POLICY =
             ConfigOptions.key("io-cache.policy")
                     .stringType()
