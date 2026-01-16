@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.apache.flink.api.java.typeutils.TypeExtractor.getForClass;
 
@@ -76,7 +77,9 @@ public class KafkaDebeziumJsonDeserializationSchema
             }
 
             JsonNode valueNode = objectMapper.readValue(message.value(), JsonNode.class);
-            return new CdcSourceRecord(null, keyNode, valueNode);
+
+            Map<String, Object> kafkaMetadata = KafkaActionUtils.extractKafkaMetadata(message);
+            return new CdcSourceRecord(message.topic(), keyNode, valueNode, kafkaMetadata);
         } catch (Exception e) {
             LOG.error("Invalid Json:\n{}", new String(message.value()));
             throw e;
