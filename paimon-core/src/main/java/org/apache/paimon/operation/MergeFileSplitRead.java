@@ -24,6 +24,7 @@ import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantAccessInfoUtils;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -306,8 +307,12 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
             boolean keepDelete)
             throws IOException {
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
+        RowType mfReadType =
+                variantAccess != null
+                        ? VariantAccessInfoUtils.buildReadRowType(actualReadType(), variantAccess)
+                        : actualReadType();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
-                new ReducerMergeFunctionWrapper(mfFactory.create(actualReadType()));
+                new ReducerMergeFunctionWrapper(mfFactory.create(mfReadType));
         for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
             sectionReaders.add(
                     () ->
