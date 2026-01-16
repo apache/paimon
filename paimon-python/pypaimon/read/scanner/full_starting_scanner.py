@@ -66,13 +66,6 @@ class FullStartingScanner(StartingScanner):
         # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
         self.open_file_cost = options.source_split_open_file_cost()
-        # for shard
-        self.idx_of_this_subtask = None
-        self.number_of_para_subtasks = None
-        self.start_pos_of_this_subtask = None
-        self.end_pos_of_this_subtask = None
-        # for sample
-        self.sample_num_rows = None
 
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()

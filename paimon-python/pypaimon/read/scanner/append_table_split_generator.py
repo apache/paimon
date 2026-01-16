@@ -182,9 +182,9 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         # Map each sample index to its corresponding file and local index
         filtered_partitioned_files = defaultdict(list)
         file_positions = {}  # {file_name: BitMap of local_indexes}
-        file_positions = self._compute_file_sample_idx_map(partitioned_files, filtered_partitioned_files,
-                                                           file_positions,
-                                                           sample_indexes, is_blob=False)
+        self._compute_file_sample_idx_map(partitioned_files, filtered_partitioned_files,
+                                          file_positions,
+                                          sample_indexes, is_blob=False)
         return filtered_partitioned_files, file_positions
 
     @staticmethod
