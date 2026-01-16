@@ -372,7 +372,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       val withFirstRowId = addFirstRowId(sparkSession, mergeRows)
       assert(withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2)
       withFirstRowId
-        .repartitionByRange(col(FIRST_ROW_ID_NAME))
+        .repartition(col(FIRST_ROW_ID_NAME))
         .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
     }
 
