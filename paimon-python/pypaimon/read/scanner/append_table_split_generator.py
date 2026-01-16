@@ -84,7 +84,7 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         file_end_pos = 0  # end row position of current file in all splits data
 
         for split in splits:
-            shard_file_idx_map = self._compute_split_file_idx_map(
+            shard_file_idx_map = self._compute_split_shard_file_idx_map(
                 plan_start_pos, plan_end_pos, split, file_end_pos
             )
             file_end_pos = shard_file_idx_map[self.NEXT_POS_KEY]
@@ -182,12 +182,13 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         # Map each sample index to its corresponding file and local index
         filtered_partitioned_files = defaultdict(list)
         file_positions = {}  # {file_name: BitMap of local_indexes}
-        self._compute_file_sample_idx_map(partitioned_files, filtered_partitioned_files, file_positions,
-                                          sample_indexes, is_blob=False)
+        file_positions = self._compute_file_sample_idx_map(partitioned_files, filtered_partitioned_files,
+                                                           file_positions,
+                                                           sample_indexes, is_blob=False)
         return filtered_partitioned_files, file_positions
 
     @staticmethod
-    def _compute_split_file_idx_map(
+    def _compute_split_shard_file_idx_map(
             plan_start_pos: int,
             plan_end_pos: int,
             split: Split,

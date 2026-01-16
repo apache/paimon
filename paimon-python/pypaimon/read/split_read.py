@@ -48,7 +48,8 @@ from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
-from pypaimon.read.reader.shard_batch_reader import ShardBatchReader, SampleBatchReader
+from pypaimon.read.reader.sample_batch_reader import SampleBatchReader
+from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
 from pypaimon.read.sampled_split import SampledSplit
 from pypaimon.read.split import Split

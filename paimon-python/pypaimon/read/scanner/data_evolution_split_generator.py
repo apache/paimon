@@ -133,7 +133,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         for split in splits:
             # Compute file index map for both data and blob files
             # Blob files share the same row position tracking as data files
-            shard_file_idx_map = self._compute_split_file_idx_map(
+            shard_file_idx_map = self._compute_split_shard_file_idx_map(
                 plan_start_pos, plan_end_pos, split, file_end_pos
             )
             file_end_pos = shard_file_idx_map[self.NEXT_POS_KEY]
@@ -291,7 +291,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return split_by_row_id
 
-    def _compute_split_file_idx_map(
+    def _compute_split_shard_file_idx_map(
             self,
             plan_start_pos: int,
             plan_end_pos: int,

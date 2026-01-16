@@ -16,7 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Dict
 
 from pyroaring import BitMap
 
@@ -268,6 +268,7 @@ class AbstractSplitGenerator(ABC):
                 # Early exit if we've processed all sample indexes
             if sample_idx >= len(sample_indexes):
                 break
+        return file_positions
 
     @staticmethod
     def _compute_file_range(
