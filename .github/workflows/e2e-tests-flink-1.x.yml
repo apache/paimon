@@ -27,6 +27,8 @@ on:
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
       - 'paimon-lucene/**'
+  schedule:
+    - cron: '0 6 * * *'
 
 env:
   JDK_VERSION: 8
@@ -46,6 +48,11 @@ jobs:
         # Only Test Latest Version
         flink_version: [ '1.20' ]
         hadoop_profile: ['', 'hadoop3']
+        include:
+          # Run hadoop3 tests only on daily schedule
+          - hadoop_profile: 'hadoop3'
+            only_schedule: true
+    if: ${{ !matrix.only_schedule || github.event_name == 'schedule' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -77,7 +84,6 @@ jobs:
           if ! [ "${{ matrix.hadoop_profile }}" = "" ]; then
             profile="$profile,${{ matrix.hadoop_profile }}"
           fi
-          profile="flink-${{ matrix.flink_version }}"
           mvn -T 1C -B test -P$profile -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

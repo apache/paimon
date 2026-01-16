@@ -26,6 +26,8 @@ on:
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
       - 'paimon-lucene/**'
+  schedule:
+    - cron: '0 6 * * *'
 
 env:
   JDK_VERSION: 8
@@ -42,6 +44,11 @@ jobs:
     strategy:
       matrix:
         hadoop_profile: ['', 'hadoop3']
+        include:
+          # Run hadoop3 tests only on daily schedule
+          - hadoop_profile: 'hadoop3'
+            only_schedule: true
+    if: ${{ !matrix.only_schedule || github.event_name == 'schedule' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
