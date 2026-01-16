@@ -444,14 +444,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return false;
     }
 
-    protected boolean supportsLimitPushManifestEntries() {
-        return false;
-    }
-
-    protected Iterator<ManifestEntry> limitPushManifestEntries(Iterator<ManifestEntry> entries) {
-        throw new UnsupportedOperationException();
-    }
-
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
         throw new UnsupportedOperationException();
     }

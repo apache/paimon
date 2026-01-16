@@ -446,7 +446,7 @@ public class KeyValueFileStoreScanTest {
         KeyValueFileStoreScan scan = storePartialUpdate.newScan();
         scan.withSnapshot(snapshot.id()).withLimit(10);
         // supportsLimitPushManifestEntries should return false for PARTIAL_UPDATE
-        assertThat(scan.supportsLimitPushManifestEntries()).isFalse();
+        assertThat(scan.limitPushdownEnabled()).isFalse();
 
         // Should read all files since limit pushdown is disabled
         KeyValueFileStoreScan scanWithoutLimit = storePartialUpdate.newScan();
@@ -494,7 +494,7 @@ public class KeyValueFileStoreScanTest {
         KeyValueFileStoreScan scan = storeAggregate.newScan();
         scan.withSnapshot(snapshot.id()).withLimit(10);
         // supportsLimitPushManifestEntries should return false for AGGREGATE
-        assertThat(scan.supportsLimitPushManifestEntries()).isFalse();
+        assertThat(scan.limitPushdownEnabled()).isFalse();
 
         // Should read all files since limit pushdown is disabled
         KeyValueFileStoreScan scanWithoutLimit = storeAggregate.newScan();
@@ -538,7 +538,7 @@ public class KeyValueFileStoreScanTest {
         KeyValueFileStoreScan scan = storeWithDV.newScan();
         scan.withLimit(10);
         // supportsLimitPushManifestEntries should return false when deletion vectors are enabled
-        assertThat(scan.supportsLimitPushManifestEntries()).isFalse();
+        assertThat(scan.limitPushdownEnabled()).isFalse();
     }
 
     private void runTestExactMatch(

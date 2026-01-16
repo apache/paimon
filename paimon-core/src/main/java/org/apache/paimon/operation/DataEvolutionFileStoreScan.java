@@ -117,11 +117,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     @Override
-    public boolean supportsLimitPushManifestEntries() {
-        return false;
-    }
-
-    @Override
     protected boolean postFilterManifestEntriesEnabled() {
         return inputFilter != null;
     }

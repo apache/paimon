@@ -34,7 +34,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -89,24 +88,21 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
-    public boolean supportsLimitPushManifestEntries() {
-        return limit != null && limit > 0 && !deletionVectorsEnabled;
-    }
-
-    @Override
     protected boolean postFilterManifestEntriesEnabled() {
-        return supportsLimitPushManifestEntries();
+        return limit != null && limit > 0 && !deletionVectorsEnabled;
     }
 
     @Override
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
         checkArgument(limit != null && limit > 0 && !deletionVectorsEnabled);
-        // Use LimitAwareManifestEntryIterator for limit pushdown
-        Iterator<ManifestEntry> iterator =
-                new LimitAwareManifestEntryIterator(entries.iterator(), limit);
         List<ManifestEntry> result = new ArrayList<>();
-        while (iterator.hasNext()) {
-            result.add(iterator.next());
+        long accumulatedRowCount = 0;
+        for (ManifestEntry entry : entries) {
+            result.add(entry);
+            accumulatedRowCount += entry.file().rowCount();
+            if (accumulatedRowCount >= limit) {
+                break;
+            }
         }
         return result;
     }
@@ -171,66 +167,6 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             return predicate.evaluate(dataPredicate).remain();
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking predicate.", e);
-        }
-    }
-
-    /**
-     * Iterator that applies limit pushdown by stopping early when enough rows have been
-     * accumulated.
-     */
-    private static class LimitAwareManifestEntryIterator implements Iterator<ManifestEntry> {
-        private final Iterator<ManifestEntry> baseIterator;
-        private final long limit;
-
-        private long accumulatedRowCount = 0;
-        private ManifestEntry nextEntry = null;
-        private boolean hasNext = false;
-
-        LimitAwareManifestEntryIterator(Iterator<ManifestEntry> baseIterator, long limit) {
-            this.baseIterator = baseIterator;
-            this.limit = limit;
-            advance();
-        }
-
-        private void advance() {
-            // If we've already accumulated enough rows, stop reading more entries
-            if (accumulatedRowCount >= limit) {
-                hasNext = false;
-                nextEntry = null;
-                return;
-            }
-
-            if (baseIterator.hasNext()) {
-                nextEntry = baseIterator.next();
-                hasNext = true;
-
-                long fileRowCount = nextEntry.file().rowCount();
-                if (fileRowCount > 0) {
-                    accumulatedRowCount += fileRowCount;
-                }
-
-                return;
-            }
-
-            // No more base entries
-            hasNext = false;
-            nextEntry = null;
-        }
-
-        @Override
-        public boolean hasNext() {
-            return hasNext;
-        }
-
-        @Override
-        public ManifestEntry next() {
-            // This exception is only thrown if next() is called when hasNext() returns false.
-            if (!hasNext) {
-                throw new java.util.NoSuchElementException();
-            }
-            ManifestEntry current = nextEntry;
-            advance();
-            return current;
         }
     }
 }
