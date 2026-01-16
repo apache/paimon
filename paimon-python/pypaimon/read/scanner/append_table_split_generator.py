@@ -19,6 +19,8 @@ import random
 from collections import defaultdict
 from typing import List, Dict, Tuple
 
+from pyroaring import BitMap
+
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.sampled_split import SampledSplit
@@ -96,7 +98,7 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
         return sliced_splits
 
     @staticmethod
-    def _wrap_to_sampled_splits(splits: List[Split], file_positions: Dict[str, List[int]]) -> List[Split]:
+    def _wrap_to_sampled_splits(splits: List[Split], file_positions: Dict[str, BitMap]) -> List[Split]:
         # Set sample file positions for each split
         sampled_splits = []
         for split in splits:
@@ -179,7 +181,7 @@ class AppendTableSplitGenerator(AbstractSplitGenerator):
 
         # Map each sample index to its corresponding file and local index
         filtered_partitioned_files = defaultdict(list)
-        file_positions = {}  # {file_name: [local_indexes]}
+        file_positions = {}  # {file_name: BitMap of local_indexes}
         self._compute_file_sample_idx_map(partitioned_files, filtered_partitioned_files, file_positions,
                                           sample_indexes, is_blob=False)
         return filtered_partitioned_files, file_positions

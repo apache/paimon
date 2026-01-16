@@ -40,11 +40,11 @@ from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 
 class FullStartingScanner(StartingScanner):
     def __init__(
-            self,
-            table,
-            predicate: Optional[Predicate],
-            limit: Optional[int],
-            vector_search: Optional['VectorSearch'] = None
+        self,
+        table,
+        predicate: Optional[Predicate],
+        limit: Optional[int],
+        vector_search: Optional['VectorSearch'] = None
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -121,7 +121,6 @@ class FullStartingScanner(StartingScanner):
             return Plan([])
         # Get deletion files map if deletion vectors are enabled.
         # {partition-bucket -> {filename -> DeletionFile}}
-        deletion_files_map: dict[tuple, dict[str, DeletionFile]] = {}
         if self.deletion_vectors_enabled:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
             # Extract unique partition-bucket pairs from file entries
@@ -129,8 +128,7 @@ class FullStartingScanner(StartingScanner):
             for entry in file_entries:
                 buckets.add((tuple(entry.partition.values), entry.bucket))
             deletion_files_map = self._scan_dv_index(latest_snapshot, buckets)
-
-        self.split_generator.deletion_files_map = deletion_files_map
+            self.split_generator.deletion_files_map = deletion_files_map
 
         # Generate splits
         splits = self.split_generator.create_splits(file_entries)

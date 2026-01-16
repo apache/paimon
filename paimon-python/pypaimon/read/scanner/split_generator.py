@@ -18,6 +18,8 @@ limitations under the License.
 from abc import ABC, abstractmethod
 from typing import Callable, List, Optional, Tuple
 
+from pyroaring import BitMap
+
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.split import Split
@@ -75,9 +77,9 @@ class AbstractSplitGenerator(ABC):
 
     def with_sample(self, num_rows: int):
         if self.idx_of_this_subtask is not None:
-            raise Exception("with_sample and with_shard cannot be used simultaneously now")
+            raise ValueError("with_sample and with_shard cannot be used simultaneously now")
         if self.start_pos_of_this_subtask is not None:
-            raise Exception("with_sample and with_slice cannot be used simultaneously now")
+            raise ValueError("with_sample and with_slice cannot be used simultaneously now")
         self.sample_num_rows = num_rows
         return self
 
@@ -241,16 +243,16 @@ class AbstractSplitGenerator(ABC):
                 file_end_row = current_row + entry.file.row_count
 
                 # Find all sample indexes that fall within this file
-                local_indexes = []
+                local_indexes = BitMap()
                 while sample_idx < len(sample_indexes) and sample_indexes[sample_idx] < file_end_row:
                     if sample_indexes[sample_idx] >= file_start_row:
                         # Convert global index to local index within this file
                         local_index = sample_indexes[sample_idx] - file_start_row
-                        local_indexes.append(local_index)
+                        local_indexes.add(local_index)
                     sample_idx += 1
 
                 # If this file contains any sampled rows, include it
-                if local_indexes:
+                if len(local_indexes) > 0:
                     filtered_entries.append(entry)
                     file_positions[entry.file.file_name] = local_indexes
 

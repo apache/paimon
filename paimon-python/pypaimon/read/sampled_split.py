@@ -14,7 +14,9 @@
 #  KIND, either express or implied.  See the License for the
 #  specific language governing permissions and limitations
 #  under the License.
-from typing import List, Dict
+from typing import Dict, List
+
+from pyroaring import BitMap
 
 from pypaimon.read.split import Split
 
@@ -36,7 +38,7 @@ class SampledSplit(Split):
     def __init__(
             self,
             data_split: 'Split',
-            sampled_file_idx_map: Dict[str, List[int]]
+            sampled_file_idx_map: Dict[str, BitMap]
     ):
         self._data_split = data_split
         self._sampled_file_idx_map = sampled_file_idx_map
@@ -44,7 +46,7 @@ class SampledSplit(Split):
     def data_split(self) -> 'Split':
         return self._data_split
 
-    def sampled_file_idx_map(self) -> Dict[str, List[int]]:
+    def sampled_file_idx_map(self) -> Dict[str, BitMap]:
         return self._sampled_file_idx_map
 
     @property
@@ -61,12 +63,12 @@ class SampledSplit(Split):
 
     @property
     def row_count(self) -> int:
-        if not self._sample_file_idx_map:
+        if not self._sampled_file_idx_map:
             return self._data_split.row_count
 
         total_rows = 0
         for file in self._data_split.files:
-            positions = self._sample_file_idx_map[file.file_name]
+            positions = self._sampled_file_idx_map[file.file_name]
             total_rows += len(positions)
 
         return total_rows
@@ -97,5 +99,5 @@ class SampledSplit(Split):
         return hash((id(self._data_split), tuple(sorted(self._sampled_file_idx_map.items()))))
 
     def __repr__(self):
-        return (f"SlicedSplit(data_split={self._data_split}, "
-                f"shard_file_idx_map={self._sampled_file_idx_map})")
+        return (f"SampledSplit(data_split={self._data_split}, "
+                f"sampled_file_idx_map={self._sampled_file_idx_map})")

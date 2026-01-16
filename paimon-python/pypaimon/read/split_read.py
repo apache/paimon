@@ -374,7 +374,7 @@ class SplitRead(ABC):
 class RawFileSplitRead(SplitRead):
     def raw_reader_supplier(self, file: DataFileMeta, dv_factory: Optional[Callable] = None) -> Optional[RecordReader]:
         read_fields = self._get_final_read_data_fields()
-        file_batch_reader = self._create_file_reader(file, read_fields, row_tracking_enabled=True)
+        file_batch_reader = self._create_file_reader(file, read_fields)
         if file_batch_reader is None:
             return None
         dv = dv_factory() if dv_factory else None
