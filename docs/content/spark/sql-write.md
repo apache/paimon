@@ -288,11 +288,11 @@ Here list the configurations.
 This mode also supports Spark SQL. Here is an example:
 
 ```sql
-set `spark.paimon.write.merge-schema` = true;
+SET `spark.paimon.write.merge-schema` = true;
 
 CREATE TABLE t (a INT, b STRING);
 INSERT INTO t VALUES (1, '1'), (2, '2');
 
--- need using by name mode
+-- Need using `BY NAME` statement (requires Spark 3.5+)
 INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
 ```
