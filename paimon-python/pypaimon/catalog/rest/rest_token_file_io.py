@@ -18,19 +18,22 @@ limitations under the License.
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 from cachetools import TTLCache
 
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.common.identifier import Identifier
+<<<<<<< HEAD
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
 from pypaimon.common.uri_reader import UriReaderFactory
+=======
+>>>>>>> 5b8c6e7f3 (refresh rest token)
 
 
 class RESTTokenFileIO(FileIO):
@@ -42,7 +45,7 @@ class RESTTokenFileIO(FileIO):
     _FILE_IO_CACHE_TTL = 36000  # 10 hours in seconds
     
     def __init__(self, identifier: Identifier, path: str,
-                 catalog_options: Optional[Options] = None):
+                 catalog_options: Optional[dict] = None):
         self.identifier = identifier
         self.path = path
         self.catalog_options = catalog_options
@@ -57,6 +60,7 @@ class RESTTokenFileIO(FileIO):
             ttl=self._FILE_IO_CACHE_TTL
         )
 
+<<<<<<< HEAD
     def __getstate__(self):
         state = self.__dict__.copy()
         # Remove non-serializable objects
@@ -178,6 +182,15 @@ class RESTTokenFileIO(FileIO):
     @property
     def filesystem(self):
         return self.file_io().filesystem
+=======
+    def _initialize_oss_fs(self, path) -> FileSystem:
+        self.try_to_refresh_token()
+        self.properties.update(self.token.token)
+        return super()._initialize_oss_fs(path)
+
+    def new_output_stream(self, path: Path):
+        return self.filesystem.open_output_stream(str(path))
+>>>>>>> 5b8c6e7f3 (refresh rest token)
 
     def try_to_refresh_token(self):
         if self.should_refresh():
