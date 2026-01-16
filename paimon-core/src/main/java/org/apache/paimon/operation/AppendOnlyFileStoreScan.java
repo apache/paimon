@@ -33,7 +33,9 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -92,9 +94,21 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
-    protected Iterator<ManifestEntry> limitPushManifestEntries(Iterator<ManifestEntry> entries) {
+    protected boolean postFilterManifestEntriesEnabled() {
+        return supportsLimitPushManifestEntries();
+    }
+
+    @Override
+    protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
         checkArgument(limit != null && limit > 0 && !deletionVectorsEnabled);
-        return new LimitAwareManifestEntryIterator(entries, limit);
+        // Use LimitAwareManifestEntryIterator for limit pushdown
+        Iterator<ManifestEntry> iterator =
+                new LimitAwareManifestEntryIterator(entries.iterator(), limit);
+        List<ManifestEntry> result = new ArrayList<>();
+        while (iterator.hasNext()) {
+            result.add(iterator.next());
+        }
+        return result;
     }
 
     /** Note: Keep this thread-safe. */
