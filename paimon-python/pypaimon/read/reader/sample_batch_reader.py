@@ -74,26 +74,26 @@ class SampleBatchReader(RecordBatchReader):
             self.sample_idx += 1
             return batch
         else:
-            batch = self.reader.read_arrow_batch()
-            if batch is None:
-                return None
+            while True:
+                batch = self.reader.read_arrow_batch()
+                if batch is None:
+                    return None
 
-            batch_begin = self.current_pos
-            self.current_pos += batch.num_rows
-            take_idxes = []
+                batch_begin = self.current_pos
+                self.current_pos += batch.num_rows
+                take_idxes = []
 
-            sample_pos = self.sample_positions[self.sample_idx]
-            while batch_begin <= sample_pos < self.current_pos:
-                take_idxes.append(sample_pos - batch_begin)
-                self.sample_idx += 1
-                if self.sample_idx >= len(self.sample_positions):
-                    break
                 sample_pos = self.sample_positions[self.sample_idx]
+                while batch_begin <= sample_pos < self.current_pos:
+                    take_idxes.append(sample_pos - batch_begin)
+                    self.sample_idx += 1
+                    if self.sample_idx >= len(self.sample_positions):
+                        break
+                    sample_pos = self.sample_positions[self.sample_idx]
 
-            if take_idxes:
-                return batch.take(take_idxes)
-            else:  # batch is outside the desired range
-                return self.read_arrow_batch()
+                if take_idxes:
+                    return batch.take(take_idxes)
+                # batch is outside the desired range, continue to next batch
 
     def close(self):
         self.reader.close()
