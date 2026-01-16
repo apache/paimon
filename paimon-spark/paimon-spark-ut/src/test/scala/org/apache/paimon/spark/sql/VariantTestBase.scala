@@ -715,4 +715,158 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       )
     )
   }
+
+  test("Paimon Variant: partial update with variant") {
+    withTable("t") {
+      sql("""
+            |CREATE table t (
+            |  id INT,
+            |  ts INT,
+            |  dt INT,
+            |  v VARIANT
+            |)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'changelog-producer' = 'lookup',
+            |  'merge-engine' = 'partial-update',
+            |  'fields.dt.sequence-group' = 'ts',
+            |  'fields.ts.aggregate-function' = 'max',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t VALUES
+            | (1, 1, 1, parse_json('{"c":{"a1":1,"a2":2}}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t VALUES
+            | (1, 2, 2, parse_json('{"c":{"a1":3,"a2":4}}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t"),
+        sql("""SELECT 1, 2, 2, parse_json('{"c":{"a1":3,"a2":4}}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.c', 'string') FROM t"),
+        Seq(
+          Row("{\"a1\":3,\"a2\":4}")
+        )
+      )
+    }
+  }
+
+  test("Paimon Variant: deduplicate with variant") {
+    withTable("t_dedup") {
+      sql("""
+            |CREATE table t_dedup (
+            |  id INT,
+            |  name STRING,
+            |  v VARIANT
+            |) TBLPROPERTIES
+            |(
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'merge-engine' = 'deduplicate',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t_dedup VALUES
+            | (1, 'Alice', parse_json('{"age":30,"city":"NYC"}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t_dedup VALUES
+            | (1, 'Bob', parse_json('{"age":25,"city":"LA"}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t_dedup"),
+        sql("""SELECT 1, 'Bob', parse_json('{"age":25,"city":"LA"}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.age', 'int') FROM t_dedup"),
+        Seq(Row(25))
+      )
+    }
+  }
+
+  test("Paimon Variant: aggregate with variant") {
+    withTable("t_agg") {
+      sql("""
+            |CREATE table t_agg (
+            |  id INT,
+            |  cnt INT,
+            |  v VARIANT
+            |) TBLPROPERTIES
+            |(
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'merge-engine' = 'aggregation',
+            |  'fields.cnt.aggregate-function' = 'sum',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t_agg VALUES
+            | (1, 10, parse_json('{"data":{"x":1,"y":2}}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t_agg VALUES
+            | (1, 20, parse_json('{"data":{"x":3,"y":4}}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t_agg"),
+        sql("""SELECT 1, 30, parse_json('{"data":{"x":3,"y":4}}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.data.x', 'int') FROM t_agg"),
+        Seq(Row(3))
+      )
+    }
+  }
+
+  test("Paimon Variant: first-row with variant") {
+    withTable("t_first") {
+      sql("""
+            |CREATE table t_first (
+            |  id INT,
+            |  seq INT,
+            |  v VARIANT
+            |) TBLPROPERTIES
+            |(
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'merge-engine' = 'first-row'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t_first VALUES
+            | (1, 100, parse_json('{"status":"active"}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t_first VALUES
+            | (1, 200, parse_json('{"status":"inactive"}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t_first"),
+        sql("""SELECT 1, 100, parse_json('{"status":"active"}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.status', 'string') FROM t_first"),
+        Seq(Row("active"))
+      )
+    }
+  }
 }
