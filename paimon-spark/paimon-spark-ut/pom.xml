@@ -43,12 +43,6 @@ under the License.
             <artifactId>paimon-format</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>${paimon-sparkx-common}</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
         <!-- Below are test dependencies which need to be distinguished for different Spark versions. -->
 
         <dependency>
@@ -89,6 +83,40 @@ under the License.
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>spark3</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.paimon</groupId>
+                    <artifactId>paimon-spark3-common_${scala.binary.version}</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+            </dependencies>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+                <property>
+                    <name>spark3</name>
+                </property>
+            </activation>
+        </profile>
+        <profile>
+            <id>spark4</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.paimon</groupId>
+                    <artifactId>paimon-spark4-common_${scala.binary.version}</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+            </dependencies>
+            <activation>
+                <property>
+                    <name>spark4</name>
+                </property>
+            </activation>
+        </profile>
+    </profiles>
 
     <build>
         <plugins>
