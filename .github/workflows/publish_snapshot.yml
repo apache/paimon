@@ -65,8 +65,8 @@ jobs:
           echo "<password>$ASF_PASSWORD</password>" >> $tmp_settings
           echo "</server></servers></settings>" >> $tmp_settings
           
-          mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3,flink1 -pl '!paimon-faiss/paimon-faiss-jni,!paimon-faiss/paimon-faiss-index'
+          mvn --settings $tmp_settings -ntp clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3,flink1 -pl '!paimon-faiss/paimon-faiss-jni,!paimon-faiss/paimon-faiss-index'
           # deploy for scala 2.13
-          mvn --settings $tmp_settings clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3,scala-2.13,flink1 -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark3-common_2.13,org.apache.paimon:paimon-spark-3.2_2.13,org.apache.paimon:paimon-spark-3.3_2.13,org.apache.paimon:paimon-spark-3.4_2.13,org.apache.paimon:paimon-spark-3.5_2.13
+          mvn --settings $tmp_settings -ntp clean deploy -Dgpg.skip -Drat.skip -DskipTests -Papache-release,spark3,scala-2.13,flink1 -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark3-common_2.13,org.apache.paimon:paimon-spark-3.2_2.13,org.apache.paimon:paimon-spark-3.3_2.13,org.apache.paimon:paimon-spark-3.4_2.13,org.apache.paimon:paimon-spark-3.5_2.13
 
           rm $tmp_settings

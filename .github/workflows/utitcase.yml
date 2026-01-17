@@ -73,7 +73,7 @@ jobs:
       - name: Build Others
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3,paimon-faiss
+          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3,paimon-faiss
 
       - name: Test Others
         timeout-minutes: 60
@@ -87,6 +87,6 @@ jobs:
             TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
           TEST_MODULES="${TEST_MODULES%,}"
-          mvn -T 2C -B clean install -pl "${TEST_MODULES}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B -ntp clean install -pl "${TEST_MODULES}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2
