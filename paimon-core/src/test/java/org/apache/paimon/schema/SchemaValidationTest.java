@@ -151,4 +151,17 @@ class SchemaValidationTest {
         assertThatThrownBy(() -> validateBlobSchema(options, Collections.singletonList("f2")))
                 .hasMessage("The BLOB type column can not be part of partition keys.");
     }
+
+    @Test
+    public void testPartialUpdateTableAggregateFunctionWithoutSequenceGroup() {
+        Map<String, String> options = new HashMap<>(2);
+        options.put("merge-engine", "partial-update");
+        options.put("fields.f3.aggregate-function", "max");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "Must use sequence group for aggregation functions but not found for field");
+
+        options.put("fields.f2.sequence-group", "f3");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
 }
