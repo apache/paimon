@@ -3060,6 +3060,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // col5 is intentionally not masked to verify unmasked columns work correctly
 
+        setColumnMasking(identifier, columnMasking);
+
         // Read and verify masked data
         ReadBuilder readBuilder = table.newReadBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
