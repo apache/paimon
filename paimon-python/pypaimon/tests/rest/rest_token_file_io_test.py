@@ -251,7 +251,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 original_catalog_options.to_map(),
                 merged_token
             )
-
+            
             self.assertIn("custom.key", merged_properties)
             self.assertEqual(merged_properties["custom.key"], "custom.value")
             self.assertIn(OssOptions.OSS_ACCESS_KEY_ID.key(), merged_properties)
