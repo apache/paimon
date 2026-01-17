@@ -120,12 +120,12 @@ jobs:
       - name: Build Java
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests
+          mvn -T 2C -B -ntp clean install -DskipTests
 
       - name: Build Java Paimon Faiss
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests -Ppaimon-faiss
+          mvn -T 2C -B -ntp clean install -DskipTests -Ppaimon-faiss
 
       - name: Install Python dependencies
         shell: bash

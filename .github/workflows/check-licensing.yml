@@ -51,13 +51,13 @@ jobs:
         run: |
           set -o pipefail
 
-          mvn clean deploy ${{ env.MVN_COMMON_OPTIONS }} -DskipTests \
+          mvn clean deploy ${{ env.MVN_COMMON_OPTIONS }} -ntp -DskipTests \
             -DaltDeploymentRepository=validation_repository::default::file:${{ env.MVN_VALIDATION_DIR }} \
             | tee ${{ env.MVN_BUILD_OUTPUT_FILE }}
 
       - name: Check licensing
         run: |
-          mvn ${{ env.MVN_COMMON_OPTIONS }} exec:java@check-licensing -N \
+          mvn ${{ env.MVN_COMMON_OPTIONS }} -ntp exec:java@check-licensing -N \
             -Dexec.args="${{ env.MVN_BUILD_OUTPUT_FILE }} $(pwd) ${{ env.MVN_VALIDATION_DIR }}" \
             -Dlog4j.configurationFile=file://$(pwd)/tools/ci/log4j.properties
         env:
