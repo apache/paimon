@@ -258,6 +258,20 @@ under the License.
         </dependency>
     </dependencies>
 
+    <profiles>
+        <profile>
+            <id>hadoop3</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-hdfs-client</artifactId>
+                    <version>${hadoop.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+
     <build>
         <plugins>
             <plugin>
