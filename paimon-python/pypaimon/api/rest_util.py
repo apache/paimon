@@ -52,15 +52,15 @@ class RESTUtil:
             override_properties = {}
         if base_properties is None:
             base_properties = {}
-
+        
         result = {}
-
+        
         for key, value in base_properties.items():
             if value is not None and key not in override_properties:
                 result[key] = value
-
+        
         for key, value in override_properties.items():
             if value is not None:
                 result[key] = value
-
+        
         return result

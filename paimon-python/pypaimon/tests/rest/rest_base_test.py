@@ -28,7 +28,7 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
-from pypaimon.api.options import Options
+from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.catalog.rest.table_metadata import TableMetadata
@@ -227,7 +227,6 @@ class RESTBaseTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         return table_read.to_arrow(splits)
-
 
     def _write_test_table_with_schema(self, table, pa_schema):
         """Write test data using the specified PyArrow schema."""

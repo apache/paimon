@@ -22,8 +22,8 @@ from typing import Optional, Union
 
 from cachetools import TTLCache
 
-from api.rest_util import RESTUtil
 from pypaimon.api.rest_api import RESTApi
+from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
