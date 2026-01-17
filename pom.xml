@@ -127,7 +127,7 @@ under the License.
 
         <!-- spark profile properties-->
         <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
-        <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
+        <paimon-spark-common.spark.version>3.5.8</paimon-spark-common.spark.version>
         <test.spark.main.version>3.3</test.spark.main.version>
         <test.spark.version>3.3.0</test.spark.version>
 
@@ -407,7 +407,7 @@ under the License.
             <properties>
                 <scala.binary.version>2.12</scala.binary.version>
                 <scala.version>${scala212.version}</scala.version>
-                <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>3.5.8</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
                 <!-- todo: support the latest spark in paimon e2e test2 -->
                 <test.spark.main.version>3.3</test.spark.main.version>
