@@ -26,7 +26,6 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
-import org.apache.paimon.mergetree.compact.aggregate.factory.FieldLastNonNullValueAggFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
@@ -44,16 +43,12 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -77,7 +72,7 @@ import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
-import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
+import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
@@ -95,8 +90,6 @@ public class SchemaValidation {
 
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
-     *
-     * <p>TODO validate all items in schema and all keys in options.
      *
      * @param schema the schema to be validated
      */
@@ -122,7 +115,7 @@ public class SchemaValidation {
 
         validateSequenceField(schema, options);
 
-        validateSequenceGroup(schema, options);
+        validateMergeFunction(schema);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
         if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
@@ -449,90 +442,12 @@ public class SchemaValidation {
                         });
     }
 
-    private static void validateSequenceGroup(TableSchema schema, CoreOptions options) {
-        Map<String, Set<String>> fields2Group = new HashMap<>();
-        Set<Integer> sequenceGroupFieldIndexs = new HashSet<>();
-        List<String> fieldNames = schema.fieldNames();
-        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
-            String k = entry.getKey();
-            String v = entry.getValue();
-            if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
-                Arrays.stream(v.split(FIELDS_SEPARATOR))
-                        .map(fieldName -> requireField(fieldName, fieldNames))
-                        .forEach(sequenceGroupFieldIndexs::add);
-                String[] sequenceFieldNames =
-                        k.substring(
-                                        FIELDS_PREFIX.length() + 1,
-                                        k.length() - SEQUENCE_GROUP.length() - 1)
-                                .split(FIELDS_SEPARATOR);
-
-                for (String field : v.split(FIELDS_SEPARATOR)) {
-                    if (!fieldNames.contains(field)) {
-                        throw new IllegalArgumentException(
-                                String.format("Field %s can not be found in table schema.", field));
-                    }
-
-                    List<String> sequenceFieldsList = new ArrayList<>();
-                    for (String sequenceFieldName : sequenceFieldNames) {
-                        if (!fieldNames.contains(sequenceFieldName)) {
-                            throw new IllegalArgumentException(
-                                    String.format(
-                                            "The sequence field group: %s can not be found in table schema.",
-                                            sequenceFieldName));
-                        }
-                        sequenceFieldsList.add(sequenceFieldName);
-                    }
-
-                    if (fields2Group.containsKey(field)) {
-                        List<List<String>> sequenceGroups = new ArrayList<>();
-                        sequenceGroups.add(new ArrayList<>(fields2Group.get(field)));
-                        sequenceGroups.add(sequenceFieldsList);
-
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "Field %s is defined repeatedly by multiple groups: %s.",
-                                        field, sequenceGroups));
-                    }
-
-                    Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
-                    group.addAll(sequenceFieldsList);
-                }
-
-                // add self
-                Arrays.stream(sequenceFieldNames)
-                        .mapToInt(fieldName -> requireField(fieldName, fieldNames))
-                        .forEach(sequenceGroupFieldIndexs::add);
-            }
+    private static void validateMergeFunction(TableSchema schema) {
+        if (schema.primaryKeys().isEmpty()) {
+            return;
         }
 
-        if (options.mergeEngine() == MergeEngine.PARTIAL_UPDATE) {
-            for (String fieldName : fieldNames) {
-                String aggFunc = options.fieldAggFunc(fieldName);
-                String aggFuncName = aggFunc == null ? options.fieldsDefaultFunc() : aggFunc;
-                if (schema.primaryKeys().contains(fieldName)) {
-                    continue;
-                }
-                if (aggFuncName != null) {
-                    // last_non_null_value doesn't require sequence group
-                    checkArgument(
-                            aggFuncName.equals(FieldLastNonNullValueAggFactory.NAME)
-                                    || sequenceGroupFieldIndexs.contains(
-                                            fieldNames.indexOf(fieldName)),
-                            "Must use sequence group for aggregation functions but not found for field %s.",
-                            fieldName);
-                }
-            }
-        }
-
-        Set<String> illegalGroup =
-                fields2Group.values().stream()
-                        .flatMap(Collection::stream)
-                        .filter(g -> options.fieldAggFunc(g) != null)
-                        .collect(Collectors.toSet());
-        if (!illegalGroup.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Should not defined aggregation function on sequence group: " + illegalGroup);
-        }
+        createMergeFunctionFactory(schema);
     }
 
     private static void validateForDeletionVectors(CoreOptions options) {
