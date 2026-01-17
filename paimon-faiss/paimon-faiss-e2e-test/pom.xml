@@ -34,7 +34,7 @@ under the License.
     <properties>
         <test.java.version>java8</test.java.version>
         <test.spark.main.version>3.5</test.spark.main.version>
-        <test.spark.version>3.5.7</test.spark.version>
+        <test.spark.version>3.5.8</test.spark.version>
     </properties>
 
     <dependencies>
