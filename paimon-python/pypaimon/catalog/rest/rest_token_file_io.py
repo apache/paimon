@@ -119,10 +119,9 @@ class RESTTokenFileIO(FileIO):
             if file_io is not None:
                 return file_io
             
-            merged_token = self._merge_token_with_catalog_options(self.token.token)
             merged_properties = RESTUtil.merge(
                 self.catalog_options.to_map() if self.catalog_options else {},
-                merged_token
+                self.token.token
             )
             merged_options = Options(merged_properties)
             
@@ -262,7 +261,9 @@ class RESTTokenFileIO(FileIO):
         self.log.info(
             f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
         )
-        new_token = RESTToken(response.token, response.expires_at_millis)
+        
+        merged_token_dict = self._merge_token_with_catalog_options(response.token)
+        new_token = RESTToken(merged_token_dict, response.expires_at_millis)
         self.token = new_token
 
     def valid_token(self):
