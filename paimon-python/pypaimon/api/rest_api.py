@@ -46,7 +46,7 @@ class RESTApi:
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
     TABLE_NAME_PATTERN = "tableNamePattern"
-    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
+    TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 60
 
     def __init__(self, options: Union[Options, Dict[str, str]], config_required: bool = True):
         if isinstance(options, dict):
