@@ -219,6 +219,7 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         }
     }
 
+    @Test
     public void testColumnMasking() {
         String maskingTable = "column_masking_table";
         batchSql(

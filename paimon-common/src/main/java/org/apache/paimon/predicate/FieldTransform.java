@@ -42,7 +42,6 @@ public class FieldTransform implements Transform {
     private final FieldRef fieldRef;
 
     public static final String FIELD_FIELD_REF = "fieldRef";
-    public static final String FIELD_TYPE = "type";
 
     @JsonCreator
     public FieldTransform(@JsonProperty(FIELD_FIELD_REF) FieldRef fieldRef) {
