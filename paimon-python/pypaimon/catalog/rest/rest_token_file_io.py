@@ -123,6 +123,10 @@ class RESTTokenFileIO(FileIO):
                 self.catalog_options.to_map() if self.catalog_options else {},
                 self.token.token
             )
+            if self.catalog_options:
+                dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
+                if dlf_oss_endpoint and dlf_oss_endpoint.strip():
+                    merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
             merged_options = Options(merged_properties)
             
             file_io = PyArrowFileIO(self.path, merged_options)
