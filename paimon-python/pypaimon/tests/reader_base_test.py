@@ -1124,7 +1124,7 @@ class ReaderBasicTest(unittest.TestCase):
             self.assertTrue(set(expected_value_fields).issubset(set(file_meta.value_stats_cols)),
                             f"value_stats_cols should contain value fields: {expected_value_fields}, "
                             f"but got: {file_meta.value_stats_cols}")
-
+            
             expected_arity = len(file_meta.value_stats_cols)
             self.assertEqual(value_stats.min_values.arity, expected_arity,
                              f"value_stats should contain {expected_arity} fields (matching value_stats_cols), "
@@ -1139,7 +1139,7 @@ class ReaderBasicTest(unittest.TestCase):
             self.assertEqual(value_stats.min_values.arity, len(file_meta.value_stats_cols),
                              f"value_stats.min_values.arity ({value_stats.min_values.arity}) must match "
                              f"value_stats_cols length ({len(file_meta.value_stats_cols)})")
-
+            
             for field_name in file_meta.value_stats_cols:
                 is_system_field = (field_name.startswith('_KEY_') or
                                    field_name in ['_SEQUENCE_NUMBER', '_VALUE_KIND', '_ROW_ID'])
