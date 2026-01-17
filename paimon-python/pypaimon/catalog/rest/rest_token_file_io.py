@@ -18,7 +18,7 @@ limitations under the License.
 import logging
 import threading
 import time
-from typing import Optional
+from typing import Optional, Union
 
 from cachetools import TTLCache
 
@@ -41,40 +41,55 @@ class RESTTokenFileIO(FileIO):
     _FILE_IO_CACHE_MAXSIZE = 1000
     _FILE_IO_CACHE_TTL = 36000  # 10 hours in seconds
     
+    _FILE_IO_CACHE: TTLCache = None
+    _FILE_IO_CACHE_LOCK = threading.Lock()
+    
+    _TOKEN_CACHE: dict = {}
+    _TOKEN_LOCKS: dict = {}
+    _TOKEN_LOCKS_LOCK = threading.Lock()
+    
+    @classmethod
+    def _get_file_io_cache(cls) -> TTLCache:
+        if cls._FILE_IO_CACHE is None:
+            with cls._FILE_IO_CACHE_LOCK:
+                if cls._FILE_IO_CACHE is None:
+                    cls._FILE_IO_CACHE = TTLCache(
+                        maxsize=cls._FILE_IO_CACHE_MAXSIZE,
+                        ttl=cls._FILE_IO_CACHE_TTL
+                    )
+        return cls._FILE_IO_CACHE
+    
     def __init__(self, identifier: Identifier, path: str,
-                 catalog_options: Optional[Options] = None):
+                 catalog_options: Optional[Union[dict, Options]] = None):
         self.identifier = identifier
         self.path = path
-        self.catalog_options = catalog_options
-        self.properties = catalog_options or Options({})  # For compatibility with refresh_token()
+        if catalog_options is None:
+            self.catalog_options = None
+        elif isinstance(catalog_options, dict):
+            self.catalog_options = Options(catalog_options)
+        else:
+            # Assume it's already an Options object
+            self.catalog_options = catalog_options
+        self.properties = self.catalog_options or Options({})  # For compatibility with refresh_token()
         self.token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
         self.lock = threading.Lock()
         self.log = logging.getLogger(__name__)
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
-        self._file_io_cache: TTLCache = TTLCache(
-            maxsize=self._FILE_IO_CACHE_MAXSIZE,
-            ttl=self._FILE_IO_CACHE_TTL
-        )
 
     def __getstate__(self):
         state = self.__dict__.copy()
         # Remove non-serializable objects
         state.pop('lock', None)
         state.pop('api_instance', None)
-        state.pop('_file_io_cache', None)
         state.pop('_uri_reader_factory_cache', None)
         # token can be serialized, but we'll refresh it on deserialization
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        # Recreate lock and cache after deserialization
+        # Recreate lock after deserialization
         self.lock = threading.Lock()
-        self._file_io_cache = TTLCache(
-            maxsize=self._FILE_IO_CACHE_MAXSIZE,
-            ttl=self._FILE_IO_CACHE_TTL
-        )
         self._uri_reader_factory_cache = None
         # api_instance will be recreated when needed
         self.api_instance = None
@@ -86,25 +101,36 @@ class RESTTokenFileIO(FileIO):
             return FileIO.get(self.path, self.catalog_options or Options({}))
         
         cache_key = self.token
+        cache = self._get_file_io_cache()
         
-        file_io = self._file_io_cache.get(cache_key)
+        file_io = cache.get(cache_key)
         if file_io is not None:
             return file_io
         
-        with self.lock:
-            file_io = self._file_io_cache.get(cache_key)
+        with self._FILE_IO_CACHE_LOCK:
+            self.try_to_refresh_token()
+            
+            if self.token is None:
+                return FileIO.get(self.path, self.catalog_options or Options({}))
+            
+            cache_key = self.token
+            cache = self._get_file_io_cache()
+            file_io = cache.get(cache_key)
             if file_io is not None:
                 return file_io
             
-            merged_token = self._merge_token_with_catalog_options(self.token.token)
             merged_properties = RESTUtil.merge(
                 self.catalog_options.to_map() if self.catalog_options else {},
-                merged_token
+                self.token.token
             )
+            if self.catalog_options:
+                dlf_oss_endpoint = self.catalog_options.get(CatalogOptions.DLF_OSS_ENDPOINT)
+                if dlf_oss_endpoint and dlf_oss_endpoint.strip():
+                    merged_properties[OssOptions.OSS_ENDPOINT.key()] = dlf_oss_endpoint
             merged_options = Options(merged_properties)
             
             file_io = PyArrowFileIO(self.path, merged_options)
-            self._file_io_cache[cache_key] = file_io
+            cache[cache_key] = file_io
             return file_io
 
     def _merge_token_with_catalog_options(self, token: dict) -> dict:
@@ -180,16 +206,55 @@ class RESTTokenFileIO(FileIO):
         return self.file_io().filesystem
 
     def try_to_refresh_token(self):
-        if self.should_refresh():
-            with self.lock:
-                if self.should_refresh():
-                    self.refresh_token()
+        identifier_str = str(self.identifier)
+        
+        if self.token is not None and not self._is_token_expired(self.token):
+            return
+        
+        cached_token = self._get_cached_token(identifier_str)
+        if cached_token and not self._is_token_expired(cached_token):
+            self.token = cached_token
+            return
+        
+        global_lock = self._get_global_token_lock(identifier_str)
+        
+        with global_lock:
+            cached_token = self._get_cached_token(identifier_str)
+            if cached_token and not self._is_token_expired(cached_token):
+                self.token = cached_token
+                return
+            
+            token_to_check = cached_token if cached_token else self.token
+            if token_to_check is None or self._is_token_expired(token_to_check):
+                self.refresh_token()
+                self._set_cached_token(identifier_str, self.token)
+
+    def _get_cached_token(self, identifier_str: str) -> Optional[RESTToken]:
+        with self._TOKEN_LOCKS_LOCK:
+            return self._TOKEN_CACHE.get(identifier_str)
+    
+    def _set_cached_token(self, identifier_str: str, token: RESTToken):
+        with self._TOKEN_LOCKS_LOCK:
+            self._TOKEN_CACHE[identifier_str] = token
+    
+    def _is_token_expired(self, token: Optional[RESTToken]) -> bool:
+        if token is None:
+            return True
+        current_time = int(time.time() * 1000)
+        return (token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+    
+    def _get_global_token_lock(self, identifier_str: str) -> threading.Lock:
+        with self._TOKEN_LOCKS_LOCK:
+            if identifier_str not in self._TOKEN_LOCKS:
+                self._TOKEN_LOCKS[identifier_str] = threading.Lock()
+            return self._TOKEN_LOCKS[identifier_str]
 
     def should_refresh(self):
         if self.token is None:
             return True
         current_time = int(time.time() * 1000)
-        return (self.token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+        time_until_expiry = self.token.expire_at_millis - current_time
+        return time_until_expiry < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
 
     def refresh_token(self):
         self.log.info(f"begin refresh data token for identifier [{self.identifier}]")
@@ -200,17 +265,14 @@ class RESTTokenFileIO(FileIO):
         self.log.info(
             f"end refresh data token for identifier [{self.identifier}] expiresAtMillis [{response.expires_at_millis}]"
         )
-        self.token = RESTToken(response.token, response.expires_at_millis)
+        
+        merged_token_dict = self._merge_token_with_catalog_options(response.token)
+        new_token = RESTToken(merged_token_dict, response.expires_at_millis)
+        self.token = new_token
 
     def valid_token(self):
         self.try_to_refresh_token()
         return self.token
 
     def close(self):
-        with self.lock:
-            for file_io in self._file_io_cache.values():
-                try:
-                    file_io.close()
-                except Exception as e:
-                    self.log.warning(f"Error closing cached FileIO: {e}")
-            self._file_io_cache.clear()
+        pass
