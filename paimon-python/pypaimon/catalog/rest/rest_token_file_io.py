@@ -18,11 +18,9 @@ limitations under the License.
 import logging
 import threading
 import time
-from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from cachetools import TTLCache
-from pyarrow._fs import FileSystem
 
 from api.rest_util import RESTUtil
 from pypaimon.api.rest_api import RESTApi
@@ -44,11 +42,18 @@ class RESTTokenFileIO(FileIO):
     _FILE_IO_CACHE_TTL = 36000  # 10 hours in seconds
     
     def __init__(self, identifier: Identifier, path: str,
-                 catalog_options: Optional[dict] = None):
+                 catalog_options: Optional[Union[dict, Options]] = None):
         self.identifier = identifier
         self.path = path
-        self.catalog_options = catalog_options
-        self.properties = catalog_options or Options({})  # For compatibility with refresh_token()
+        # Convert dict to Options if needed for consistent API usage
+        if catalog_options is None:
+            self.catalog_options = None
+        elif isinstance(catalog_options, dict):
+            self.catalog_options = Options(catalog_options)
+        else:
+            # Assume it's already an Options object
+            self.catalog_options = catalog_options
+        self.properties = self.catalog_options or Options({})  # For compatibility with refresh_token()
         self.token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
         self.lock = threading.Lock()
@@ -180,14 +185,6 @@ class RESTTokenFileIO(FileIO):
     @property
     def filesystem(self):
         return self.file_io().filesystem
-
-    def _initialize_oss_fs(self, path) -> FileSystem:
-        self.try_to_refresh_token()
-        self.properties.update(self.token.token)
-        return super()._initialize_oss_fs(path)
-
-    def new_output_stream(self, path: Path):
-        return self.filesystem.open_output_stream(str(path))
 
     def try_to_refresh_token(self):
         if self.should_refresh():
