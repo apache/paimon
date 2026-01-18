@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
@@ -37,6 +38,11 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
@@ -71,8 +77,10 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -111,6 +119,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
@@ -120,6 +129,7 @@ import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
@@ -3418,6 +3428,113 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         reader.forEachRemaining(rows::add);
         assertThat(rows).hasSize(4);
         assertThat(rows.get(0).getString(1).toString()).isIn("Alice", "Bob", "Charlie", "David");
+    }
+
+    @Test
+    public void testConflictRollback() throws Exception {
+        doTestConflictRollback(false);
+    }
+
+    @Test
+    public void testConflictRollbackFail() throws Exception {
+        doTestConflictRollback(true);
+    }
+
+    private void doTestConflictRollback(boolean insertMiddle) throws Exception {
+        Identifier identifier =
+                Identifier.create("test_conflict_rollback", "test_conflict_rollback");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col1", DataTypes.INT())),
+                        emptyList(),
+                        emptyList(),
+                        new HashMap<>(),
+                        ""),
+                true);
+        Table table = catalog.getTable(identifier);
+
+        // write 5 files
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(i));
+                List<CommitMessage> commitMessages = write.prepareCommit();
+                commit.commit(commitMessages);
+                DataFileMeta file =
+                        ((CommitMessageImpl) commitMessages.get(0))
+                                .newFilesIncrement()
+                                .newFiles()
+                                .get(0);
+                files.add(file);
+            }
+        }
+
+        // delete write
+        DataFileMeta file = files.get(0);
+        CommitMessageImpl deleteCommitMessage =
+                new CommitMessageImpl(
+                        EMPTY_ROW,
+                        0,
+                        -1,
+                        new DataIncrement(emptyList(), singletonList(file), emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()));
+
+        // compact write
+        CommitMessage compactCommitMessage;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            AppendCompactTask compactTask = new AppendCompactTask(EMPTY_ROW, files);
+            FileStoreWrite<?> fileStoreWrite = ((TableWriteImpl<?>) write).getWrite();
+            compactCommitMessage =
+                    compactTask.doCompact(
+                            (FileStoreTable) table, (BaseAppendFileStoreWrite) fileStoreWrite);
+        }
+
+        // do compact commit first
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(singletonList(compactCommitMessage));
+        }
+
+        if (insertMiddle) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(0));
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        // do delete commit after
+        // expire snapshots first
+        SnapshotManager snapshotManager = ((FileStoreTable) table).snapshotManager();
+        snapshotManager.deleteSnapshot(1);
+        snapshotManager.deleteSnapshot(2);
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            List<CommitMessage> messages = singletonList(deleteCommitMessage);
+            if (insertMiddle) {
+                assertThatThrownBy(() -> commit.commit(messages))
+                        .hasMessageContaining("File deletion conflicts detected");
+            } else {
+                // should rollback compact commit
+                commit.commit(messages);
+            }
+        }
+
+        // scan for rollback success
+        if (!insertMiddle) {
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Integer> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(r -> result.add(r.getInt(0)));
+            assertThat(result).containsExactlyInAnyOrder(1, 2, 3, 4);
+        }
+
+        // clear
+        catalog.dropDatabase(identifier.getDatabaseName(), false, true);
     }
 
     protected void createTable(

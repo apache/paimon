@@ -1019,12 +1019,13 @@ public class FileStoreCommitTest {
                     null,
                     Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
+                    false,
                     firstLatest,
                     true,
                     null);
             // Compact
             commit.tryCommitOnce(
-                    new RetryCommitResult(firstLatest, Collections.emptyList(), null),
+                    RetryCommitResult.forCommitFail(firstLatest, Collections.emptyList(), null),
                     Collections.emptyList(),
                     Collections.emptyList(),
                     Collections.emptyList(),
@@ -1032,6 +1033,7 @@ public class FileStoreCommitTest {
                     null,
                     Collections.emptyMap(),
                     Snapshot.CommitKind.COMPACT,
+                    false,
                     store.snapshotManager().latestSnapshot(),
                     true,
                     null);

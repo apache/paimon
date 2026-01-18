@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -43,6 +44,7 @@ import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.partition.PartitionExpireStrategy;
@@ -288,6 +290,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                         commitUser,
                         this::newScan,
                         options.commitStrictModeLastSafeSnapshot().orElse(null));
+        CommitRollback rollback = null;
+        TableRollback tableRollback = catalogEnvironment.catalogTableRollback();
+        if (tableRollback != null) {
+            rollback = new CommitRollback(tableRollback);
+        }
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -320,7 +327,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.rowTrackingEnabled(),
                 options.commitDiscardDuplicateFiles(),
                 conflictDetection,
-                strictModeChecker);
+                strictModeChecker,
+                rollback);
     }
 
     @Override
