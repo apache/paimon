@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 from collections import defaultdict
-from typing import List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import pyarrow as pa
 
@@ -24,6 +24,9 @@ from pypaimon.schema.data_types import PyarrowFieldParser
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_write import FileStoreWrite
+
+if TYPE_CHECKING:
+    from ray.data import Dataset
 
 
 class TableWrite:
@@ -68,10 +71,32 @@ class TableWrite:
         self.file_store_write.write_cols = write_cols
         return self
 
-    def write_raydata(self, dataset, overwrite=False, parallelism=1):
+    def write_ray(
+        self,
+        dataset: "Dataset",
+        overwrite: bool = False,
+        concurrency: Optional[int] = None,
+        ray_remote_args: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Write a Ray Dataset to Paimon table.
+        
+        Args:
+            dataset: Ray Dataset to write. This is a distributed data collection
+                from Ray Data (ray.data.Dataset).
+            overwrite: Whether to overwrite existing data. Defaults to False.
+            concurrency: Optional max number of Ray tasks to run concurrently.
+                By default, dynamically decided based on available resources.
+            ray_remote_args: Optional kwargs passed to :func:`ray.remote` in write tasks.
+                For example, ``{"num_cpus": 2, "max_retries": 3}``.
+        """
         from pypaimon.write.ray_datasink import PaimonDatasink
         datasink = PaimonDatasink(self.table, overwrite=overwrite)
-        dataset.write_datasink(datasink, concurrency=parallelism)
+        dataset.write_datasink(
+            datasink,
+            concurrency=concurrency,
+            ray_remote_args=ray_remote_args,
+        )
 
     def close(self):
         self.file_store_write.close()
