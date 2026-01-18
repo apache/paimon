@@ -20,7 +20,7 @@ package org.apache.paimon.table.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -126,7 +126,7 @@ public class FormatReadBuilder implements ReadBuilder {
     }
 
     @Override
-    public ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
+    public ReadBuilder withVariantExtractions(VariantExtraction[] variantExtractions) {
         throw new UnsupportedOperationException();
     }
 

@@ -19,7 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -78,13 +78,13 @@ public class ParquetFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters,
-            @Nullable VariantAccessInfo[] variantAccess) {
+            @Nullable VariantExtraction[] variantExtractions) {
         return new ParquetReaderFactory(
                 options,
                 projectedRowType,
                 readBatchSize,
                 ParquetFilters.convert(filters),
-                variantAccess);
+                variantExtractions);
     }
 
     @Override

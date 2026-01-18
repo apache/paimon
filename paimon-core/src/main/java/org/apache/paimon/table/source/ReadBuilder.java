@@ -18,9 +18,10 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -128,12 +129,13 @@ public interface ReadBuilder extends Serializable {
     ReadBuilder withReadType(RowType readType);
 
     /**
-     * Push variant access to the reader.
+     * Push variant extraction to the reader.
      *
-     * @param variantAccessInfo variant access info
+     * @param variantExtractions variant extraction
      * @since 1.4.0
      */
-    ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo);
+    @Experimental
+    ReadBuilder withVariantExtractions(VariantExtraction[] variantExtractions);
 
     /**
      * Apply projection to the reader, if you need nested row pruning, use {@link

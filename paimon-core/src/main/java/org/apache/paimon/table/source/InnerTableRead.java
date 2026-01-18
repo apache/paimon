@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -52,7 +52,7 @@ public interface InnerTableRead extends TableRead {
         throw new UnsupportedOperationException();
     }
 
-    default InnerTableRead withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
+    default InnerTableRead withVariantExtractions(VariantExtraction[] variantExtractions) {
         return this;
     }
 

@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -271,9 +271,9 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
                 @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess) {
+                @Nullable VariantExtraction[] variantExtractions) {
             FormatReaderMapping.Builder builder =
-                    formatReaderMappingBuilder(projectKeys, filters, variantAccess);
+                    formatReaderMappingBuilder(projectKeys, filters, variantExtractions);
             return new KeyValueFileReaderFactory(
                     fileIO,
                     schemaManager,
@@ -290,7 +290,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(
                 boolean projectKeys,
                 @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess) {
+                @Nullable VariantExtraction[] variantExtractions) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             List<DataField> readTableFields =
                     KeyValue.createKeyValueFields(
@@ -308,7 +308,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                     filters,
                     null,
                     null,
-                    variantAccess);
+                    variantExtractions);
         }
 
         public FileIO fileIO() {

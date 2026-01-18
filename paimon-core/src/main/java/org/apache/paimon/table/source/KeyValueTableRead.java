@@ -21,7 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
@@ -58,7 +58,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     private IOManager ioManager = null;
     @Nullable private TopN topN = null;
     @Nullable private Integer limit = null;
-    @Nullable private VariantAccessInfo[] variantAccess = null;
+    @Nullable private VariantExtraction[] variantExtractions = null;
 
     public KeyValueTableRead(
             Supplier<MergeFileSplitRead> mergeReadSupplier,
@@ -97,8 +97,8 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
         if (limit != null) {
             read = read.withLimit(limit);
         }
-        if (variantAccess != null) {
-            read = read.withVariantAccess(variantAccess);
+        if (variantExtractions != null) {
+            read = read.withVariantExtractions(variantExtractions);
         }
         read.withFilter(predicate).withIOManager(ioManager);
     }
@@ -110,9 +110,9 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
     }
 
     @Override
-    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
-        initialized().forEach(r -> r.withVariantAccess(variantAccess));
-        this.variantAccess = variantAccess;
+    public void applyVariantExtractions(VariantExtraction[] variantExtractions) {
+        initialized().forEach(r -> r.withVariantExtractions(variantExtractions));
+        this.variantExtractions = variantExtractions;
     }
 
     @Override

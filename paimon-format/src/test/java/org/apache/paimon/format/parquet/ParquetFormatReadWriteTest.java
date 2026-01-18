@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReadWriteTest;
@@ -141,18 +141,19 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                 .isEqualTo("{\"age\":25,\"other\":\"Hello\"}");
 
         // read with typed col only
-        List<VariantAccessInfo.VariantField> variantFields2 = new ArrayList<>();
+        List<VariantExtraction.VariantField> variantFields2 = new ArrayList<>();
         variantFields2.add(
-                new VariantAccessInfo.VariantField(
+                new VariantExtraction.VariantField(
                         new DataField(0, "age", DataTypes.INT()), "$.age"));
-        VariantAccessInfo[] variantAccess2 = {new VariantAccessInfo("v", variantFields2)};
+        VariantExtraction[] variantExtraction2 = {new VariantExtraction("v", variantFields2)};
         RowType readStructType2 =
                 DataTypes.ROW(
                         DataTypes.FIELD(
                                 0, "v", DataTypes.ROW(DataTypes.FIELD(0, "age", DataTypes.INT()))));
         List<InternalRow> result2 = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(writeType, writeType, new ArrayList<>(), variantAccess2)
+                format.createReaderFactory(
+                                writeType, writeType, new ArrayList<>(), variantExtraction2)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readStructType2);
@@ -162,14 +163,14 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         assertThat(result2.get(1).equals(GenericRow.of(GenericRow.of(25)))).isTrue();
 
         // read with typed col and untyped col
-        List<VariantAccessInfo.VariantField> variantFields3 = new ArrayList<>();
+        List<VariantExtraction.VariantField> variantFields3 = new ArrayList<>();
         variantFields3.add(
-                new VariantAccessInfo.VariantField(
+                new VariantExtraction.VariantField(
                         new DataField(0, "age", DataTypes.INT()), "$.age"));
         variantFields3.add(
-                new VariantAccessInfo.VariantField(
+                new VariantExtraction.VariantField(
                         new DataField(1, "other", DataTypes.STRING()), "$.other"));
-        VariantAccessInfo[] variantAccess3 = {new VariantAccessInfo("v", variantFields3)};
+        VariantExtraction[] variantExtraction3 = {new VariantExtraction("v", variantFields3)};
         RowType readStructType3 =
                 DataTypes.ROW(
                         DataTypes.FIELD(
@@ -180,7 +181,8 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                                         DataTypes.FIELD(1, "other", DataTypes.STRING()))));
         List<InternalRow> result3 = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(writeType, writeType, new ArrayList<>(), variantAccess3)
+                format.createReaderFactory(
+                                writeType, writeType, new ArrayList<>(), variantExtraction3)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readStructType3);
@@ -196,11 +198,11 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                 .isTrue();
 
         // read unexisted col
-        List<VariantAccessInfo.VariantField> variantFields4 = new ArrayList<>();
+        List<VariantExtraction.VariantField> variantFields4 = new ArrayList<>();
         variantFields4.add(
-                new VariantAccessInfo.VariantField(
+                new VariantExtraction.VariantField(
                         new DataField(0, "unexist_col", DataTypes.INT()), "$.unexist_col"));
-        VariantAccessInfo[] variantAccess4 = {new VariantAccessInfo("v", variantFields4)};
+        VariantExtraction[] variantExtraction4 = {new VariantExtraction("v", variantFields4)};
         RowType readStructType4 =
                 DataTypes.ROW(
                         DataTypes.FIELD(
@@ -209,7 +211,8 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
                                 DataTypes.ROW(DataTypes.FIELD(0, "unexist_col", DataTypes.INT()))));
         List<InternalRow> result4 = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
-                format.createReaderFactory(writeType, writeType, new ArrayList<>(), variantAccess4)
+                format.createReaderFactory(
+                                writeType, writeType, new ArrayList<>(), variantExtraction4)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readStructType4);

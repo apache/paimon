@@ -22,7 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
@@ -89,7 +89,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
-    @Nullable private VariantAccessInfo[] variantAccess;
+    @Nullable private VariantExtraction[] variantExtractions;
 
     protected RowType readRowType;
 
@@ -128,8 +128,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withVariantAccess(VariantAccessInfo[] variantAccess) {
-        this.variantAccess = variantAccess;
+    public SplitRead<InternalRow> withVariantExtractions(VariantExtraction[] variantExtractions) {
+        this.variantExtractions = variantExtractions;
         return this;
     }
 
@@ -172,7 +172,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         null,
                         null,
                         null,
-                        variantAccess);
+                        variantExtractions);
 
         List<List<DataFileMeta>> splitByRowId = mergeRangesAndSort(files);
         for (List<DataFileMeta> needMergeFiles : splitByRowId) {

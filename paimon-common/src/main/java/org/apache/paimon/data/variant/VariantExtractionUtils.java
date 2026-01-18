@@ -31,17 +31,18 @@ import java.util.Set;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.METADATA_FIELD_NAME;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME;
 import static org.apache.paimon.data.variant.PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** Utils for variant access. */
-public class VariantAccessInfoUtils {
+/** Utils for variant extraction. */
+public class VariantExtractionUtils {
 
     /**
      * Extracted the fields from the variant fields, and build a new rowType to represent the actual
      * readType of the variant.
      */
-    public static RowType actualReadType(List<VariantAccessInfo.VariantField> variantFields) {
+    public static RowType actualReadType(List<VariantExtraction.VariantField> variantFields) {
         List<DataField> fields = new ArrayList<>();
-        for (VariantAccessInfo.VariantField variantField : variantFields) {
+        for (VariantExtraction.VariantField variantField : variantFields) {
             fields.add(variantField.dataField());
         }
         return new RowType(fields);
@@ -49,17 +50,19 @@ public class VariantAccessInfoUtils {
 
     /** Replace the variant with the actual readType. */
     public static RowType buildReadRowType(
-            RowType readType, VariantAccessInfo[] variantAccessInfo) {
-        Map<String, List<VariantAccessInfo.VariantField>> variantFieldsMap = new HashMap<>();
-        for (VariantAccessInfo info : variantAccessInfo) {
-            variantFieldsMap.put(info.columnName(), info.variantFields());
+            RowType readType, VariantExtraction[] variantExtractions) {
+        Map<String, List<VariantExtraction.VariantField>> variantFieldsMap = new HashMap<>();
+        for (VariantExtraction info : variantExtractions) {
+            checkState(info.columnName().length == 1);
+            // todo: support nested variant.
+            variantFieldsMap.put(info.columnName()[0], info.variantFields());
         }
         List<DataField> fields = new ArrayList<>();
         for (DataField field : readType.getFields()) {
             if (variantFieldsMap.containsKey(field.name())) {
                 fields.add(
                         field.newType(
-                                VariantAccessInfoUtils.actualReadType(
+                                VariantExtractionUtils.actualReadType(
                                         variantFieldsMap.get(field.name()))));
             } else {
                 fields.add(field);
@@ -70,14 +73,14 @@ public class VariantAccessInfoUtils {
 
     /** Clip the variant schema to read with variant access fields. */
     public static RowType clipVariantSchema(
-            RowType shreddingSchema, List<VariantAccessInfo.VariantField> variantFields) {
+            RowType shreddingSchema, List<VariantExtraction.VariantField> variantFields) {
         if (!shreddingSchema.containsField(TYPED_VALUE_FIELD_NAME)) {
             return shreddingSchema;
         }
 
         boolean canClip = true;
         Set<String> fieldsToRead = new HashSet<>();
-        for (VariantAccessInfo.VariantField variantField : variantFields) {
+        for (VariantExtraction.VariantField variantField : variantFields) {
             VariantPathSegment[] pathSegments = VariantPathSegment.parse(variantField.path());
             if (pathSegments.length < 1) {
                 canClip = false;

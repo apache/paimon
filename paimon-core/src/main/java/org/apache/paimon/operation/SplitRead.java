@@ -18,7 +18,7 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
@@ -44,7 +44,7 @@ public interface SplitRead<T> {
 
     SplitRead<T> withReadType(RowType readType);
 
-    SplitRead<T> withVariantAccess(VariantAccessInfo[] variantAccess);
+    SplitRead<T> withVariantExtractions(VariantExtraction[] variantExtractions);
 
     SplitRead<T> withFilter(@Nullable Predicate predicate);
 
@@ -81,8 +81,8 @@ public interface SplitRead<T> {
             }
 
             @Override
-            public SplitRead<R> withVariantAccess(VariantAccessInfo[] variantAccess) {
-                read.withVariantAccess(variantAccess);
+            public SplitRead<R> withVariantExtractions(VariantExtraction[] variantExtractions) {
+                read.withVariantExtractions(variantExtractions);
                 return this;
             }
 

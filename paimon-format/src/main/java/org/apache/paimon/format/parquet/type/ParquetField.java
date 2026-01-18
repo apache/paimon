@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.parquet.type;
 
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
@@ -39,7 +39,7 @@ public abstract class ParquetField {
     // `variantFileType` describes the file schema of the Parquet variant field.
     @Nullable private final ParquetField variantFileType;
     // Represent the required variant fields.
-    @Nullable List<VariantAccessInfo.VariantField> variantFields;
+    @Nullable List<VariantExtraction.VariantField> variantFields;
 
     public ParquetField(
             DataType type,
@@ -57,7 +57,7 @@ public abstract class ParquetField {
             boolean required,
             String[] path,
             @Nullable ParquetField variantFileType,
-            @Nullable List<VariantAccessInfo.VariantField> variantFields) {
+            @Nullable List<VariantExtraction.VariantField> variantFields) {
         this.type = type;
         this.repetitionLevel = repetitionLevel;
         this.definitionLevel = definitionLevel;
@@ -92,7 +92,7 @@ public abstract class ParquetField {
     }
 
     @Nullable
-    public List<VariantAccessInfo.VariantField> variantFields() {
+    public List<VariantExtraction.VariantField> variantFields() {
         return variantFields;
     }
 

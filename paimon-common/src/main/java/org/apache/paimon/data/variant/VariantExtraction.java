@@ -18,28 +18,36 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
-/** Variant access information for a variant column. */
-public class VariantAccessInfo implements Serializable {
+/** Variant extraction information that describes fields extraction from a variant column. */
+@Experimental
+public class VariantExtraction implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    // The name of the variant column.
-    private final String columnName;
+    /**
+     * Returns the path to the variant column. For top-level variant columns, this is a single
+     * element array containing the column name. For nested variant columns within structs, this is
+     * an array representing the path (e.g., ["structCol", "innerStruct", "variantCol"]).
+     */
+    private final String[] columnName;
 
     // Extracted fields from the variant.
     private final List<VariantField> variantFields;
 
-    public VariantAccessInfo(String columnName, List<VariantField> variantFields) {
-        this.columnName = columnName;
+    public VariantExtraction(String columnName, List<VariantField> variantFields) {
+        this.columnName = new String[] {columnName};
         this.variantFields = variantFields;
     }
 
-    public String columnName() {
+    public String[] columnName() {
         return columnName;
     }
 
@@ -49,13 +57,27 @@ public class VariantAccessInfo implements Serializable {
 
     @Override
     public String toString() {
-        return "VariantAccessInfo{"
-                + "columnName='"
-                + columnName
-                + '\''
+        return "VariantExtraction{"
+                + "columnName="
+                + Arrays.toString(columnName)
                 + ", variantFields="
                 + variantFields
                 + '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        VariantExtraction that = (VariantExtraction) o;
+        return Objects.deepEquals(columnName, that.columnName)
+                && Objects.equals(variantFields, that.variantFields);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(Arrays.hashCode(columnName), variantFields);
     }
 
     /** Variant field extracted from the variant. */
@@ -104,6 +126,22 @@ public class VariantAccessInfo implements Serializable {
                     + ", castArgs="
                     + castArgs
                     + '}';
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            VariantField that = (VariantField) o;
+            return Objects.equals(dataField, that.dataField)
+                    && Objects.equals(path, that.path)
+                    && Objects.equals(castArgs, that.castArgs);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(dataField, path, castArgs);
         }
     }
 }

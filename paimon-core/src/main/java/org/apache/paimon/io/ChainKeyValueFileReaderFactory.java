@@ -20,7 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.predicate.Predicate;
@@ -120,10 +120,10 @@ public class ChainKeyValueFileReaderFactory extends KeyValueFileReaderFactory {
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
                 @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess,
+                @Nullable VariantExtraction[] variantExtractions,
                 @Nullable ChainReadContext chainReadContext) {
             FormatReaderMapping.Builder builder =
-                    wrapped.formatReaderMappingBuilder(projectKeys, filters, variantAccess);
+                    wrapped.formatReaderMappingBuilder(projectKeys, filters, variantExtractions);
             return new ChainKeyValueFileReaderFactory(
                     wrapped.fileIO,
                     wrapped.schemaManager,

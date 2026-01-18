@@ -24,7 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.variant.GenericVariant;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
@@ -106,9 +106,10 @@ public class InferVariantShreddingWriteTest {
                         new String[] {"age", "name"});
         verifyShreddingSchema(writeType, expectShreddedType);
 
-        VariantAccessInfo variantAccess =
-                createVariantAccess("v", new DataField(0, "age", DataTypes.INT()), "$.age");
-        List<InternalRow> result2 = readRowsWithVariantAccess(format, writeType, variantAccess);
+        VariantExtraction variantExtraction =
+                createVariantExtraction("v", new DataField(0, "age", DataTypes.INT()), "$.age");
+        List<InternalRow> result2 =
+                readRowsWithVariantExtraction(format, writeType, variantExtraction);
         assertThat(result2.get(0)).isEqualTo(GenericRow.of(GenericRow.of(30)));
         assertThat(result2.get(1)).isEqualTo(GenericRow.of(GenericRow.of(25)));
         assertThat(result2.get(2)).isEqualTo(GenericRow.of(GenericRow.of(35)));
@@ -129,12 +130,13 @@ public class InferVariantShreddingWriteTest {
         assertThat(result.get(0).getVariant(0).toJson()).isEqualTo("{\"numbers\":[1,2,3]}");
         assertThat(result.get(1).getVariant(0).toJson()).isEqualTo("{\"numbers\":[4,5,6]}");
 
-        VariantAccessInfo variantAccess =
-                createVariantAccess(
+        VariantExtraction variantExtraction =
+                createVariantExtraction(
                         "v",
                         new DataField(0, "numbers", DataTypes.ARRAY(DataTypes.BIGINT())),
                         "$.numbers");
-        List<InternalRow> result2 = readRowsWithVariantAccess(format, writeType, variantAccess);
+        List<InternalRow> result2 =
+                readRowsWithVariantExtraction(format, writeType, variantExtraction);
         // Verify the nested row structure and array content
         InternalRow row1 = result2.get(0).getRow(0, 1);
         assertThat(row1.getArray(0).size()).isEqualTo(3);
@@ -232,9 +234,11 @@ public class InferVariantShreddingWriteTest {
                 RowType.of(new DataType[] {DataTypes.VARIANT()}, new String[] {"field"});
         verifyShreddingSchema(writeType, expectShreddedType);
 
-        VariantAccessInfo variantAccess =
-                createVariantAccess("v", new DataField(0, "field", DataTypes.VARIANT()), "$.field");
-        List<InternalRow> result2 = readRowsWithVariantAccess(format, writeType, variantAccess);
+        VariantExtraction variantExtraction =
+                createVariantExtraction(
+                        "v", new DataField(0, "field", DataTypes.VARIANT()), "$.field");
+        List<InternalRow> result2 =
+                readRowsWithVariantExtraction(format, writeType, variantExtraction);
         assertThat(result2.get(0).getRow(0, 1).getVariant(0).toJson()).isEqualTo("\"text\"");
         assertThat(result2.get(1).getRow(0, 1).getVariant(0).toJson()).isEqualTo("123");
         assertThat(result2.get(2).getRow(0, 1).getVariant(0).toJson()).isEqualTo("true");
@@ -382,9 +386,10 @@ public class InferVariantShreddingWriteTest {
                         new String[] {"id", "value"});
         verifyShreddingSchema(writeType, expectShreddedType);
 
-        VariantAccessInfo variantAccess =
-                createVariantAccess("v", new DataField(0, "id", DataTypes.BIGINT()), "$.id");
-        List<InternalRow> result2 = readRowsWithVariantAccess(format, writeType, variantAccess);
+        VariantExtraction variantExtraction =
+                createVariantExtraction("v", new DataField(0, "id", DataTypes.BIGINT()), "$.id");
+        List<InternalRow> result2 =
+                readRowsWithVariantExtraction(format, writeType, variantExtraction);
         assertThat(result2.size()).isEqualTo(20);
         for (int i = 0; i < 20; i++) {
             if (i % 3 == 0) {
@@ -424,9 +429,11 @@ public class InferVariantShreddingWriteTest {
                 RowType.of(new DataType[] {DataTypes.BIGINT()}, new String[] {"value"});
         verifyShreddingSchema(writeType, expectShreddedType);
 
-        VariantAccessInfo variantAccess =
-                createVariantAccess("v", new DataField(0, "value", DataTypes.STRING()), "$.value");
-        List<InternalRow> result2 = readRowsWithVariantAccess(format, writeType, variantAccess);
+        VariantExtraction variantExtraction =
+                createVariantExtraction(
+                        "v", new DataField(0, "value", DataTypes.STRING()), "$.value");
+        List<InternalRow> result2 =
+                readRowsWithVariantExtraction(format, writeType, variantExtraction);
         assertThat(result2.size()).isEqualTo(3);
         assertThat(result2.get(0))
                 .isEqualTo(GenericRow.of(GenericRow.of(BinaryString.fromString("100"))));
@@ -511,21 +518,21 @@ public class InferVariantShreddingWriteTest {
         return result;
     }
 
-    protected VariantAccessInfo createVariantAccess(
+    protected VariantExtraction createVariantExtraction(
             String variantFieldName, DataField field, String path) {
-        List<VariantAccessInfo.VariantField> variantFields = new ArrayList<>();
-        variantFields.add(new VariantAccessInfo.VariantField(field, path));
-        return new VariantAccessInfo(variantFieldName, variantFields);
+        List<VariantExtraction.VariantField> variantFields = new ArrayList<>();
+        variantFields.add(new VariantExtraction.VariantField(field, path));
+        return new VariantExtraction(variantFieldName, variantFields);
     }
 
-    protected List<InternalRow> readRowsWithVariantAccess(
-            ParquetFileFormat format, RowType writeType, VariantAccessInfo... variantAccessInfos)
+    protected List<InternalRow> readRowsWithVariantExtraction(
+            ParquetFileFormat format, RowType writeType, VariantExtraction... variantExtractions)
             throws IOException {
-        RowType readStructType = buildReadStructType(variantAccessInfos);
+        RowType readStructType = buildReadStructType(variantExtractions);
         List<InternalRow> result = new ArrayList<>();
         try (RecordReader<InternalRow> reader =
                 format.createReaderFactory(
-                                writeType, writeType, new ArrayList<>(), variantAccessInfos)
+                                writeType, writeType, new ArrayList<>(), variantExtractions)
                         .createReader(
                                 new FormatReaderContext(fileIO, file, fileIO.getFileSize(file)))) {
             InternalRowSerializer serializer = new InternalRowSerializer(readStructType);
@@ -534,16 +541,16 @@ public class InferVariantShreddingWriteTest {
         return result;
     }
 
-    protected RowType buildReadStructType(VariantAccessInfo... variantAccessInfos) {
+    protected RowType buildReadStructType(VariantExtraction... variantExtractions) {
         List<DataField> fields = new ArrayList<>();
-        for (int i = 0; i < variantAccessInfos.length; i++) {
-            VariantAccessInfo variantAccessInfo = variantAccessInfos[i];
+        for (int i = 0; i < variantExtractions.length; i++) {
+            VariantExtraction variantExtraction = variantExtractions[i];
             List<DataField> variantFields = new ArrayList<>();
-            for (VariantAccessInfo.VariantField vf : variantAccessInfo.variantFields()) {
+            for (VariantExtraction.VariantField vf : variantExtraction.variantFields()) {
                 variantFields.add(vf.dataField());
             }
             RowType variantRowType = new RowType(variantFields);
-            fields.add(new DataField(i, variantAccessInfo.columnName(), variantRowType));
+            fields.add(new DataField(i, variantExtraction.columnName()[0], variantRowType));
         }
         return new RowType(fields);
     }

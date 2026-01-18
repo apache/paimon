@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.parquet.type;
 
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -52,7 +52,7 @@ public class ParquetGroupField extends ParquetField {
             List<ParquetField> children,
             String[] path,
             ParquetGroupField variantFileType,
-            @Nullable List<VariantAccessInfo.VariantField> variantFields) {
+            @Nullable List<VariantExtraction.VariantField> variantFields) {
         super(
                 type,
                 repetitionLevel,

@@ -36,8 +36,8 @@ import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.data.variant.VariantAccessInfo;
-import org.apache.paimon.data.variant.VariantAccessInfoUtils;
+import org.apache.paimon.data.variant.VariantExtraction;
+import org.apache.paimon.data.variant.VariantExtractionUtils;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
@@ -80,7 +80,7 @@ public class ParquetReaderUtil {
     public static WritableColumnVector createWritableColumnVector(
             int batchSize,
             DataType fieldType,
-            @Nullable List<VariantAccessInfo.VariantField> variantFields) {
+            @Nullable List<VariantExtraction.VariantField> variantFields) {
         switch (fieldType.getTypeRoot()) {
             case BOOLEAN:
                 return new HeapBooleanVector(batchSize);
@@ -149,7 +149,7 @@ public class ParquetReaderUtil {
             case VARIANT:
                 if (variantFields != null) {
                     return createWritableColumnVector(
-                            batchSize, VariantAccessInfoUtils.actualReadType(variantFields));
+                            batchSize, VariantExtractionUtils.actualReadType(variantFields));
                 }
 
                 WritableColumnVector[] vectors = new WritableColumnVector[2];
@@ -233,7 +233,7 @@ public class ParquetReaderUtil {
             DataField[] readFields,
             MessageColumnIO columnIO,
             RowType[] shreddingSchemas,
-            List<List<VariantAccessInfo.VariantField>> variantFields) {
+            List<List<VariantExtraction.VariantField>> variantFields) {
         List<ParquetField> list = new ArrayList<>();
         for (int i = 0; i < readFields.length; i++) {
             list.add(
@@ -254,7 +254,7 @@ public class ParquetReaderUtil {
             DataField dataField,
             ColumnIO columnIO,
             @Nullable RowType shreddingSchema,
-            @Nullable List<VariantAccessInfo.VariantField> variantFields) {
+            @Nullable List<VariantExtraction.VariantField> variantFields) {
         boolean required = columnIO.getType().getRepetition() == REQUIRED;
         int repetitionLevel = columnIO.getRepetitionLevel();
         int definitionLevel = columnIO.getDefinitionLevel();
@@ -288,7 +288,7 @@ public class ParquetReaderUtil {
                 DataType clippedParquetType =
                         variantFields == null
                                 ? shreddingSchema
-                                : VariantAccessInfoUtils.clipVariantSchema(
+                                : VariantExtractionUtils.clipVariantSchema(
                                         shreddingSchema, variantFields);
                 ParquetGroupField parquetField =
                         (ParquetGroupField)
@@ -296,7 +296,7 @@ public class ParquetReaderUtil {
                 DataType readType =
                         variantFields == null
                                 ? variantType
-                                : VariantAccessInfoUtils.actualReadType(variantFields);
+                                : VariantExtractionUtils.actualReadType(variantFields);
                 return new ParquetGroupField(
                         readType,
                         parquetField.getRepetitionLevel(),

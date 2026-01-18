@@ -581,7 +581,7 @@ public class PaimonShreddingUtils {
      * extract. If it is variant struct, return a list of fields matching the variant struct fields.
      */
     public static FieldToExtract[] getFieldsToExtract(
-            List<VariantAccessInfo.VariantField> variantFields, VariantSchema variantSchema) {
+            List<VariantExtraction.VariantField> variantFields, VariantSchema variantSchema) {
         if (variantFields != null) {
             return variantFields.stream()
                     .map(

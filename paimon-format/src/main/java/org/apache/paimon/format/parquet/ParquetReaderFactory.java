@@ -21,7 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
@@ -78,7 +78,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final DataField[] readFields;
     private final int batchSize;
     @Nullable private final FilterCompat.Filter filter;
-    @Nullable private final VariantAccessInfo[] variantAccess;
+    @Nullable private final VariantExtraction[] variantExtractions;
 
     public ParquetReaderFactory(
             Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
@@ -90,12 +90,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             RowType readType,
             int batchSize,
             @Nullable FilterCompat.Filter filter,
-            @Nullable VariantAccessInfo[] variantAccess) {
+            @Nullable VariantExtraction[] variantExtractions) {
         this.conf = conf;
         this.readFields = readType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
-        this.variantAccess = variantAccess;
+        this.variantExtractions = variantExtractions;
     }
 
     @Override
@@ -126,8 +126,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         reader.setRequestedSchema(requestedSchema);
         RowType[] shreddingSchemas =
                 VariantUtils.extractShreddingSchemasFromParquetSchema(readFields, fileSchema);
-        List<List<VariantAccessInfo.VariantField>> variantFields =
-                VariantUtils.buildVariantFields(readFields, variantAccess);
+        List<List<VariantExtraction.VariantField>> variantFields =
+                VariantUtils.buildVariantFields(readFields, variantExtractions);
         WritableColumnVector[] writableVectors = createWritableVectors(variantFields);
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
@@ -251,7 +251,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     private WritableColumnVector[] createWritableVectors(
-            List<List<VariantAccessInfo.VariantField>> variantFields) {
+            List<List<VariantExtraction.VariantField>> variantFields) {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
             columns[i] =

@@ -20,7 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.VariantExtraction;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
@@ -45,7 +45,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     public abstract void applyReadType(RowType readType);
 
-    public abstract void applyVariantAccess(VariantAccessInfo[] variantAccess);
+    public abstract void applyVariantExtractions(VariantExtraction[] variantExtractions);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -84,8 +84,8 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     @Override
-    public InnerTableRead withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
-        applyVariantAccess(variantAccessInfo);
+    public InnerTableRead withVariantExtractions(VariantExtraction[] variantExtractions) {
+        applyVariantExtractions(variantExtractions);
         return this;
     }
 
