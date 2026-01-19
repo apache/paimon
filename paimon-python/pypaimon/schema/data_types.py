@@ -561,7 +561,7 @@ class PyarrowFieldParser:
         return fields
 
     @staticmethod
-    def to_avro_type(field_type: pyarrow.DataType, field_name: str) -> Union[str, Dict[str, Any]]:
+    def to_avro_type(field_type: pyarrow.DataType, field_name: str, parent_name: str = "record") -> Union[str, Dict[str, Any]]:
         if pyarrow.types.is_integer(field_type):
             if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
                (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
@@ -599,21 +599,22 @@ class PyarrowFieldParser:
             value_field = field_type.value_field
             return {
                 "type": "array",
-                "items": PyarrowFieldParser.to_avro_type(value_field.type, value_field.name)
+                "items": PyarrowFieldParser.to_avro_type(value_field.type, value_field.name, parent_name)
             }
         elif pyarrow.types.is_struct(field_type):
-            return PyarrowFieldParser.to_avro_schema(field_type, name="{}_record".format(field_name))
+            nested_name = "{}_{}".format(parent_name, field_name)
+            return PyarrowFieldParser.to_avro_schema(field_type, name=nested_name)
 
         raise ValueError("Unsupported pyarrow type for Avro conversion: {}".format(field_type))
 
     @staticmethod
     def to_avro_schema(pyarrow_schema: Union[pyarrow.Schema, pyarrow.StructType],
-                       name: str = "Root2",
-                       namespace: str = "pyarrow.avro"
+                       name: str = "record",
+                       namespace: str = "org.apache.paimon.avro.generated"
                        ) -> Dict[str, Any]:
         fields = []
         for field in pyarrow_schema:
-            avro_type = PyarrowFieldParser.to_avro_type(field.type, field.name)
+            avro_type = PyarrowFieldParser.to_avro_type(field.type, field.name, parent_name=name)
             if field.nullable:
                 avro_type = ["null", avro_type]
             fields.append({"name": field.name, "type": avro_type})
