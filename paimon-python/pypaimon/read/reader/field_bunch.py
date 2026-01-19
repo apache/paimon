@@ -82,11 +82,6 @@ class BlobBunch(FieldBunch):
                         "Blob file with overlapping row id should have decreasing sequence number."
                     )
                 return
-            elif first_row_id > self.expected_next_first_row_id:
-                raise ValueError(
-                    f"Blob file first row id should be continuous, expect "
-                    f"{self.expected_next_first_row_id} but got {first_row_id}"
-                )
 
             if file.schema_id != self._files[0].schema_id:
                 raise ValueError(

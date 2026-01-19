@@ -57,11 +57,6 @@ class Split(ABC):
 
 
 class DataSplit(Split):
-    """
-    Implementation of Split for native Python reading.
-
-    This is equivalent to Java's DataSplit.
-    """
 
     def __init__(
         self,
