@@ -153,8 +153,8 @@ public class ArrowFormatWriterTest {
             VarBinaryVector valueVector = (VarBinaryVector) variantVector.getChild(Variant.VALUE);
             VarBinaryVector metadataVector =
                     (VarBinaryVector) variantVector.getChild(Variant.METADATA);
-            assertThat((byte[]) valueVector.getObject(0)).isEqualTo(variant.value());
-            assertThat((byte[]) metadataVector.getObject(0)).isEqualTo(variant.metadata());
+            assertThat(valueVector.getObject(0)).isEqualTo(variant.value());
+            assertThat(metadataVector.getObject(0)).isEqualTo(variant.metadata());
         }
     }
 
