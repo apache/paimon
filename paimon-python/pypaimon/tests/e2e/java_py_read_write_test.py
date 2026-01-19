@@ -175,8 +175,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):
-        # For parquet, read from Java-written table (no format suffix)
-        # For lance, read from Java-written table (with format suffix)
         table_name = f'default.mixed_test_pk_tablej_{file_format}'
         table = self.catalog.get_table(table_name)
         read_builder = table.new_read_builder()
