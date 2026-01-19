@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
@@ -49,7 +48,6 @@ public final class AppendTableRead extends AbstractDataTableRead {
     private Predicate predicate = null;
     private TopN topN = null;
     private Integer limit = null;
-    @Nullable private VariantAccessInfo[] variantAccess;
 
     public AppendTableRead(
             List<Function<SplitReadConfig, SplitReadProvider>> providerFactories,
@@ -78,19 +76,12 @@ public final class AppendTableRead extends AbstractDataTableRead {
         read.withFilter(predicate);
         read.withTopN(topN);
         read.withLimit(limit);
-        read.withVariantAccess(variantAccess);
     }
 
     @Override
     public void applyReadType(RowType readType) {
         initialized().forEach(r -> r.withReadType(readType));
         this.readType = readType;
-    }
-
-    @Override
-    public void applyVariantAccess(VariantAccessInfo[] variantAccess) {
-        initialized().forEach(r -> r.withVariantAccess(variantAccess));
-        this.variantAccess = variantAccess;
     }
 
     @Override

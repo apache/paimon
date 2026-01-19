@@ -40,6 +40,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarBinaryType;
 
 import java.math.BigDecimal;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -581,19 +582,23 @@ public class PaimonShreddingUtils {
      * extract. If it is variant struct, return a list of fields matching the variant struct fields.
      */
     public static FieldToExtract[] getFieldsToExtract(
-            List<VariantAccessInfo.VariantField> variantFields, VariantSchema variantSchema) {
-        if (variantFields != null) {
-            return variantFields.stream()
-                    .map(
-                            field ->
-                                    buildFieldsToExtract(
-                                            field.dataField().type(),
-                                            field.path(),
-                                            field.castArgs(),
-                                            variantSchema))
-                    .toArray(FieldToExtract[]::new);
+            DataType dataType, VariantSchema variantSchema) {
+        if (!VariantMetadataUtils.isVariantRowType(dataType)) {
+            return null;
         }
-        return null;
+
+        RowType variantRowType = (RowType) dataType;
+        List<DataField> fields = variantRowType.getFields();
+        FieldToExtract[] fieldsToExtract = new FieldToExtract[fields.size()];
+        for (int i = 0; i < fields.size(); i++) {
+            DataField field = fields.get(i);
+            String path = VariantMetadataUtils.path(field.description());
+            boolean failOnError = VariantMetadataUtils.failOnError(field.description());
+            ZoneId timeZoneId = VariantMetadataUtils.timeZoneId(field.description());
+            VariantCastArgs castArgs = new VariantCastArgs(failOnError, timeZoneId);
+            fieldsToExtract[i] = buildFieldsToExtract(field.type(), path, castArgs, variantSchema);
+        }
+        return fieldsToExtract;
     }
 
     /**

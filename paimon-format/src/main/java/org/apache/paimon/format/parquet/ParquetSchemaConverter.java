@@ -374,11 +374,9 @@ public class ParquetSchemaConverter {
         } else {
             GroupType groupType = parquetType.asGroupType();
             if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
-                int level = groupType.getType(0) instanceof GroupType ? 3 : 2;
                 paimonDataType =
                         new ArrayType(
-                                convertToPaimonField(parquetListElementType(groupType, level))
-                                        .type());
+                                convertToPaimonField(parquetListElementType(groupType)).type());
             } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
                 paimonDataType =
@@ -403,7 +401,8 @@ public class ParquetSchemaConverter {
         return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
     }
 
-    public static Type parquetListElementType(GroupType listType, int level) {
+    public static Type parquetListElementType(GroupType listType) {
+        int level = listType.getType(0) instanceof GroupType ? 3 : 2;
         if (level == 3) {
             // Level 3 representation of list type.
             // List type should only have one middle group type, which is repeated, and one element

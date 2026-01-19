@@ -20,7 +20,6 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
@@ -86,7 +85,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
-    @Nullable private VariantAccessInfo[] variantAccess;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -121,12 +119,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public SplitRead<InternalRow> withReadType(RowType readRowType) {
         this.readRowType = readRowType;
-        return this;
-    }
-
-    @Override
-    public SplitRead<InternalRow> withVariantAccess(VariantAccessInfo[] variantAccess) {
-        this.variantAccess = variantAccess;
         return this;
     }
 
@@ -192,8 +184,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         },
                         filters,
                         topN,
-                        limit,
-                        variantAccess);
+                        limit);
 
         for (DataFileMeta file : files) {
             suppliers.add(
