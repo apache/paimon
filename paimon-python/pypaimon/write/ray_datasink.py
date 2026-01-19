@@ -55,7 +55,8 @@ class PaimonDatasink(Datasink[List["CommitMessage"]]):
 
     def __setstate__(self, state: dict) -> None:
         self.__dict__.update(state)
-        if self._writer_builder is not None and not hasattr(self._writer_builder, 'table'):
+        writer_builder = getattr(self, '_writer_builder', None)
+        if writer_builder is not None and not hasattr(writer_builder, 'table'):
             self._writer_builder = None
         if not hasattr(self, '_table_name'):
             self._table_name = self.table.identifier.get_full_name()
