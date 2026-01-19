@@ -76,7 +76,8 @@ public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
         out.close();
 
         try (ParquetFileReader reader =
-                ParquetUtil.getParquetReader(fileIO, file, fileIO.getFileSize(file))) {
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
             ParquetMetadata parquetMetadata = reader.getFooter();
             List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
             for (BlockMetaData blockMetaData : blockMetaDataList) {
