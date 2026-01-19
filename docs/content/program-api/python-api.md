@@ -72,6 +72,7 @@ catalog_options = {
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
+
 {{< /tab >}}
 {{< /tabs >}}
 
@@ -473,6 +474,38 @@ ray_dataset = table_read.to_ray(splits)
 
 See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more details.
 
+### Read Pytorch Dataset
+
+This requires `torch` to be installed.
+
+You can read all the data into a `torch.utils.data.Dataset` or `torch.utils.data.IterableDataset`:
+
+```python
+from torch.utils.data import DataLoader
+
+table_read = read_builder.new_read()
+dataset = table_read.to_torch(splits, streaming=True)
+dataloader = DataLoader(
+    dataset,
+    batch_size=2,
+    num_workers=2,  # Concurrency to read data
+    shuffle=False
+)
+
+# Collect all data from dataloader
+for batch_idx, batch_data in enumerate(dataloader):
+    print(batch_data)
+
+# output:
+#   {'user_id': tensor([1, 2]), 'behavior': ['a', 'b']}
+#   {'user_id': tensor([3, 4]), 'behavior': ['c', 'd']}
+#   {'user_id': tensor([5, 6]), 'behavior': ['e', 'f']}
+#   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
+```
+
+When the `streaming` parameter is true, it will iteratively read;
+when it is false, it will read the full amount of data into memory.
+
 ### Incremental Read
 
 This API allows reading data committed between two snapshot timestamps. The steps are as follows.
@@ -671,22 +704,22 @@ Key points about shard read:
 The following shows the supported features of Python Paimon compared to Java Paimon:
 
 **Catalog Level**
-   - FileSystemCatalog
-   - RestCatalog
+  - FileSystemCatalog
+  - RestCatalog
 
 **Table Level**
-   - Append Tables
-     - `bucket = -1` (unaware)
-     - `bucket > 0` (fixed)
-   - Primary Key Tables
-     - only support deduplicate
-     - `bucket = -2` (postpone)
-     - `bucket > 0` (fixed)
-     - read with deletion vectors enabled
-   - Read/Write Operations
-     - Batch read and write for append tables and primary key tables
-     - Predicate filtering
-     - Overwrite semantics
-     - Incremental reading of Delta data
-     - Reading and writing blob data
-     - `with_shard` feature
+  - Append Tables
+    - `bucket = -1` (unaware)
+    - `bucket > 0` (fixed)
+  - Primary Key Tables
+      - only support deduplicate
+      - `bucket = -2` (postpone)
+      - `bucket > 0` (fixed)
+      - read with deletion vectors enabled
+  - Read/Write Operations
+      - Batch read and write for append tables and primary key tables
+      - Predicate filtering
+      - Overwrite semantics
+      - Incremental reading of Delta data
+      - Reading and writing blob data
+      - `with_shard` feature

@@ -252,7 +252,7 @@ class RESTCatalog(Catalog):
         )
 
     def file_io_from_options(self, table_path: str) -> FileIO:
-        return FileIO(table_path, self.context.options)
+        return FileIO.get(table_path, self.context.options)
 
     def file_io_for_data(self, table_path: str, identifier: Identifier):
         return RESTTokenFileIO(identifier, table_path, self.context.options) \

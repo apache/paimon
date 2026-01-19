@@ -25,8 +25,14 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
@@ -38,6 +44,8 @@ import org.apache.paimon.rest.exceptions.NotAuthorizedException;
 import org.apache.paimon.rest.responses.ConfigResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -55,6 +63,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.catalog.Catalog.TABLE_DEFAULT_OPTION_PREFIX;
 import static org.apache.paimon.rest.RESTApi.HEADER_PREFIX;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -246,6 +255,42 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         catalog.dropTable(identifier, true);
     }
 
+    @Test
+    void testAuthTableQueryResponseWithColumnMasking() throws Exception {
+        Identifier identifier = Identifier.create("test_db", "auth_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                Identifier.create(identifier.getDatabaseName(), identifier.getTableName()),
+                DEFAULT_TABLE_SCHEMA,
+                false);
+
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.STRING()));
+        Predicate predicate = builder.equal(0, 100);
+        String predicateJson = JsonSerdeUtil.toFlatJson(predicate);
+
+        Transform transform =
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "col2", DataTypes.STRING())));
+        String transformJson = JsonSerdeUtil.toFlatJson(transform);
+
+        // Set up mock response with filter and columnMasking
+        List<Predicate> rowFilters = Collections.singletonList(predicate);
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("col2", transform);
+        restCatalogServer.setRowFilterAuth(identifier, rowFilters);
+        restCatalogServer.setColumnMaskingAuth(identifier, columnMasking);
+
+        TableQueryAuthResult result = catalog.authTableQuery(identifier, null);
+        assertThat(result.filter()).containsOnly(predicateJson);
+        assertThat(result.columnMasking()).isNotEmpty();
+        assertThat(result.columnMasking()).containsKey("col2");
+        assertThat(result.columnMasking().get("col2")).isEqualTo(transformJson);
+
+        catalog.dropTable(identifier, true);
+        catalog.dropDatabase(identifier.getDatabaseName(), true, true);
+    }
+
     private void checkHeader(String headerName, String headerValue) {
         // Verify that the header were included in the requests
         List<Map<String, String>> receivedHeaders = restCatalogServer.getReceivedHeaders();
@@ -337,6 +382,16 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                 fileSizeInBytes,
                 fileCount,
                 lastFileCreationTime);
+    }
+
+    @Override
+    protected void setColumnMasking(Identifier identifier, Map<String, Transform> columnMasking) {
+        restCatalogServer.setColumnMaskingAuth(identifier, columnMasking);
+    }
+
+    @Override
+    protected void setRowFilter(Identifier identifier, List<Predicate> rowFilters) {
+        restCatalogServer.setRowFilterAuth(identifier, rowFilters);
     }
 
     private RESTCatalog initCatalog(boolean enableDataToken) throws IOException {

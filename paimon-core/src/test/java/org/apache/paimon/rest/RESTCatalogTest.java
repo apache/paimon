@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TableType;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
@@ -37,9 +38,27 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.operation.BaseAppendFileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.predicate.CastTransform;
+import org.apache.paimon.predicate.ConcatTransform;
+import org.apache.paimon.predicate.ConcatWsTransform;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FieldTransform;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.Transform;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.exceptions.BadRequestException;
@@ -58,8 +77,10 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -98,6 +119,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
@@ -107,6 +129,7 @@ import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
@@ -2969,6 +2992,551 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         DEFAULT_TABLE_SCHEMA.options().remove(CoreOptions.PATH.key());
     }
 
+    @Test
+    void testColumnMaskingApplyOnRead() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_masking_apply");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create table with multiple columns of different types
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "col1", DataTypes.STRING()));
+        fields.add(new DataField(1, "col2", DataTypes.STRING()));
+        fields.add(new DataField(2, "col3", DataTypes.INT()));
+        fields.add(new DataField(3, "col4", DataTypes.STRING()));
+        fields.add(new DataField(4, "col5", DataTypes.STRING()));
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Write test data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("hello"),
+                        BinaryString.fromString("world"),
+                        100,
+                        BinaryString.fromString("test"),
+                        BinaryString.fromString("data")));
+        write.write(
+                GenericRow.of(
+                        BinaryString.fromString("foo"),
+                        BinaryString.fromString("bar"),
+                        200,
+                        BinaryString.fromString("example"),
+                        BinaryString.fromString("value")));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Set up column masking with various transform types
+        Map<String, Transform> columnMasking = new HashMap<>();
+
+        // Test 1: ConcatTransform - mask col1 with "****"
+        ConcatTransform concatTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("****")));
+        columnMasking.put("col1", concatTransform);
+
+        // Test 2: UpperTransform - convert col2 to uppercase
+        UpperTransform upperTransform =
+                new UpperTransform(
+                        Collections.singletonList(new FieldRef(1, "col2", DataTypes.STRING())));
+        columnMasking.put("col2", upperTransform);
+
+        // Test 3: CastTransform - cast col3 (INT) to STRING
+        CastTransform castTransform =
+                new CastTransform(new FieldRef(2, "col3", DataTypes.INT()), DataTypes.STRING());
+        columnMasking.put("col3", castTransform);
+
+        // Test 4: ConcatWsTransform - concatenate col4 with separator
+        ConcatWsTransform concatWsTransform =
+                new ConcatWsTransform(
+                        java.util.Arrays.asList(
+                                BinaryString.fromString("-"),
+                                BinaryString.fromString("prefix"),
+                                new FieldRef(3, "col4", DataTypes.STRING())));
+        columnMasking.put("col4", concatWsTransform);
+
+        // col5 is intentionally not masked to verify unmasked columns work correctly
+
+        setColumnMasking(identifier, columnMasking);
+
+        // Read and verify masked data
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+
+        assertThat(rows).hasSize(2);
+
+        // Verify first row
+        InternalRow row1 = rows.get(0);
+        assertThat(row1.getString(0).toString())
+                .isEqualTo("****"); // col1 masked with ConcatTransform
+        assertThat(row1.getString(1).toString())
+                .isEqualTo("WORLD"); // col2 masked with UpperTransform
+        assertThat(row1.getString(2).toString())
+                .isEqualTo("100"); // col3 masked with CastTransform (INT->STRING)
+        assertThat(row1.getString(3).toString())
+                .isEqualTo("prefix-test"); // col4 masked with ConcatWsTransform
+        assertThat(row1.getString(4).toString())
+                .isEqualTo("data"); // col5 NOT masked - original value
+
+        // Verify second row
+        InternalRow row2 = rows.get(1);
+        assertThat(row2.getString(0).toString())
+                .isEqualTo("****"); // col1 masked with ConcatTransform
+        assertThat(row2.getString(1).toString())
+                .isEqualTo("BAR"); // col2 masked with UpperTransform
+        assertThat(row2.getString(2).toString())
+                .isEqualTo("200"); // col3 masked with CastTransform (INT->STRING)
+        assertThat(row2.getString(3).toString())
+                .isEqualTo("prefix-example"); // col4 masked with ConcatWsTransform
+        assertThat(row2.getString(4).toString())
+                .isEqualTo("value"); // col5 NOT masked - original value
+    }
+
+    @Test
+    void testRowFilter() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "auth_table_filter");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create table with multiple data types
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "name", DataTypes.STRING()));
+        fields.add(new DataField(2, "age", DataTypes.BIGINT()));
+        fields.add(new DataField(3, "salary", DataTypes.DOUBLE()));
+        fields.add(new DataField(4, "is_active", DataTypes.BOOLEAN()));
+        fields.add(new DataField(5, "score", DataTypes.FLOAT()));
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Write test data with various types
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(GenericRow.of(1, BinaryString.fromString("Alice"), 25L, 50000.0, true, 85.5f));
+        write.write(GenericRow.of(2, BinaryString.fromString("Bob"), 30L, 60000.0, false, 90.0f));
+        write.write(
+                GenericRow.of(3, BinaryString.fromString("Charlie"), 35L, 70000.0, true, 95.5f));
+        write.write(GenericRow.of(4, BinaryString.fromString("David"), 28L, 55000.0, true, 88.0f));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Test 1: Filter by INT type (id > 2)
+        LeafPredicate intFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(0, "id", DataTypes.INT())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(2));
+        setRowFilter(identifier, Collections.singletonList(intFilterPredicate));
+
+        List<String> result1 = batchRead(table);
+        assertThat(result1).hasSize(2);
+        assertThat(result1)
+                .contains(
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]",
+                        "+I[4, David, 28, 55000.0, true, 88.0]");
+
+        // Test 2: Filter by BIGINT type (age >= 30)
+        LeafPredicate bigintFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.BIGINT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30L));
+        setRowFilter(identifier, Collections.singletonList(bigintFilterPredicate));
+
+        List<String> result2 = batchRead(table);
+        assertThat(result2).hasSize(2);
+        assertThat(result2)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 3: Filter by DOUBLE type (salary > 55000.0)
+        LeafPredicate doubleFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "salary", DataTypes.DOUBLE())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(55000.0));
+        setRowFilter(identifier, Collections.singletonList(doubleFilterPredicate));
+
+        List<String> result3 = batchRead(table);
+        assertThat(result3).hasSize(2);
+        assertThat(result3)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 4: Filter by BOOLEAN type (is_active = true)
+        LeafPredicate booleanFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "is_active", DataTypes.BOOLEAN())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(true));
+        setRowFilter(identifier, Collections.singletonList(booleanFilterPredicate));
+
+        List<String> result4 = batchRead(table);
+        assertThat(result4).hasSize(3);
+        assertThat(result4)
+                .contains(
+                        "+I[1, Alice, 25, 50000.0, true, 85.5]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]",
+                        "+I[4, David, 28, 55000.0, true, 88.0]");
+
+        // Test 5: Filter by FLOAT type (score >= 90.0)
+        LeafPredicate floatFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(5, "score", DataTypes.FLOAT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(90.0f));
+        setRowFilter(identifier, Collections.singletonList(floatFilterPredicate));
+
+        List<String> result5 = batchRead(table);
+        assertThat(result5).hasSize(2);
+        assertThat(result5)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 6: Filter by STRING type (name = "Alice")
+        LeafPredicate stringFilterPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(1, "name", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("Alice")));
+        setRowFilter(identifier, Collections.singletonList(stringFilterPredicate));
+
+        List<String> result6 = batchRead(table);
+        assertThat(result6).hasSize(1);
+        assertThat(result6).contains("+I[1, Alice, 25, 50000.0, true, 85.5]");
+
+        // Test 7: Filter with two predicates (age >= 30 AND is_active = true)
+        LeafPredicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.BIGINT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30L));
+        LeafPredicate isActiveTruePredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "is_active", DataTypes.BOOLEAN())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(true));
+        setRowFilter(identifier, Arrays.asList(ageGe30Predicate, isActiveTruePredicate));
+
+        List<String> result7 = batchRead(table);
+        assertThat(result7).hasSize(1);
+        assertThat(result7).contains("+I[3, Charlie, 35, 70000.0, true, 95.5]");
+
+        // Test 8: Filter with two predicates (salary > 55000.0 AND score >= 90.0)
+        LeafPredicate salaryGt55000Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "salary", DataTypes.DOUBLE())),
+                        GreaterThan.INSTANCE,
+                        Collections.singletonList(55000.0));
+        LeafPredicate scoreGe90Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(5, "score", DataTypes.FLOAT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(90.0f));
+        setRowFilter(identifier, Arrays.asList(salaryGt55000Predicate, scoreGe90Predicate));
+
+        List<String> result8 = batchRead(table);
+        assertThat(result8).hasSize(2);
+        assertThat(result8)
+                .contains(
+                        "+I[2, Bob, 30, 60000.0, false, 90.0]",
+                        "+I[3, Charlie, 35, 70000.0, true, 95.5]");
+    }
+
+    @Test
+    void testColumnMaskingAndRowFilter() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "combined_auth_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+
+        // Create table with test data
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "id", DataTypes.INT()));
+        fields.add(new DataField(1, "name", DataTypes.STRING()));
+        fields.add(new DataField(2, "salary", DataTypes.STRING()));
+        fields.add(new DataField(3, "age", DataTypes.INT()));
+        fields.add(new DataField(4, "department", DataTypes.STRING()));
+
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        fields,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.singletonMap(QUERY_AUTH_ENABLED.key(), "true"),
+                        ""),
+                true);
+
+        Table table = catalog.getTable(identifier);
+
+        // Write test data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        write.write(
+                GenericRow.of(
+                        1,
+                        BinaryString.fromString("Alice"),
+                        BinaryString.fromString("50000.0"),
+                        25,
+                        BinaryString.fromString("IT")));
+        write.write(
+                GenericRow.of(
+                        2,
+                        BinaryString.fromString("Bob"),
+                        BinaryString.fromString("60000.0"),
+                        30,
+                        BinaryString.fromString("HR")));
+        write.write(
+                GenericRow.of(
+                        3,
+                        BinaryString.fromString("Charlie"),
+                        BinaryString.fromString("70000.0"),
+                        35,
+                        BinaryString.fromString("IT")));
+        write.write(
+                GenericRow.of(
+                        4,
+                        BinaryString.fromString("David"),
+                        BinaryString.fromString("55000.0"),
+                        28,
+                        BinaryString.fromString("Finance")));
+        List<CommitMessage> messages = write.prepareCommit();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        commit.commit(messages);
+        write.close();
+        commit.close();
+
+        // Test column masking only
+        Transform salaryMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        Map<String, Transform> columnMasking = new HashMap<>();
+        columnMasking.put("salary", salaryMaskTransform);
+        setColumnMasking(identifier, columnMasking);
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableRead read = readBuilder.newRead();
+        RecordReader<InternalRow> reader = read.createReader(splits);
+
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(4);
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("***");
+
+        // Test row filter only (clear column masking first)
+        setColumnMasking(identifier, new HashMap<>());
+        Predicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
+        setRowFilter(identifier, Collections.singletonList(ageGe30Predicate));
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(2);
+
+        // Test both column masking and row filter together
+        columnMasking.put("salary", salaryMaskTransform);
+        Transform nameMaskTransform =
+                new ConcatTransform(Collections.singletonList(BinaryString.fromString("***")));
+        columnMasking.put("name", nameMaskTransform);
+        setColumnMasking(identifier, columnMasking);
+        Predicate deptPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(4, "department", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("IT")));
+        setRowFilter(identifier, Collections.singletonList(deptPredicate));
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("***"); // name masked
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("***"); // salary masked
+        assertThat(rows.get(0).getString(4).toString()).isEqualTo("IT"); // department not masked
+
+        // Test complex scenario: row filter + column masking combined
+        Predicate combinedPredicate = PredicateBuilder.and(ageGe30Predicate, deptPredicate);
+        setRowFilter(identifier, Collections.singletonList(combinedPredicate));
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getInt(0)).isEqualTo(3); // id
+        assertThat(rows.get(0).getString(1).toString()).isEqualTo("***"); // name masked
+        assertThat(rows.get(0).getString(2).toString()).isEqualTo("***"); // salary masked
+        assertThat(rows.get(0).getInt(3)).isEqualTo(35); // age not masked
+
+        // Clear both column masking and row filter
+        setColumnMasking(identifier, new HashMap<>());
+        setRowFilter(identifier, null);
+
+        readBuilder = table.newReadBuilder();
+        splits = readBuilder.newScan().plan().splits();
+        read = readBuilder.newRead();
+        reader = read.createReader(splits);
+
+        rows = new ArrayList<>();
+        reader.forEachRemaining(rows::add);
+        assertThat(rows).hasSize(4);
+        assertThat(rows.get(0).getString(1).toString()).isIn("Alice", "Bob", "Charlie", "David");
+    }
+
+    @Test
+    public void testConflictRollback() throws Exception {
+        doTestConflictRollback(false);
+    }
+
+    @Test
+    public void testConflictRollbackFail() throws Exception {
+        doTestConflictRollback(true);
+    }
+
+    private void doTestConflictRollback(boolean insertMiddle) throws Exception {
+        Identifier identifier =
+                Identifier.create("test_conflict_rollback", "test_conflict_rollback");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col1", DataTypes.INT())),
+                        emptyList(),
+                        emptyList(),
+                        new HashMap<>(),
+                        ""),
+                true);
+        Table table = catalog.getTable(identifier);
+
+        // write 5 files
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        List<DataFileMeta> files = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(i));
+                List<CommitMessage> commitMessages = write.prepareCommit();
+                commit.commit(commitMessages);
+                DataFileMeta file =
+                        ((CommitMessageImpl) commitMessages.get(0))
+                                .newFilesIncrement()
+                                .newFiles()
+                                .get(0);
+                files.add(file);
+            }
+        }
+
+        // delete write
+        DataFileMeta file = files.get(0);
+        CommitMessageImpl deleteCommitMessage =
+                new CommitMessageImpl(
+                        EMPTY_ROW,
+                        0,
+                        -1,
+                        new DataIncrement(emptyList(), singletonList(file), emptyList()),
+                        new CompactIncrement(emptyList(), emptyList(), emptyList()));
+
+        // compact write
+        CommitMessage compactCommitMessage;
+        try (BatchTableWrite write = writeBuilder.newWrite()) {
+            AppendCompactTask compactTask = new AppendCompactTask(EMPTY_ROW, files);
+            FileStoreWrite<?> fileStoreWrite = ((TableWriteImpl<?>) write).getWrite();
+            compactCommitMessage =
+                    compactTask.doCompact(
+                            (FileStoreTable) table, (BaseAppendFileStoreWrite) fileStoreWrite);
+        }
+
+        // do compact commit first
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(singletonList(compactCommitMessage));
+        }
+
+        if (insertMiddle) {
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(0));
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        // do delete commit after
+        // expire snapshots first
+        SnapshotManager snapshotManager = ((FileStoreTable) table).snapshotManager();
+        snapshotManager.deleteSnapshot(1);
+        snapshotManager.deleteSnapshot(2);
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            List<CommitMessage> messages = singletonList(deleteCommitMessage);
+            if (insertMiddle) {
+                assertThatThrownBy(() -> commit.commit(messages))
+                        .hasMessageContaining("File deletion conflicts detected");
+            } else {
+                // should rollback compact commit
+                commit.commit(messages);
+            }
+        }
+
+        // scan for rollback success
+        if (!insertMiddle) {
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Integer> result = new ArrayList<>();
+            readBuilder
+                    .newRead()
+                    .createReader(readBuilder.newScan().plan())
+                    .forEachRemaining(r -> result.add(r.getInt(0)));
+            assertThat(result).containsExactlyInAnyOrder(1, 2, 3, 4);
+        }
+
+        // clear
+        catalog.dropDatabase(identifier.getDatabaseName(), false, true);
+    }
+
     protected void createTable(
             Identifier identifier, Map<String, String> options, List<String> partitionKeys)
             throws Exception {
@@ -3010,6 +3578,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
             long fileCount,
             long lastFileCreationTime);
 
+    protected abstract void setColumnMasking(
+            Identifier identifier, Map<String, Transform> columnMasking);
+
+    protected abstract void setRowFilter(Identifier identifier, List<Predicate> rowFilter);
+
     protected void batchWrite(Table table, List<Integer> data) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         BatchTableWrite write = writeBuilder.newWrite();
@@ -3030,11 +3603,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
         List<String> result = new ArrayList<>();
+
+        // Create field getters for each column
+        InternalRow.FieldGetter[] fieldGetters =
+                new InternalRow.FieldGetter[table.rowType().getFieldCount()];
+        for (int i = 0; i < table.rowType().getFieldCount(); i++) {
+            fieldGetters[i] = InternalRow.createFieldGetter(table.rowType().getTypeAt(i), i);
+        }
+
         reader.forEachRemaining(
                 row -> {
-                    String rowStr =
-                            String.format("%s[%d]", row.getRowKind().shortString(), row.getInt(0));
-                    result.add(rowStr);
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(row.getRowKind().shortString()).append("[");
+                    for (int i = 0; i < row.getFieldCount(); i++) {
+                        if (i > 0) {
+                            sb.append(", ");
+                        }
+                        Object value = fieldGetters[i].getFieldOrNull(row);
+                        sb.append(value);
+                    }
+                    sb.append("]");
+                    result.add(sb.toString());
                 });
         return result;
     }

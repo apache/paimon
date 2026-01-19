@@ -144,7 +144,8 @@ public class ManifestFileTest {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
-                        false);
+                        false,
+                        null);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         return new ManifestFile.Factory(

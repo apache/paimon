@@ -35,8 +35,6 @@ import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, Data
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.paimon.Utils
 import org.apache.spark.sql.test.SharedSparkSession
-import org.scalactic.source.Position
-import org.scalatest.Tag
 
 import java.io.File
 import java.util.{TimeZone, UUID}
@@ -152,14 +150,6 @@ class PaimonSparkTestBase
         case (key, None) => conf.unsetConf(key)
       }
     }
-  }
-
-  override def test(testName: String, testTags: Tag*)(testFun: => Any)(implicit
-      pos: Position): Unit = {
-    super.test(testName, testTags: _*) {
-      println(testName)
-      testFun
-    }(pos)
   }
 
   def loadTable(tableName: String): FileStoreTable = {

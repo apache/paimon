@@ -16,26 +16,84 @@
 # limitations under the License.
 ################################################################################
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Tuple
+from abc import ABC, abstractmethod
+from typing import List, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
 
 
-@dataclass
-class Split:
-    """Implementation of Split for native Python reading."""
-    files: List[DataFileMeta]
-    partition: GenericRow
-    bucket: int
-    _file_paths: List[str]
-    _row_count: int
-    _file_size: int
-    shard_file_idx_map: Dict[str, Tuple[int, int]] = field(default_factory=dict)  # file_name -> (start_idx, end_idx)
-    raw_convertible: bool = False
-    data_deletion_files: Optional[List[DeletionFile]] = None
+class Split(ABC):
+    """
+    Base interface for Split following Java's org.apache.paimon.table.source.Split.
+
+    All split implementations should inherit from this class.
+    """
+
+    @property
+    @abstractmethod
+    def row_count(self) -> int:
+        """Return the total row count of this split."""
+        pass
+
+    @property
+    @abstractmethod
+    def files(self) -> List[DataFileMeta]:
+        """Return the data files in this split."""
+        pass
+
+    @property
+    @abstractmethod
+    def partition(self) -> GenericRow:
+        """Return the partition of this split."""
+        pass
+
+    @property
+    @abstractmethod
+    def bucket(self) -> int:
+        """Return the bucket of this split."""
+        pass
+
+
+class DataSplit(Split):
+    """
+    Implementation of Split for native Python reading.
+
+    This is equivalent to Java's DataSplit.
+    """
+
+    def __init__(
+        self,
+        files: List[DataFileMeta],
+        partition: GenericRow,
+        bucket: int,
+        file_paths: List[str],
+        row_count: int,
+        file_size: int,
+        raw_convertible: bool = False,
+        data_deletion_files: Optional[List[DeletionFile]] = None
+    ):
+        self._files = files
+        self._partition = partition
+        self._bucket = bucket
+        self._file_paths = file_paths
+        self._row_count = row_count
+        self._file_size = file_size
+        self.raw_convertible = raw_convertible
+        self.data_deletion_files = data_deletion_files
+
+    @property
+    def files(self) -> List[DataFileMeta]:
+        return self._files
+
+    @property
+    def partition(self) -> GenericRow:
+        return self._partition
+
+    @property
+    def bucket(self) -> int:
+        return self._bucket
 
     @property
     def row_count(self) -> int:

@@ -47,7 +47,7 @@ public class JindoMultiPartUploadCommitter
             FileIO fileIO, Path targetPath) throws IOException {
         JindoFileIO jindoFileIO = (JindoFileIO) fileIO;
         org.apache.hadoop.fs.Path hadoopPath = jindoFileIO.path(targetPath);
-        Pair<JindoHadoopSystem, String> pair = jindoFileIO.getFileSystemPair(hadoopPath);
+        Pair<JindoHadoopSystem, String> pair = jindoFileIO.getFileSystemPair(hadoopPath, false);
         JindoHadoopSystem fs = pair.getKey();
         return new JindoMultiPartUpload(fs, hadoopPath);
     }

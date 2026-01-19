@@ -359,6 +359,48 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription("Whether enabled read file index.");
 
+    public static final ConfigOption<String> VARIANT_SHREDDING_SCHEMA =
+            key("variant.shreddingSchema")
+                    .stringType()
+                    .noDefaultValue()
+                    .withFallbackKeys("parquet.variant.shreddingSchema")
+                    .withDescription("The Variant shredding schema for writing.");
+
+    public static final ConfigOption<Boolean> VARIANT_INFER_SHREDDING_SCHEMA =
+            key("variant.inferShreddingSchema")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to automatically infer the shredding schema when writing Variant columns.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_SCHEMA_WIDTH =
+            key("variant.shredding.maxSchemaWidth")
+                    .intType()
+                    .defaultValue(300)
+                    .withDescription(
+                            "Maximum number of shredded fields allowed in an inferred schema.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_SCHEMA_DEPTH =
+            key("variant.shredding.maxSchemaDepth")
+                    .intType()
+                    .defaultValue(50)
+                    .withDescription(
+                            "Maximum traversal depth in Variant values during schema inference.");
+
+    public static final ConfigOption<Double> VARIANT_SHREDDING_MIN_FIELD_CARDINALITY_RATIO =
+            key("variant.shredding.minFieldCardinalityRatio")
+                    .doubleType()
+                    .defaultValue(0.1)
+                    .withDescription(
+                            "Minimum fraction of rows that must contain a field for it to be shredded. "
+                                    + "Fields below this threshold will remain in the un-shredded Variant binary.");
+
+    public static final ConfigOption<Integer> VARIANT_SHREDDING_MAX_INFER_BUFFER_ROW =
+            key("variant.shredding.maxInferBufferRow")
+                    .intType()
+                    .defaultValue(4096)
+                    .withDescription("Maximum number of rows to buffer for schema inference.");
+
     public static final ConfigOption<String> MANIFEST_FORMAT =
             key("manifest.format")
                     .stringType()
@@ -653,6 +695,16 @@ public class CoreOptions implements Serializable {
                             Description.builder()
                                     .text(
                                             "Target size of a blob file. Default is value of TARGET_FILE_SIZE.")
+                                    .build());
+
+    public static final ConfigOption<Boolean> BLOB_SPLIT_BY_FILE_SIZE =
+            key("blob.split-by-file-size")
+                    .booleanType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Whether to consider blob file size as a factor when performing scan splitting.")
                                     .build());
 
     public static final ConfigOption<Integer> NUM_SORTED_RUNS_COMPACTION_TRIGGER =
@@ -2027,6 +2079,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether index file in data file directory.");
 
+    public static final ConfigOption<String> GLOBAL_INDEX_EXTERNAL_PATH =
+            key("global-index.external-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
+
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
                     .memoryType()
@@ -2591,6 +2650,11 @@ public class CoreOptions implements Serializable {
                 .orElse(targetFileSize(false));
     }
 
+    public boolean blobSplitByFileSize() {
+        return options.getOptional(BLOB_SPLIT_BY_FILE_SIZE)
+                .orElse(!options.get(BLOB_AS_DESCRIPTOR));
+    }
+
     public long compactionFileSize(boolean hasPrimaryKey) {
         // file size to join the compaction, we don't process on middle file size to avoid
         // compact a same file twice (the compression is not calculate so accurately. the output
@@ -2723,6 +2787,19 @@ public class CoreOptions implements Serializable {
 
     public boolean indexFileInDataFileDir() {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
+    }
+
+    public Path globalIndexExternalPath() {
+        String pathString = options.get(GLOBAL_INDEX_EXTERNAL_PATH);
+        if (pathString == null || pathString.isEmpty()) {
+            return null;
+        }
+        Path path = new Path(pathString);
+        String scheme = path.toUri().getScheme();
+        if (scheme == null) {
+            throw new IllegalArgumentException("scheme should not be null: " + path);
+        }
+        return path;
     }
 
     public LookupStrategy lookupStrategy() {

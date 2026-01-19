@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -44,6 +45,9 @@ public class StringUtils {
 
     /** The empty String {@code ""}. */
     public static final String EMPTY = "";
+
+    /** Default maximum number of fields for truncated string representation. */
+    public static final int DEFAULT_MAX_FIELDS = 25;
 
     /**
      * Checks if the string is null, empty, or contains only whitespace characters. A whitespace
@@ -561,5 +565,47 @@ public class StringUtils {
 
     public static boolean isCloseBracket(char c) {
         return c == ']' || c == '}' || c == ')';
+    }
+
+    /**
+     * Converts a sequence to a string with truncation if it exceeds the maximum number of fields.
+     * This is useful for limiting the size of string representations of large collections.
+     *
+     * @param lst the collection to convert to string
+     * @param start the prefix string
+     * @param sep the separator between elements
+     * @param end the suffix string
+     * @param maxFields the maximum number of fields to include before truncation
+     * @return the truncated string representation
+     */
+    public static String truncatedString(
+            Collection<?> lst, String start, String sep, String end, int maxFields) {
+        boolean truncated = lst.size() > maxFields;
+        int numFields = truncated ? Math.max(0, maxFields - 1) : lst.size();
+
+        StringBuilder builder = new StringBuilder();
+        builder.append(start);
+
+        Iterator<?> iterator = lst.iterator();
+        for (int i = 0; i < numFields; i++) {
+            if (i > 0) {
+                builder.append(sep);
+            }
+            builder.append(iterator.next());
+        }
+
+        if (truncated) {
+            builder.append(sep)
+                    .append("... ")
+                    .append(lst.size() - numFields)
+                    .append(" more fields");
+        }
+
+        builder.append(end);
+        return builder.toString();
+    }
+
+    public static String truncatedString(Collection<?> lst, String start, String sep, String end) {
+        return truncatedString(lst, start, sep, end, DEFAULT_MAX_FIELDS);
     }
 }

@@ -24,6 +24,10 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.function.FunctionImpl;
 import org.apache.paimon.partition.Partition;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.UpperTransform;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
 import org.apache.paimon.rest.requests.AlterFunctionRequest;
 import org.apache.paimon.rest.requests.AlterTableRequest;
@@ -35,6 +39,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
+import org.apache.paimon.rest.responses.AuthTableQueryResponse;
 import org.apache.paimon.rest.responses.GetDatabaseResponse;
 import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
@@ -52,6 +57,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewSchema;
 
@@ -150,7 +156,7 @@ public class MockRESTMessage {
     public static ListPartitionsResponse listPartitionsResponse() {
         Map<String, String> spec = new HashMap<>();
         spec.put("f0", "1");
-        Partition partition = new Partition(spec, 1, 1, 1, 1, false);
+        Partition partition = new Partition(spec, 1, 1, 1, 1, 1, false);
         return new ListPartitionsResponse(ImmutableList.of(partition));
     }
 
@@ -381,5 +387,18 @@ public class MockRESTMessage {
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Arrays.asList("f0", "f1");
         return new Schema(fields, partitionKeys, primaryKeys, options, "comment");
+    }
+
+    public static AuthTableQueryResponse authTableQueryResponse() {
+        LeafPredicate predicate =
+                new LeafPredicate(
+                        Equal.INSTANCE, DataTypes.INT(), 0, "id", Collections.singletonList(1));
+        List<String> filter = java.util.Arrays.asList(JsonSerdeUtil.toFlatJson(predicate));
+        Map<String, String> columnMasking = new HashMap<>();
+        FieldRef fieldRef = new FieldRef(1, "f1", DataTypes.STRING());
+        UpperTransform upperTransform = new UpperTransform(Collections.singletonList(fieldRef));
+        columnMasking.put("c1", JsonSerdeUtil.toFlatJson(upperTransform));
+
+        return new AuthTableQueryResponse(filter, columnMasking);
     }
 }

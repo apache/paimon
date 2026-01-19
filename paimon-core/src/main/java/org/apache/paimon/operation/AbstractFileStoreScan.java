@@ -46,6 +46,9 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -67,6 +70,8 @@ import static org.apache.paimon.utils.ThreadPoolUtils.randomlyOnlyExecute;
 
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreScan.class);
 
     private final ManifestsReader manifestsReader;
     private final SnapshotManager snapshotManager;
@@ -277,9 +282,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = manifestsResult.filteredManifests;
 
         Iterator<ManifestEntry> iterator = readManifestEntries(manifests, false);
-        if (supportsLimitPushManifestEntries()) {
-            iterator = limitPushManifestEntries(iterator);
-        }
 
         List<ManifestEntry> files = ListUtils.toList(iterator);
         if (postFilterManifestEntriesEnabled()) {
@@ -289,6 +291,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestEntry> result = files;
 
         long scanDuration = (System.nanoTime() - started) / 1_000_000;
+        LOG.info(
+                "File store scan plan completed in {} ms. Files size : {}",
+                scanDuration,
+                result.size());
         if (scanMetrics != null) {
             long allDataFiles =
                     manifestsResult.allManifests.stream()
@@ -436,14 +442,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     protected boolean postFilterManifestEntriesEnabled() {
         return false;
-    }
-
-    protected boolean supportsLimitPushManifestEntries() {
-        return false;
-    }
-
-    protected Iterator<ManifestEntry> limitPushManifestEntries(Iterator<ManifestEntry> entries) {
-        throw new UnsupportedOperationException();
     }
 
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {

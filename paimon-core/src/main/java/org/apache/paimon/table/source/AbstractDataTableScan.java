@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
@@ -70,8 +71,6 @@ import java.util.Optional;
 import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
-import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.CHANGELOG;
-import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DELTA;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -98,6 +97,18 @@ abstract class AbstractDataTableScan implements DataTableScan {
         this.snapshotReader = snapshotReader;
         this.queryAuth = queryAuth;
     }
+
+    @Override
+    public final TableScan.Plan plan() {
+        TableQueryAuthResult queryAuthResult = authQuery();
+        Plan plan = planWithoutAuth();
+        if (queryAuthResult != null) {
+            plan = queryAuthResult.convertPlan(plan);
+        }
+        return plan;
+    }
+
+    protected abstract TableScan.Plan planWithoutAuth();
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
@@ -165,12 +176,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
-    protected void authQuery() {
+    @Nullable
+    protected TableQueryAuthResult authQuery() {
         if (!options.queryAuthEnabled()) {
-            return;
+            return null;
         }
-        queryAuth.auth(readType == null ? null : readType.getFieldNames());
-        // TODO add support for row level access control
+        return queryAuth.auth(readType == null ? null : readType.getFieldNames());
     }
 
     @Override

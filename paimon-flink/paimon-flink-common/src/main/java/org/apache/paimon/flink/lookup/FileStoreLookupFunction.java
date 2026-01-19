@@ -68,6 +68,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CACHE_ROWS;
@@ -98,6 +99,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient Duration refreshInterval;
     // timestamp when refreshing lookup table
     private transient long nextRefreshTime;
+    // threshold for triggering full table reload when snapshots are pending
+    private transient Integer refreshFullThreshold;
 
     protected FunctionContext functionContext;
 
@@ -178,6 +181,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.refreshInterval =
                 options.getOptional(LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL)
                         .orElse(options.get(CONTINUOUS_DISCOVERY_INTERVAL));
+        this.refreshFullThreshold = options.get(LOOKUP_REFRESH_FULL_LOAD_THRESHOLD);
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
@@ -335,6 +339,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
                 lookupTable.close();
                 lookupTable.open();
+                nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
                 // no need to refresh the lookup table because it is reopened
                 return;
             }
@@ -342,9 +347,46 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         // 3. refresh lookup table
         if (shouldRefreshLookupTable()) {
-            lookupTable.refresh();
+            // Check if we should do full load (close and reopen table) instead of incremental
+            // refresh
+            boolean doFullLoad = shouldDoFullLoad();
+
+            if (doFullLoad) {
+                LOG.info(
+                        "Doing full load for table {} instead of incremental refresh",
+                        table.name());
+                lookupTable.close();
+                lookupTable.open();
+            } else {
+                lookupTable.refresh();
+            }
+
             nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
         }
+    }
+
+    /**
+     * Check if we should do full load instead of incremental refresh. This can improve performance
+     * when there are many pending snapshots.
+     */
+    @VisibleForTesting
+    public boolean shouldDoFullLoad() {
+        if (refreshFullThreshold == null) {
+            return false;
+        }
+
+        Long latestSnapshotId = ((FileStoreTable) table).snapshotManager().latestSnapshotId();
+        Long nextSnapshotId = lookupTable.nextSnapshotId();
+        if (latestSnapshotId == null || nextSnapshotId == null) {
+            return false;
+        }
+
+        LOG.info(
+                "Check if should do full load, latestSnapshotId: {}, nextSnapshotId: {}, refreshFullThreshold: {}",
+                latestSnapshotId,
+                nextSnapshotId,
+                refreshFullThreshold);
+        return latestSnapshotId - nextSnapshotId + 1 >= refreshFullThreshold;
     }
 
     private boolean shouldRefreshLookupTable() {

@@ -51,7 +51,7 @@ class PartitionExpireTableTest extends TableTestBase {
 
         Table table = catalog.getTable(identifier());
         String path = table.options().get("path");
-        PartitionEntry expire = new PartitionEntry(BinaryRow.singleColumn(1), 1, 1, 1, 1);
+        PartitionEntry expire = new PartitionEntry(BinaryRow.singleColumn(1), 1, 1, 1, 1, 1);
         TABLE_EXPIRE_PARTITIONS.put(path, Collections.singletonList(expire));
         write(table, GenericRow.of(1, 1));
         write(table, GenericRow.of(2, 2));

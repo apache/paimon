@@ -28,6 +28,7 @@ import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateReplaceVisitor;
@@ -153,17 +154,22 @@ public class SchemaEvolutionUtil {
 
         PredicateReplaceVisitor visitor =
                 predicate -> {
+                    Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+                    if (!fieldRefOptional.isPresent()) {
+                        return Optional.empty();
+                    }
+                    FieldRef fieldRef = fieldRefOptional.get();
                     DataField tableField =
                             checkNotNull(
-                                    nameToTableFields.get(predicate.fieldName()),
-                                    String.format("Find no field %s", predicate.fieldName()));
+                                    nameToTableFields.get(fieldRef.name()),
+                                    String.format("Find no field %s", fieldRef.name()));
                     DataField dataField = idToDataFields.get(tableField.id());
                     if (dataField == null) {
                         return keepNewFieldFilter ? Optional.of(predicate) : Optional.empty();
                     }
 
                     return CastExecutors.castLiteralsWithEvolution(
-                                    predicate.literals(), predicate.type(), dataField.type())
+                                    predicate.literals(), fieldRef.type(), dataField.type())
                             .map(
                                     literals ->
                                             new LeafPredicate(

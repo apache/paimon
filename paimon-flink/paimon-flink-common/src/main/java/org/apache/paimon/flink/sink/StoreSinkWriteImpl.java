@@ -85,7 +85,6 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 table.newWrite(commitUser, state.getSubtaskId())
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .withBucketMode(table.bucketMode())
                         .withMemoryPoolFactory(memoryPoolFactory);
 
         if (metricGroup != null) {

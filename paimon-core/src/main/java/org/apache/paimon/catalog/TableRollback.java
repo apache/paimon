@@ -16,17 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation.commit;
+package org.apache.paimon.catalog;
 
-import org.apache.paimon.Snapshot.CommitKind;
+import org.apache.paimon.table.Instant;
 
-/** Provider to provide {@link CommitKind}. */
-@FunctionalInterface
-public interface CommitKindProvider {
+import javax.annotation.Nullable;
 
-    CommitKind provide(CommitChanges changes);
+/** Rollback table to instant from snapshot. */
+public interface TableRollback {
 
-    static CommitKindProvider provider(CommitKind kind) {
-        return changes -> kind;
-    }
+    void rollbackTo(Instant instant, @Nullable Long fromSnapshot);
 }

@@ -2923,6 +2923,11 @@ components:
           type: array
           items:
             type: string
+        columnMasking:
+          type: object
+          description: Column masking rules as a map from column name to transform entry JSON string.
+          additionalProperties:
+            type: string
     AlterDatabaseRequest:
       type: object
       properties:
@@ -3252,6 +3257,9 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
+        totalBuckets:
+          type: integer
+          format: int32
         done:
           type: boolean
         createdAt:
@@ -3285,6 +3293,9 @@ components:
         lastFileCreationTime:
           type: integer
           format: int64
+        totalBuckets:
+          type: integer
+          format: int32
   #######################################
   # Examples of different values #
   #######################################

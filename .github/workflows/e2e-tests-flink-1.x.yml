@@ -47,16 +47,16 @@ jobs:
         flink_version: [ '1.20' ]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
       - name: Build Flink
-        run: mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }}
+        run: mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3 -pl paimon-e2e-tests -am -Pflink-${{ matrix.flink_version }}
 
       - name: Test Flink
         run: |
@@ -66,9 +66,9 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           profile="flink-${{ matrix.flink_version }}"
           if [ "${{ matrix.flink_version }}" = "${{ matrix.flink_version[-1] }}" ]; then
-            mvn -T 1C -B test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
+            mvn -T 1C -B -ntp test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
           else
-            mvn -T 1C -B test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile}
+            mvn -T 1C -B -ntp test -Pflink1,spark3 -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -P${profile}
           fi
         env:
           MAVEN_OPTS: -Xmx4096m

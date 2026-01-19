@@ -51,6 +51,7 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.nio.file.Files;
@@ -260,19 +261,9 @@ public class JavaPyLanceE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    @DisabledIfSystemProperty(named = "python.version", matches = "3.6")
     public void testReadPkTableLance() throws Exception {
         try {
-            // Known issue: Reading Python-written Lance files in Java causes JVM crash due to
-            // missing Tokio runtime. The error is:
-            // "there is no reactor running, must be called from the context of a Tokio 1.x runtime"
-            //
-            // This is a limitation of lance-core Java bindings. The Rust native library requires
-            // Tokio runtime for certain operations when reading files written by Python (which may
-            // use different encoding formats). Java-written files can be read successfully because
-            // they use synchronous APIs that don't require Tokio.
-            //
-            // Workaround: Try to "warm up" Tokio runtime by reading a Java-written file first.
-            // This may initialize the Tokio runtime if it's created on first use.
             try {
                 Identifier warmupIdentifier = identifier("mixed_test_pk_tablej_lance");
                 try {

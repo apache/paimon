@@ -1,0 +1,9 @@
+Apache Paimon Faiss JNI
+Copyright 2024-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+This product includes Faiss (https://github.com/facebookresearch/faiss)
+developed by Facebook AI Research under the MIT License.
+

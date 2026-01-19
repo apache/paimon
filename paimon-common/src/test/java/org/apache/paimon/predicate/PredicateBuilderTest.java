@@ -20,11 +20,23 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.SimpleColStats;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimeType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -117,5 +129,46 @@ public class PredicateBuilderTest {
         predicate = builder.in(0, Arrays.asList(1, 2));
         assertThat(predicate.test(GenericRow.of(1))).isEqualTo(true);
         assertThat(predicate.test(GenericRow.of(10))).isEqualTo(false);
+    }
+
+    @Test
+    public void testConvertToJavaObjectRoundTrip() {
+        // VARCHAR
+        DataType varcharType = new VarCharType();
+        Object internalVarchar = PredicateBuilder.convertJavaObject(varcharType, "hello");
+        assertThat(PredicateBuilder.convertToJavaObject(varcharType, internalVarchar))
+                .isEqualTo("hello");
+
+        // DECIMAL
+        DecimalType decimalType = new DecimalType(10, 2);
+        BigDecimal decimal = new BigDecimal("12.34");
+        Object internalDecimal = PredicateBuilder.convertJavaObject(decimalType, decimal);
+        assertThat(PredicateBuilder.convertToJavaObject(decimalType, internalDecimal))
+                .isEqualTo(decimal);
+
+        // DATE
+        DataType dateType = new DateType();
+        LocalDate date = LocalDate.of(2024, 1, 2);
+        Object internalDate = PredicateBuilder.convertJavaObject(dateType, date);
+        assertThat(PredicateBuilder.convertToJavaObject(dateType, internalDate)).isEqualTo(date);
+
+        // TIME
+        DataType timeType = new TimeType(3);
+        LocalTime time = LocalTime.of(1, 2, 3, 400_000_000);
+        Object internalTime = PredicateBuilder.convertJavaObject(timeType, time);
+        assertThat(PredicateBuilder.convertToJavaObject(timeType, internalTime))
+                .isEqualTo(LocalTime.of(1, 2, 3, 400_000_000));
+
+        // TIMESTAMP (without time zone)
+        DataType tsType = new TimestampType(3);
+        LocalDateTime ts = LocalDateTime.of(2024, 1, 2, 3, 4, 5, 123_000_000);
+        Object internalTs = PredicateBuilder.convertJavaObject(tsType, ts);
+        assertThat(PredicateBuilder.convertToJavaObject(tsType, internalTs)).isEqualTo(ts);
+
+        // TIMESTAMP_LTZ
+        DataType ltzType = new LocalZonedTimestampType(3);
+        Instant instant = Instant.parse("2024-01-02T03:04:05.123Z");
+        Object internalLtz = PredicateBuilder.convertJavaObject(ltzType, instant);
+        assertThat(PredicateBuilder.convertToJavaObject(ltzType, internalLtz)).isEqualTo(instant);
     }
 }

@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
@@ -73,6 +74,7 @@ public class PartitionStatisticsReporter implements Closeable {
             long rowCount = 0;
             long totalSize = 0;
             long fileCount = 0;
+            int totalBuckets = 0;
             for (DataSplit split : splits) {
                 List<DataFileMeta> fileMetas = split.dataFiles();
                 fileCount += fileMetas.size();
@@ -80,11 +82,17 @@ public class PartitionStatisticsReporter implements Closeable {
                     rowCount += fileMeta.rowCount();
                     totalSize += fileMeta.fileSize();
                 }
+                totalBuckets = Optional.ofNullable(split.totalBuckets()).orElse(0);
             }
 
             PartitionStatistics partitionStats =
                     new PartitionStatistics(
-                            partitionSpec, rowCount, totalSize, fileCount, modifyTimeMillis);
+                            partitionSpec,
+                            rowCount,
+                            totalSize,
+                            fileCount,
+                            modifyTimeMillis,
+                            totalBuckets);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
             partitionHandler.alterPartitions(Collections.singletonList(partitionStats));
         }

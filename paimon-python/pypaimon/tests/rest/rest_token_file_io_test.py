@@ -23,10 +23,10 @@ from unittest.mock import patch
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 
-from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
+from pypaimon.filesystem.local_file_io import LocalFileIO
 
 
 class RESTTokenFileIOTest(unittest.TestCase):
@@ -91,6 +91,30 @@ class RESTTokenFileIOTest(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_try_to_write_atomic_directory_check(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+
+            target_dir = os.path.join(self.temp_dir, "target_dir")
+            os.makedirs(target_dir)
+            
+            result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
+            self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
+            
+            self.assertTrue(os.path.isdir(target_dir))
+            self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
+            
+            normal_file = os.path.join(self.temp_dir, "normal_file.txt")
+            result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
+            self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
+            self.assertTrue(os.path.exists(normal_file))
+            with open(normal_file, "r") as f:
+                self.assertEqual(f.read(), "test content")
+
     def test_new_output_stream_behavior_matches_parent(self):
         """Test that RESTTokenFileIO.new_output_stream behaves like FileIO.new_output_stream."""
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
@@ -99,7 +123,7 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-            regular_file_io = FileIO(self.warehouse_path, self.catalog_options)
+            regular_file_io = LocalFileIO(self.warehouse_path, self.catalog_options)
 
             test_file_path = f"file://{self.temp_dir}/comparison/test.txt"
             test_content = b"comparison content"
@@ -191,6 +215,94 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 "test-secret-key",
                 "Other token properties should be preserved"
             )
+
+    def test_catalog_options_not_modified(self):
+        from pypaimon.api.rest_util import RESTUtil
+
+        original_catalog_options = Options({
+            CatalogOptions.URI.key(): "http://test-uri",
+            "custom.key": "custom.value"
+        })
+        
+        catalog_options_copy = Options(original_catalog_options.to_map())
+        
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                original_catalog_options
+            )
+            
+            token_dict = {
+                OssOptions.OSS_ACCESS_KEY_ID.key(): "token-access-key",
+                OssOptions.OSS_ACCESS_KEY_SECRET.key(): "token-secret-key",
+                OssOptions.OSS_ENDPOINT.key(): "token-endpoint"
+            }
+            
+            merged_token = file_io._merge_token_with_catalog_options(token_dict)
+            
+            self.assertEqual(
+                original_catalog_options.to_map(),
+                catalog_options_copy.to_map(),
+                "Original catalog_options should not be modified"
+            )
+            
+            merged_properties = RESTUtil.merge(
+                original_catalog_options.to_map(),
+                merged_token
+            )
+            
+            self.assertIn("custom.key", merged_properties)
+            self.assertEqual(merged_properties["custom.key"], "custom.value")
+            self.assertIn(OssOptions.OSS_ACCESS_KEY_ID.key(), merged_properties)
+            self.assertEqual(merged_properties[OssOptions.OSS_ACCESS_KEY_ID.key()], "token-access-key")
+
+    def test_filesystem_property(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+            
+            self.assertTrue(hasattr(file_io, 'filesystem'), "RESTTokenFileIO should have filesystem property")
+            filesystem = file_io.filesystem
+            self.assertIsNotNone(filesystem, "filesystem should not be None")
+            
+            self.assertTrue(hasattr(filesystem, 'open_input_file'),
+                            "filesystem should support open_input_file method")
+
+    def test_uri_reader_factory_property(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+            
+            self.assertTrue(hasattr(file_io, 'uri_reader_factory'),
+                            "RESTTokenFileIO should have uri_reader_factory property")
+            uri_reader_factory = file_io.uri_reader_factory
+            self.assertIsNotNone(uri_reader_factory, "uri_reader_factory should not be None")
+            
+            self.assertTrue(hasattr(uri_reader_factory, 'create'),
+                            "uri_reader_factory should support create method")
+
+    def test_filesystem_and_uri_reader_factory_after_serialization(self):
+        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
+            original_file_io = RESTTokenFileIO(
+                self.identifier,
+                self.warehouse_path,
+                self.catalog_options
+            )
+            
+            pickled = pickle.dumps(original_file_io)
+            restored_file_io = pickle.loads(pickled)
+            
+            self.assertIsNotNone(restored_file_io.filesystem,
+                                 "filesystem should work after deserialization")
+            self.assertIsNotNone(restored_file_io.uri_reader_factory,
+                                 "uri_reader_factory should work after deserialization")
 
 
 if __name__ == '__main__':

@@ -18,9 +18,8 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, LogicalPlan, MergeAction, MergeIntoTable, Project, UpdateAction, UpdateStarAction}
+import org.apache.spark.sql.catalyst.plans.logical.{DeleteAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction}
 
 /** Resolve all the expressions for MergeInto. */
 object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {

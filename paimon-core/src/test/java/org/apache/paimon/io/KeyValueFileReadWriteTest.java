@@ -240,7 +240,8 @@ public class KeyValueFileReadWriteTest {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
-                        false);
+                        false,
+                        null);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         Options options = new Options();
@@ -263,7 +264,8 @@ public class KeyValueFileReadWriteTest {
                                 null,
                                 null,
                                 CoreOptions.ExternalPathStrategy.NONE,
-                                false);
+                                false,
+                                null);
                     }
                 };
 

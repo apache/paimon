@@ -44,6 +44,7 @@ public class PartitionStatistics implements Serializable {
     public static final String FIELD_FILE_SIZE_IN_BYTES = "fileSizeInBytes";
     public static final String FIELD_FILE_COUNT = "fileCount";
     public static final String FIELD_LAST_FILE_CREATION_TIME = "lastFileCreationTime";
+    public static final String FIELD_TOTAL_BUCKETS = "totalBuckets";
 
     @JsonProperty(FIELD_SPEC)
     protected final Map<String, String> spec;
@@ -60,18 +61,25 @@ public class PartitionStatistics implements Serializable {
     @JsonProperty(FIELD_LAST_FILE_CREATION_TIME)
     protected final long lastFileCreationTime;
 
+    // defaults to 0 if this field is absent in the serialized data (e.g., from an older Paimon
+    // version)
+    @JsonProperty(FIELD_TOTAL_BUCKETS)
+    protected final int totalBuckets;
+
     @JsonCreator
     public PartitionStatistics(
             @JsonProperty(FIELD_SPEC) Map<String, String> spec,
             @JsonProperty(FIELD_RECORD_COUNT) long recordCount,
             @JsonProperty(FIELD_FILE_SIZE_IN_BYTES) long fileSizeInBytes,
             @JsonProperty(FIELD_FILE_COUNT) long fileCount,
-            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime) {
+            @JsonProperty(FIELD_LAST_FILE_CREATION_TIME) long lastFileCreationTime,
+            @JsonProperty(FIELD_TOTAL_BUCKETS) int totalBuckets) {
         this.spec = spec;
         this.recordCount = recordCount;
         this.fileSizeInBytes = fileSizeInBytes;
         this.fileCount = fileCount;
         this.lastFileCreationTime = lastFileCreationTime;
+        this.totalBuckets = totalBuckets;
     }
 
     @JsonGetter(FIELD_SPEC)
@@ -99,6 +107,11 @@ public class PartitionStatistics implements Serializable {
         return lastFileCreationTime;
     }
 
+    @JsonGetter(FIELD_TOTAL_BUCKETS)
+    public int totalBuckets() {
+        return totalBuckets;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -112,12 +125,14 @@ public class PartitionStatistics implements Serializable {
                 && fileSizeInBytes == that.fileSizeInBytes
                 && fileCount == that.fileCount
                 && lastFileCreationTime == that.lastFileCreationTime
+                && totalBuckets == that.totalBuckets
                 && Objects.equals(spec, that.spec);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime);
+        return Objects.hash(
+                spec, recordCount, fileSizeInBytes, fileCount, lastFileCreationTime, totalBuckets);
     }
 
     @Override
@@ -133,6 +148,8 @@ public class PartitionStatistics implements Serializable {
                 + fileCount
                 + ", lastFileCreationTime="
                 + lastFileCreationTime
+                + ", totalBuckets="
+                + totalBuckets
                 + '}';
     }
 }

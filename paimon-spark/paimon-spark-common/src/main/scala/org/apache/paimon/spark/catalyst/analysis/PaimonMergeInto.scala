@@ -18,9 +18,6 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.commands.MergeIntoPaimonTable
-
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.AttributeReference
 import org.apache.spark.sql.catalyst.plans.logical.{MergeAction, MergeIntoTable}

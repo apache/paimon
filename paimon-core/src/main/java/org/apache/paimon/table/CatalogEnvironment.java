@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.tag.SnapshotLoaderImpl;
@@ -37,7 +38,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Collections;
 import java.util.Optional;
 
 /** Catalog environment in table which contains log factory, metastore client factory. */
@@ -114,6 +114,21 @@ public class CatalogEnvironment implements Serializable {
     }
 
     @Nullable
+    public TableRollback catalogTableRollback() {
+        if (catalogLoader != null && supportsVersionManagement) {
+            Catalog catalog = catalogLoader.load();
+            return (instant, fromSnapshot) -> {
+                try {
+                    catalog.rollbackTo(identifier, instant, fromSnapshot);
+                } catch (Catalog.TableNotExistException e) {
+                    throw new RuntimeException(e);
+                }
+            };
+        }
+        return null;
+    }
+
+    @Nullable
     public SnapshotLoader snapshotLoader() {
         if (catalogLoader == null) {
             return null;
@@ -154,7 +169,7 @@ public class CatalogEnvironment implements Serializable {
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
         if (!options.queryAuthEnabled() || catalogLoader == null) {
-            return select -> Collections.emptyList();
+            return select -> null;
         }
         return select -> {
             try (Catalog catalog = catalogLoader.load()) {

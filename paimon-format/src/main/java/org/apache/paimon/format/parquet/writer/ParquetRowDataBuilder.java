@@ -29,6 +29,8 @@ import org.apache.parquet.io.OutputFile;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.MessageType;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.convertToParquetMessageType;
@@ -38,10 +40,13 @@ public class ParquetRowDataBuilder
         extends ParquetWriter.Builder<InternalRow, ParquetRowDataBuilder> {
 
     private final RowType rowType;
+    @Nullable private final RowType shreddingSchemas;
 
-    public ParquetRowDataBuilder(OutputFile path, RowType rowType) {
+    public ParquetRowDataBuilder(
+            OutputFile path, RowType rowType, @Nullable RowType shreddingSchemas) {
         super(path);
         this.rowType = rowType;
+        this.shreddingSchemas = shreddingSchemas;
     }
 
     @Override
@@ -65,7 +70,7 @@ public class ParquetRowDataBuilder
             this.conf = conf;
             this.schema =
                     convertToParquetMessageType(
-                            VariantUtils.replaceWithShreddingType(conf, rowType));
+                            VariantUtils.replaceWithShreddingType(rowType, shreddingSchemas));
         }
 
         @Override
@@ -75,7 +80,9 @@ public class ParquetRowDataBuilder
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema, conf);
+            this.writer =
+                    new ParquetRowDataWriter(
+                            recordConsumer, rowType, schema, conf, shreddingSchemas);
         }
 
         @Override

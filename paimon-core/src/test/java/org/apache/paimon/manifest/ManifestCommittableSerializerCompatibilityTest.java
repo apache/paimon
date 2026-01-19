@@ -281,7 +281,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
                         Arrays.asList("asdf", "qwer", "zxcv"));
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
         IndexFileMeta hashIndexFile =
-                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, null, null);
+                new IndexFileMeta(
+                        "my_index_type", "my_index_file", 1024 * 100, 1002, null, null, null);
 
         LinkedHashMap<String, DeletionVectorMeta> dvRanges = new LinkedHashMap<>();
         dvRanges.put("dv_key1", new DeletionVectorMeta("dv_key1", 1, 2, 3L));
@@ -1060,7 +1061,8 @@ public class ManifestCommittableSerializerCompatibilityTest {
         List<DataFileMeta> dataFiles = Collections.singletonList(dataFile);
 
         IndexFileMeta indexFile =
-                new IndexFileMeta("my_index_type", "my_index_file", 1024 * 100, 1002, null, null);
+                new IndexFileMeta(
+                        "my_index_type", "my_index_file", 1024 * 100, 1002, null, null, null);
         List<IndexFileMeta> indexFiles = Collections.singletonList(indexFile);
 
         CommitMessageImpl commitMessage =

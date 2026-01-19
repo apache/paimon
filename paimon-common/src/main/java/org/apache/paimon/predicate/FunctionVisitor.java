@@ -19,6 +19,7 @@
 package org.apache.paimon.predicate;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** A {@link PredicateVisitor} to visit functions. */
@@ -26,8 +27,14 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
 
     @Override
     default T visit(LeafPredicate predicate) {
-        return predicate.function().visit(this, predicate.fieldRef(), predicate.literals());
+        Optional<FieldRef> fieldRef = predicate.fieldRefOptional();
+        if (!fieldRef.isPresent()) {
+            return visitNonFieldLeaf(predicate);
+        }
+        return predicate.function().visit(this, fieldRef.get(), predicate.literals());
     }
+
+    T visitNonFieldLeaf(LeafPredicate leafPredicate);
 
     @Override
     default T visit(CompoundPredicate predicate) {

@@ -35,7 +35,7 @@ class FormatBlobReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
                  full_fields: List[DataField], push_down_predicate: Any, blob_as_descriptor: bool,
-                 batch_size: int = 4096):
+                 batch_size: int = 1024):
         self._file_io = file_io
         self._file_path = file_path
         self._push_down_predicate = push_down_predicate

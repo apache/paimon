@@ -33,6 +33,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.DefaultPartitionPredicate;
 import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -55,6 +56,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.format.text.HadoopCompressionUtils.isCompressed;
@@ -107,7 +109,7 @@ public class FormatTableScan implements InnerTableScan {
         List<PartitionEntry> partitionEntries = new ArrayList<>();
         for (Pair<LinkedHashMap<String, String>, Path> partition2Path : partition2Paths) {
             BinaryRow row = toPartitionRow(partition2Path.getKey());
-            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L));
+            partitionEntries.add(new PartitionEntry(row, -1L, -1L, -1L, -1L, -1));
         }
         return partitionEntries;
     }
@@ -303,10 +305,14 @@ public class FormatTableScan implements InnerTableScan {
         Map<String, String> equals = new HashMap<>();
         for (Predicate sub : predicates) {
             if (sub instanceof LeafPredicate) {
-                LeafFunction function = ((LeafPredicate) sub).function();
-                String field = ((LeafPredicate) sub).fieldName();
-                if (function instanceof Equal && partitionKeys.contains(field)) {
-                    equals.put(field, ((LeafPredicate) sub).literals().get(0).toString());
+                Optional<FieldRef> fieldRefOptional = ((LeafPredicate) sub).fieldRefOptional();
+                if (fieldRefOptional.isPresent()) {
+                    FieldRef fieldRef = fieldRefOptional.get();
+                    LeafFunction function = ((LeafPredicate) sub).function();
+                    String field = fieldRef.name();
+                    if (function instanceof Equal && partitionKeys.contains(field)) {
+                        equals.put(field, ((LeafPredicate) sub).literals().get(0).toString());
+                    }
                 }
             }
         }

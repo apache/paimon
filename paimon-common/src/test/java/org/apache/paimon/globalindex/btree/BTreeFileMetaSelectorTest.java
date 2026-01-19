@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.memory.MemorySliceOutput;
 import org.apache.paimon.predicate.FieldRef;
@@ -54,11 +55,11 @@ public class BTreeFileMetaSelectorTest {
 
         files =
                 Arrays.asList(
-                        new GlobalIndexIOMeta("file1", 1, meta1.serialize()),
-                        new GlobalIndexIOMeta("file2", 1, meta2.serialize()),
-                        new GlobalIndexIOMeta("file3", 1, meta3.serialize()),
-                        new GlobalIndexIOMeta("file4", 1, meta4.serialize()),
-                        new GlobalIndexIOMeta("file5", 1, meta5.serialize()));
+                        new GlobalIndexIOMeta(new Path("file1"), 1, meta1.serialize()),
+                        new GlobalIndexIOMeta(new Path("file2"), 1, meta2.serialize()),
+                        new GlobalIndexIOMeta(new Path("file3"), 1, meta3.serialize()),
+                        new GlobalIndexIOMeta(new Path("file4"), 1, meta4.serialize()),
+                        new GlobalIndexIOMeta(new Path("file5"), 1, meta5.serialize()));
     }
 
     @Test
@@ -147,7 +148,8 @@ public class BTreeFileMetaSelectorTest {
     private void assertFiles(List<GlobalIndexIOMeta> files, List<String> expected) {
         Assertions.assertThat(
                         files.stream()
-                                .map(GlobalIndexIOMeta::fileName)
+                                .map(GlobalIndexIOMeta::filePath)
+                                .map(Path::toString)
                                 .collect(Collectors.toList()))
                 .containsExactlyInAnyOrderElementsOf(expected);
     }

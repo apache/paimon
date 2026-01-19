@@ -16,19 +16,36 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.parquet;
+package org.apache.paimon.table.source;
 
-import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 
-import static org.apache.paimon.options.ConfigOptions.key;
+import javax.annotation.Nullable;
 
-/** Options for parquet format. */
-public class ParquetOptions {
+/** A wrapper class for {@link Split} that adds query authorization information. */
+public class QueryAuthSplit implements Split {
 
-    public static final ConfigOption<String> PARQUET_VARIANT_SHREDDING_SCHEMA =
-            key("parquet.variant.shreddingSchema")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Specify the variant shredding schema for writing parquet files.");
+    private static final long serialVersionUID = 1L;
+
+    private final Split split;
+    private final TableQueryAuthResult authResult;
+
+    public QueryAuthSplit(Split split, TableQueryAuthResult authResult) {
+        this.split = split;
+        this.authResult = authResult;
+    }
+
+    public Split split() {
+        return split;
+    }
+
+    @Nullable
+    public TableQueryAuthResult authResult() {
+        return authResult;
+    }
+
+    @Override
+    public long rowCount() {
+        return split.rowCount();
+    }
 }

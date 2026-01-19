@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -42,7 +43,7 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
 
     private final BTreeFileMetaSelector fileSelector;
     private final List<GlobalIndexIOMeta> files;
-    private final Map<String, GlobalIndexReader> readerCache;
+    private final Map<Path, GlobalIndexReader> readerCache;
     private final KeySerializer keySerializer;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
@@ -259,7 +260,7 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
         for (GlobalIndexIOMeta meta : files) {
             readers.add(
                     readerCache.computeIfAbsent(
-                            meta.fileName(),
+                            meta.filePath(),
                             name -> {
                                 try {
                                     return new BTreeIndexReader(
@@ -276,7 +277,7 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         IOException exception = null;
-        for (Map.Entry<String, GlobalIndexReader> entry : this.readerCache.entrySet()) {
+        for (Map.Entry<Path, GlobalIndexReader> entry : this.readerCache.entrySet()) {
             try {
                 entry.getValue().close();
             } catch (IOException ioe) {

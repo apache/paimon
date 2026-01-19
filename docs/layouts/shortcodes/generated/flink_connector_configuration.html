@@ -93,6 +93,12 @@ under the License.
             <td>If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.</td>
         </tr>
         <tr>
+            <td><h5>lookup.refresh.full-load-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>If the pending snapshot count exceeds this threshold, lookup table will discard incremental updates and refresh the entire table from the latest snapshot. This can improve performance when there are many snapshots pending. Set to a reasonable value (e.g., 10) to enable this optimization. Default is Integer.MAX_VALUE (disabled). </td>
+        </tr>
+        <tr>
             <td><h5>lookup.refresh.time-periods-blacklist</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

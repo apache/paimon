@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.ExternalPathProvider;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexInDataFileDirPathFactory;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.ChainReadContext;
@@ -37,6 +38,7 @@ import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -81,6 +83,7 @@ public class FileStorePathFactory {
     private final AtomicInteger statsFileCount;
     private final List<Path> externalPaths;
     private final ExternalPathStrategy strategy;
+    @Nullable private final Path globalIndexExternalRootDir;
 
     public FileStorePathFactory(
             Path root,
@@ -95,7 +98,8 @@ public class FileStorePathFactory {
             @Nullable String dataFilePathDirectory,
             List<Path> externalPaths,
             ExternalPathStrategy strategy,
-            boolean indexFileInDataFileDir) {
+            boolean indexFileInDataFileDir,
+            @Nullable Path globalIndexExternalRootDir) {
         this.root = root;
         this.dataFilePathDirectory = dataFilePathDirectory;
         this.indexFileInDataFileDir = indexFileInDataFileDir;
@@ -116,6 +120,7 @@ public class FileStorePathFactory {
         this.statsFileCount = new AtomicInteger(0);
         this.externalPaths = externalPaths;
         this.strategy = strategy;
+        this.globalIndexExternalRootDir = globalIndexExternalRootDir;
     }
 
     public Path root() {
@@ -128,6 +133,10 @@ public class FileStorePathFactory {
 
     public Path indexPath() {
         return new Path(root, INDEX_PATH);
+    }
+
+    public Path globalIndexRootDir() {
+        return globalIndexExternalRootDir != null ? globalIndexExternalRootDir : indexPath();
     }
 
     public Path statisticsPath() {
@@ -318,7 +327,7 @@ public class FileStorePathFactory {
         return new IndexPathFactory() {
             @Override
             public Path toPath(String fileName) {
-                return new Path(indexPath(), fileName);
+                return new Path(globalIndexRootDir(), fileName);
             }
 
             @Override
@@ -327,8 +336,17 @@ public class FileStorePathFactory {
             }
 
             @Override
+            public Path toPath(IndexFileMeta file) {
+                return Optional.ofNullable(file.externalPath())
+                        .map(Path::new)
+                        // If external path is null, use the index path (not global index root dir,
+                        // because the root dir may change by alter table)
+                        .orElse(new Path(indexPath(), file.fileName()));
+            }
+
+            @Override
             public boolean isExternalPath() {
-                return false;
+                return globalIndexExternalRootDir != null;
             }
         };
     }

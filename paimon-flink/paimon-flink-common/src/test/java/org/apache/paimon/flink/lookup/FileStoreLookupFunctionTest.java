@@ -43,6 +43,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,16 +92,19 @@ public class FileStoreLookupFunctionTest {
     }
 
     private void createLookupFunction(boolean refreshAsync) throws Exception {
-        createLookupFunction(true, false, false, refreshAsync);
+        createLookupFunction(true, false, false, refreshAsync, null);
     }
 
     private void createLookupFunction(
             boolean isPartition,
             boolean joinEqualPk,
             boolean dynamicPartition,
-            boolean refreshAsync)
+            boolean refreshAsync,
+            Integer fullLoadThreshold)
             throws Exception {
-        table = createFileStoreTable(isPartition, dynamicPartition, refreshAsync);
+        table =
+                createFileStoreTable(
+                        isPartition, dynamicPartition, refreshAsync, fullLoadThreshold);
         lookupFunction = createLookupFunction(table, joinEqualPk);
         lookupFunction.open(tempDir.toString());
     }
@@ -116,7 +120,11 @@ public class FileStoreLookupFunctionTest {
     }
 
     private FileStoreTable createFileStoreTable(
-            boolean isPartition, boolean dynamicPartition, boolean refreshAsync) throws Exception {
+            boolean isPartition,
+            boolean dynamicPartition,
+            boolean refreshAsync,
+            Integer fullLoadThreshold)
+            throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC, refreshAsync);
@@ -126,6 +134,10 @@ public class FileStoreLookupFunctionTest {
         conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
         if (dynamicPartition) {
             conf.set(FlinkConnectorOptions.SCAN_PARTITIONS, "max_pt()");
+        }
+
+        if (fullLoadThreshold != null) {
+            conf.set(FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD, fullLoadThreshold);
         }
 
         RowType rowType =
@@ -153,7 +165,7 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testCompatibilityForOldVersion() throws Exception {
-        createLookupFunction(false, true, false, false);
+        createLookupFunction(false, true, false, false, null);
         commit(writeCommit(1));
         PrimaryKeyPartialLookupTable lookupTable =
                 (PrimaryKeyPartialLookupTable) lookupFunction.lookupTable();
@@ -174,7 +186,7 @@ public class FileStoreLookupFunctionTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testDefaultLocalPartial(boolean refreshAsync) throws Exception {
-        createLookupFunction(false, true, false, refreshAsync);
+        createLookupFunction(false, true, false, refreshAsync, null);
         assertThat(lookupFunction.lookupTable()).isInstanceOf(PrimaryKeyPartialLookupTable.class);
         QueryExecutor queryExecutor =
                 ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
@@ -184,7 +196,7 @@ public class FileStoreLookupFunctionTest {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testDefaultRemotePartial(boolean refreshAsync) throws Exception {
-        createLookupFunction(false, true, false, refreshAsync);
+        createLookupFunction(false, true, false, refreshAsync, null);
         ServiceManager serviceManager = new ServiceManager(fileIO, tablePath);
         serviceManager.resetService(
                 PRIMARY_KEY_LOOKUP, new InetSocketAddress[] {new InetSocketAddress(1)});
@@ -232,7 +244,7 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testLookupDynamicPartition() throws Exception {
-        createLookupFunction(true, false, true, false);
+        createLookupFunction(true, false, true, false, null);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
@@ -252,7 +264,7 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testParseWrongTimePeriodsBlacklist() throws Exception {
-        FileStoreTable table = createFileStoreTable(false, false, false);
+        FileStoreTable table = createFileStoreTable(false, false, false, null);
 
         FileStoreTable table1 =
                 table.copy(
@@ -299,7 +311,7 @@ public class FileStoreLookupFunctionTest {
         String right = end.atZone(ZoneId.systemDefault()).format(formatter);
 
         FileStoreTable table =
-                createFileStoreTable(false, false, false)
+                createFileStoreTable(false, false, false, null)
                         .copy(
                                 Collections.singletonMap(
                                         LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST.key(),
@@ -310,6 +322,50 @@ public class FileStoreLookupFunctionTest {
         lookupFunction.tryRefresh();
 
         assertThat(lookupFunction.nextBlacklistCheckTime()).isEqualTo(end.toEpochMilli() + 1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testLookupTableWithFullLoad(boolean joinEqualPk) throws Exception {
+        createLookupFunction(false, joinEqualPk, false, false, 3);
+
+        if (joinEqualPk) {
+            assertThat(lookupFunction.lookupTable())
+                    .isInstanceOf(PrimaryKeyPartialLookupTable.class);
+        } else {
+            assertThat(lookupFunction.lookupTable()).isInstanceOf(FullCacheLookupTable.class);
+        }
+
+        GenericRow expectedRow = GenericRow.of(1, 1, 1L);
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
+        writer.write(expectedRow);
+        commit(writer.prepareCommit(true, 1));
+
+        List<RowData> result =
+                new ArrayList<>(lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 1L))));
+        assertThat(result).size().isEqualTo(1);
+        RowData resultRow = result.get(0);
+        assertThat(resultRow.getInt(0)).isEqualTo(expectedRow.getInt(0));
+        assertThat(resultRow.getInt(1)).isEqualTo(expectedRow.getInt(1));
+
+        // Create more commits to exceed threshold (3 more to have gap > 3)
+        for (int i = 2; i < 6; i++) {
+            writer.write(GenericRow.of(i, i, (long) i));
+            commit(writer.prepareCommit(true, i));
+        }
+        writer.close();
+
+        // wait refresh
+        Thread.sleep(2000);
+
+        expectedRow = GenericRow.of(5, 5, 5L);
+        assertThat(lookupFunction.shouldDoFullLoad()).isTrue();
+        lookupFunction.tryRefresh();
+        result = new ArrayList<>(lookupFunction.lookup(new FlinkRowData(GenericRow.of(5, 5, 5L))));
+        assertThat(result).size().isEqualTo(1);
+        resultRow = result.get(0);
+        assertThat(resultRow.getInt(0)).isEqualTo(expectedRow.getInt(0));
+        assertThat(resultRow.getInt(1)).isEqualTo(expectedRow.getInt(1));
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {

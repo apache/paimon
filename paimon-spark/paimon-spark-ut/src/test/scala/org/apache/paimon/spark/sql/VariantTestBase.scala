@@ -386,4 +386,487 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       }
     }
   }
+
+  test("Paimon Variant: read and write variant with null value") {
+    withTable("source_tbl", "target_tbl") {
+      sql("CREATE TABLE source_tbl (id INT, js STRING) USING paimon")
+      val n = 100
+      val nullCount = 98
+      val values = (1 to n)
+        .map {
+          i =>
+            if (i <= nullCount) {
+              s"($i, null)"
+            } else {
+              val jsonStr =
+                s"""
+                   |'{
+                   |  "id":$i,"name":"user$i","age":${20 + (i % 50)},
+                   |  "tags":[{"type":"vip","level":$i},{"type":"premium","level":$i}],
+                   |  "address":{"city":"city$i","street":"street$i"}
+                   |}'
+                   |""".stripMargin
+              s"($i, $jsonStr)"
+            }
+        }
+        .mkString(", ")
+      sql(s"INSERT INTO source_tbl VALUES $values")
+
+      sql("CREATE TABLE target_tbl (id INT, v VARIANT) USING paimon")
+      sql("INSERT INTO target_tbl SELECT id, parse_json(js) FROM source_tbl")
+
+      checkAnswer(
+        sql("""
+              |SELECT
+              |variant_get(v, '$.name', 'string'),
+              |variant_get(v, '$.tags', 'string'),
+              |variant_get(v, '$.tags', 'array<string>'),
+              |variant_get(v, '$.tags', 'array<struct<type string, level int>>'),
+              |variant_get(v, '$.tags[0]', 'string'),
+              |variant_get(v, '$.tags[0]', 'struct<type string, level int>'),
+              |variant_get(v, '$.tags[1].type', 'string'),
+              |variant_get(v, '$.address', 'string')
+              |FROM target_tbl where v IS NOT NULL
+              |""".stripMargin),
+        Seq(
+          Row(
+            "user99",
+            "[{\"level\":99,\"type\":\"vip\"},{\"level\":99,\"type\":\"premium\"}]",
+            Array("{\"level\":99,\"type\":\"vip\"}", "{\"level\":99,\"type\":\"premium\"}"),
+            Array(Row("vip", 99), Row("premium", 99)),
+            "{\"level\":99,\"type\":\"vip\"}",
+            Row("vip", 99),
+            "premium",
+            "{\"city\":\"city99\",\"street\":\"street99\"}"
+          ),
+          Row(
+            "user100",
+            "[{\"level\":100,\"type\":\"vip\"},{\"level\":100,\"type\":\"premium\"}]",
+            Array("{\"level\":100,\"type\":\"vip\"}", "{\"level\":100,\"type\":\"premium\"}"),
+            Array(Row("vip", 100), Row("premium", 100)),
+            "{\"level\":100,\"type\":\"vip\"}",
+            Row("vip", 100),
+            "premium",
+            "{\"city\":\"city100\",\"street\":\"street100\"}"
+          )
+        )
+      )
+    }
+  }
+
+  test("Paimon Variant: edge case json - empty objects and arrays") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, parse_json('{}')),
+          | (2, parse_json('[]')),
+          | (3, parse_json('{"empty_obj":{},"empty_arr":[]}')),
+          | (4, parse_json('{"nested":{"deep":{"empty":{}}}}')),
+          | (5, parse_json('[[[]]]]'))
+          | """.stripMargin)
+
+    val expectedSelect = sql("""
+                               |SELECT 1, parse_json('{}') UNION ALL
+                               |SELECT 2, parse_json('[]') UNION ALL
+                               |SELECT 3, parse_json('{"empty_obj":{},"empty_arr":[]}') UNION ALL
+                               |SELECT 4, parse_json('{"nested":{"deep":{"empty":{}}}}') UNION ALL
+                               |SELECT 5, parse_json('[[[]]]]')
+                               |""".stripMargin)
+
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), expectedSelect)
+
+    checkAnswer(
+      sql("""
+            |SELECT id,
+            |variant_get(v, '$.empty_obj', 'string'),
+            |variant_get(v, '$.empty_arr', 'string'),
+            |variant_get(v, '$.nested.deep.empty', 'string')
+            |FROM T ORDER BY id
+            |""".stripMargin),
+      Seq(
+        Row(1, null, null, null),
+        Row(2, null, null, null),
+        Row(3, "{}", "[]", null),
+        Row(4, null, null, "{}"),
+        Row(5, null, null, null)
+      )
+    )
+  }
+
+  test("Paimon Variant: edge case json - special characters and unicode") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, parse_json('{"key":"value with \\"quotes\\""}')),
+          | (2, parse_json('{"key":"line1\\nline2"}')),
+          | (3, parse_json('{"key":"tab\\there"}')),
+          | (4, parse_json('{"key":"backslash\\\\test"}')),
+          | (5, parse_json('{"chinese":"中文测试","emoji":"😀🎉"}')),
+          | (6, parse_json('{"special":"!@#$%^&*()_+-={}[]|:;<>?,./"}'))
+          | """.stripMargin)
+
+    val expectedSelect =
+      sql("""
+            |SELECT 1, parse_json('{"key":"value with \\"quotes\\""}') UNION ALL
+            |SELECT 2, parse_json('{"key":"line1\\nline2"}') UNION ALL
+            |SELECT 3, parse_json('{"key":"tab\\there"}') UNION ALL
+            |SELECT 4, parse_json('{"key":"backslash\\\\test"}') UNION ALL
+            |SELECT 5, parse_json('{"chinese":"中文测试","emoji":"😀🎉"}') UNION ALL
+            |SELECT 6, parse_json('{"special":"!@#$%^&*()_+-={}[]|:;<>?,./"}')  
+            |""".stripMargin)
+
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), expectedSelect)
+
+    checkAnswer(
+      sql("""
+            |SELECT id,
+            |variant_get(v, '$.key', 'string'),
+            |variant_get(v, '$.chinese', 'string'),
+            |variant_get(v, '$.emoji', 'string'),
+            |variant_get(v, '$.special', 'string')
+            |FROM T ORDER BY id
+            |""".stripMargin),
+      Seq(
+        Row(1, "value with \"quotes\"", null, null, null),
+        Row(2, "line1\nline2", null, null, null),
+        Row(3, "tab\there", null, null, null),
+        Row(4, "backslash\\test", null, null, null),
+        Row(5, null, "中文测试", "😀🎉", null),
+        Row(6, null, null, null, "!@#$%^&*()_+-={}[]|:;<>?,./")
+      )
+    )
+  }
+
+  test("Paimon Variant: edge case json - extreme numeric values") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, parse_json('{"max_long":9223372036854775807}')),
+          | (2, parse_json('{"min_long":-9223372036854775808}')),
+          | (3, parse_json('{"zero":0}')),
+          | (4, parse_json('{"neg_zero":-0}')),
+          | (5, parse_json('{"large_decimal":123456789012345678901234567890.123456789}')),
+          | (6, parse_json('{"scientific":1.23e10}')),
+          | (7, parse_json('{"neg_scientific":-4.56e-7}'))
+          | """.stripMargin)
+
+    val expectedSelect = sql(
+      """
+        |SELECT 1 AS id, parse_json('{"max_long":9223372036854775807}') AS v UNION ALL
+        |SELECT 2, parse_json('{"min_long":-9223372036854775808}') UNION ALL
+        |SELECT 3, parse_json('{"zero":0}') UNION ALL
+        |SELECT 4, parse_json('{"neg_zero":-0}') UNION ALL
+        |SELECT 5, parse_json('{"large_decimal":123456789012345678901234567890.123456789}') UNION ALL
+        |SELECT 6, parse_json('{"scientific":1.23e10}') UNION ALL
+        |SELECT 7, parse_json('{"neg_scientific":-4.56e-7}')
+        |""".stripMargin)
+
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), expectedSelect)
+
+    checkAnswer(
+      sql("""
+            |SELECT id,
+            |variant_get(v, '$.max_long', 'long'),
+            |variant_get(v, '$.min_long', 'long'),
+            |variant_get(v, '$.zero', 'int'),
+            |variant_get(v, '$.neg_zero', 'int'),
+            |variant_get(v, '$.large_decimal', 'double'),
+            |variant_get(v, '$.scientific', 'double'),
+            |variant_get(v, '$.neg_scientific', 'double')
+            |FROM T ORDER BY id
+            |""".stripMargin),
+      Seq(
+        Row(1, 9223372036854775807L, null, null, null, null, null, null),
+        Row(2, null, -9223372036854775808L, null, null, null, null, null),
+        Row(3, null, null, 0, null, null, null, null),
+        Row(4, null, null, null, 0, null, null, null),
+        Row(5, null, null, null, null, 1.2345678901234568e29, null, null),
+        Row(6, null, null, null, null, null, 1.23e10, null),
+        Row(7, null, null, null, null, null, null, -4.56e-7)
+      )
+    )
+  }
+
+  test("Paimon Variant: edge case json - deeply nested structures") {
+    val deepJson = {
+      val opens = (1 to 10).map(i => s""""level$i":{""").mkString
+      val closes = "}" * 10
+      s"""{$opens"value":"deep"$closes}"""
+    }
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql(s"""
+           |INSERT INTO T VALUES
+           | (1, parse_json('$deepJson')),
+           | (2, parse_json('{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":100}}}}}}}}}}')),
+           | (3, parse_json('[[[[[[[[[10]]]]]]]]]'))
+           | """.stripMargin)
+
+    val expectedSelect = sql(
+      s"""
+         |SELECT 1 AS id, parse_json('$deepJson') AS v UNION ALL
+         |SELECT 2, parse_json('{"a":{"b":{"c":{"d":{"e":{"f":{"g":{"h":{"i":{"j":100}}}}}}}}}}') UNION ALL
+         |SELECT 3, parse_json('[[[[[[[[[10]]]]]]]]]')
+         |""".stripMargin)
+
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), expectedSelect)
+
+    checkAnswer(
+      sql("""
+            |SELECT id,
+            |variant_get(v, '$.level1.level2.level3.level4.level5.level6.level7.level8.level9.level10.value', 'string'),
+            |variant_get(v, '$.a.b.c.d.e.f.g.h.i.j', 'int'),
+            |variant_get(v, '$[0][0][0][0][0][0][0][0][0]', 'int')
+            |FROM T ORDER BY id
+            |""".stripMargin),
+      Seq(
+        Row(1, "deep", null, null),
+        Row(2, null, 100, null),
+        Row(3, null, null, 10)
+      )
+    )
+  }
+
+  test("Paimon Variant: edge case json - mixed types in arrays") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, parse_json('{"mixed":[1, "two", true, null, {"key":"value"}, [7,8,9]]}')),
+          | (2, parse_json('{"numbers":[1, 2.5, 1e10, -100]}')),
+          | (3, parse_json('{"nested":[{"a":1},{"b":2},{"c":{"d":3}}]}'))
+          | """.stripMargin)
+
+    val expectedSelect = sql(
+      """
+        |SELECT 1 AS id, parse_json('{"mixed":[1, "two", true, null, {"key":"value"}, [7,8,9]]}') AS v UNION ALL
+        |SELECT 2, parse_json('{"numbers":[1, 2.5, 1e10, -100]}') UNION ALL
+        |SELECT 3, parse_json('{"nested":[{"a":1},{"b":2},{"c":{"d":3}}]}')
+        |""".stripMargin)
+
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), expectedSelect)
+
+    checkAnswer(
+      sql("""
+            |SELECT id,
+            |variant_get(v, '$.mixed[0]', 'int'),
+            |variant_get(v, '$.mixed[1]', 'string'),
+            |variant_get(v, '$.mixed[2]', 'boolean'),
+            |variant_get(v, '$.mixed[4].key', 'string'),
+            |variant_get(v, '$.mixed[5][1]', 'int'),
+            |variant_get(v, '$.numbers[2]', 'double'),
+            |variant_get(v, '$.nested[2].c.d', 'int')
+            |FROM T ORDER BY id
+            |""".stripMargin),
+      Seq(
+        Row(1, 1, "two", true, "value", 8, null, null),
+        Row(2, null, null, null, null, null, 1e10, null),
+        Row(3, null, null, null, null, null, null, 3)
+      )
+    )
+  }
+
+  test("Paimon Variant: primitive types as variant") {
+    sql("CREATE TABLE T (id INT, v VARIANT)")
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, CAST(42 AS VARIANT)),
+          | (2, CAST(-99 AS VARIANT)),
+          | (3, CAST(9223372036854775807 AS VARIANT)),
+          | (4, CAST(3.14 AS VARIANT)),
+          | (5, CAST(1.23e10 AS VARIANT)),
+          | (6, CAST('hello' AS VARIANT)),
+          | (7, CAST('' AS VARIANT)),
+          | (8, CAST(true AS VARIANT)),
+          | (9, CAST(false AS VARIANT)),
+          | (10, CAST(null AS VARIANT))
+          | """.stripMargin)
+
+    val expectedSelect = sql("""
+                               |SELECT 1 AS id, CAST(42 AS VARIANT) AS v UNION ALL
+                               |SELECT 2, CAST(-99 AS VARIANT) UNION ALL
+                               |SELECT 3, CAST(9223372036854775807 AS VARIANT) UNION ALL
+                               |SELECT 4, CAST(3.14 AS VARIANT) UNION ALL
+                               |SELECT 5, CAST(1.23e10 AS VARIANT) UNION ALL
+                               |SELECT 6, CAST('hello' AS VARIANT) UNION ALL
+                               |SELECT 7, CAST('' AS VARIANT) UNION ALL
+                               |SELECT 8, CAST(true AS VARIANT) UNION ALL
+                               |SELECT 9, CAST(false AS VARIANT) UNION ALL
+                               |SELECT 10, CAST(null AS VARIANT)
+                               |""".stripMargin)
+
+    checkAnswer(sql("SELECT * FROM T ORDER BY id"), expectedSelect)
+
+    checkAnswer(
+      sql("""
+            |SELECT id,
+            |variant_get(v, '$', 'string')
+            |FROM T ORDER BY id
+            |""".stripMargin),
+      Seq(
+        Row(1, "42"),
+        Row(2, "-99"),
+        Row(3, "9223372036854775807"),
+        Row(4, "3.14"),
+        Row(5, "1.23E10"),
+        Row(6, "hello"),
+        Row(7, ""),
+        Row(8, "true"),
+        Row(9, "false"),
+        Row(10, null)
+      )
+    )
+  }
+
+  test("Paimon Variant: partial update with variant") {
+    withTable("t") {
+      sql("""
+            |CREATE table t (
+            |  id INT,
+            |  ts INT,
+            |  dt INT,
+            |  v VARIANT
+            |)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'changelog-producer' = 'lookup',
+            |  'merge-engine' = 'partial-update',
+            |  'fields.dt.sequence-group' = 'ts',
+            |  'fields.ts.aggregate-function' = 'max',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t VALUES
+            | (1, 1, 1, parse_json('{"c":{"a1":1,"a2":2}}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t VALUES
+            | (1, 2, 2, parse_json('{"c":{"a1":3,"a2":4}}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t"),
+        sql("""SELECT 1, 2, 2, parse_json('{"c":{"a1":3,"a2":4}}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.c', 'string') FROM t"),
+        Seq(
+          Row("{\"a1\":3,\"a2\":4}")
+        )
+      )
+    }
+  }
+
+  test("Paimon Variant: deduplicate with variant") {
+    withTable("t_dedup") {
+      sql("""
+            |CREATE table t_dedup (
+            |  id INT,
+            |  name STRING,
+            |  v VARIANT
+            |) TBLPROPERTIES
+            |(
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'merge-engine' = 'deduplicate',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t_dedup VALUES
+            | (1, 'Alice', parse_json('{"age":30,"city":"NYC"}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t_dedup VALUES
+            | (1, 'Bob', parse_json('{"age":25,"city":"LA"}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t_dedup"),
+        sql("""SELECT 1, 'Bob', parse_json('{"age":25,"city":"LA"}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.age', 'int') FROM t_dedup"),
+        Seq(Row(25))
+      )
+    }
+  }
+
+  test("Paimon Variant: aggregate with variant") {
+    withTable("t_agg") {
+      sql("""
+            |CREATE table t_agg (
+            |  id INT,
+            |  cnt INT,
+            |  v VARIANT
+            |) TBLPROPERTIES
+            |(
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'merge-engine' = 'aggregation',
+            |  'fields.cnt.aggregate-function' = 'sum',
+            |  'write-only' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t_agg VALUES
+            | (1, 10, parse_json('{"data":{"x":1,"y":2}}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t_agg VALUES
+            | (1, 20, parse_json('{"data":{"x":3,"y":4}}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t_agg"),
+        sql("""SELECT 1, 30, parse_json('{"data":{"x":3,"y":4}}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.data.x', 'int') FROM t_agg"),
+        Seq(Row(3))
+      )
+    }
+  }
+
+  test("Paimon Variant: first-row with variant") {
+    withTable("t_first") {
+      sql("""
+            |CREATE table t_first (
+            |  id INT,
+            |  seq INT,
+            |  v VARIANT
+            |) TBLPROPERTIES
+            |(
+            |  'primary-key' = 'id',
+            |  'bucket' = '1',
+            |  'merge-engine' = 'first-row'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t_first VALUES
+            | (1, 100, parse_json('{"status":"active"}'))
+            | """.stripMargin)
+
+      sql("""
+            |INSERT INTO t_first VALUES
+            | (1, 200, parse_json('{"status":"inactive"}'))
+            | """.stripMargin)
+
+      checkAnswer(
+        sql("SELECT * FROM t_first"),
+        sql("""SELECT 1, 100, parse_json('{"status":"active"}')""")
+      )
+      checkAnswer(
+        sql("SELECT variant_get(v, '$.status', 'string') FROM t_first"),
+        Seq(Row("active"))
+      )
+    }
+  }
 }

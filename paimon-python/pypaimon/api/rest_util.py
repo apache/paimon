@@ -15,7 +15,7 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from typing import Dict
+from typing import Dict, Optional
 from urllib.parse import unquote
 
 from pypaimon.common.options import Options
@@ -42,4 +42,25 @@ class RESTUtil:
             if key.startswith(prefix):
                 new_key = key[len(prefix):]
                 result[new_key] = str(value)
+        return result
+
+    @staticmethod
+    def merge(
+            base_properties: Optional[Dict[str, str]],
+            override_properties: Optional[Dict[str, str]]) -> Dict[str, str]:
+        if override_properties is None:
+            override_properties = {}
+        if base_properties is None:
+            base_properties = {}
+        
+        result = {}
+        
+        for key, value in base_properties.items():
+            if value is not None and key not in override_properties:
+                result[key] = value
+        
+        for key, value in override_properties.items():
+            if value is not None:
+                result[key] = value
+        
         return result

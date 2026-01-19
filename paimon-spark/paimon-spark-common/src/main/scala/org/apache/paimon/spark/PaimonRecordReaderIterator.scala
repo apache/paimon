@@ -81,7 +81,7 @@ case class PaimonRecordReaderIterator(
     try {
       if (currentIterator != null) {
         currentIterator.releaseBatch()
-        currentResult == null
+        currentResult = null
       }
     } finally {
       reader.close()

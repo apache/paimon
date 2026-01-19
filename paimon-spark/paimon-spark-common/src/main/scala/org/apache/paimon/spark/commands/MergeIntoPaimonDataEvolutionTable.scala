@@ -41,9 +41,9 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.{col, udf}
 import org.apache.spark.sql.types.StructType
 
+import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
 import scala.collection.Searching.{search, Found, InsertionPoint}
-import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 /** Command for Merge Into for Data Evolution paimon table. */
@@ -75,7 +75,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   import MergeIntoPaimonDataEvolutionTable._
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
-  private val firstRowIds: Seq[Long] = table
+  private val firstRowIds: immutable.IndexedSeq[Long] = table
     .store()
     .newScan()
     .withManifestEntryFilter(
@@ -90,7 +90,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     .map(file => file.file().firstRowId().asInstanceOf[Long])
     .distinct
     .sorted
-    .toSeq
+    .toIndexedSeq
 
   private val firstRowIdToBlobFirstRowIds = {
     val map = new mutable.HashMap[Long, List[Long]]()
@@ -372,7 +372,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       val withFirstRowId = addFirstRowId(sparkSession, mergeRows)
       assert(withFirstRowId.schema.fields.length == updateColumnsSorted.size + 2)
       withFirstRowId
-        .repartitionByRange(col(FIRST_ROW_ID_NAME))
+        .repartition(col(FIRST_ROW_ID_NAME))
         .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
     }
 
@@ -516,9 +516,7 @@ object MergeIntoPaimonDataEvolutionTable {
   final private val redundantColumns =
     Seq(PaimonMetadataColumn.ROW_ID.toAttribute)
 
-  def floorBinarySearch(sortedSeq: Seq[Long], value: Long): Long = {
-    val indexed = sortedSeq.toIndexedSeq
-
+  def floorBinarySearch(indexed: immutable.IndexedSeq[Long], value: Long): Long = {
     if (indexed.isEmpty) {
       throw new IllegalArgumentException("The input sorted sequence is empty.")
     }
