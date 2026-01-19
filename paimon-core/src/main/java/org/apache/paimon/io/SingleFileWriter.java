@@ -75,8 +75,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         try {
             if (factory instanceof SupportsDirectWrite) {
-                SupportsDirectWrite supportsDirectWrite = (SupportsDirectWrite) factory;
-                writer = supportsDirectWrite.create(fileIO, path, compression);
+                writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
             } else {
                 out = fileIO.newOutputStream(path, false);
                 if (asyncWrite) {
