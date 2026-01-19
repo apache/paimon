@@ -154,7 +154,7 @@ public class ArrowFieldTypeConversion {
 
         @Override
         public FieldType visit(VariantType variantType) {
-            throw new UnsupportedOperationException();
+            return new FieldType(variantType.isNullable(), Types.MinorType.STRUCT.getType(), null);
         }
 
         @Override

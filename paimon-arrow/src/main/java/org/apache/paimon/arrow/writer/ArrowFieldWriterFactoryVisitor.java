@@ -145,7 +145,8 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
 
     @Override
     public ArrowFieldWriterFactory visit(VariantType variantType) {
-        throw new UnsupportedOperationException("Doesn't support VariantType.");
+        return (fieldVector, isNullable) ->
+                new ArrowFieldWriters.VariantWriter(fieldVector, isNullable, null);
     }
 
     @Override
