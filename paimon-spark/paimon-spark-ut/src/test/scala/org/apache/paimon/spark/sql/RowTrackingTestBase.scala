@@ -32,6 +32,8 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
+  import testImplicits._
+
   test("Row Tracking: read row Tracking") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
@@ -339,6 +341,29 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
             Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
           )
         }
+    }
+  }
+
+  test("Data Evolution: merge into table with data-evolution for any source table") {
+    withTable("s", "t") {
+      Seq((1, 11), (2, 22)).toDF("id", "b").createOrReplaceTempView("s")
+
+      sql(
+        "CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id AS b, id AS c FROM range(2, 4)")
+
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.b = s.b
+            |WHEN NOT MATCHED THEN INSERT (id, b, c) VALUES (id, b, 11)
+            |""".stripMargin)
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(3)))
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
+        Seq(Row(1, 11, 11, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
+      )
     }
   }
 

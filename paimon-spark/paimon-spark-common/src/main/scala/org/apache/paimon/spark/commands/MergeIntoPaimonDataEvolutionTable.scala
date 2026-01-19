@@ -21,6 +21,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
+import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
@@ -129,7 +130,9 @@ case class MergeIntoPaimonDataEvolutionTable(
    * without any extra shuffle, join, or sort.
    */
   private lazy val isSelfMergeOnRowId: Boolean = {
-    if (!targetRelation.name.equals(sourceRelation.name)) {
+    if (!isPaimonTable(sourceTable)) {
+      false
+    } else if (!targetRelation.name.equals(PaimonRelation.getPaimonRelation(sourceTable).name)) {
       false
     } else {
       matchedCondition match {
@@ -148,7 +151,6 @@ case class MergeIntoPaimonDataEvolutionTable(
   )
 
   lazy val targetRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(targetTable)
-  lazy val sourceRelation: DataSourceV2Relation = PaimonRelation.getPaimonRelation(sourceTable)
 
   lazy val tableSchema: StructType = v2Table.schema
 
@@ -193,7 +195,7 @@ case class MergeIntoPaimonDataEvolutionTable(
         .toSeq
     }
 
-    val sourceDss = createDataset(sparkSession, sourceRelation)
+    val sourceDss = createDataset(sparkSession, sourceTable)
 
     val firstRowIdsTouched = extractSourceRowIdMapping match {
       case Some(sourceRowIdAttr) =>
@@ -293,7 +295,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       // Build mapping: source exprId -> target attr (matched by column name).
       val sourceToTarget = {
         val targetAttrs = targetRelation.output ++ targetRelation.metadataOutput
-        val sourceAttrs = sourceRelation.output ++ sourceRelation.metadataOutput
+        val sourceAttrs = sourceTable.output ++ sourceTable.metadataOutput
         sourceAttrs.flatMap {
           s => targetAttrs.find(t => resolver(t.name, s.name)).map(t => s.exprId -> t)
         }.toMap
@@ -347,9 +349,9 @@ case class MergeIntoPaimonDataEvolutionTable(
       val targetTableProjExprs = targetReadPlan.output :+ Alias(TrueLiteral, ROW_FROM_TARGET)()
       val targetTableProj = Project(targetTableProjExprs, targetReadPlan)
 
-      val sourceReadPlan = sourceRelation.copy(output = allReadFieldsOnSource.toSeq)
-      val sourceTableProjExprs = sourceReadPlan.output :+ Alias(TrueLiteral, ROW_FROM_SOURCE)()
-      val sourceTableProj = Project(sourceTableProjExprs, sourceReadPlan)
+      val sourceTableProjExprs =
+        allReadFieldsOnSource.toSeq :+ Alias(TrueLiteral, ROW_FROM_SOURCE)()
+      val sourceTableProj = Project(sourceTableProjExprs, sourceTable)
 
       val joinPlan =
         Join(targetTableProj, sourceTableProj, LeftOuter, Some(matchedCondition), JoinHint.NONE)
@@ -390,7 +392,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       touchedFileTargetRelation.copy(targetRelation.table, allReadFieldsOnTarget.toSeq)
 
     val joinPlan =
-      Join(sourceRelation, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
+      Join(sourceTable, targetReadPlan, LeftAnti, Some(matchedCondition), JoinHint.NONE)
 
     // merge rows as there are multiple not matched actions
     val mergeRows = MergeRows(
@@ -441,7 +443,7 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     // Helper to check if an attribute belongs to the source table
     def isSourceAttribute(attr: AttributeReference): Boolean = {
-      (sourceRelation.output ++ sourceRelation.metadataOutput).exists(_.exprId.equals(attr.exprId))
+      (sourceTable.output ++ sourceTable.metadataOutput).exists(_.exprId.equals(attr.exprId))
     }
 
     matchedCondition match {
