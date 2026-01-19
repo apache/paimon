@@ -129,7 +129,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
             options={
                 'dynamic-partition-overwrite': 'false',
                 'bucket': '2',
-                'file.format': file_format
+                'file.format': file_format,
+                "orc.timestamp-ltz.legacy.type": "false"
             }
         )
 

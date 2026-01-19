@@ -382,6 +382,9 @@ public class JavaPyE2ETest {
                             splits,
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
             System.out.println("Result for " + format + " : " + res);
+            assertThat(table.rowType().getFieldTypes().get(4)).isEqualTo(DataTypes.TIMESTAMP());
+            assertThat(table.rowType().getFieldTypes().get(5))
+                    .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
             assertThat(res)
                     .containsExactlyInAnyOrder(
                             "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
