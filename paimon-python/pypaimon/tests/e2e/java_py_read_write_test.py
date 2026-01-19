@@ -35,9 +35,9 @@ else:
 
 def get_file_format_params():
     if sys.version_info[:2] == (3, 6):
-        return [('parquet',)]
+        return [('parquet',), ('orc',), ('avro',)]
     else:
-        return [('parquet',), ('lance',)]
+        return [('parquet',), ('orc',), ('avro',), ('lance',)]
 
 
 class JavaPyReadWriteTest(unittest.TestCase):
@@ -165,10 +165,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
     def test_read_pk_table(self, file_format):
         # For parquet, read from Java-written table (no format suffix)
         # For lance, read from Java-written table (with format suffix)
-        if file_format == 'parquet':
-            table_name = 'default.mixed_test_pk_tablej'
-        else:
-            table_name = f'default.mixed_test_pk_tablej_{file_format}'
+        table_name = f'default.mixed_test_pk_tablej_{file_format}'
         table = self.catalog.get_table(table_name)
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
