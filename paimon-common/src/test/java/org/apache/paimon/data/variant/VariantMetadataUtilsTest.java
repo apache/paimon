@@ -35,7 +35,7 @@ public class VariantMetadataUtilsTest {
     @Test
     public void testBuildVariantMetadata() {
         String metadata = VariantMetadataUtils.buildVariantMetadata("$.a.b", true, "UTC");
-        assertThat(metadata).isEqualTo("__VARIANT_METADATA:$.a.b;true;UTC");
+        assertThat(metadata).isEqualTo("__VARIANT_METADATA$.a.b;true;UTC");
     }
 
     @Test

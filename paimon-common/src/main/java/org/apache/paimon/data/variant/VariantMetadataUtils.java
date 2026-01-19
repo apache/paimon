@@ -31,25 +31,18 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Utils for marking and identifying variant-originated RowType. Uses description field in DataField
  * to encode variant metadata.
  *
- * <p>Description format: __VARIANT_METADATA:&lt;path&gt;;&lt;failOnError&gt;;&lt;timeZoneId&gt;
+ * <p>Description format: __VARIANT_METADATA&lt;path&gt;;&lt;failOnError&gt;;&lt;timeZoneId&gt;
  *
- * <p>Example: __VARIANT_METADATA:$.a.b;true;UTC
+ * <p>Example: __VARIANT_METADATA$.a.b;true;UTC
  */
 public class VariantMetadataUtils {
 
     public static final String METADATA_KEY = "__VARIANT_METADATA";
     public static final String DELIMITER = ";";
-    public static final String KEY_VALUE_SEPARATOR = ":";
 
     /** Build variant metadata description string. */
     public static String buildVariantMetadata(String path, boolean failOnError, String timeZoneId) {
-        return METADATA_KEY
-                + KEY_VALUE_SEPARATOR
-                + path
-                + DELIMITER
-                + failOnError
-                + DELIMITER
-                + timeZoneId;
+        return METADATA_KEY + path + DELIMITER + failOnError + DELIMITER + timeZoneId;
     }
 
     public static String buildVariantMetadata(String path) {
@@ -90,9 +83,7 @@ public class VariantMetadataUtils {
     }
 
     private static String[] splitDescription(String description) {
-        return description
-                .substring(METADATA_KEY.length() + KEY_VALUE_SEPARATOR.length())
-                .split(DELIMITER);
+        return description.substring(METADATA_KEY.length()).split(DELIMITER);
     }
 
     /** Builder for creating variant row types with metadata. */
