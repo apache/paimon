@@ -18,4 +18,4 @@
 
 .gitignore
 rat-results.txt
-pypaimon/sample/data/data.jsonl
+.*\.jsonl$
