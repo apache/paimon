@@ -65,8 +65,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             options={'dynamic-partition-overwrite': 'false', 'file.format': file_format}
         )
 
-        self.catalog.create_table('default.mixed_test_append_tablep', schema, False)
-        table = self.catalog.get_table('default.mixed_test_append_tablep_' + file_format)
+        table_name = f'default.mixed_test_append_tablep_{file_format}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
 
         initial_data = pd.DataFrame({
             'id': [1, 2, 3, 4, 5, 6],
