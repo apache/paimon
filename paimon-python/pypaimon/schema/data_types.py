@@ -608,7 +608,7 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_avro_schema(pyarrow_schema: Union[pyarrow.Schema, pyarrow.StructType],
-                       name: str = "Root",
+                       name: str = "Root2",
                        namespace: str = "pyarrow.avro"
                        ) -> Dict[str, Any]:
         fields = []
