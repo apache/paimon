@@ -53,8 +53,8 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     protected final FileIO fileIO;
     protected final Path path;
     private final Function<T, InternalRow> converter;
-    private final boolean deleteFileUponAbort;
 
+    private boolean deleteFileUponAbort;
     private FormatWriter writer;
     @Nullable private PositionOutputStream out;
 
@@ -72,6 +72,8 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         this.fileIO = fileIO;
         this.path = path;
         this.converter = converter;
+        // true first to clean file in exception
+        this.deleteFileUponAbort = true;
 
         try {
             if (factory instanceof SupportsDirectWrite) {
@@ -88,8 +90,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
                 FileAwareFormatWriter fileAwareFormatWriter = (FileAwareFormatWriter) writer;
                 fileAwareFormatWriter.setFile(path);
                 deleteFileUponAbort = fileAwareFormatWriter.deleteFileUponAbort();
-            } else {
-                deleteFileUponAbort = true;
             }
         } catch (IOException e) {
             LOG.warn(
