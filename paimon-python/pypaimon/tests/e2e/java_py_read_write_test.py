@@ -56,7 +56,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ('id', pa.int32()),
             ('name', pa.string()),
             ('category', pa.string()),
-            ('value', pa.float64())
+            ('value', pa.float64()),
+            ('ts', pa.timestamp('us')),
+            ('ts_ltz', pa.timestamp('us', tz='UTC'))
         ])
 
         schema = Schema.from_pyarrow_schema(
@@ -73,7 +75,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'id': [1, 2, 3, 4, 5, 6],
             'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
             'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
-            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
+            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+            'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
         })
         # Write initial data
         write_builder = table.new_batch_write_builder()
@@ -112,7 +116,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ('id', pa.int32()),
             ('name', pa.string()),
             ('category', pa.string()),
-            ('value', pa.float64())
+            ('value', pa.float64()),
+            ('ts', pa.timestamp('us')),
+            ('ts_ltz', pa.timestamp('us', tz='UTC'))
         ])
 
         table_name = f'default.mixed_test_pk_tablep_{file_format}'
@@ -142,7 +148,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'id': [1, 2, 3, 4, 5, 6],
             'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
             'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
-            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
+            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+            'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
         })
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()

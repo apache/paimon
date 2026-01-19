@@ -114,6 +114,8 @@ public class JavaPyE2ETest {
                             .column("name", DataTypes.STRING())
                             .column("category", DataTypes.STRING())
                             .column("value", DataTypes.DOUBLE())
+                            .column("ts", DataTypes.TIMESTAMP())
+                            .column("ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
                             .partitionKeys("category")
                             .option("dynamic-partition-overwrite", "false")
                             .option("file.format", format)
@@ -126,12 +128,12 @@ public class JavaPyE2ETest {
             try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
                     InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
 
-                write.write(createRow4Cols(1, "Apple", "Fruit", 1.5));
-                write.write(createRow4Cols(2, "Banana", "Fruit", 0.8));
-                write.write(createRow4Cols(3, "Carrot", "Vegetable", 0.6));
-                write.write(createRow4Cols(4, "Broccoli", "Vegetable", 1.2));
-                write.write(createRow4Cols(5, "Chicken", "Meat", 5.0));
-                write.write(createRow4Cols(6, "Beef", "Meat", 8.0));
+                write.write(createRow6Cols(1, "Apple", "Fruit", 1.5, 1000000L, 2000000L));
+                write.write(createRow6Cols(2, "Banana", "Fruit", 0.8, 1000001L, 2000001L));
+                write.write(createRow6Cols(3, "Carrot", "Vegetable", 0.6, 1000002L, 2000002L));
+                write.write(createRow6Cols(4, "Broccoli", "Vegetable", 1.2, 1000003L, 2000003L));
+                write.write(createRow6Cols(5, "Chicken", "Meat", 5.0, 1000004L, 2000004L));
+                write.write(createRow6Cols(6, "Beef", "Meat", 8.0, 1000005L, 2000005L));
 
                 commit.commit(0, write.prepareCommit(true, 0));
             }
@@ -146,12 +148,12 @@ public class JavaPyE2ETest {
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5",
-                            "2, Banana, Fruit, 0.8",
-                            "3, Carrot, Vegetable, 0.6",
-                            "4, Broccoli, Vegetable, 1.2",
-                            "5, Chicken, Meat, 5.0",
-                            "6, Beef, Meat, 8.0");
+                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
+                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001",
+                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002",
+                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003",
+                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004",
+                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005");
         }
     }
 
@@ -185,6 +187,8 @@ public class JavaPyE2ETest {
                             .column("name", DataTypes.STRING())
                             .column("category", DataTypes.STRING())
                             .column("value", DataTypes.DOUBLE())
+                            .column("ts", DataTypes.TIMESTAMP())
+                            .column("ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
                             .primaryKey("id")
                             .partitionKeys("category")
                             .option("dynamic-partition-overwrite", "false")
@@ -199,12 +203,12 @@ public class JavaPyE2ETest {
             try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
                     InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
 
-                write.write(createRow4Cols(1, "Apple", "Fruit", 1.5));
-                write.write(createRow4Cols(2, "Banana", "Fruit", 0.8));
-                write.write(createRow4Cols(3, "Carrot", "Vegetable", 0.6));
-                write.write(createRow4Cols(4, "Broccoli", "Vegetable", 1.2));
-                write.write(createRow4Cols(5, "Chicken", "Meat", 5.0));
-                write.write(createRow4Cols(6, "Beef", "Meat", 8.0));
+                write.write(createRow6Cols(1, "Apple", "Fruit", 1.5, 1000000L, 2000000L));
+                write.write(createRow6Cols(2, "Banana", "Fruit", 0.8, 1000001L, 2000001L));
+                write.write(createRow6Cols(3, "Carrot", "Vegetable", 0.6, 1000002L, 2000002L));
+                write.write(createRow6Cols(4, "Broccoli", "Vegetable", 1.2, 1000003L, 2000003L));
+                write.write(createRow6Cols(5, "Chicken", "Meat", 5.0, 1000004L, 2000004L));
+                write.write(createRow6Cols(6, "Beef", "Meat", 8.0, 1000005L, 2000005L));
 
                 commit.commit(0, write.prepareCommit(true, 0));
             }
@@ -219,12 +223,12 @@ public class JavaPyE2ETest {
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5",
-                            "2, Banana, Fruit, 0.8",
-                            "3, Carrot, Vegetable, 0.6",
-                            "4, Broccoli, Vegetable, 1.2",
-                            "5, Chicken, Meat, 5.0",
-                            "6, Beef, Meat, 8.0");
+                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
+                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001",
+                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002",
+                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003",
+                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004",
+                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005");
         }
     }
 
@@ -380,12 +384,12 @@ public class JavaPyE2ETest {
             System.out.println("Result: " + res);
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5",
-                            "2, Banana, Fruit, 0.8",
-                            "3, Carrot, Vegetable, 0.6",
-                            "4, Broccoli, Vegetable, 1.2",
-                            "5, Chicken, Meat, 5.0",
-                            "6, Beef, Meat, 8.0");
+                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
+                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001",
+                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002",
+                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003",
+                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004",
+                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005");
         }
     }
 
@@ -417,9 +421,15 @@ public class JavaPyE2ETest {
                 FileIOFinder.find(tablePath), tablePath, tableSchema, CatalogEnvironment.empty());
     }
 
-    private static InternalRow createRow4Cols(int id, String name, String category, double value) {
+    private static InternalRow createRow6Cols(
+            int id, String name, String category, double value, long ts, long tsLtz) {
         return GenericRow.of(
-                id, BinaryString.fromString(name), BinaryString.fromString(category), value);
+                id,
+                BinaryString.fromString(name),
+                BinaryString.fromString(category),
+                value,
+                org.apache.paimon.data.Timestamp.fromEpochMillis(ts),
+                org.apache.paimon.data.Timestamp.fromEpochMillis(tsLtz));
     }
 
     protected GenericRow createRow3Cols(Object... values) {

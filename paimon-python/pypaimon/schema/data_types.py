@@ -434,20 +434,25 @@ class PyarrowFieldParser:
                     precision = int(match_p.group(1))
                     return pyarrow.decimal128(precision, 0)
             if type_name.startswith('TIMESTAMP'):
-                # WITH_LOCAL_TIME_ZONE is ambiguous and not supported
+                is_ltz = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
+                tz = 'UTC' if is_ltz else None
+                
                 if type_name == 'TIMESTAMP':
-                    return pyarrow.timestamp('us', tz=None)  # default to 6
-                match = re.fullmatch(r'TIMESTAMP\((\d+)\)', type_name)
+                    return pyarrow.timestamp('us', tz=tz)  # default to 6
+                elif type_name == 'TIMESTAMP_LTZ':
+                    return pyarrow.timestamp('us', tz=tz)  # default to 6
+
+                match = re.fullmatch(r'TIMESTAMP(?:_LTZ)?\((\d+)\)(?: WITH LOCAL TIME ZONE)?', type_name)
                 if match:
                     precision = int(match.group(1))
                     if precision == 0:
-                        return pyarrow.timestamp('s', tz=None)
+                        return pyarrow.timestamp('s', tz=tz)
                     elif 1 <= precision <= 3:
-                        return pyarrow.timestamp('ms', tz=None)
+                        return pyarrow.timestamp('ms', tz=tz)
                     elif 4 <= precision <= 6:
-                        return pyarrow.timestamp('us', tz=None)
+                        return pyarrow.timestamp('us', tz=tz)
                     elif 7 <= precision <= 9:
-                        return pyarrow.timestamp('ns', tz=None)
+                        return pyarrow.timestamp('ns', tz=tz)
             elif type_name == 'DATE':
                 return pyarrow.date32()
             if type_name.startswith('TIME'):
@@ -517,9 +522,12 @@ class PyarrowFieldParser:
             type_name = 'BLOB'
         elif types.is_decimal(pa_type):
             type_name = f'DECIMAL({pa_type.precision}, {pa_type.scale})'
-        elif types.is_timestamp(pa_type) and pa_type.tz is None:
+        elif types.is_timestamp(pa_type):
             precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
-            type_name = f'TIMESTAMP({precision_mapping[pa_type.unit]})'
+            if pa_type.tz is None:
+                type_name = f'TIMESTAMP({precision_mapping[pa_type.unit]})'
+            else:
+                type_name = f'TIMESTAMP_LTZ({precision_mapping[pa_type.unit]})'
         elif types.is_date32(pa_type):
             type_name = 'DATE'
         elif types.is_time(pa_type):
