@@ -3361,6 +3361,10 @@ public class CoreOptions implements Serializable {
         return options.get(OVERWRITE_UPGRADE);
     }
 
+    public int readBatchSize() {
+        return options.get(READ_BATCH_SIZE);
+    }
+
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
