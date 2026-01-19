@@ -869,4 +869,117 @@ abstract class VariantTestBase extends PaimonSparkTestBase {
       )
     }
   }
+
+  test("Paimon Variant: nested variant in struct") {
+    sql("CREATE TABLE T (id INT, data STRUCT<name: STRING, v: VARIANT>)")
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, struct('Alice', parse_json('{"score":95,"grade":"A"}'))),
+          | (2, struct('Bob', parse_json('{"score":88,"grade":"B"}')))
+          | """.stripMargin)
+
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY id"),
+      sql("""
+            |SELECT 1, struct('Alice', parse_json('{"score":95,"grade":"A"}'))
+            |UNION ALL
+            |SELECT 2, struct('Bob', parse_json('{"score":88,"grade":"B"}'))
+            |""".stripMargin)
+    )
+    checkAnswer(
+      sql(
+        "SELECT id, data.name, variant_get(data.v, '$.score', 'int'), variant_get(data.v, '$.grade', 'string') FROM T ORDER BY id"),
+      Seq(Row(1, "Alice", 95, "A"), Row(2, "Bob", 88, "B"))
+    )
+    checkAnswer(
+      sql("SELECT data.name FROM T WHERE variant_get(data.v, '$.score', 'int') > 90"),
+      Seq(Row("Alice"))
+    )
+  }
+
+  test("Paimon Variant: nested variant in array") {
+    sql("CREATE TABLE T (id INT, arr ARRAY<VARIANT>)")
+    sql("""
+          |INSERT INTO T VALUES
+          | (1, array(parse_json('{"x":1,"y":2}'), parse_json('{"x":3,"y":4}'))),
+          | (2, array(parse_json('{"x":5,"y":6}')))
+          | """.stripMargin)
+
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY id"),
+      sql("""
+            |SELECT 1, array(parse_json('{"x":1,"y":2}'), parse_json('{"x":3,"y":4}'))
+            |UNION ALL
+            |SELECT 2, array(parse_json('{"x":5,"y":6}'))
+            |""".stripMargin)
+    )
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(arr[0], '$.x', 'int'), variant_get(arr[0], '$.y', 'int') FROM T ORDER BY id"),
+      Seq(Row(1, 1, 2), Row(2, 5, 6))
+    )
+    checkAnswer(
+      sql("SELECT size(arr) FROM T WHERE id = 1"),
+      Seq(Row(2))
+    )
+  }
+
+  test("Paimon Variant: nested variant in map") {
+    sql("CREATE TABLE T (id INT, m MAP<STRING, VARIANT>)")
+    sql(
+      """
+        |INSERT INTO T VALUES
+        | (1, map('key1', parse_json('{"value":100,"type":"int"}'), 'key2', parse_json('{"value":200,"type":"long"}'))),
+        | (2, map('key3', parse_json('{"value":300,"type":"double"}')))
+        | """.stripMargin)
+
+    checkAnswer(
+      sql("SELECT * FROM T ORDER BY id"),
+      sql("""
+            |SELECT 1, map('key1', parse_json('{"value":100,"type":"int"}'), 'key2', parse_json('{"value":200,"type":"long"}'))
+            |UNION ALL
+            |SELECT 2, map('key3', parse_json('{"value":300,"type":"double"}'))
+            |""".stripMargin)
+    )
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(m['key1'], '$.value', 'int'), variant_get(m['key1'], '$.type', 'string') FROM T WHERE id = 1"),
+      Seq(Row(1, 100, "int"))
+    )
+    checkAnswer(
+      sql("SELECT map_keys(m) FROM T WHERE id = 2"),
+      Seq(Row(Array("key3")))
+    )
+  }
+
+  test("Paimon Variant: complex nested variant in struct with array and map") {
+    sql("CREATE TABLE T (id INT, data STRUCT<tags: ARRAY<VARIANT>, attrs: MAP<STRING, VARIANT>>)")
+    sql(
+      """
+        |INSERT INTO T VALUES
+        | (1, struct(
+        |   array(parse_json('{"tag":"important","priority":1}'), parse_json('{"tag":"urgent","priority":2}')),
+        |   map('color', parse_json('{"r":255,"g":0,"b":0}'), 'size', parse_json('{"width":100,"height":200}'))
+        | ))
+        | """.stripMargin)
+
+    checkAnswer(
+      sql("SELECT * FROM T"),
+      sql("""
+            |SELECT 1, struct(
+            |  array(parse_json('{"tag":"important","priority":1}'), parse_json('{"tag":"urgent","priority":2}')),
+            |  map('color', parse_json('{"r":255,"g":0,"b":0}'), 'size', parse_json('{"width":100,"height":200}'))
+            |)
+            |""".stripMargin)
+    )
+    checkAnswer(
+      sql(
+        "SELECT id, variant_get(data.tags[0], '$.tag', 'string'), variant_get(data.attrs['color'], '$.r', 'int') FROM T"),
+      Seq(Row(1, "important", 255))
+    )
+    checkAnswer(
+      sql("SELECT size(data.tags), size(data.attrs) FROM T WHERE id = 1"),
+      Seq(Row(2, 2))
+    )
+  }
 }

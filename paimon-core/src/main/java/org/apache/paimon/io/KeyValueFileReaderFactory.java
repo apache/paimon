@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -262,7 +261,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
 
         public KeyValueFileReaderFactory build(
                 BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
-            return build(partition, bucket, dvFactory, true, Collections.emptyList(), null);
+            return build(partition, bucket, dvFactory, true, Collections.emptyList());
         }
 
         public KeyValueFileReaderFactory build(
@@ -270,10 +269,8 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                 int bucket,
                 DeletionVector.Factory dvFactory,
                 boolean projectKeys,
-                @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess) {
-            FormatReaderMapping.Builder builder =
-                    formatReaderMappingBuilder(projectKeys, filters, variantAccess);
+                @Nullable List<Predicate> filters) {
+            FormatReaderMapping.Builder builder = formatReaderMappingBuilder(projectKeys, filters);
             return new KeyValueFileReaderFactory(
                     fileIO,
                     schemaManager,
@@ -288,9 +285,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
         }
 
         protected FormatReaderMapping.Builder formatReaderMappingBuilder(
-                boolean projectKeys,
-                @Nullable List<Predicate> filters,
-                @Nullable VariantAccessInfo[] variantAccess) {
+                boolean projectKeys, @Nullable List<Predicate> filters) {
             RowType finalReadKeyType = projectKeys ? this.readKeyType : keyType;
             List<DataField> readTableFields =
                     KeyValue.createKeyValueFields(
@@ -302,13 +297,7 @@ public class KeyValueFileReaderFactory implements FileReaderFactory<KeyValue> {
                         return KeyValue.createKeyValueFields(dataKeyFields, dataValueFields);
                     };
             return new FormatReaderMapping.Builder(
-                    formatDiscover,
-                    readTableFields,
-                    fieldsExtractor,
-                    filters,
-                    null,
-                    null,
-                    variantAccess);
+                    formatDiscover, readTableFields, fieldsExtractor, filters, null, null);
         }
 
         public FileIO fileIO() {

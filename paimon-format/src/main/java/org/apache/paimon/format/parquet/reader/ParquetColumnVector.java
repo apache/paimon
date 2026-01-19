@@ -94,7 +94,7 @@ public class ParquetColumnVector {
             variantSchema =
                     PaimonShreddingUtils.buildVariantSchema((RowType) fileContentCol.getType());
             fieldsToExtract =
-                    PaimonShreddingUtils.getFieldsToExtract(column.variantFields(), variantSchema);
+                    PaimonShreddingUtils.getFieldsToExtract(column.getType(), variantSchema);
             repetitionLevels = contentVector.repetitionLevels;
             definitionLevels = contentVector.definitionLevels;
         } else if (isPrimitive) {
