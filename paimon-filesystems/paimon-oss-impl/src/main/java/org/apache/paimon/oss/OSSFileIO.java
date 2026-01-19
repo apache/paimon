@@ -21,6 +21,7 @@ package org.apache.paimon.oss;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.StorageType;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
@@ -28,6 +29,11 @@ import org.apache.paimon.utils.ReflectionUtils;
 
 import com.aliyun.oss.OSSClient;
 import com.aliyun.oss.common.comm.ServiceClient;
+import com.aliyun.oss.model.CopyObjectRequest;
+import com.aliyun.oss.model.OSSObject;
+import com.aliyun.oss.model.ObjectMetadata;
+import com.aliyun.oss.model.RestoreObjectRequest;
+import com.aliyun.oss.model.StorageClass;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
@@ -38,9 +44,11 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
@@ -192,6 +200,249 @@ public class OSSFileIO extends HadoopCompliantFileIO {
         } catch (Exception e) {
             LOG.error("Failed to enable second level domain.", e);
             throw new RuntimeException("Failed to enable second level domain.", e);
+        }
+    }
+
+    @Override
+    public Optional<Path> archive(Path path, StorageType type) throws IOException {
+        if (!isObjectStore()) {
+            throw new UnsupportedOperationException(
+                    "Archive operation is only supported for object stores");
+        }
+
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        AliyunOSSFileSystem fs = (AliyunOSSFileSystem) getFileSystem(hadoopPath);
+
+        try {
+            String storageClass = mapStorageTypeToOSSStorageClass(type);
+            archivePath(fs, hadoopPath, storageClass);
+            // OSS archiving is in-place, path doesn't change
+            return Optional.empty();
+        } catch (Exception e) {
+            throw new IOException("Failed to archive path: " + path, e);
+        }
+    }
+
+    @Override
+    public void restoreArchive(Path path, Duration duration) throws IOException {
+        if (!isObjectStore()) {
+            throw new UnsupportedOperationException(
+                    "Restore archive operation is only supported for object stores");
+        }
+
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        AliyunOSSFileSystem fs = (AliyunOSSFileSystem) getFileSystem(hadoopPath);
+
+        try {
+            // For OSS Archive/ColdArchive, we need to initiate a restore request
+            OSSClient ossClient = getOSSClient(fs);
+            if (ossClient != null) {
+                URI uri = hadoopPath.toUri();
+                String bucket = uri.getHost();
+                String key = uri.getPath();
+                if (key.startsWith("/")) {
+                    key = key.substring(1);
+                }
+
+                // Check if the object is in Archive or ColdArchive
+                ObjectMetadata metadata = ossClient.getObjectMetadata(bucket, key);
+                StorageClass storageClass = metadata.getObjectStorageClass();
+
+                if (storageClass == StorageClass.Archive || storageClass == StorageClass.ColdArchive) {
+                    // Initiate restore request
+                    RestoreObjectRequest restoreRequest = new RestoreObjectRequest(bucket, key);
+
+                    // Set restore days (OSS restore duration is in days)
+                    int days = (int) duration.toDays();
+                    if (days <= 0) {
+                        days = 7; // Default to 7 days
+                    }
+                    restoreRequest.setDays(days);
+
+                    ossClient.restoreObject(restoreRequest);
+                    LOG.info(
+                            "Initiated restore request for oss://{}/{} (storage class: {}, duration: {} days)",
+                            bucket,
+                            key,
+                            storageClass,
+                            days);
+                } else {
+                    LOG.debug(
+                            "Object oss://{}/{} is not in archive storage (storage class: {}), "
+                                    + "no restore needed",
+                            bucket,
+                            key,
+                            storageClass);
+                }
+            } else {
+                // Fallback: log and let AliyunOSSFileSystem handle restore on access
+                LOG.debug(
+                        "OSS client not accessible, restore will happen automatically on access. "
+                                + "Path: {}, duration: {}",
+                        path,
+                        duration);
+            }
+        } catch (Exception e) {
+            throw new IOException("Failed to restore archive for path: " + path, e);
+        }
+    }
+
+    @Override
+    public Optional<Path> unarchive(Path path, StorageType type) throws IOException {
+        if (!isObjectStore()) {
+            throw new UnsupportedOperationException(
+                    "Unarchive operation is only supported for object stores");
+        }
+
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        AliyunOSSFileSystem fs = (AliyunOSSFileSystem) getFileSystem(hadoopPath);
+
+        try {
+            // Move back to STANDARD storage class
+            archivePath(fs, hadoopPath, "Standard");
+            // OSS unarchiving is in-place, path doesn't change
+            return Optional.empty();
+        } catch (Exception e) {
+            throw new IOException("Failed to unarchive path: " + path, e);
+        }
+    }
+
+    /**
+     * Archive a path (file or directory) recursively to the specified OSS storage class.
+     *
+     * @param fs the AliyunOSSFileSystem instance
+     * @param hadoopPath the path to archive
+     * @param storageClass the OSS storage class to use
+     */
+    private void archivePath(
+            AliyunOSSFileSystem fs, org.apache.hadoop.fs.Path hadoopPath, String storageClass)
+            throws IOException {
+        if (!fs.exists(hadoopPath)) {
+            throw new IOException("Path does not exist: " + hadoopPath);
+        }
+
+        org.apache.hadoop.fs.FileStatus status = fs.getFileStatus(hadoopPath);
+        if (status.isDirectory()) {
+            // Archive all files in the directory recursively
+            org.apache.hadoop.fs.FileStatus[] children = fs.listStatus(hadoopPath);
+            for (org.apache.hadoop.fs.FileStatus child : children) {
+                archivePath(fs, child.getPath(), storageClass);
+            }
+        } else {
+            // Archive the file by changing its storage class
+            changeStorageClass(fs, hadoopPath, storageClass);
+        }
+    }
+
+    /**
+     * Change the storage class of an OSS object using OSS SDK CopyObjectRequest.
+     *
+     * <p>This method uses CopyObjectRequest to copy the object to itself with a new storage class,
+     * which effectively changes the storage class in-place without changing the object path.
+     *
+     * @param fs the AliyunOSSFileSystem instance
+     * @param hadoopPath the path to the object
+     * @param storageClass the target storage class
+     */
+    private void changeStorageClass(
+            AliyunOSSFileSystem fs, org.apache.hadoop.fs.Path hadoopPath, String storageClass)
+            throws IOException {
+        try {
+            // Get the OSS client from AliyunOSSFileSystem using reflection
+            OSSClient ossClient = getOSSClient(fs);
+            if (ossClient == null) {
+                throw new IOException(
+                        "Unable to access OSS client from AliyunOSSFileSystem. "
+                                + "Storage class change requires direct OSS client access.");
+            }
+
+            URI uri = hadoopPath.toUri();
+            String bucket = uri.getHost();
+            String key = uri.getPath();
+            if (key.startsWith("/")) {
+                key = key.substring(1);
+            }
+
+            // Map string storage class to OSS StorageClass enum
+            StorageClass ossStorageClass = mapStringToOSSStorageClass(storageClass);
+
+            // Use CopyObjectRequest to copy object to itself with new storage class
+            // This is the standard way to change storage class in-place
+            CopyObjectRequest copyRequest = new CopyObjectRequest(bucket, key, bucket, key);
+            copyRequest.setNewObjectStorageClass(ossStorageClass);
+
+            // Preserve metadata by copying it
+            ObjectMetadata metadata = ossClient.getObjectMetadata(bucket, key);
+            copyRequest.setNewObjectMetadata(metadata);
+
+            ossClient.copyObject(copyRequest);
+
+            LOG.debug(
+                    "Successfully changed storage class for oss://{}/{} to {}",
+                    bucket,
+                    key,
+                    storageClass);
+        } catch (Exception e) {
+            throw new IOException(
+                    "Failed to change storage class for " + hadoopPath + " to " + storageClass, e);
+        }
+    }
+
+    /**
+     * Get the OSSClient from AliyunOSSFileSystem using reflection.
+     *
+     * @param fs the AliyunOSSFileSystem instance
+     * @return the OSSClient, or null if not accessible
+     */
+    private OSSClient getOSSClient(AliyunOSSFileSystem fs) {
+        try {
+            AliyunOSSFileSystemStore store = fs.getStore();
+            if (store != null) {
+                // Get the OSS client from the store
+                return ReflectionUtils.getPrivateFieldValue(store, "ossClient");
+            }
+            return null;
+        } catch (Exception e) {
+            LOG.warn("Failed to get OSS client from AliyunOSSFileSystem", e);
+            return null;
+        }
+    }
+
+    /**
+     * Map string storage class name to OSS StorageClass enum.
+     *
+     * @param storageClass the storage class name
+     * @return the OSS StorageClass enum value
+     */
+    private StorageClass mapStringToOSSStorageClass(String storageClass) {
+        switch (storageClass) {
+            case "Standard":
+                return StorageClass.Standard;
+            case "Archive":
+                return StorageClass.Archive;
+            case "ColdArchive":
+                return StorageClass.ColdArchive;
+            default:
+                throw new IllegalArgumentException("Unsupported OSS storage class: " + storageClass);
+        }
+    }
+
+    /**
+     * Map Paimon StorageType to OSS storage class name.
+     *
+     * @param type the Paimon storage type
+     * @return the OSS storage class name
+     */
+    private String mapStorageTypeToOSSStorageClass(StorageType type) {
+        switch (type) {
+            case Standard:
+                return "Standard";
+            case Archive:
+                return "Archive";
+            case ColdArchive:
+                return "ColdArchive";
+            default:
+                throw new IllegalArgumentException("Unsupported storage type: " + type);
         }
     }
 
