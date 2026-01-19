@@ -39,7 +39,7 @@ class BlobTestBase extends PaimonSparkTestBase {
   test("Blob: test basic") {
     withTable("t") {
       sql(
-        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='false')")
       sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F')")
 
       checkAnswer(
@@ -167,7 +167,7 @@ class BlobTestBase extends PaimonSparkTestBase {
   test("Blob: test compaction") {
     withTable("t") {
       sql(
-        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+        "CREATE TABLE t (id INT, data STRING, picture BINARY) TBLPROPERTIES ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='false')")
       for (i <- 1 to 10) {
         sql("INSERT INTO t VALUES (" + i + ", 'paimon', X'48656C6C6F')")
       }
