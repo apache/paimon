@@ -24,6 +24,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVec;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
@@ -138,6 +139,11 @@ public class KeyProjectedRow implements InternalRow {
     @Override
     public InternalArray getArray(int pos) {
         return row.getArray(indexMapping[pos]);
+    }
+
+    @Override
+    public InternalVec getVec(int pos) {
+        return row.getVec(indexMapping[pos]);
     }
 
     @Override

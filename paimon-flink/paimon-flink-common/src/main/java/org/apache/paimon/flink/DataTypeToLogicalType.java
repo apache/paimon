@@ -43,6 +43,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VecType;
 
 import org.apache.flink.table.types.logical.LogicalType;
 
@@ -157,6 +158,12 @@ public class DataTypeToLogicalType implements DataTypeVisitor<LogicalType> {
     public LogicalType visit(ArrayType arrayType) {
         return new org.apache.flink.table.types.logical.ArrayType(
                 arrayType.isNullable(), arrayType.getElementType().accept(this));
+    }
+
+    @Override
+    public LogicalType visit(VecType vecType) {
+        return new org.apache.flink.table.types.logical.ArrayType(
+                vecType.isNullable(), vecType.getElementType().accept(this));
     }
 
     @Override

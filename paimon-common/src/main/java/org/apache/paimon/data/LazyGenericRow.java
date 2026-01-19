@@ -159,6 +159,11 @@ public class LazyGenericRow implements InternalRow {
     }
 
     @Override
+    public InternalVec getVec(int pos) {
+        return (InternalVec) getField(pos);
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         return (InternalMap) getField(pos);
     }

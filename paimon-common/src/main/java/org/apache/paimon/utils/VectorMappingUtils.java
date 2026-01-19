@@ -23,6 +23,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVec;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.ArrayColumnVector;
@@ -39,6 +40,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -64,6 +66,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VecType;
 
 /**
  * This is a util about how to expand the {@link ColumnVector}s with the partition row and index
@@ -344,6 +347,32 @@ public class VectorMappingUtils {
                 @Override
                 public boolean isNullAt(int i) {
                     return partition.isNullAt(index);
+                }
+
+                @Override
+                public ColumnVector getColumnVector() {
+                    throw new UnsupportedOperationException(
+                            "Doesn't support getting ColumnVector.");
+                }
+            };
+        }
+
+        @Override
+        public ColumnVector visit(VecType vecType) {
+            return new VecColumnVector() {
+                @Override
+                public InternalVec getVec(int i) {
+                    return partition.getVec(index);
+                }
+
+                @Override
+                public boolean isNullAt(int i) {
+                    return partition.isNullAt(index);
+                }
+
+                @Override
+                public int getVecSize() {
+                    return partition.getVec(index).size();
                 }
 
                 @Override

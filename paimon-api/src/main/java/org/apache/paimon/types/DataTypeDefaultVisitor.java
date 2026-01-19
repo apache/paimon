@@ -125,6 +125,11 @@ public abstract class DataTypeDefaultVisitor<R> implements DataTypeVisitor<R> {
     }
 
     @Override
+    public R visit(VecType vecType) {
+        return defaultMethod(vecType);
+    }
+
+    @Override
     public R visit(MultisetType multisetType) {
         return defaultMethod(multisetType);
     }

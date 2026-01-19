@@ -59,6 +59,10 @@ public class DataTypes {
         return new ArrayType(element);
     }
 
+    public static VecType VECTOR(int length, DataType element) {
+        return new VecType(length, element);
+    }
+
     public static CharType CHAR(int length) {
         return new CharType(length);
     }

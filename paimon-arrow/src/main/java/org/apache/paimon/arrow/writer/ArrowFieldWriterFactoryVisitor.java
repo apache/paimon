@@ -41,8 +41,10 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VecType;
 
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 
@@ -161,6 +163,18 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
                         fieldVector,
                         elementWriterFactory.create(
                                 ((ListVector) fieldVector).getDataVector(), isNullable),
+                        isNullable);
+    }
+
+    @Override
+    public ArrowFieldWriterFactory visit(VecType vecType) {
+        ArrowFieldWriterFactory elementWriterFactory = vecType.getElementType().accept(this);
+        return (fieldVector, isNullable) ->
+                new ArrowFieldWriters.VecWriter(
+                        fieldVector,
+                        vecType.getLength(),
+                        elementWriterFactory.create(
+                                ((FixedSizeListVector) fieldVector).getDataVector(), isNullable),
                         isNullable);
     }
 

@@ -84,6 +84,8 @@ public interface DataGetters {
     /** Returns the array value at the given position. */
     InternalArray getArray(int pos);
 
+    InternalVec getVec(int pos);
+
     /** Returns the map value at the given position. */
     InternalMap getMap(int pos);
 

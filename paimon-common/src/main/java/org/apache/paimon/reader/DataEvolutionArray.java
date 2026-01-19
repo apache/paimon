@@ -24,6 +24,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVec;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 
@@ -146,6 +147,11 @@ public class DataEvolutionArray implements InternalArray {
     @Override
     public InternalArray getArray(int pos) {
         return chooseArray(pos).getArray(offsetInRow(pos));
+    }
+
+    @Override
+    public InternalVec getVec(int pos) {
+        return chooseArray(pos).getVec(offsetInRow(pos));
     }
 
     @Override

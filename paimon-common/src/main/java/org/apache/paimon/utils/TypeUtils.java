@@ -18,22 +18,26 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.ArrayBasedVec;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VecType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -212,6 +216,16 @@ public class TypeUtils {
                     throw new RuntimeException(
                             String.format("Failed to parse Json String %s", s), e);
                 }
+            case VECTOR:
+                VecType vecType = (VecType) type;
+                DataType vecElementType = vecType.getElementType();
+                Object vecBaseArr =
+                        castFromStringInternal(s, DataTypes.ARRAY(vecElementType), isCdcValue);
+                if (vecBaseArr instanceof InternalArray) {
+                    return ArrayBasedVec.from((InternalArray) vecBaseArr);
+                } else {
+                    throw new RuntimeException("Failed to make array during building a vector");
+                }
             case MAP:
                 MapType mapType = (MapType) type;
                 DataType keyType = mapType.getKeyType();
@@ -333,6 +347,7 @@ public class TypeUtils {
 
         switch (t1.getTypeRoot()) {
             case ARRAY:
+            case VECTOR:
             case MAP:
             case MULTISET:
             case ROW:

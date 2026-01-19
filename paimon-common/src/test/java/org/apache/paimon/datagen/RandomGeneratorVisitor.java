@@ -45,6 +45,7 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VecType;
 import org.apache.paimon.utils.Preconditions;
 
 import java.math.BigDecimal;
@@ -234,6 +235,11 @@ public class RandomGeneratorVisitor extends DataGenVisitorBase {
         return DataGeneratorContainer.of(
                 new DataGeneratorMapper<>(generator, (GenericArray::new)),
                 container.getOptions().toArray(new ConfigOption<?>[0]));
+    }
+
+    @Override
+    public DataGeneratorContainer visit(VecType vecType) {
+        throw new RuntimeException("RandomGenerator for VecType has not been implemented yet.");
     }
 
     @Override

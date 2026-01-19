@@ -47,6 +47,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VecType;
 import org.apache.paimon.utils.ConvertBinaryUtil;
 
 import org.davidmoten.hilbert.HilbertCurve;
@@ -273,6 +274,11 @@ public class HilbertIndexer implements Serializable {
 
         @Override
         public HProcessFunction visit(ArrayType arrayType) {
+            throw new RuntimeException("Unsupported type");
+        }
+
+        @Override
+        public HProcessFunction visit(VecType vecType) {
             throw new RuntimeException("Unsupported type");
         }
 

@@ -20,7 +20,6 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -29,153 +28,121 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVec;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.types.RowKind;
 
 import java.io.Serializable;
 
-/**
- * Columnar row to support access to vector column data. It is a row view in {@link
- * VectorizedColumnBatch}.
- */
-public final class ColumnarRow implements InternalRow, DataSetters, Serializable {
+/** Columnar vecType to support access to vector column data. */
+public final class ColumnarVec implements InternalVec, DataSetters, Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private RowKind rowKind = RowKind.INSERT;
-    private VectorizedColumnBatch vectorizedColumnBatch;
-    private int rowId;
+    private final ColumnVector data;
+    private final int offset;
+    private final int numElements;
 
-    public ColumnarRow() {}
-
-    public ColumnarRow(VectorizedColumnBatch vectorizedColumnBatch) {
-        this(vectorizedColumnBatch, 0);
-    }
-
-    public ColumnarRow(VectorizedColumnBatch vectorizedColumnBatch, int rowId) {
-        this.vectorizedColumnBatch = vectorizedColumnBatch;
-        this.rowId = rowId;
-    }
-
-    public void setVectorizedColumnBatch(VectorizedColumnBatch vectorizedColumnBatch) {
-        this.vectorizedColumnBatch = vectorizedColumnBatch;
-        this.rowId = 0;
-    }
-
-    public VectorizedColumnBatch batch() {
-        return vectorizedColumnBatch;
-    }
-
-    public void setRowId(int rowId) {
-        this.rowId = rowId;
+    public ColumnarVec(ColumnVector data, int offset, int numElements) {
+        this.data = data;
+        this.offset = offset;
+        this.numElements = numElements;
     }
 
     @Override
-    public RowKind getRowKind() {
-        return rowKind;
-    }
-
-    @Override
-    public void setRowKind(RowKind kind) {
-        this.rowKind = kind;
-    }
-
-    @Override
-    public int getFieldCount() {
-        return vectorizedColumnBatch.getArity();
+    public int size() {
+        return numElements;
     }
 
     @Override
     public boolean isNullAt(int pos) {
-        return vectorizedColumnBatch.isNullAt(rowId, pos);
-    }
-
-    @Override
-    public boolean getBoolean(int pos) {
-        return vectorizedColumnBatch.getBoolean(rowId, pos);
-    }
-
-    @Override
-    public byte getByte(int pos) {
-        return vectorizedColumnBatch.getByte(rowId, pos);
-    }
-
-    @Override
-    public short getShort(int pos) {
-        return vectorizedColumnBatch.getShort(rowId, pos);
-    }
-
-    @Override
-    public int getInt(int pos) {
-        return vectorizedColumnBatch.getInt(rowId, pos);
-    }
-
-    @Override
-    public long getLong(int pos) {
-        return vectorizedColumnBatch.getLong(rowId, pos);
-    }
-
-    @Override
-    public float getFloat(int pos) {
-        return vectorizedColumnBatch.getFloat(rowId, pos);
-    }
-
-    @Override
-    public double getDouble(int pos) {
-        return vectorizedColumnBatch.getDouble(rowId, pos);
-    }
-
-    @Override
-    public BinaryString getString(int pos) {
-        return vectorizedColumnBatch.getString(rowId, pos);
-    }
-
-    @Override
-    public Decimal getDecimal(int pos, int precision, int scale) {
-        return vectorizedColumnBatch.getDecimal(rowId, pos, precision, scale);
-    }
-
-    @Override
-    public Timestamp getTimestamp(int pos, int precision) {
-        return vectorizedColumnBatch.getTimestamp(rowId, pos, precision);
-    }
-
-    @Override
-    public byte[] getBinary(int pos) {
-        return vectorizedColumnBatch.getBinary(rowId, pos);
-    }
-
-    @Override
-    public Variant getVariant(int pos) {
-        return vectorizedColumnBatch.getVariant(rowId, pos);
-    }
-
-    @Override
-    public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
-    }
-
-    @Override
-    public InternalRow getRow(int pos, int numFields) {
-        return vectorizedColumnBatch.getRow(rowId, pos);
-    }
-
-    @Override
-    public InternalArray getArray(int pos) {
-        return vectorizedColumnBatch.getArray(rowId, pos);
-    }
-
-    @Override
-    public InternalVec getVec(int pos) {
-        return vectorizedColumnBatch.getVec(rowId, pos);
-    }
-
-    @Override
-    public InternalMap getMap(int pos) {
-        return vectorizedColumnBatch.getMap(rowId, pos);
+        return data.isNullAt(offset + pos);
     }
 
     @Override
     public void setNullAt(int pos) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public boolean getBoolean(int pos) {
+        return ((BooleanColumnVector) data).getBoolean(offset + pos);
+    }
+
+    @Override
+    public byte getByte(int pos) {
+        return ((ByteColumnVector) data).getByte(offset + pos);
+    }
+
+    @Override
+    public short getShort(int pos) {
+        return ((ShortColumnVector) data).getShort(offset + pos);
+    }
+
+    @Override
+    public int getInt(int pos) {
+        return ((IntColumnVector) data).getInt(offset + pos);
+    }
+
+    @Override
+    public long getLong(int pos) {
+        return ((LongColumnVector) data).getLong(offset + pos);
+    }
+
+    @Override
+    public float getFloat(int pos) {
+        return ((FloatColumnVector) data).getFloat(offset + pos);
+    }
+
+    @Override
+    public double getDouble(int pos) {
+        return ((DoubleColumnVector) data).getDouble(offset + pos);
+    }
+
+    @Override
+    public BinaryString getString(int pos) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public Decimal getDecimal(int pos, int precision, int scale) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public Timestamp getTimestamp(int pos, int precision) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public byte[] getBinary(int pos) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public Variant getVariant(int pos) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public Blob getBlob(int pos) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public InternalArray getArray(int pos) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public InternalVec getVec(int pos) {
+        return ((VecColumnVector) data).getVec(offset + pos);
+    }
+
+    @Override
+    public InternalMap getMap(int pos) {
+        throw new UnsupportedOperationException("Not support the operation!");
+    }
+
+    @Override
+    public InternalRow getRow(int pos, int numFields) {
         throw new UnsupportedOperationException("Not support the operation!");
     }
 
@@ -225,21 +192,71 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     }
 
     @Override
-    public boolean equals(Object o) {
-        throw new UnsupportedOperationException(
-                "ColumnarRowData do not support equals, please compare fields one by one!");
+    public boolean[] toBooleanArray() {
+        boolean[] res = new boolean[numElements];
+        for (int i = 0; i < numElements; i++) {
+            res[i] = getBoolean(i);
+        }
+        return res;
     }
 
     @Override
-    public int hashCode() {
-        throw new UnsupportedOperationException(
-                "ColumnarRowData do not support hashCode, please hash fields one by one!");
+    public byte[] toByteArray() {
+        byte[] res = new byte[numElements];
+        for (int i = 0; i < numElements; i++) {
+            res[i] = getByte(i);
+        }
+        return res;
     }
 
-    public ColumnarRow copy(ColumnVector[] vectors) {
-        VectorizedColumnBatch vectorizedColumnBatchCopy = vectorizedColumnBatch.copy(vectors);
-        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, rowId);
-        columnarRow.setRowKind(rowKind);
-        return columnarRow;
+    @Override
+    public short[] toShortArray() {
+        short[] res = new short[numElements];
+        for (int i = 0; i < numElements; i++) {
+            res[i] = getShort(i);
+        }
+        return res;
+    }
+
+    @Override
+    public int[] toIntArray() {
+        int[] res = new int[numElements];
+        for (int i = 0; i < numElements; i++) {
+            res[i] = getInt(i);
+        }
+        return res;
+    }
+
+    @Override
+    public long[] toLongArray() {
+        long[] res = new long[numElements];
+        for (int i = 0; i < numElements; i++) {
+            res[i] = getLong(i);
+        }
+        return res;
+    }
+
+    @Override
+    public float[] toFloatArray() {
+        float[] res = new float[numElements];
+        for (int i = 0; i < numElements; i++) {
+            res[i] = getFloat(i);
+        }
+        return res;
+    }
+
+    @Override
+    public double[] toDoubleArray() {
+        double[] res = new double[numElements];
+        for (int i = 0; i < numElements; i++) {
+            res[i] = getDouble(i);
+        }
+        return res;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        throw new UnsupportedOperationException(
+                "ColumnarVector do not support equals, please compare fields one by one!");
     }
 }

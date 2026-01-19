@@ -26,6 +26,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVec;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
@@ -141,6 +142,11 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
     @Override
     public InternalArray getArray(int pos) {
         return ((ArrayColumnVector) data).getArray(offset + pos);
+    }
+
+    @Override
+    public InternalVec getVec(int pos) {
+        return ((VecColumnVector) data).getVec(offset + pos);
     }
 
     @Override

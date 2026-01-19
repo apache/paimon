@@ -21,6 +21,7 @@ package org.apache.paimon.data;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalVecSerializer;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentUtils;
@@ -86,6 +87,13 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
 
     @Override
     public void writeArray(int pos, InternalArray input, InternalArraySerializer serializer) {
+        BinaryArray binary = serializer.toBinaryArray(input);
+        writeSegmentsToVarLenPart(
+                pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());
+    }
+
+    @Override
+    public void writeVec(int pos, InternalVec input, InternalVecSerializer serializer) {
         BinaryArray binary = serializer.toBinaryArray(input);
         writeSegmentsToVarLenPart(
                 pos, binary.getSegments(), binary.getOffset(), binary.getSizeInBytes());

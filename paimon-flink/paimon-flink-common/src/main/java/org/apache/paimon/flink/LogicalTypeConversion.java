@@ -20,15 +20,19 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VecType;
 
 import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.VarBinaryType;
 
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Conversion between {@link LogicalType} and {@link DataType}. */
 public class LogicalTypeConversion {
@@ -47,6 +51,14 @@ public class LogicalTypeConversion {
                 logicalType instanceof BinaryType || logicalType instanceof VarBinaryType,
                 "Expected BinaryType or VarBinaryType, but got: " + logicalType);
         return new BlobType();
+    }
+
+    public static VecType toVecType(
+            LogicalType elementType, String fieldName, Map<String, String> options) {
+        String vecDim = options.get(String.format("field.%s.vector-dim", fieldName));
+        checkNotNull(vecDim, "Absent 'field." + fieldName + ".vector-dim' for vector type");
+        int dim = Integer.parseInt(vecDim);
+        return DataTypes.VECTOR(dim, toDataType(elementType));
     }
 
     public static RowType toDataType(org.apache.flink.table.types.logical.RowType logicalType) {
