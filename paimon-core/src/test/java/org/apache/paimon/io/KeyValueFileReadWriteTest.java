@@ -22,10 +22,17 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializerTest;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.append.AppendOnlyWriter;
+import org.apache.paimon.append.BucketedAppendCompactManager;
+import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fileindex.FileIndexOptions;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.fs.FileIO;
@@ -34,14 +41,21 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
@@ -50,8 +64,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -224,38 +240,83 @@ public class KeyValueFileReadWriteTest {
                                                 kv.value().getInt(1))));
     }
 
-    protected KeyValueFileWriterFactory createWriterFactory(String pathStr, String format) {
-        Path path = new Path(pathStr);
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(
-                        path,
-                        RowType.of(),
-                        CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+    @Test
+    public void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType schema =
+                RowType.of(
+                        new DataType[] {new IntType(), new VarCharType(), new VarCharType()},
+                        new String[] {"id", "name", "dt"});
+
+        String format = "avro";
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
+        Path path = writerFactory.pathFactory(0).newPath();
+        assertThat(path.toString().endsWith(format)).isTrue();
+
+        DataFilePathFactory dataFilePathFactory =
+                new DataFilePathFactory(
+                        new Path(tempDir + "/dt=1/bucket-1"),
                         format,
                         CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                         CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
-                        CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
                         CoreOptions.FILE_SUFFIX_INCLUDE_COMPRESSION.defaultValue(),
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        null);
+        FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
+        LinkedList<DataFileMeta> toCompact = new LinkedList<>();
+        CoreOptions options =
+                new CoreOptions(Collections.singletonMap("metadata.stats-mode", "truncate(16)"));
+        AppendOnlyWriter appendOnlyWriter =
+                new AppendOnlyWriter(
+                        LocalFileIO.create(),
+                        IOManager.create(tempDir.toString()),
+                        0,
+                        fileFormat,
+                        10,
+                        10,
+                        schema,
                         null,
+                        0,
+                        new BucketedAppendCompactManager(
+                                null, toCompact, null, 4, 10, false, null, null), // not used
                         null,
-                        CoreOptions.ExternalPathStrategy.NONE,
+                        false,
+                        dataFilePathFactory,
+                        null,
+                        false,
+                        false,
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        CompressOptions.defaultOptions(),
+                        new StatsCollectorFactories(options),
+                        MemorySize.MAX_VALUE,
+                        new FileIndexOptions(),
+                        true,
                         false,
                         null);
+        appendOnlyWriter.setMemoryPool(
+                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
+        appendOnlyWriter.write(
+                GenericRow.of(1, BinaryString.fromString("aaa"), BinaryString.fromString("1")));
+        CommitIncrement increment = appendOnlyWriter.prepareCommit(true);
+        appendOnlyWriter.close();
+
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(meta.fileName().endsWith(format)).isTrue();
+    }
+
+    protected KeyValueFileWriterFactory createWriterFactory(String pathStr, String format) {
+        Path path = new Path(pathStr);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
         Options options = new Options();
         options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
 
         Function<String, FileStorePathFactory> pathFactoryMap =
-                new Function<String, FileStorePathFactory>() {
-                    @Override
-                    public FileStorePathFactory apply(String format) {
-                        return new FileStorePathFactory(
+                format1 ->
+                        new FileStorePathFactory(
                                 path,
                                 RowType.of(),
                                 CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
-                                format,
+                                format1,
                                 CoreOptions.DATA_FILE_PREFIX.defaultValue(),
                                 CoreOptions.CHANGELOG_FILE_PREFIX.defaultValue(),
                                 CoreOptions.PARTITION_GENERATE_LEGACY_NAME.defaultValue(),
@@ -266,8 +327,6 @@ public class KeyValueFileReadWriteTest {
                                 CoreOptions.ExternalPathStrategy.NONE,
                                 false,
                                 null);
-                    }
-                };
 
         return KeyValueFileWriterFactory.builder(
                         fileIO,

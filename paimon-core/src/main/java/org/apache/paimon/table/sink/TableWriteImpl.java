@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.BundleRecords;
@@ -125,6 +126,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public TableWriteImpl<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         write.withMemoryPoolFactory(memoryPoolFactory);
+        return this;
+    }
+
+    @Override
+    public TableWrite withBlobConsumer(BlobConsumer blobConsumer) {
+        write.withBlobConsumer(blobConsumer);
         return this;
     }
 
