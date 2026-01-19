@@ -112,14 +112,23 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_pk_table(self, file_format):
-        pa_schema = pa.schema([
-            ('id', pa.int32()),
-            ('name', pa.string()),
-            ('category', pa.string()),
-            ('value', pa.float64()),
-            ('ts', pa.timestamp('us')),
-            ('ts_ltz', pa.timestamp('us', tz='UTC'))
-        ])
+        # Lance format doesn't support timestamp, so exclude timestamp columns
+        if file_format == 'lance':
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+                ('category', pa.string()),
+                ('value', pa.float64())
+            ])
+        else:
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+                ('category', pa.string()),
+                ('value', pa.float64()),
+                ('ts', pa.timestamp('us')),
+                ('ts_ltz', pa.timestamp('us', tz='UTC'))
+            ])
 
         table_name = f'default.mixed_test_pk_tablep_{file_format}'
         schema = Schema.from_pyarrow_schema(
@@ -145,14 +154,23 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
 
-        initial_data = pd.DataFrame({
-            'id': [1, 2, 3, 4, 5, 6],
-            'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
-            'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
-            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
-            'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
-            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
-        })
+        # Lance format doesn't support timestamp, so exclude timestamp columns
+        if file_format == 'lance':
+            initial_data = pd.DataFrame({
+                'id': [1, 2, 3, 4, 5, 6],
+                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
+            })
+        else:
+            initial_data = pd.DataFrame({
+                'id': [1, 2, 3, 4, 5, 6],
+                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+                'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+                'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
+            })
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
