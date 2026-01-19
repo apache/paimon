@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.index.DynamicBucketIndexMaintainer;
@@ -63,6 +64,8 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      * @param memoryPoolFactory the given memory pool factory.
      */
     FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory);
+
+    FileStoreWrite<T> withBlobConsumer(BlobConsumer blobConsumer);
 
     /**
      * Set whether the write operation should ignore previously stored files.

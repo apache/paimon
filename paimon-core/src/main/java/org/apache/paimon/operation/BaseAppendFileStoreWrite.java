@@ -24,6 +24,7 @@ import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.cluster.Sorter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -82,6 +83,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private @Nullable List<String> writeCols;
     private boolean forceBufferSpill = false;
     private boolean withBlob;
+    private @Nullable BlobConsumer blobConsumer;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -107,6 +109,12 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
 
         this.fileIndexOptions = options.indexColumnsOptions();
+    }
+
+    @Override
+    public BaseAppendFileStoreWrite withBlobConsumer(BlobConsumer blobConsumer) {
+        this.blobConsumer = blobConsumer;
+        return this;
     }
 
     @Override
@@ -142,7 +150,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.writeBufferSpillDiskSize(),
                 fileIndexOptions,
                 options.asyncFileWrite(),
-                options.statsDenseStore());
+                options.statsDenseStore(),
+                blobConsumer);
     }
 
     @Override

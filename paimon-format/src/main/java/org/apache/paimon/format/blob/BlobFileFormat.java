@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.blob;
 
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.EmptyStatsExtractor;
 import org.apache.paimon.format.FileFormat;
@@ -49,6 +50,8 @@ public class BlobFileFormat extends FileFormat {
 
     private final boolean blobAsDescriptor;
 
+    @Nullable public BlobConsumer writeConsumer;
+
     public BlobFileFormat() {
         this(false);
     }
@@ -60,6 +63,10 @@ public class BlobFileFormat extends FileFormat {
 
     public static boolean isBlobFile(String fileName) {
         return fileName.endsWith("." + BlobFileFormatFactory.IDENTIFIER);
+    }
+
+    public void setWriteConsumer(@Nullable BlobConsumer writeConsumer) {
+        this.writeConsumer = writeConsumer;
     }
 
     @Override
@@ -90,11 +97,11 @@ public class BlobFileFormat extends FileFormat {
         return Optional.of(new EmptyStatsExtractor());
     }
 
-    private static class BlobFormatWriterFactory implements FormatWriterFactory {
+    private class BlobFormatWriterFactory implements FormatWriterFactory {
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new BlobFormatWriter(out);
+            return new BlobFormatWriter(out, writeConsumer);
         }
     }
 

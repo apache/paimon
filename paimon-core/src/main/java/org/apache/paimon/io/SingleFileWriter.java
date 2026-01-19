@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
+import org.apache.paimon.format.FileAwareFormatWriter;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SupportsDirectWrite;
@@ -36,6 +37,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Optional;
 import java.util.function.Function;
 
 /**
@@ -51,9 +53,10 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     protected final FileIO fileIO;
     protected final Path path;
     private final Function<T, InternalRow> converter;
+    private final boolean deleteFileUponAbort;
 
     private FormatWriter writer;
-    private PositionOutputStream out;
+    @Nullable private PositionOutputStream out;
 
     @Nullable private Long outputBytes;
     private long recordCount;
@@ -72,13 +75,22 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
 
         try {
             if (factory instanceof SupportsDirectWrite) {
-                writer = ((SupportsDirectWrite) factory).create(fileIO, path, compression);
+                SupportsDirectWrite supportsDirectWrite = (SupportsDirectWrite) factory;
+                writer = supportsDirectWrite.create(fileIO, path, compression);
             } else {
                 out = fileIO.newOutputStream(path, false);
                 if (asyncWrite) {
                     out = new AsyncPositionOutputStream(out);
                 }
                 writer = factory.create(out, compression);
+            }
+
+            if (writer instanceof FileAwareFormatWriter) {
+                FileAwareFormatWriter fileAwareFormatWriter = (FileAwareFormatWriter) writer;
+                fileAwareFormatWriter.setFile(path);
+                deleteFileUponAbort = fileAwareFormatWriter.deleteFileUponAbort();
+            } else {
+                deleteFileUponAbort = true;
             }
         } catch (IOException e) {
             LOG.warn(
@@ -118,7 +130,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             }
             recordCount += bundle.rowCount();
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
@@ -135,7 +147,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             recordCount++;
             return rowData;
         } catch (Throwable e) {
-            LOG.warn("Exception occurs when writing file " + path + ". Cleaning up.", e);
+            LOG.warn("Exception occurs when writing file {}. Cleaning up.", path, e);
             abort();
             throw e;
         }
@@ -160,15 +172,13 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             IOUtils.closeQuietly(out);
             out = null;
         }
-        fileIO.deleteQuietly(path);
+        abortExecutor().ifPresent(FileWriterAbortExecutor::abort);
     }
 
-    public FileWriterAbortExecutor abortExecutor() {
-        if (!closed) {
-            throw new RuntimeException("Writer should be closed!");
-        }
-
-        return new FileWriterAbortExecutor(fileIO, path);
+    public Optional<FileWriterAbortExecutor> abortExecutor() {
+        return deleteFileUponAbort
+                ? Optional.of(new FileWriterAbortExecutor(fileIO, path))
+                : Optional.empty();
     }
 
     @Override

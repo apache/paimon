@@ -129,7 +129,7 @@ public class RollingFileWriterImpl<T, R> implements RollingFileWriter<T, R> {
         // only store abort executor in memory
         // cannot store whole writer, it includes lots of memory for example column vectors to read
         // and write
-        closedWriters.add(currentWriter.abortExecutor());
+        currentWriter.abortExecutor().ifPresent(closedWriters::add);
         results.add(currentWriter.result());
         currentWriter = null;
     }

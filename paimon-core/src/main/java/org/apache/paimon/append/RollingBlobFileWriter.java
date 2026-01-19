@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -43,6 +44,8 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -91,7 +94,6 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                             RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>>
             blobWriterFactory;
     private final long targetFileSize;
-    private final long blobTargetFileSize;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -118,11 +120,10 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
-
+            boolean statsDenseStore,
+            @Nullable BlobConsumer blobConsumer) {
         // Initialize basic fields
         this.targetFileSize = targetFileSize;
-        this.blobTargetFileSize = blobTargetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
 
@@ -161,7 +162,8 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                blobTargetFileSize);
+                                blobTargetFileSize,
+                                blobConsumer);
     }
 
     /** Creates a factory for normal data writers. */
@@ -221,9 +223,10 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                     FileSource fileSource,
                     boolean asyncFileWrite,
                     boolean statsDenseStore,
-                    long targetFileSize) {
-
+                    long targetFileSize,
+                    @Nullable BlobConsumer blobConsumer) {
         BlobFileFormat blobFileFormat = new BlobFileFormat();
+        blobFileFormat.setWriteConsumer(blobConsumer);
         List<String> blobNames = blobType.getFieldNames();
 
         // Validate blob field count
@@ -375,7 +378,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     /** Closes the main writer and returns its metadata. */
     private DataFileMeta closeMainWriter() throws IOException {
         currentWriter.close();
-        closedWriters.add(currentWriter.writer().abortExecutor());
+        currentWriter.writer().abortExecutor().ifPresent(closedWriters::add);
         return currentWriter.result();
     }
 

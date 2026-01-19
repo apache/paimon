@@ -103,7 +103,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,
-                        false);
+                        false,
+                        null);
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

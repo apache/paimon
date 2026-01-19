@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
@@ -92,6 +93,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
+    @Nullable private final BlobConsumer blobConsumer;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -120,7 +122,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             MemorySize maxDiskSize,
             FileIndexOptions fileIndexOptions,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
+            boolean statsDenseStore,
+            @Nullable BlobConsumer blobConsumer) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -134,6 +137,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.forceCompact = forceCompact;
         this.asyncFileWrite = asyncFileWrite;
         this.statsDenseStore = statsDenseStore;
+        this.blobConsumer = blobConsumer;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
@@ -311,7 +315,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     fileIndexOptions,
                     FileSource.APPEND,
                     asyncFileWrite,
-                    statsDenseStore);
+                    statsDenseStore,
+                    blobConsumer);
         }
         return new RowDataRollingFileWriter(
                 fileIO,

@@ -105,8 +105,8 @@ public class RollingBlobFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
     }
 
     @Test
@@ -205,8 +205,8 @@ public class RollingBlobFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Create large blob data that will exceed the blob target file size
         byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
@@ -282,8 +282,8 @@ public class RollingBlobFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -361,8 +361,8 @@ public class RollingBlobFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Create blob data that will trigger rolling (non-descriptor mode: direct blob data)
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -579,8 +579,8 @@ public class RollingBlobFileWriterTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Write data
         for (int i = 0; i < 3; i++) {
