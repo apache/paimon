@@ -187,6 +187,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Verify data
         self.assertEqual(len(res), 6)
+        if file_format != "lance":
+            self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
+            self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
         # Data order may vary due to partitioning/bucketing, so compare as sets
         expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
         actual_names = set(res['name'].tolist())
