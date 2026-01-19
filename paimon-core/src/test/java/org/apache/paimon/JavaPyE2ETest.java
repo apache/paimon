@@ -124,7 +124,7 @@ public class JavaPyE2ETest {
             FileStoreTable fileStoreTable = (FileStoreTable) table;
 
             try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
-                 InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
+                    InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
 
                 write.write(createRow4Cols(1, "Apple", "Fruit", 1.5));
                 write.write(createRow4Cols(2, "Banana", "Fruit", 0.8));
@@ -158,69 +158,74 @@ public class JavaPyE2ETest {
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testReadAppendTable() throws Exception {
-        Identifier identifier = identifier("mixed_test_append_tablep");
-        Table table = catalog.getTable(identifier);
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        List<Split> splits =
-                new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
-        TableRead read = fileStoreTable.newRead();
-        List<String> res =
-                getResult(
-                        read,
-                        splits,
-                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
-        System.out.println(res);
+        for (String format : Arrays.asList("parquet", "orc", "avro")) {
+            Identifier identifier = identifier("mixed_test_append_tablep_" + format);
+            Table table = catalog.getTable(identifier);
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            List<Split> splits =
+                    new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+            TableRead read = fileStoreTable.newRead();
+            List<String> res =
+                    getResult(
+                            read,
+                            splits,
+                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+            System.out.println(res);
+        }
     }
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testJavaWriteReadPkTable() throws Exception {
-        Identifier identifier = identifier("mixed_test_pk_tablej");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.INT())
-                        .column("name", DataTypes.STRING())
-                        .column("category", DataTypes.STRING())
-                        .column("value", DataTypes.DOUBLE())
-                        .primaryKey("id")
-                        .partitionKeys("category")
-                        .option("dynamic-partition-overwrite", "false")
-                        .option("bucket", "2")
-                        .build();
+        for (String format : Arrays.asList("parquet", "orc", "avro")) {
+            Identifier identifier = identifier("mixed_test_pk_tablej_" + format);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("category", DataTypes.STRING())
+                            .column("value", DataTypes.DOUBLE())
+                            .primaryKey("id")
+                            .partitionKeys("category")
+                            .option("dynamic-partition-overwrite", "false")
+                            .option("bucket", "2")
+                            .option("file.format", format)
+                            .build();
 
-        catalog.createTable(identifier, schema, true);
-        Table table = catalog.getTable(identifier);
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
+            catalog.createTable(identifier, schema, true);
+            Table table = catalog.getTable(identifier);
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
 
-        try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
-                InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
+            try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
+                    InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
 
-            write.write(createRow4Cols(1, "Apple", "Fruit", 1.5));
-            write.write(createRow4Cols(2, "Banana", "Fruit", 0.8));
-            write.write(createRow4Cols(3, "Carrot", "Vegetable", 0.6));
-            write.write(createRow4Cols(4, "Broccoli", "Vegetable", 1.2));
-            write.write(createRow4Cols(5, "Chicken", "Meat", 5.0));
-            write.write(createRow4Cols(6, "Beef", "Meat", 8.0));
+                write.write(createRow4Cols(1, "Apple", "Fruit", 1.5));
+                write.write(createRow4Cols(2, "Banana", "Fruit", 0.8));
+                write.write(createRow4Cols(3, "Carrot", "Vegetable", 0.6));
+                write.write(createRow4Cols(4, "Broccoli", "Vegetable", 1.2));
+                write.write(createRow4Cols(5, "Chicken", "Meat", 5.0));
+                write.write(createRow4Cols(6, "Beef", "Meat", 8.0));
 
-            commit.commit(0, write.prepareCommit(true, 0));
+                commit.commit(0, write.prepareCommit(true, 0));
+            }
+
+            List<Split> splits =
+                    new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+            TableRead read = fileStoreTable.newRead();
+            List<String> res =
+                    getResult(
+                            read,
+                            splits,
+                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+            assertThat(res)
+                    .containsExactlyInAnyOrder(
+                            "1, Apple, Fruit, 1.5",
+                            "2, Banana, Fruit, 0.8",
+                            "3, Carrot, Vegetable, 0.6",
+                            "4, Broccoli, Vegetable, 1.2",
+                            "5, Chicken, Meat, 5.0",
+                            "6, Beef, Meat, 8.0");
         }
-
-        List<Split> splits =
-                new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
-        TableRead read = fileStoreTable.newRead();
-        List<String> res =
-                getResult(
-                        read,
-                        splits,
-                        row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
-        assertThat(res)
-                .containsExactlyInAnyOrder(
-                        "1, Apple, Fruit, 1.5",
-                        "2, Banana, Fruit, 0.8",
-                        "3, Carrot, Vegetable, 0.6",
-                        "4, Broccoli, Vegetable, 1.2",
-                        "5, Chicken, Meat, 5.0",
-                        "6, Beef, Meat, 8.0");
     }
 
     @Test

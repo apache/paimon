@@ -50,7 +50,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
         })
         cls.catalog.create_database('default', True)
 
-    def test_py_write_read_append_table(self):
+    @parameterized.expand(get_file_format_params())
+    def test_py_write_read_append_table(self, file_format):
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -61,11 +62,11 @@ class JavaPyReadWriteTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             partition_keys=['category'],
-            options={'dynamic-partition-overwrite': 'false'}
+            options={'dynamic-partition-overwrite': 'false', 'file.format': file_format}
         )
 
         self.catalog.create_table('default.mixed_test_append_tablep', schema, False)
-        table = self.catalog.get_table('default.mixed_test_append_tablep')
+        table = self.catalog.get_table('default.mixed_test_append_tablep_' + file_format)
 
         initial_data = pd.DataFrame({
             'id': [1, 2, 3, 4, 5, 6],
@@ -95,8 +96,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         actual_names = set(initial_result['name'].tolist())
         self.assertEqual(actual_names, expected_names)
 
-    def test_read_append_table(self):
-        table = self.catalog.get_table('default.mixed_test_append_tablej')
+    @parameterized.expand(get_file_format_params())
+    def test_read_append_table(self, file_format):
+        table = self.catalog.get_table('default.mixed_test_append_tablej_' + file_format)
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
