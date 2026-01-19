@@ -53,6 +53,9 @@ class ResourcePaths:
                                         RESTUtil.encode_string(database_name), self.TABLES)
         return "{}/{}".format(self.base_path, self.TABLES)
 
+    def table_by_id(self, table_id: str) -> str:
+        return "{}/{}/{}".format(self.base_path, self.TABLES, RESTUtil.encode_string(table_id))
+
     def table(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                 self.TABLES, RESTUtil.encode_string(table_name)))

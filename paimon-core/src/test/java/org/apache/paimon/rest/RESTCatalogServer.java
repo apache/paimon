@@ -328,6 +328,8 @@ public class RESTCatalogServer {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
                         return renameViewHandle(restAuthParameter.data());
+                    } else if (isTableByIdRequest(request.getPath())) {
+                        return tableByIdHandle(restAuthParameter.method(), request.getPath());
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.tables())) {
                         return tablesHandle(parameters);
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
@@ -1562,6 +1564,38 @@ public class RESTCatalogServer {
 
     private boolean isObjectTable(Schema schema) {
         return Options.fromMap(schema.options()).get(TYPE) == OBJECT_TABLE;
+    }
+
+    private boolean isTableByIdRequest(String requestPath) {
+        String path = requestPath.split("\\?")[0];
+        String tablesPath = resourcePaths.tables();
+        if (!path.startsWith(tablesPath + "/")) {
+            return false;
+        }
+        if (path.equals(resourcePaths.renameTable())) {
+            return false;
+        }
+        String remaining = path.substring((tablesPath + "/").length());
+        return !remaining.isEmpty() && !remaining.contains("/");
+    }
+
+    private MockResponse tableByIdHandle(String method, String requestPath) throws Exception {
+        if (!"GET".equals(method)) {
+            return new MockResponse().setResponseCode(404);
+        }
+        String path = requestPath.split("\\?")[0];
+        String tableId = path.substring((resourcePaths.tables() + "/").length());
+        for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
+            TableMetadata tableMetadata = entry.getValue();
+            if (tableId.equals(tableMetadata.uuid())) {
+                Identifier identifier = Identifier.fromString(entry.getKey());
+                return tableHandle("GET", "", identifier);
+            }
+        }
+        return mockResponse(
+                new ErrorResponse(
+                        ErrorResponse.RESOURCE_TYPE_TABLE, tableId, "Table not exist.", 404),
+                404);
     }
 
     private MockResponse tableHandle(String method, String data, Identifier identifier)

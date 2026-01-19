@@ -367,6 +367,9 @@ class RESTCatalogServer:
                     source_table_dir.rename(destination_table_dir)
                 return self._mock_response("", 200)
 
+            if self._is_table_by_id_request(resource_path):
+                return self._table_by_id_handle(method, resource_path)
+
             database = resource_path.split("/")[4]
             # Database-specific endpoints
             if resource_path.startswith(self.resource_paths.database(database)):
@@ -579,6 +582,27 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _is_table_by_id_request(self, resource_path: str) -> bool:
+        tables_path = self.resource_paths.tables()
+        if not resource_path.startswith(tables_path + "/"):
+            return False
+        if resource_path == self.resource_paths.rename_table():
+            return False
+        remaining = resource_path[len(tables_path) + 1:]
+        return bool(remaining) and "/" not in remaining
+
+    def _table_by_id_handle(self, method: str, resource_path: str) -> Tuple[str, int]:
+        if method != "GET":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+        table_id = resource_path[len(self.resource_paths.tables()) + 1:]
+        for full_name, table_metadata in self.table_metadata_store.items():
+            if table_id == str(table_metadata.uuid):
+                identifier = Identifier.from_string(full_name)
+                return self._table_handle("GET", "", identifier)
+        return self._mock_response(
+            ErrorResponse(ErrorResponse.RESOURCE_TYPE_TABLE, table_id, "Table not exist.", 404), 404
+        )
 
     def _table_token_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
         if method != "GET":

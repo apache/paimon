@@ -266,6 +266,16 @@ class RESTApi:
             self.rest_auth_function,
         )
 
+    def get_table_by_id(self, table_id: str) -> GetTableResponse:
+        if not table_id or not table_id.strip():
+            raise ValueError("Table id cannot be empty")
+
+        return self.client.get(
+            self.resource_paths.table_by_id(table_id),
+            GetTableResponse,
+            self.rest_auth_function,
+        )
+
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
         database_name, table_name = self.__validate_identifier(identifier)
 

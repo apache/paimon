@@ -78,6 +78,10 @@ public class ResourcePaths {
         return SLASH.join(V1, prefix, TABLES);
     }
 
+    public String tableById(String tableId) {
+        return SLASH.join(V1, prefix, TABLES, encodeString(tableId));
+    }
+
     public String table(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
