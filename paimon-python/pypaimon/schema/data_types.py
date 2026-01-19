@@ -569,7 +569,8 @@ class PyarrowFieldParser:
         return fields
 
     @staticmethod
-    def to_avro_type(field_type: pyarrow.DataType, field_name: str, parent_name: str = "record") -> Union[str, Dict[str, Any]]:
+    def to_avro_type(field_type: pyarrow.DataType, field_name: str,
+                     parent_name: str = "record") -> Union[str, Dict[str, Any]]:
         if pyarrow.types.is_integer(field_type):
             if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
                (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
