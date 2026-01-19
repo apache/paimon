@@ -381,7 +381,7 @@ public class JavaPyE2ETest {
                             read,
                             splits,
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
-            System.out.println("Result: " + res);
+            System.out.println("Result for " + format + " : " + res);
             assertThat(res)
                     .containsExactlyInAnyOrder(
                             "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
