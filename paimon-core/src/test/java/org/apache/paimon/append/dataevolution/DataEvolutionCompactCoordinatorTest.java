@@ -247,7 +247,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
 
         DataEvolutionCompactTask task =
-                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, files, false);
+                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, 0, files, false);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
@@ -266,7 +266,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.blob", 0L, 100L, 0, 1024));
 
         DataEvolutionCompactTask task =
-                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, files, true);
+                new DataEvolutionCompactTask(BinaryRow.EMPTY_ROW, 0, files, true);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =
@@ -286,7 +286,7 @@ public class DataEvolutionCompactCoordinatorTest {
                         createDataFileMeta("file2.parquet", 100L, 100L, 0, 1024));
 
         BinaryRow partition = BinaryRow.singleColumn(42);
-        DataEvolutionCompactTask task = new DataEvolutionCompactTask(partition, files, false);
+        DataEvolutionCompactTask task = new DataEvolutionCompactTask(partition, 0, files, false);
 
         byte[] bytes = serializer.serialize(task);
         DataEvolutionCompactTask deserialized =

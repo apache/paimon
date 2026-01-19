@@ -259,12 +259,17 @@ public class CompactProcedure extends BaseProcedure {
             switch (bucketMode) {
                 case HASH_FIXED:
                 case HASH_DYNAMIC:
-                    compactAwareBucketTable(
-                            table,
-                            fullCompact,
-                            partitionPredicate,
-                            partitionIdleTime,
-                            javaSparkContext);
+                    if (table.coreOptions().dataEvolutionEnabled()) {
+                        compactDataEvolutionTable(
+                                table, partitionPredicate, partitionIdleTime, javaSparkContext);
+                    } else {
+                        compactAwareBucketTable(
+                                table,
+                                fullCompact,
+                                partitionPredicate,
+                                partitionIdleTime,
+                                javaSparkContext);
+                    }
                     break;
                 case BUCKET_UNAWARE:
                     if (table.coreOptions().dataEvolutionEnabled()) {

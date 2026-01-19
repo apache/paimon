@@ -39,7 +39,7 @@ import scala.collection.mutable.ListBuffer
 case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
-    firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)],
+    firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Int, Long)],
     blobAsDescriptor: Boolean,
     catalogContext: CatalogContext)
   extends InnerTableV1DataWrite {
@@ -67,7 +67,7 @@ case class DataEvolutionTableDataWrite(
 
   def newCurrentWriter(firstRowId: Long): Unit = {
     finishCurrentWriter()
-    val (partition, numRecords) = firstRowIdToPartitionMap.getOrElse(firstRowId, null)
+    val (partition, bucket, numRecords) = firstRowIdToPartitionMap.getOrElse(firstRowId, null)
     if (partition == null) {
       throw new IllegalArgumentException(
         s"First row ID $firstRowId not found in partition map. " +
@@ -80,8 +80,8 @@ case class DataEvolutionTableDataWrite(
       .asInstanceOf[TableWriteImpl[InternalRow]]
       .getWrite
       .asInstanceOf[AbstractFileStoreWrite[InternalRow]]
-      .createWriter(partition, 0)
-    currentWriter = PerFileWriter(partition, firstRowId, writer, numRecords)
+      .createWriter(partition, bucket)
+    currentWriter = PerFileWriter(partition, bucket, firstRowId, writer, numRecords)
   }
 
   def finishCurrentWriter(): Unit = {
@@ -107,6 +107,7 @@ case class DataEvolutionTableDataWrite(
 
   private case class PerFileWriter(
       partition: BinaryRow,
+      bucket: Int,
       firstRowId: Long,
       recordWriter: RecordWriter[InternalRow],
       numRecords: Long) {
@@ -134,7 +135,7 @@ case class DataEvolutionTableDataWrite(
         val dataFileMeta = dataFiles.get(0).assignFirstRowId(firstRowId)
         new CommitMessageImpl(
           partition,
-          0,
+          bucket,
           null,
           new DataIncrement(
             java.util.Arrays.asList(dataFileMeta),

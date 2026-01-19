@@ -37,12 +37,14 @@ import scala.collection.mutable
 
 case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteHelper {
 
-  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)] =
+  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Int, Long)] =
     initPartitionMap()
   override val table: FileStoreTable = paimonTable.copy(dynamicOp)
 
-  private def initPartitionMap(): mutable.HashMap[Long, (BinaryRow, Long)] = {
-    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (BinaryRow, Long)]
+  @transient private lazy val serializer = new CommitMessageSerializer
+
+  private def initPartitionMap(): mutable.HashMap[Long, (BinaryRow, Int, Long)] = {
+    val firstRowIdToPartitionMap = new mutable.HashMap[Long, (BinaryRow, Int, Long)]
     table
       .store()
       .newScan()
@@ -50,7 +52,7 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
       .forEachRemaining(
         k =>
           firstRowIdToPartitionMap
-            .put(k.file().firstRowId(), (k.partition(), k.file().rowCount())))
+            .put(k.file().firstRowId(), (k.partition(), k.bucket(), k.file().rowCount())))
     firstRowIdToPartitionMap
   }
 

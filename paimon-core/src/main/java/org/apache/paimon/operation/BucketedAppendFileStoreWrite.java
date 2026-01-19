@@ -97,7 +97,7 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
             List<DataFileMeta> restoredFiles,
             ExecutorService compactExecutor,
             @Nullable BucketedDvMaintainer dvMaintainer) {
-        if (options.writeOnly()) {
+        if (options.writeOnly() || options.rowTrackingEnabled()) {
             return new NoopCompactManager();
         } else if (options.bucketClusterEnabled()) {
             return new BucketedAppendClusterManager(

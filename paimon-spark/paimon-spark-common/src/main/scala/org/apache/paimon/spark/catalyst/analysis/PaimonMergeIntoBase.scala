@@ -18,14 +18,18 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
+import org.apache.paimon.CoreOptions.BUCKET_KEY
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.{MergeIntoPaimonDataEvolutionTable, MergeIntoPaimonTable}
+import org.apache.paimon.utils.StringUtils
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+
+import java.util
 
 import scala.collection.JavaConverters._
 
@@ -72,6 +76,13 @@ trait PaimonMergeIntoBase
           resolveNotMatchedBySourceActions(merge, targetOutput, dataEvolutionEnabled)
 
         if (dataEvolutionEnabled) {
+          val bucketKeySt = v2Table.getTable.options().get(BUCKET_KEY.key)
+          if (!StringUtils.isNullOrWhitespaceOnly(bucketKeySt)) {
+            checkUpdateActionValidityForBucketKey(
+              AttributeSet(targetOutput),
+              updateActions,
+              bucketKeySt.split(",").toSeq)
+          }
           MergeIntoPaimonDataEvolutionTable(
             v2Table,
             merge.targetTable,
@@ -142,7 +153,7 @@ trait PaimonMergeIntoBase
     lazy val isMergeConditionValid = {
       val mergeExpressions = splitConjunctivePredicates(mergeCondition)
       primaryKeys.forall {
-        primaryKey => isUpdateExpressionToPrimaryKey(targetOutput, mergeExpressions, primaryKey)
+        primaryKey => isUpdateExpressionForKey(targetOutput, mergeExpressions, primaryKey)
       }
     }
 
@@ -154,6 +165,24 @@ trait PaimonMergeIntoBase
     val valid = isMergeConditionValid || actions.forall(isUpdateActionValid)
     if (!valid) {
       throw new RuntimeException("Can't update the primary key column in update clause.")
+    }
+  }
+
+  /** This check will avoid to update the bucket key columns */
+  private def checkUpdateActionValidityForBucketKey(
+      targetOutput: AttributeSet,
+      actions: Seq[UpdateAction],
+      bucketKeys: Seq[String]): Unit = {
+
+    // Check whether there are an update expression related to any primary key.
+    def isUpdateActionValid(action: UpdateAction): Boolean = {
+      validUpdateAssignment(targetOutput, bucketKeys, action.assignments)
+    }
+
+    val valid = actions.forall(isUpdateActionValid)
+    if (!valid) {
+      throw new RuntimeException(
+        "Can't update the bucket key column in data-evolution update clause.")
     }
   }
 }
