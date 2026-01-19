@@ -239,6 +239,8 @@ public class SchemaValidation {
         validateIncrementalClustering(schema, options);
 
         validateChainTable(schema, options);
+
+        validateChangelogReadSequenceNumber(schema, options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -670,6 +672,17 @@ public class SchemaValidation {
             Preconditions.checkArgument(
                     options.partitionTimestampFormatter() != null,
                     "Partition timestamp formatter is required for chain table.");
+        }
+    }
+
+    private static void validateChangelogReadSequenceNumber(
+            TableSchema schema, CoreOptions options) {
+        if (options.tableReadSequenceNumberEnabled()) {
+            checkArgument(
+                    !schema.primaryKeys().isEmpty(),
+                    "Cannot enable '%s' for non-primary-key table. "
+                            + "Sequence number is only available for primary key tables.",
+                    CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key());
         }
     }
 }
