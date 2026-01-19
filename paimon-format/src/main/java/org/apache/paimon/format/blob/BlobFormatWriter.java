@@ -55,21 +55,21 @@ public class BlobFormatWriter implements FormatWriter {
     @Override
     public void addElement(InternalRow element) throws IOException {
         checkArgument(element.getFieldCount() == 1, "BlobFormatWriter only support one field.");
-        checkArgument(!element.isNullAt(0), "BlobFormatWriter only support non-null blob.");
-        Blob blob = element.getBlob(0);
 
         long previousPos = out.getPos();
-        crc32.reset();
-
         write(MAGIC_NUMBER_BYTES);
-        try (SeekableInputStream in = blob.newInputStream()) {
-            int bytesRead = in.read(tmpBuffer);
-            while (bytesRead >= 0) {
-                write(tmpBuffer, bytesRead);
-                bytesRead = in.read(tmpBuffer);
+
+        if (!element.isNullAt(0)) {
+            Blob blob = element.getBlob(0);
+            try (SeekableInputStream in = blob.newInputStream()) {
+                int bytesRead = in.read(tmpBuffer);
+                while (bytesRead >= 0) {
+                    write(tmpBuffer, bytesRead);
+                    bytesRead = in.read(tmpBuffer);
+                }
             }
         }
-
+        crc32.reset();
         long binLength = out.getPos() - previousPos + 12;
         lengths.add(binLength);
         byte[] lenBytes = longToLittleEndian(binLength);

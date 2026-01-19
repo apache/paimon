@@ -78,11 +78,13 @@ public class BlobFileFormatTest {
 
         // write
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
-        List<byte[]> blobs = Arrays.asList("hello".getBytes(), "world".getBytes());
+        List<byte[]> blobs =
+                Arrays.asList(
+                        "hello".getBytes(), "world".getBytes(), null, "asldfjasldkfjas".getBytes());
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter formatWriter = writerFactory.create(out, null);
             for (byte[] bytes : blobs) {
-                formatWriter.addElement(GenericRow.of(new BlobData(bytes)));
+                formatWriter.addElement(GenericRow.of(bytes == null ? null : new BlobData(bytes)));
             }
             formatWriter.close();
         }
@@ -96,13 +98,17 @@ public class BlobFileFormatTest {
                 .createReader(context)
                 .forEachRemaining(
                         row -> {
-                            Blob blob = row.getBlob(0);
-                            if (blobAsDescriptor) {
-                                assertThat(blob).isInstanceOf(BlobRef.class);
+                            if (row.isNullAt(0)) {
+                                result.add(null);
                             } else {
-                                assertThat(blob).isInstanceOf(BlobData.class);
+                                Blob blob = row.getBlob(0);
+                                if (blobAsDescriptor) {
+                                    assertThat(blob).isInstanceOf(BlobRef.class);
+                                } else {
+                                    assertThat(blob).isInstanceOf(BlobData.class);
+                                }
+                                result.add(blob.toData());
                             }
-                            result.add(blob.toData());
                         });
 
         // assert
