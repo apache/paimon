@@ -130,9 +130,10 @@ class PaimonDatasink(Datasink[List["CommitMessage"]]):
             commit_messages_to_abort = non_empty_messages
             table_commit.commit(non_empty_messages)
 
-            logger.info(f"Successfully committed write job for table {self._table_name}")
             commit_messages_to_abort = []
             self._pending_commit_messages = []
+
+            logger.info(f"Successfully committed write job for table {self._table_name}")
         except Exception as e:
             logger.error(
                 f"Error committing write job for table {self._table_name}: {e}",
