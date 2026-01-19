@@ -58,6 +58,7 @@ def main():
     
     json_file_path = _get_sample_data_path('data.jsonl')
     
+    table_write = None
     try:
         catalog = CatalogFactory.create({
             'metastore': 'rest',
@@ -124,6 +125,7 @@ def main():
         
         # write_ray() has already committed the data, just close the writer
         table_write.close()
+        table_write = None
         
         print(f"Successfully wrote {ray_dataset.count()} rows to table")
         
@@ -137,6 +139,11 @@ def main():
         print(result_df.head())
         
     finally:
+        if table_write is not None:
+            try:
+                table_write.close()
+            except Exception:
+                pass
         server.shutdown()
         if ray.is_initialized():
             ray.shutdown()
