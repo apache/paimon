@@ -36,6 +36,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
+import org.apache.paimon.metastore.ChainTableOverwriteCommitCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
@@ -416,6 +417,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (options.toConfiguration().get(IcebergOptions.METADATA_ICEBERG_STORAGE)
                 != IcebergOptions.StorageType.DISABLED) {
             callbacks.add(new IcebergCommitCallback(table, commitUser));
+        }
+
+        if (options.isChainTable()) {
+            callbacks.add(new ChainTableOverwriteCommitCallback(table));
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
