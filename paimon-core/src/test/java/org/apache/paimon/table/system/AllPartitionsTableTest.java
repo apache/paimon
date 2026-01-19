@@ -34,8 +34,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Objects;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
@@ -67,12 +65,20 @@ public class AllPartitionsTableTest extends TableTestBase {
 
     @Test
     public void testAllPartitionsTable() throws Exception {
-        List<String> result =
-                read(allPartitionsTable).stream()
-                        .map(Objects::toString)
-                        .collect(Collectors.toList());
-        result = result.stream().filter(r -> !r.contains("path")).collect(Collectors.toList());
-        assertThat(result.get(0).toString()).startsWith("+I(default,T,f1=1,1,680,1,");
+        List<InternalRow> rows = read(allPartitionsTable);
+
+        assertThat(rows.size()).isEqualTo(1);
+        InternalRow row = rows.get(0);
+        assertThat(row.getFieldCount()).isEqualTo(8);
+        assertThat(row.getString(0).toString()).isEqualTo("default"); // database_name
+        assertThat(row.getString(1).toString()).isEqualTo("T"); // table_name
+        assertThat(row.getString(2).toString()).isEqualTo("f1=1"); // partition_name
+        assertThat(row.getLong(3)).isEqualTo(1L); // record_count
+        assertThat(row.getLong(4)).isGreaterThan(0L); // file_size_in_bytes
+        assertThat(row.getLong(5)).isEqualTo(1L); // file_count
+        assertThat(row.getLong(6))
+                .isLessThanOrEqualTo(System.currentTimeMillis()); // last_file_creation_time
+        assertThat(row.getBoolean(7)).isFalse(); // done
     }
 
     @Test

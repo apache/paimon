@@ -2625,7 +2625,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     assertThat(r.getLong(8)).isEqualTo(1);
                     assertThat(r.getString(9).toString()).isEqualTo("updated");
                     assertThat(r.getLong(10)).isEqualTo(2);
-                    assertThat(r.getLong(11)).isEqualTo(2584);
+                    assertThat(r.getLong(11)).isGreaterThan(0);
                     assertThat(r.getLong(12)).isEqualTo(2);
                 };
         tablesCheck.accept(row);
@@ -2651,7 +2651,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                     assertThat(r.getString(1).toString()).isEqualTo("all_tables");
                     assertThat(r.getString(2).toString()).isEqualTo("f1=2");
                     assertThat(r.getLong(3)).isEqualTo(1);
-                    assertThat(r.getLong(4)).isEqualTo(1292);
+                    assertThat(r.getLong(4)).isGreaterThan(0);
                     assertThat(r.getLong(5)).isEqualTo(1);
                     assertThat(r.getBoolean(7)).isEqualTo(false);
                 };
