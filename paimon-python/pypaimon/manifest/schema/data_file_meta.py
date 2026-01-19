@@ -230,7 +230,7 @@ DATA_FILE_META_SCHEMA = {
         {"name": "_CREATION_TIME",
          "type": [
              "null",
-             {"type": "long", "logicalType": "timestamp-millis"}],
+             {"type": "long", "logicalType": "timestamp-millis", "isAdjustedToUTC": True}],
          "default": None},
         {"name": "_DELETE_ROW_COUNT", "type": ["null", "long"], "default": None},
         {"name": "_EMBEDDED_FILE_INDEX", "type": ["null", "bytes"], "default": None},
