@@ -15,28 +15,11 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-# Core dependencies for pypaimon
-cachetools>=4.2,<6; python_version=="3.6"
-cachetools>=5,<6; python_version>"3.6"
-dataclasses>=0.8; python_version < "3.7"
-fastavro>=1.4,<2
-fsspec>=2021.10,<2026; python_version<"3.8"
-fsspec>=2023,<2026; python_version>="3.8"
-ossfs>=2021.8; python_version<"3.8"
-ossfs>=2023; python_version>="3.8"
-packaging>=21,<26
-pandas>=1.1,<2; python_version < "3.7"
-pandas>=1.3,<3; python_version >= "3.7" and python_version < "3.9"
-pandas>=1.5,<3; python_version >= "3.9"
-polars>=0.9,<1; python_version<"3.8"
-polars>=1,<2; python_version>="3.8"
-pyarrow>=6,<7; python_version < "3.8"
-pyarrow>=16,<20; python_version >= "3.8"
-pylance>=0.20,<1; python_version>="3.9"
-pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"
-pyroaring
-readerwriterlock>=1,<2
-zstandard>=0.19,<1
-cramjam>=1.3.0,<3; python_version>="3.7"
-faiss-cpu==1.7.2; python_version >= "3.6" and python_version < "3.7"
-faiss-cpu==1.7.4; python_version >= "3.7"
+"""
+Datasource implementations for reading Paimon tables into various data processing frameworks.
+
+This package provides optional integrations with:
+- Ray: for distributed data processing (ray_datasource.py)
+- PyTorch: for machine learning training pipelines (torch_dataset.py)
+
+"""
