@@ -30,6 +30,9 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -40,6 +43,7 @@ import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.ListVector;
@@ -133,6 +137,53 @@ public class ArrowFormatWriterTest {
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testWriteVariant() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(variant));
+            writer.flush();
+
+            StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
+            assertThat(variantVector.isNull(0)).isFalse();
+            VarBinaryVector valueVector = (VarBinaryVector) variantVector.getChild(Variant.VALUE);
+            VarBinaryVector metadataVector =
+                    (VarBinaryVector) variantVector.getChild(Variant.METADATA);
+            assertThat(valueVector.getObject(0)).isEqualTo(variant.value());
+            assertThat(metadataVector.getObject(0)).isEqualTo(variant.metadata());
+        }
+    }
+
+    @Test
+    public void testWriteVariantWithShreddingSchema() {
+        RowType rowType = new RowType(Arrays.asList(new DataField(0, "v", DataTypes.VARIANT())));
+        RowType expectedSchema =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "a", DataTypes.INT()),
+                        DataTypes.FIELD(1, "b", DataTypes.STRING()));
+        RowType shreddingSchemas =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(
+                                        0,
+                                        "v",
+                                        PaimonShreddingUtils.variantShreddingSchema(
+                                                expectedSchema))));
+        GenericVariant variant = GenericVariant.fromJson("{\"a\": 1, \"b\": \"x\"}");
+
+        try (ArrowFormatWriter writer =
+                new ArrowFormatWriter(rowType, 16, true, null, shreddingSchemas)) {
+            writer.write(GenericRow.of(variant));
+            writer.flush();
+
+            StructVector variantVector = (StructVector) writer.getVectorSchemaRoot().getVector("v");
+            assertThat(variantVector.isNull(0)).isFalse();
+            assertThat(variantVector.getChild(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME))
+                    .isNotNull();
         }
     }
 
@@ -345,6 +396,7 @@ public class ArrowFormatWriterTest {
                                     4096,
                                     true,
                                     allocator,
+                                    null,
                                     null,
                                     customFieldTypeVisitor,
                                     customFieldWriterVisitor))) {
