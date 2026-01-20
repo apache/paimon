@@ -27,6 +27,7 @@ import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DeltaVarintCompressor;
 import org.apache.paimon.utils.LongArrayList;
 
@@ -48,15 +49,19 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
     private final PositionOutputStream out;
     @Nullable private final BlobConsumer writeConsumer;
+    private final String blobFieldName;
     private final CRC32 crc32;
     private final byte[] tmpBuffer;
     private final LongArrayList lengths;
 
     private String pathString;
 
-    public BlobFormatWriter(PositionOutputStream out, @Nullable BlobConsumer writeConsumer) {
+    public BlobFormatWriter(
+            PositionOutputStream out, @Nullable BlobConsumer writeConsumer, RowType type) {
         this.out = out;
         this.writeConsumer = writeConsumer;
+        checkArgument(type.getFieldCount() == 1, "BlobFormatWriter only support one field.");
+        this.blobFieldName = type.getFieldNames().get(0);
         this.crc32 = new CRC32();
         this.tmpBuffer = new byte[4096];
         this.lengths = new LongArrayList(16);
@@ -102,7 +107,7 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
 
         if (writeConsumer != null) {
             BlobDescriptor descriptor = new BlobDescriptor(pathString, blobPos, blobLength);
-            boolean flush = writeConsumer.accept(descriptor);
+            boolean flush = writeConsumer.accept(blobFieldName, descriptor);
             if (flush) {
                 out.flush();
             }

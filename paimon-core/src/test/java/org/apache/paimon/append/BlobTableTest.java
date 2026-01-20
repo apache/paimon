@@ -67,7 +67,12 @@ public class BlobTableTest extends TableTestBase {
         FileStoreTable table = getTableDefault();
         List<BlobDescriptor> blobs = new ArrayList<>();
         try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
-            write.withBlobConsumer(blobs::add);
+            write.withBlobConsumer(
+                    (blobFieldName, blobDescriptor) -> {
+                        assertThat(blobFieldName).isEqualTo("f2");
+                        blobs.add(blobDescriptor);
+                        return true;
+                    });
             write.write(dataDefault(0, 0));
             write.write(dataDefault(0, 0));
         }

@@ -79,7 +79,7 @@ public class BlobFileFormat extends FileFormat {
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new BlobFormatWriterFactory();
+        return new BlobFormatWriterFactory(type);
     }
 
     @Override
@@ -99,9 +99,15 @@ public class BlobFileFormat extends FileFormat {
 
     private class BlobFormatWriterFactory implements FormatWriterFactory {
 
+        private final RowType type;
+
+        private BlobFormatWriterFactory(RowType type) {
+            this.type = type;
+        }
+
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new BlobFormatWriter(out, writeConsumer);
+            return new BlobFormatWriter(out, writeConsumer, type);
         }
     }
 
