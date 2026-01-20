@@ -22,6 +22,7 @@ import unittest
 import shutil
 
 import pyarrow as pa
+import pyarrow.types as pa_types
 import ray
 
 from pypaimon import CatalogFactory, Schema
@@ -115,6 +116,66 @@ class RayDataTest(unittest.TestCase):
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
 
+    def test_ray_data_read_with_blob(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('data', pa.large_binary()),  # BLOB type in Paimon
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-field': 'data',
+            }
+        )
+        import time
+        table_name = f'default.test_ray_blob_{int(time.time() * 1000000)}'
+        
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
+            'data': [b'data1', b'data2', b'data3', b'data4', b'data5'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
+
+        self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
+
+        df_check = ray_dataset.to_pandas()
+        ray_table_check = pa.Table.from_pandas(df_check)
+        ray_schema_check = ray_table_check.schema
+        ray_data_field = ray_schema_check.field('data')
+
+        self.assertTrue(
+            pa_types.is_binary(ray_data_field.type),
+            f"Ray Dataset should convert large_binary to binary when reading, "
+            f"but got {ray_data_field.type}"
+        )
+        self.assertFalse(
+            pa_types.is_large_binary(ray_data_field.type),
+            f"Ray Dataset should NOT have large_binary type after reading, "
+            f"but got {ray_data_field.type}"
+        )
+
         # Test basic operations
         sample_data = ray_dataset.take(3)
         self.assertEqual(len(sample_data), 3, "Should have 3 sample rows")
@@ -129,6 +190,13 @@ class RayDataTest(unittest.TestCase):
             list(df_sorted['name']),
             ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             "Name column should match"
+        )
+        
+        data_values = [bytes(d) if d is not None else None for d in df_sorted['data']]
+        self.assertEqual(
+            data_values,
+            [b'data1', b'data2', b'data3', b'data4', b'data5'],
+            "Data column should match"
         )
 
     def test_basic_ray_data_write(self):

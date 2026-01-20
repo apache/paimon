@@ -273,7 +273,7 @@ class ReaderBasicTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as e:
             table_write.write_arrow_batch(record_batch)
-        self.assertTrue(str(e.exception).startswith("Input schema isn't consistent with table schema and write cols."))
+        self.assertTrue(str(e.exception).startswith("Input schema doesn't match table schema."))
 
     def test_reader_iterator(self):
         read_builder = self.table.new_read_builder()
