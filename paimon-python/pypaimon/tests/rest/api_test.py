@@ -176,7 +176,7 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(rest_api.get_database('default'), test_databases.get('default'))
             table = rest_api.get_table(Identifier.from_string('default.user'))
             self.assertEqual(table.id, str(test_tables['default.user'].uuid))
-            table_by_id = rest_api.get_table_by_id(table.id)
+            table_by_id = rest_api.get_table(table.id)
             self.assertEqual(table_by_id.name, table.name)
 
         finally:
@@ -299,9 +299,9 @@ class ApiTest(unittest.TestCase):
             rest_api.get_table(None)
         self.assertIn("Identifier cannot be None", str(context.exception))
 
-        # Test get_table_by_id with empty table_id
+        # Test get_table with empty table_id
         with self.assertRaises(ValueError) as context:
-            rest_api.get_table_by_id("")
+            rest_api.get_table("")
         self.assertIn("Table id cannot be empty", str(context.exception))
 
         # Test drop_table with None identifier

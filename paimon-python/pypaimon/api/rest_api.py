@@ -255,26 +255,32 @@ class RESTApi:
             request,
             self.rest_auth_function)
 
-    def get_table(self, identifier: Identifier) -> GetTableResponse:
-        database_name, table_name = self.__validate_identifier(identifier)
+    def get_table(self, identifier: Union[Identifier, str]) -> GetTableResponse:
+        if identifier is None:
+            raise ValueError("Identifier cannot be None")
 
-        return self.client.get(
-            self.resource_paths.table(
-                database_name,
-                table_name),
-            GetTableResponse,
-            self.rest_auth_function,
-        )
+        if isinstance(identifier, Identifier):
+            database_name, table_name = self.__validate_identifier(identifier)
+            return self.client.get(
+                self.resource_paths.table(
+                    database_name,
+                    table_name),
+                GetTableResponse,
+                self.rest_auth_function,
+            )
 
-    def get_table_by_id(self, table_id: str) -> GetTableResponse:
-        if not table_id or not table_id.strip():
-            raise ValueError("Table id cannot be empty")
+        if isinstance(identifier, str):
+            if not identifier.strip():
+                raise ValueError("Table id cannot be empty")
+            if "." in identifier:
+                return self.get_table(Identifier.from_string(identifier))
+            return self.client.get(
+                self.resource_paths.table_by_id(identifier),
+                GetTableResponse,
+                self.rest_auth_function,
+            )
 
-        return self.client.get(
-            self.resource_paths.table_by_id(table_id),
-            GetTableResponse,
-            self.rest_auth_function,
-        )
+        raise ValueError("Identifier must be an Identifier or table id string")
 
     def drop_table(self, identifier: Identifier) -> GetTableResponse:
         database_name, table_name = self.__validate_identifier(identifier)
