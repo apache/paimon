@@ -20,11 +20,14 @@ Module to read a Paimon table into PyTorch Dataset.
 """
 from typing import List
 
+import torch
+from torch.utils.data import Dataset, IterableDataset
+
 from pypaimon.read.split import Split
 from pypaimon.read.table_read import TableRead
 
 
-class TorchDataset:
+class TorchDataset(Dataset):
     """
     PyTorch Dataset implementation for reading Paimon table data.
 
@@ -71,7 +74,7 @@ class TorchDataset:
         return self._data[index]
 
 
-class TorchIterDataset:
+class TorchIterDataset(IterableDataset):
     """
     PyTorch IterableDataset implementation for reading Paimon table data.
 
@@ -103,8 +106,6 @@ class TorchIterDataset:
         Yields:
             row data of dict type, where keys are column names
         """
-        # Lazy import torch.utils.data - only when this method is called
-        import torch.utils.data
         worker_info = torch.utils.data.get_worker_info()
 
         if worker_info is None:
