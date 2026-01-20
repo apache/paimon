@@ -1452,7 +1452,10 @@ class DataBlobWriterTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        result = table_read.to_arrow(table_scan.plan().splits())
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+
+        self.assertEqual(sum([s._row_count for s in splits]), 40 * 2)
 
         # Verify the data
         self.assertEqual(result.num_rows, 40, "Should have 40 rows")
@@ -2701,6 +2704,98 @@ class DataBlobWriterTest(unittest.TestCase):
                              f"got {latest_snapshot.id}")
 
             print(f"✓ Blob Table Iteration {test_iteration + 1}/{iter_num} completed successfully")
+
+    def test_blob_data_with_ray(self):
+        try:
+            import ray
+            if not ray.is_initialized():
+                ray.init(ignore_reinit_error=True, num_cpus=2)
+        except ImportError:
+            self.skipTest("Ray is not available")
+
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        pa_schema = pa.schema([
+            ('text', pa.string()),
+            ('video_path', pa.string()),
+            ('video_bytes', pa.large_binary())  # Blob column
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-field': 'video_bytes',
+                'blob-as-descriptor': 'true'
+            }
+        )
+
+        self.catalog.create_table('test_db.test_blob_data_with_ray', schema, False)
+        table = self.catalog.get_table('test_db.test_blob_data_with_ray')
+
+        num_rows = 10
+        blob_descriptors = []
+        for i in range(num_rows):
+            blob_size = 1024 * (i + 1)  # Varying sizes: 1KB, 2KB, ..., 10KB
+            blob_data = b'X' * blob_size
+            blob_file_path = os.path.join(self.temp_dir, f'blob_{i}.mp4')
+            with open(blob_file_path, 'wb') as f:
+                f.write(blob_data)
+            blob_descriptor = BlobDescriptor(blob_file_path, 0, blob_size)
+            blob_descriptors.append(blob_descriptor.serialize())
+
+        test_data = pa.Table.from_pydict({
+            'text': [f'text_{i}' for i in range(num_rows)],
+            'video_path': [f'video_{i}.mp4' for i in range(num_rows)],
+            'video_bytes': blob_descriptors
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+
+        total_split_row_count = sum([s._row_count for s in splits])
+        self.assertEqual(total_split_row_count, num_rows * 2,
+                         f"Total split row count should be {num_rows}, got {total_split_row_count}")
+        
+        total_merged_count = 0
+        for split in splits:
+            merged_count = split.merged_row_count()
+            if merged_count is not None:
+                total_merged_count += merged_count
+                self.assertLessEqual(merged_count, split.row_count,
+                                   f"merged_row_count ({merged_count}) should be <= row_count ({split.row_count})")
+        
+        if total_merged_count > 0:
+            self.assertEqual(total_merged_count, num_rows,
+                           f"Total merged_row_count should be {num_rows}, got {total_merged_count}")
+
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
+
+        ray_count = ray_dataset.count()
+        self.assertEqual(
+            ray_count,
+            num_rows,
+            f"Ray dataset count() should be {num_rows}, got {ray_count}. "
+        )
+
+        df = ray_dataset.to_pandas()
+        self.assertEqual(len(df), num_rows,
+                         f"Actual data rows should be {num_rows}, got {len(df)}")
+
+        self.assertEqual(list(df['text']), [f'text_{i}' for i in range(num_rows)])
+        self.assertEqual(list(df['video_path']), [f'video_{i}.mp4' for i in range(num_rows)])
 
 
 if __name__ == '__main__':

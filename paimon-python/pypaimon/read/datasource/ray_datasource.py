@@ -171,8 +171,15 @@ class RayDatasource(Datasource):
             for split in chunk_splits:
                 if predicate is None:
                     # Only estimate rows if no predicate (predicate filtering changes row count)
-                    if hasattr(split, 'row_count') and split.row_count > 0:
-                        total_rows += split.row_count
+                    row_count = None
+                    if hasattr(split, 'merged_row_count'):
+                        merged_count = split.merged_row_count()
+                        if merged_count is not None:
+                            row_count = merged_count
+                    if row_count is None and hasattr(split, 'row_count') and split.row_count > 0:
+                        row_count = split.row_count
+                    if row_count is not None and row_count > 0:
+                        total_rows += row_count
                 if hasattr(split, 'file_size') and split.file_size > 0:
                     total_size += split.file_size
 

@@ -96,6 +96,62 @@ class SlicedSplit(Split):
     def data_deletion_files(self):
         return self._data_split.data_deletion_files
 
+    def _get_sliced_file_row_count(self, file: 'DataFileMeta') -> int:
+        if file.file_name in self._shard_file_idx_map:
+            start, end = self._shard_file_idx_map[file.file_name]
+            return (end - start) if start != -1 and end != -1 else 0
+        return file.row_count
+
+    def merged_row_count(self):
+        if not self._shard_file_idx_map:
+            return self._data_split.merged_row_count()
+        
+        underlying_merged = self._data_split.merged_row_count()
+        if underlying_merged is not None:
+            original_row_count = self._data_split.row_count
+            return int(underlying_merged * self.row_count / original_row_count) if original_row_count > 0 else 0
+        
+        from pypaimon.read.split import DataSplit
+        
+        if not isinstance(self._data_split, DataSplit):
+            return None
+        
+        first_row_ids = [f.first_row_id for f in self._data_split.files if f.first_row_id is not None]
+        if len(first_row_ids) == len(set(first_row_ids)):
+            return self.row_count
+        
+        row_count_by_first_row_id = {}
+        for file in self._data_split.files:
+            if file.first_row_id is not None and file.first_row_id not in row_count_by_first_row_id:
+                sliced_count = self._get_sliced_file_row_count(file)
+                if not file.file_name.endswith('.blob'):
+                    row_count_by_first_row_id[file.first_row_id] = sliced_count
+        
+        for file in self._data_split.files:
+            if file.first_row_id is not None and file.first_row_id not in row_count_by_first_row_id:
+                row_count_by_first_row_id[file.first_row_id] = self._get_sliced_file_row_count(file)
+        
+        actual_row_count = sum(row_count_by_first_row_id.values())
+        
+        if self._data_split.data_deletion_files is not None:
+            if not all(f is None or f.cardinality is not None for f in self._data_split.data_deletion_files):
+                return None
+            
+            for i, deletion_file in enumerate(self._data_split.data_deletion_files):
+                if deletion_file is not None and deletion_file.cardinality is not None and i < len(self._data_split.files):
+                    file = self._data_split.files[i]
+                    if file.first_row_id is not None and file.first_row_id in row_count_by_first_row_id:
+                        file_original_count = file.row_count
+                        file_sliced_count = row_count_by_first_row_id[file.first_row_id]
+                        if file_original_count > 0:
+                            deletion_ratio = deletion_file.cardinality / file_original_count
+                            actual_row_count -= int(file_sliced_count * deletion_ratio)
+                        else:
+                            actual_row_count -= deletion_file.cardinality
+                        del row_count_by_first_row_id[file.first_row_id]
+        
+        return actual_row_count
+
     def __eq__(self, other):
         if not isinstance(other, SlicedSplit):
             return False

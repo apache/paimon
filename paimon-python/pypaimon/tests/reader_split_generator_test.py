@@ -210,6 +210,12 @@ class SplitGeneratorTest(unittest.TestCase):
                     self.assertFalse(
                         split.raw_convertible,
                         "Multi-file split should not be raw_convertible when optimized path is not used")
+            
+            merged_count = split.merged_row_count()
+            if merged_count is not None:
+                self.assertGreaterEqual(merged_count, 0, "merged_row_count should be non-negative")
+                self.assertLessEqual(merged_count, split.row_count,
+                                   "merged_row_count should be <= row_count")
 
     def test_shard_with_empty_partition(self):
         pa_schema = pa.schema([
@@ -243,6 +249,80 @@ class SplitGeneratorTest(unittest.TestCase):
         
         for split in splits_shard_0:
             self.assertGreater(len(split.files), 0, "Each split should have at least one file")
+            
+            merged_count = split.merged_row_count()
+            if merged_count is not None:
+                self.assertGreaterEqual(merged_count, 0, "merged_row_count should be non-negative")
+                self.assertLessEqual(merged_count, split.row_count,
+                                   "merged_row_count should be <= row_count")
+            
+            from pypaimon.read.sliced_split import SlicedSplit
+            if isinstance(split, SlicedSplit):
+                sliced_merged = split.merged_row_count()
+                if split.shard_file_idx_map():
+                    self.assertEqual(sliced_merged, split.row_count,
+                                   "SlicedSplit with shard_file_idx_map should return row_count as merged_row_count")
+                else:
+                    underlying_merged = split.data_split().merged_row_count()
+                    self.assertEqual(sliced_merged, underlying_merged,
+                                   "SlicedSplit without shard_file_idx_map should delegate to underlying split")
+
+    def test_sliced_split_merged_row_count(self):
+        """Test merged_row_count() for SlicedSplit with explicit slicing."""
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('value', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['id'],
+            options={'bucket': '1'}  # Single bucket to ensure splits can be sliced
+        )
+        self.catalog.create_table('default.test_sliced_split', schema, False)
+        table = self.catalog.get_table('default.test_sliced_split')
+        
+        # Write enough data to create multiple files/splits
+        # Write in multiple batches to potentially create multiple files
+        for i in range(3):
+            self._write_data(table, [{'id': list(range(i * 10, (i + 1) * 10)), 
+                                     'value': [f'v{j}' for j in range(i * 10, (i + 1) * 10)]}])
+        
+        read_builder = table.new_read_builder()
+        splits_all = read_builder.new_scan().plan().splits()
+        self.assertGreater(len(splits_all), 0, "Should have splits")
+        
+        # Use with_shard to potentially create SlicedSplit
+        # Using multiple shards increases chance of creating SlicedSplit
+        from pypaimon.read.sliced_split import SlicedSplit
+        has_sliced_split = False
+        
+        for shard_idx in range(3):
+            splits_shard = read_builder.new_scan().with_shard(shard_idx, 3).plan().splits()
+            for split in splits_shard:
+                # Test merged_row_count for all splits
+                merged_count = split.merged_row_count()
+                if merged_count is not None:
+                    self.assertGreaterEqual(merged_count, 0, "merged_row_count should be non-negative")
+                    self.assertLessEqual(merged_count, split.row_count,
+                                       "merged_row_count should be <= row_count")
+                
+                # Explicitly test SlicedSplit if present
+                if isinstance(split, SlicedSplit):
+                    has_sliced_split = True
+                    sliced_merged = split.merged_row_count()
+                    shard_map = split.shard_file_idx_map()
+                    if shard_map:
+                        # When shard_file_idx_map is present, merged_row_count should equal row_count
+                        self.assertEqual(sliced_merged, split.row_count,
+                                       "SlicedSplit with shard_file_idx_map should return row_count as merged_row_count")
+                    else:
+                        # When shard_file_idx_map is empty, should delegate to underlying split
+                        underlying_merged = split.data_split().merged_row_count()
+                        self.assertEqual(sliced_merged, underlying_merged,
+                                       "SlicedSplit without shard_file_idx_map should delegate to underlying split")
+        
+        # Note: SlicedSplit may or may not be created depending on data distribution
+        # This test ensures that if SlicedSplit is created, merged_row_count() works correctly
 
 
 if __name__ == '__main__':
