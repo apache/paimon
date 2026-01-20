@@ -324,12 +324,14 @@ public class RESTCatalogServer {
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
-                    } else if (resourcePaths.renameTable().equals(request.getPath())) {
+                    } else if ("POST".equals(request.getMethod())
+                            && resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
                         return renameViewHandle(restAuthParameter.data());
-                    } else if (isTableByIdRequest(request.getPath())) {
-                        return tableByIdHandle(restAuthParameter.method(), request.getPath());
+                    } else if ("GET".equals(request.getMethod())
+                            && isTableByIdRequest(request.getPath())) {
+                        return tableByIdHandle(request.getPath());
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.tables())) {
                         return tablesHandle(parameters);
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
@@ -1567,24 +1569,12 @@ public class RESTCatalogServer {
     }
 
     private boolean isTableByIdRequest(String requestPath) {
-        String path = requestPath.split("\\?")[0];
-        String tablesPath = resourcePaths.tables();
-        if (!path.startsWith(tablesPath + "/")) {
-            return false;
-        }
-        if (path.equals(resourcePaths.renameTable())) {
-            return false;
-        }
-        String remaining = path.substring((tablesPath + "/").length());
-        return !remaining.isEmpty() && !remaining.contains("/");
+        String tableByIdPath = StringUtils.substringBeforeLast(resourcePaths.table("mock_id"), "/");
+        return requestPath.startsWith(tableByIdPath);
     }
 
-    private MockResponse tableByIdHandle(String method, String requestPath) throws Exception {
-        if (!"GET".equals(method)) {
-            return new MockResponse().setResponseCode(404);
-        }
-        String path = requestPath.split("\\?")[0];
-        String tableId = path.substring((resourcePaths.tables() + "/").length());
+    private MockResponse tableByIdHandle(String requestPath) throws Exception {
+        String tableId = StringUtils.substringAfterLast(requestPath, "/");
         for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
             TableMetadata tableMetadata = entry.getValue();
             if (tableId.equals(tableMetadata.uuid())) {

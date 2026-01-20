@@ -487,8 +487,7 @@ public class RESTApi {
      *     this table
      */
     public GetTableResponse getTable(String tableId) {
-        return client.get(
-                resourcePaths.tableById(tableId), GetTableResponse.class, restAuthFunction);
+        return client.get(resourcePaths.table(tableId), GetTableResponse.class, restAuthFunction);
     }
 
     /**
