@@ -89,7 +89,7 @@ public class ParquetFileFormat extends FileFormat {
     @Override
     public Optional<SimpleStatsExtractor> createStatsExtractor(
             RowType type, SimpleColStatsCollector.Factory[] statsCollectors) {
-        return Optional.of(new ParquetSimpleStatsExtractor(type, statsCollectors));
+        return Optional.of(new ParquetSimpleStatsExtractor(options, type, statsCollectors));
     }
 
     private Options getParquetConfiguration(FormatContext context) {

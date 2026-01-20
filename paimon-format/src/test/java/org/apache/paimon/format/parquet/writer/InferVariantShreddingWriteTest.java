@@ -541,7 +541,8 @@ public class InferVariantShreddingWriteTest {
 
     protected void verifyShreddingSchema(RowType... expectShreddedTypes) throws IOException {
         try (ParquetFileReader reader =
-                ParquetUtil.getParquetReader(fileIO, file, fileIO.getFileSize(file))) {
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
             MessageType schema = reader.getFooter().getFileMetaData().getSchema();
             for (int i = 0; i < expectShreddedTypes.length; i++) {
                 assertThat(VariantUtils.variantFileType(schema.getType(i)))
