@@ -47,8 +47,15 @@ public class ArrowFormatCWriter implements AutoCloseable {
             RowType rowType,
             int writeBatchSize,
             boolean caseSensitive,
-            @Nullable Long memoryUsedMaxInVSR) {
-        this(new ArrowFormatWriter(rowType, writeBatchSize, caseSensitive, memoryUsedMaxInVSR));
+            @Nullable Long memoryUsedMaxInVSR,
+            @Nullable RowType shreddingSchemas) {
+        this(
+                new ArrowFormatWriter(
+                        rowType,
+                        writeBatchSize,
+                        caseSensitive,
+                        memoryUsedMaxInVSR,
+                        shreddingSchemas));
     }
 
     public ArrowFormatCWriter(
