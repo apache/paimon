@@ -26,5 +26,5 @@ public interface BlobConsumer {
      *
      * @return Whether to flush to output stream.
      */
-    boolean accept(BlobDescriptor blobDescriptor);
+    boolean accept(String blobFieldName, BlobDescriptor blobDescriptor);
 }
