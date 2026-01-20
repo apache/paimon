@@ -23,7 +23,6 @@ from unittest.mock import Mock
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.api.token_loader import DLFToken, DLFTokenLoaderFactory
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.options import Options
@@ -177,53 +176,11 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(rest_api.get_database('default'), test_databases.get('default'))
             table = rest_api.get_table(Identifier.from_string('default.user'))
             self.assertEqual(table.id, str(test_tables['default.user'].uuid))
-            table_by_id = rest_api.get_table(table.id)
-            self.assertEqual(table_by_id.name, table.name)
 
         finally:
             # Shutdown server
             server.shutdown()
             print("Server stopped")
-
-    def test_get_table_by_id(self):
-        config = ConfigResponse(defaults={"prefix": "mock-test"})
-        token = str(uuid.uuid4())
-        server = RESTCatalogServer(
-            data_path="/tmp/test_warehouse",
-            auth_provider=BearTokenAuthProvider(token),
-            config=config,
-            warehouse="test_warehouse"
-        )
-        try:
-            server.start()
-            data_fields = [
-                DataField(0, "col1", AtomicType('INT'), 'desc col1'),
-            ]
-            schema = TableSchema(TableSchema.CURRENT_VERSION, len(data_fields), data_fields, len(data_fields),
-                                 [], [], {}, "")
-            identifier = Identifier.from_string("test_table_db.get_table_by_id")
-            table_metadata = TableMetadata(uuid=str(uuid.uuid4()), is_external=True, schema=schema)
-            server.table_metadata_store.update({identifier.get_full_name(): table_metadata})
-            server.database_store.update({
-                "test_table_db": server.mock_database("test_table_db", {"env": "test"})
-            })
-            options = {
-                'uri': f"http://localhost:{server.port}",
-                'warehouse': 'test_warehouse',
-                'dlf.region': 'cn-hangzhou',
-                "token.provider": "bear",
-                'token': token
-            }
-            rest_api = RESTApi(options)
-
-            table = rest_api.get_table(identifier)
-            table_by_id = rest_api.get_table(table.id)
-            self.assertEqual(table_by_id.id, table.id)
-            self.assertEqual(table_by_id.name, identifier.get_object_name())
-            with self.assertRaises(NoSuchResourceException):
-                rest_api.get_table("missing_table_id")
-        finally:
-            server.shutdown()
 
     def test_ecs_loader_token(self):
         token = DLFToken(
@@ -339,11 +296,6 @@ class ApiTest(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             rest_api.get_table(None)
         self.assertIn("Identifier cannot be None", str(context.exception))
-
-        # Test get_table with empty table_id
-        with self.assertRaises(ValueError) as context:
-            rest_api.get_table("")
-        self.assertIn("Table id cannot be empty", str(context.exception))
 
         # Test drop_table with None identifier
         with self.assertRaises(ValueError) as context:
