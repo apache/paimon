@@ -1570,7 +1570,8 @@ public class RESTCatalogServer {
 
     private boolean isTableByIdRequest(String requestPath) {
         String tableByIdPath = StringUtils.substringBeforeLast(resourcePaths.table("mock_id"), "/");
-        return requestPath.startsWith(tableByIdPath);
+        String tableByIdPathPrefix = tableByIdPath + "/";
+        return requestPath.startsWith(tableByIdPathPrefix);
     }
 
     private MockResponse tableByIdHandle(String requestPath) throws Exception {
