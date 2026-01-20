@@ -280,6 +280,29 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public Table getTable(String tableId) throws TableNotExistException {
+        GetTableResponse response;
+        try {
+            response = api.getTable(tableId);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(tableId, e);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(tableId, e);
+        }
+
+        try {
+            String database = CatalogUtils.database(response.getPath());
+            return toTable(database, response);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Table path '%s' is not a valid catalog table path.",
+                            response.getPath()),
+                    e);
+        }
+    }
+
+    @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
         return CatalogUtils.loadTable(
                 this,

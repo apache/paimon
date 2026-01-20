@@ -149,6 +149,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public Table getTable(String tableId) throws TableNotExistException {
+        return wrapped.getTable(tableId);
+    }
+
+    @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {
         wrapped.renameTable(fromTable, toTable, ignoreIfNotExists);

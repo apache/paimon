@@ -63,9 +63,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.exceptions.BadRequestException;
 import org.apache.paimon.rest.exceptions.ForbiddenException;
-import org.apache.paimon.rest.exceptions.NoSuchResourceException;
 import org.apache.paimon.rest.responses.ConfigResponse;
-import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -358,15 +356,13 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     void testGetTableById() throws Exception {
         Identifier identifier = Identifier.create("test_table_db", "get_table_by_id");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
-
-        GetTableResponse tableResponse = restCatalog.api().getTable(identifier);
-        GetTableResponse tableByIdResponse = restCatalog.api().getTableById(tableResponse.getId());
-
-        assertThat(tableByIdResponse.getId()).isEqualTo(tableResponse.getId());
-        assertThat(tableByIdResponse.getName()).isEqualTo(identifier.getObjectName());
+        Table table = restCatalog.getTable(identifier);
+        Table tableById = restCatalog.getTable(table.uuid());
+        assertThat(tableById.uuid()).isEqualTo(table.uuid());
+        assertThat(tableById.name()).isEqualTo(identifier.getObjectName());
         assertThrows(
-                NoSuchResourceException.class,
-                () -> restCatalog.api().getTableById("missing_table_id"));
+                Catalog.TableNotExistException.class,
+                () -> restCatalog.getTable("missing_table_id"));
     }
 
     @Test

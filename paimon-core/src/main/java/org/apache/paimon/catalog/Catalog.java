@@ -156,6 +156,15 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Return a {@link Table} identified by the given tableId.
+     *
+     * @param tableId Id of the table
+     * @return The requested table
+     * @throws TableNotExistException if the target does not exist
+     */
+    Table getTable(String tableId) throws TableNotExistException;
+
+    /**
      * Get names of all tables under this database. An empty list is returned if none exists.
      *
      * <p>NOTE: System tables will not be listed.
@@ -1199,7 +1208,11 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Table %s does not exist.";
 
+        private static final String TBL_ID_MSG = "Table id %s does not exist.";
+
         private final Identifier identifier;
+
+        private final String id;
 
         public TableNotExistException(Identifier identifier) {
             this(identifier, null);
@@ -1208,6 +1221,13 @@ public interface Catalog extends AutoCloseable {
         public TableNotExistException(Identifier identifier, Throwable cause) {
             super(String.format(MSG, identifier.getFullName()), cause);
             this.identifier = identifier;
+            this.id = null;
+        }
+
+        public TableNotExistException(String tableId, Throwable cause) {
+            super(String.format(TBL_ID_MSG, tableId), cause);
+            this.id = tableId;
+            this.identifier = null;
         }
 
         public Identifier identifier() {
@@ -1219,8 +1239,10 @@ public interface Catalog extends AutoCloseable {
     class TableNoPermissionException extends RuntimeException {
 
         private static final String MSG = "Table %s has no permission. Cause by %s.";
+        private static final String TBL_ID_MSG = "Table id %s has no permission. Cause by %s.";
 
         private final Identifier identifier;
+        private final String id;
 
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
             super(
@@ -1230,6 +1252,18 @@ public interface Catalog extends AutoCloseable {
                             cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
                     cause);
             this.identifier = identifier;
+            this.id = null;
+        }
+
+        public TableNoPermissionException(String tableId, Throwable cause) {
+            super(
+                    String.format(
+                            TBL_ID_MSG,
+                            tableId,
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.id = tableId;
+            this.identifier = null;
         }
 
         @VisibleForTesting
