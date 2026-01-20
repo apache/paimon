@@ -195,7 +195,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
     def test_read_pk_table(self, file_format):
         # Skip ORC format for Python < 3.8 due to pyarrow limitation with TIMESTAMP_INSTANT
         if sys.version_info[:2] < (3, 8) and file_format == 'orc':
-            self.skipTest(f"Skipping ORC format for Python < 3.8 (pyarrow does not support TIMESTAMP_INSTANT)")
+            self.skipTest("Skipping ORC format for Python < 3.8 (pyarrow does not support TIMESTAMP_INSTANT)")
         
         table_name = f'default.mixed_test_pk_tablej_{file_format}'
         table = self.catalog.get_table(table_name)
