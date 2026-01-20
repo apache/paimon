@@ -437,9 +437,7 @@ class PyarrowFieldParser:
                 is_ltz = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
                 tz = 'UTC' if is_ltz else None
                 
-                if type_name == 'TIMESTAMP':
-                    return pyarrow.timestamp('us', tz=tz)  # default to 6
-                elif type_name == 'TIMESTAMP_LTZ':
+                if type_name == 'TIMESTAMP' or type_name == 'TIMESTAMP_LTZ':
                     return pyarrow.timestamp('us', tz=tz)  # default to 6
 
                 match = re.fullmatch(r'TIMESTAMP(?:_LTZ)?\((\d+)\)(?: WITH LOCAL TIME ZONE)?', type_name)
