@@ -512,15 +512,15 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
 
-                // deduplicate
-                beforeEntries.removeIf(dataEntries::remove);
-
                 Integer totalBuckets = null;
                 if (!dataEntries.isEmpty()) {
                     totalBuckets = dataEntries.get(0).totalBuckets();
                 } else if (!beforeEntries.isEmpty()) {
                     totalBuckets = beforeEntries.get(0).totalBuckets();
                 }
+
+                // deduplicate
+                beforeEntries.removeIf(dataEntries::remove);
 
                 List<DataFileMeta> before =
                         beforeEntries.stream()
@@ -545,6 +545,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                     after,
                                     afterDeletionFilesMap.getOrDefault(
                                             Pair.of(part, bucket), Collections.emptyMap()));
+                }
+
+                if (totalBuckets == null) {
+                    System.out.println("");
                 }
 
                 IncrementalSplit split =
