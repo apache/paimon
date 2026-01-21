@@ -189,10 +189,6 @@ class RayDataTest(unittest.TestCase):
             overwrite=False,
             concurrency=1
         )
-        
-        commit_messages = writer.prepare_commit()
-        commit = write_builder.new_commit()
-        commit.commit(commit_messages)
         writer.close()
         
         read_builder = table.new_read_builder()
