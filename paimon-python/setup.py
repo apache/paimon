@@ -50,7 +50,18 @@ setup(
     packages=PACKAGES,
     include_package_data=True,
     install_requires=install_requires,
-    extras_require={},
+    extras_require={
+        'ray': [
+            'ray>=2.10,<3; python_version>="3.7"',
+        ],
+        'torch': [
+            'torch',
+        ],
+        'all': [
+            'ray>=2.10,<3; python_version>="3.7"',
+            'torch',
+        ],
+    },
     description="Apache Paimon Python API",
     long_description=long_description,
     long_description_content_type="text/markdown",
