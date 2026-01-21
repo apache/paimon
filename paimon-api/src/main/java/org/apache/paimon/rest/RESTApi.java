@@ -486,7 +486,7 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public GetTableResponse getTable(String tableId) {
+    public GetTableResponse getTableById(String tableId) {
         return client.get(resourcePaths.table(tableId), GetTableResponse.class, restAuthFunction);
     }
 

@@ -358,7 +358,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Identifier identifier = Identifier.create("test_table_db", "get_table_by_id");
         createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
         Table table = restCatalog.getTable(identifier);
-        Table tableById = restCatalog.getTable(table.uuid());
+        Table tableById = restCatalog.getTableById(table.uuid());
         assertThat(tableById.uuid()).isEqualTo(table.uuid());
         assertThat(tableById.name()).isEqualTo(identifier.getObjectName());
         FileStoreTable fileStoreTable = (FileStoreTable) tableById;
@@ -368,7 +368,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 .isEqualTo("test_table_db");
         assertThrows(
                 Catalog.TableNotExistException.class,
-                () -> restCatalog.getTable("missing_table_id"));
+                () -> restCatalog.getTableById("missing_table_id"));
     }
 
     @Test

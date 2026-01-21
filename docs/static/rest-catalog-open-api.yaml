@@ -2578,7 +2578,7 @@ components:
       properties:
         id:
           type: string
-        databaseName:
+        database:
           type: string
         name:
           type: string

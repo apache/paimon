@@ -280,10 +280,10 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(String tableId) throws TableNotExistException {
+    public Table getTableById(String tableId) throws TableNotExistException {
         try {
-            GetTableResponse response = api.getTable(tableId);
-            String database = response.getDatabaseName();
+            GetTableResponse response = api.getTableById(tableId);
+            String database = response.getDatabase();
             return toTable(database, response);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(tableId, e);

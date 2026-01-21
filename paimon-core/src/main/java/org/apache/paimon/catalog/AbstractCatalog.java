@@ -482,7 +482,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(String tableId) throws TableNotExistException {
+    public Table getTableById(String tableId) throws TableNotExistException {
         throw new UnsupportedOperationException();
     }
 

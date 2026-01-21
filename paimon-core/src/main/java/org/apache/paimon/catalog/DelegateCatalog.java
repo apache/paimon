@@ -149,8 +149,8 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(String tableId) throws TableNotExistException {
-        return wrapped.getTable(tableId);
+    public Table getTableById(String tableId) throws TableNotExistException {
+        return wrapped.getTableById(tableId);
     }
 
     @Override
