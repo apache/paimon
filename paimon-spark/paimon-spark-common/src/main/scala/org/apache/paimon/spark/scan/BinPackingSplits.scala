@@ -78,7 +78,7 @@ case class BinPackingSplits(coreOptions: CoreOptions, readRowSizeRatio: Double =
   def pack(splits: Array[Split]): Seq[PaimonInputPartition] = {
     val (toReshuffle, reserved) = splits.partition {
       case _: FallbackSplit => false
-      case split: DataSplit => split.beforeFiles().isEmpty && split.rawConvertible()
+      case split: DataSplit => split.rawConvertible()
       // Currently, format table reader only supports reading one file.
       case _: FormatDataSplit => false
       case _ => false

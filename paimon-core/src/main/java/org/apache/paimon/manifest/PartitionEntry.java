@@ -23,16 +23,13 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
-import static org.apache.paimon.manifest.FileKind.ADD;
 import static org.apache.paimon.manifest.FileKind.DELETE;
 
 /** Entry representing a partition. */
@@ -146,28 +143,6 @@ public class PartitionEntry {
             partitions.compute(
                     entry.partition(),
                     (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
-        }
-        return partitions.values();
-    }
-
-    public static Collection<PartitionEntry> mergeSplits(Collection<DataSplit> splits) {
-        Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
-        for (DataSplit split : splits) {
-            BinaryRow partition = split.partition();
-            for (DataFileMeta file : split.dataFiles()) {
-                PartitionEntry partitionEntry =
-                        fromDataFile(
-                                partition,
-                                ADD,
-                                file,
-                                Optional.ofNullable(split.totalBuckets()).orElse(0));
-                partitions.compute(
-                        partition,
-                        (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
-            }
-
-            // Ignore before files, because we don't know how to merge them
-            // Ignore deletion files, because it is costly to read from it
         }
         return partitions.values();
     }

@@ -57,6 +57,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
@@ -1641,8 +1642,8 @@ public abstract class SimpleTableTestBase {
                                 .dataSplits());
 
         for (Split split : splits) {
-            DataSplit dataSplit = (DataSplit) split;
-            Assertions.assertThat(dataSplit.deletionFiles().isPresent()).isFalse();
+            IncrementalSplit incrementalSplit = (IncrementalSplit) split;
+            Assertions.assertThat(incrementalSplit.afterDeletionFiles()).isNull();
         }
     }
 

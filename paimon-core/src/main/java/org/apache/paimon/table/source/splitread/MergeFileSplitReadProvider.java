@@ -54,14 +54,7 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
 
     @Override
     public boolean match(Split split, Context context) {
-        if (split instanceof DataSplit) {
-            DataSplit dataSplit = (DataSplit) split;
-            return dataSplit.beforeFiles().isEmpty();
-        } else if (split instanceof ChainSplit) {
-            return true;
-        } else {
-            return false;
-        }
+        return split instanceof DataSplit || split instanceof ChainSplit;
     }
 
     @Override

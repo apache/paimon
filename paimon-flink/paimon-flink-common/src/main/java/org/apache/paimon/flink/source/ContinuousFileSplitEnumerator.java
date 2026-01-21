@@ -27,6 +27,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -305,20 +306,39 @@ public class ContinuousFileSplitEnumerator
     }
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
-        DataSplit dataSplit = ((DataSplit) split.split());
+        if (split.split() instanceof DataSplit) {
+            return assignSuggestedTask((DataSplit) split.split());
+        } else {
+            return assignSuggestedTask((IncrementalSplit) split.split());
+        }
+    }
+
+    protected int assignSuggestedTask(DataSplit split) {
         int parallelism = context.currentParallelism();
 
         int bucketId;
-        if (dataSplit.bucket() == BucketMode.POSTPONE_BUCKET) {
+        if (split.bucket() == BucketMode.POSTPONE_BUCKET) {
             bucketId =
-                    PostponeBucketFileStoreWrite.getWriteId(dataSplit.dataFiles().get(0).fileName())
+                    PostponeBucketFileStoreWrite.getWriteId(split.dataFiles().get(0).fileName())
                             % parallelism;
         } else {
-            bucketId = dataSplit.bucket();
+            bucketId = split.bucket();
         }
 
         if (shuffleBucketWithPartition) {
-            return ChannelComputer.select(dataSplit.partition(), bucketId, parallelism);
+            return ChannelComputer.select(split.partition(), bucketId, parallelism);
+        } else {
+            return ChannelComputer.select(bucketId, parallelism);
+        }
+    }
+
+    protected int assignSuggestedTask(IncrementalSplit split) {
+        int parallelism = context.currentParallelism();
+
+        // TODO how to deal with postpone bucket?
+        int bucketId = split.bucket();
+        if (shuffleBucketWithPartition) {
+            return ChannelComputer.select(split.partition(), bucketId, parallelism);
         } else {
             return ChannelComputer.select(bucketId, parallelism);
         }

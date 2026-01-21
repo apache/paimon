@@ -29,7 +29,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowKind;
@@ -86,20 +86,20 @@ public class IncrementalDiffSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
-        DataSplit split = (DataSplit) s;
+        IncrementalSplit split = (IncrementalSplit) s;
         RecordReader<KeyValue> reader =
                 readDiff(
                         mergeRead.createMergeReader(
                                 split.partition(),
                                 split.bucket(),
                                 split.beforeFiles(),
-                                split.beforeDeletionFiles().orElse(null),
+                                split.beforeDeletionFiles(),
                                 forceKeepDelete),
                         mergeRead.createMergeReader(
                                 split.partition(),
                                 split.bucket(),
-                                split.dataFiles(),
-                                split.deletionFiles().orElse(null),
+                                split.afterFiles(),
+                                split.afterDeletionFiles(),
                                 forceKeepDelete),
                         mergeRead.keyComparator(),
                         mergeRead.createUdsComparator(),
