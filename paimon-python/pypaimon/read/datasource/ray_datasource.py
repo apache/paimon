@@ -117,6 +117,8 @@ class RayDatasource(Datasource):
                 f"Reducing the parallelism to {parallelism}, as that is the number of splits"
             )
 
+        # Store necessary information for creating readers in Ray workers
+        # Extract these to avoid serializing the entire self object in closures
         table = self.table_read.table
         predicate = self.table_read.predicate
         read_type = self.table_read.read_type
