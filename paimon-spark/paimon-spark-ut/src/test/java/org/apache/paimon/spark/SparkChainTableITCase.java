@@ -33,6 +33,8 @@ import java.io.IOException;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base tests for spark read. */
 public class SparkChainTableITCase {
@@ -53,70 +55,10 @@ public class SparkChainTableITCase {
 
     @Test
     public void testChainTable(@TempDir java.nio.file.Path tempDir) throws IOException {
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession.Builder builder =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
-                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.warehouse",
-                                warehousePath.toString())
-                        .config(
-                                "spark.sql.extensions",
-                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                        .master("local[2]");
+        SparkSession.Builder builder = initSparkClient(tempDir);
+        initDailyChainTable(builder);
+
         SparkSession spark = builder.getOrCreate();
-        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
-        spark.sql("USE spark_catalog.my_db1");
-
-        /** Create table */
-        spark.sql(
-                "CREATE TABLE IF NOT EXISTS \n"
-                        + "  `my_db1`.`chain_test` (\n"
-                        + "    `t1` BIGINT COMMENT 't1',\n"
-                        + "    `t2` BIGINT COMMENT 't2',\n"
-                        + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
-                        + "    'bucket-key' = 't1',\n"
-                        + "    'primary-key' = 'dt,t1',\n"
-                        + "    'partition.timestamp-pattern' = '$dt',\n"
-                        + "    'partition.timestamp-formatter' = 'yyyyMMdd',\n"
-                        + "    'chain-table.enabled' = 'true',\n"
-                        + "    'bucket' = '2',\n"
-                        + "    'merge-engine' = 'deduplicate', \n"
-                        + "    'sequence.field' = 't2'\n"
-                        + "  )");
-
-        /** Create branch */
-        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'snapshot');");
-        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'delta')");
-
-        /** Set branch */
-        spark.sql(
-                "ALTER TABLE my_db1.chain_test SET tblproperties ("
-                        + "'scan.fallback-snapshot-branch' = 'snapshot', "
-                        + "'scan.fallback-delta-branch' = 'delta')");
-        spark.sql(
-                "ALTER TABLE `my_db1`.`chain_test$branch_snapshot` SET tblproperties ("
-                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "'scan.fallback-delta-branch' = 'delta')");
-        spark.sql(
-                "ALTER TABLE `my_db1`.`chain_test$branch_delta` SET tblproperties ("
-                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "'scan.fallback-delta-branch' = 'delta')");
-        spark.close();
-        spark = builder.getOrCreate();
-
         /** Write main branch */
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250810') values (1, 1, '1'),(2, 1, '1');");
@@ -269,80 +211,16 @@ public class SparkChainTableITCase {
                 spark.sql(
                         "SELECT t1,t2,t3 FROM `my_db1`.`chain_test$branch_delta` where dt = '20250814'");
         assertThat(df.count()).isEqualTo(1);
-
         spark.close();
-        spark = builder.getOrCreate();
-        /** Drop table */
-        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
 
-        spark.close();
+        dropTable(builder);
     }
 
     @Test
     public void testHourlyChainTable(@TempDir java.nio.file.Path tempDir) throws IOException {
-        Path warehousePath = new Path("file:" + tempDir.toString());
-        SparkSession.Builder builder =
-                SparkSession.builder()
-                        .config("spark.sql.warehouse.dir", warehousePath.toString())
-                        // with hive metastore
-                        .config("spark.sql.catalogImplementation", "hive")
-                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
-                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
-                                "thrift://localhost:" + PORT)
-                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
-                        .config(
-                                "spark.sql.catalog.spark_catalog.warehouse",
-                                warehousePath.toString())
-                        .config(
-                                "spark.sql.extensions",
-                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
-                        .master("local[2]");
+        SparkSession.Builder builder = initSparkClient(tempDir);
+        initHourlyChainTable(builder);
         SparkSession spark = builder.getOrCreate();
-        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
-        spark.sql("USE spark_catalog.my_db1");
-
-        /** Create table */
-        spark.sql(
-                "CREATE TABLE IF NOT EXISTS \n"
-                        + "  `my_db1`.`chain_test` (\n"
-                        + "    `t1` BIGINT COMMENT 't1',\n"
-                        + "    `t2` BIGINT COMMENT 't2',\n"
-                        + "    `t3` STRING COMMENT 't3'\n"
-                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
-                        + "WITH\n"
-                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
-                        + "    'bucket-key' = 't1',\n"
-                        + "    'primary-key' = 'dt,hour,t1',\n"
-                        + "    'partition.timestamp-pattern' = '$dt $hour:00:00',\n"
-                        + "    'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',\n"
-                        + "    'chain-table.enabled' = 'true',\n"
-                        + "    'bucket' = '2',\n"
-                        + "    'merge-engine' = 'deduplicate', \n"
-                        + "    'sequence.field' = 't2'\n"
-                        + "  )");
-
-        /** Create branch */
-        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'snapshot');");
-        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'delta')");
-
-        /** Set branch */
-        spark.sql(
-                "ALTER TABLE my_db1.chain_test SET tblproperties ("
-                        + "'scan.fallback-snapshot-branch' = 'snapshot', "
-                        + "'scan.fallback-delta-branch' = 'delta')");
-        spark.sql(
-                "ALTER TABLE `my_db1`.`chain_test$branch_snapshot` SET tblproperties ("
-                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "'scan.fallback-delta-branch' = 'delta')");
-        spark.sql(
-                "ALTER TABLE `my_db1`.`chain_test$branch_delta` SET tblproperties ("
-                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
-                        + "'scan.fallback-delta-branch' = 'delta')");
-        spark.close();
-        spark = builder.getOrCreate();
 
         /** Write main branch */
         spark.sql(
@@ -502,8 +380,173 @@ public class SparkChainTableITCase {
         spark.close();
         spark = builder.getOrCreate();
         /** Drop table */
-        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
+        spark.close();
+    }
 
+    @Test
+    public void testDropSnapshotPartition(@TempDir java.nio.file.Path tempDir) throws IOException {
+        SparkSession.Builder builder = initSparkClient(tempDir);
+        initDailyChainTable(builder);
+
+        SparkSession spark = builder.getOrCreate();
+        /** Write delta branch */
+        spark.sql("set spark.paimon.branch=delta;");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20260101') values (1, 1, '1'),(2, 1, '1');");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20260102') values (1, 2, '1-1' ),(3, 1, '1' );");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20260103') values (2, 2, '1-1' ),(4, 1, '1' );");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20260104') values (3, 2, '1-1' ),(4, 2, '1-1' );");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20260105') values (5, 1, '1' ),(6, 1, '1' );");
+
+        /** Write snapshot branch */
+        spark.sql("set spark.paimon.branch=snapshot;");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test`  partition (dt = '20260101')  values (1, 2, '1-1'),(2, 1, '1'),(3, 1, '1');");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20260103') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1');");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20260105') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1'), (5, 1, '1' ), (6, 1, '1');");
+        spark.close();
+
+        final SparkSession session = builder.getOrCreate();
+        assertThatNoException()
+                .isThrownBy(
+                        () -> {
+                            session.sql(
+                                    "alter table `my_db1`.`chain_test$branch_snapshot` drop partition (dt = '20260105');");
+                        });
+        assertThatThrownBy(
+                () -> {
+                    session.sql(
+                            "alter table `my_db1`.`chain_test$branch_snapshot` drop partition (dt = '20260101');");
+                });
+        session.close();
+
+        dropTable(builder);
+    }
+
+    private SparkSession.Builder initSparkClient(@TempDir java.nio.file.Path tempDir) {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        // with hive metastore
+                        .config("spark.sql.catalogImplementation", "hive")
+                        .config("hive.metastore.uris", "thrift://localhost:" + PORT)
+                        .config("spark.sql.catalog.spark_catalog", SparkCatalog.class.getName())
+                        .config("spark.sql.catalog.spark_catalog.metastore", "hive")
+                        .config(
+                                "spark.sql.catalog.spark_catalog.hive.metastore.uris",
+                                "thrift://localhost:" + PORT)
+                        .config("spark.sql.catalog.spark_catalog.format-table.enabled", "true")
+                        .config(
+                                "spark.sql.catalog.spark_catalog.warehouse",
+                                warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                "org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions")
+                        .master("local[2]");
+        return builder;
+    }
+
+    private void initDailyChainTable(SparkSession.Builder builder) throws IOException {
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        /** Create table */
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS \n"
+                        + "  `my_db1`.`chain_test` (\n"
+                        + "    `t1` BIGINT COMMENT 't1',\n"
+                        + "    `t2` BIGINT COMMENT 't2',\n"
+                        + "    `t3` STRING COMMENT 't3'\n"
+                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
+                        + "WITH\n"
+                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "    'bucket-key' = 't1',\n"
+                        + "    'primary-key' = 'dt,t1',\n"
+                        + "    'partition.timestamp-pattern' = '$dt',\n"
+                        + "    'partition.timestamp-formatter' = 'yyyyMMdd',\n"
+                        + "    'chain-table.enabled' = 'true',\n"
+                        + "    'bucket' = '2',\n"
+                        + "    'merge-engine' = 'deduplicate', \n"
+                        + "    'sequence.field' = 't2'\n"
+                        + "  )");
+
+        /** Create branch */
+        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'snapshot');");
+        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'delta')");
+
+        /** Set branch */
+        spark.sql(
+                "ALTER TABLE my_db1.chain_test SET tblproperties ("
+                        + "'scan.fallback-snapshot-branch' = 'snapshot', "
+                        + "'scan.fallback-delta-branch' = 'delta')");
+        spark.sql(
+                "ALTER TABLE `my_db1`.`chain_test$branch_snapshot` SET tblproperties ("
+                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
+                        + "'scan.fallback-delta-branch' = 'delta')");
+        spark.sql(
+                "ALTER TABLE `my_db1`.`chain_test$branch_delta` SET tblproperties ("
+                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
+                        + "'scan.fallback-delta-branch' = 'delta')");
+
+        spark.close();
+    }
+
+    private void initHourlyChainTable(SparkSession.Builder builder) throws IOException {
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        /** Create table */
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS \n"
+                        + "  `my_db1`.`chain_test` (\n"
+                        + "    `t1` BIGINT COMMENT 't1',\n"
+                        + "    `t2` BIGINT COMMENT 't2',\n"
+                        + "    `t3` STRING COMMENT 't3'\n"
+                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt', `hour` STRING COMMENT 'hour') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
+                        + "WITH\n"
+                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "    'bucket-key' = 't1',\n"
+                        + "    'primary-key' = 'dt,hour,t1',\n"
+                        + "    'partition.timestamp-pattern' = '$dt $hour:00:00',\n"
+                        + "    'partition.timestamp-formatter' = 'yyyyMMdd HH:mm:ss',\n"
+                        + "    'chain-table.enabled' = 'true',\n"
+                        + "    'bucket' = '2',\n"
+                        + "    'merge-engine' = 'deduplicate', \n"
+                        + "    'sequence.field' = 't2'\n"
+                        + "  )");
+
+        /** Create branch */
+        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'snapshot');");
+        spark.sql("CALL sys.create_branch('my_db1.chain_test', 'delta')");
+
+        /** Set branch */
+        spark.sql(
+                "ALTER TABLE my_db1.chain_test SET tblproperties ("
+                        + "'scan.fallback-snapshot-branch' = 'snapshot', "
+                        + "'scan.fallback-delta-branch' = 'delta')");
+        spark.sql(
+                "ALTER TABLE `my_db1`.`chain_test$branch_snapshot` SET tblproperties ("
+                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
+                        + "'scan.fallback-delta-branch' = 'delta')");
+        spark.sql(
+                "ALTER TABLE `my_db1`.`chain_test$branch_delta` SET tblproperties ("
+                        + "'scan.fallback-snapshot-branch' = 'snapshot',"
+                        + "'scan.fallback-delta-branch' = 'delta')");
+        spark.close();
+    }
+
+    private void dropTable(SparkSession.Builder builder) throws IOException {
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
         spark.close();
     }
 }

@@ -73,6 +73,7 @@ import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -476,7 +477,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.snapshotExpireExecutionMode(),
                 name(),
                 options.forceCreatingSnapshot(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                createPartitionValidators(this));
     }
 
     @Override
@@ -742,6 +744,14 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected RowKindGenerator rowKindGenerator() {
         return RowKindGenerator.create(schema(), store().options());
+    }
+
+    private List<PartitionValidator> createPartitionValidators(FileStoreTable table) {
+        List<PartitionValidator> validators = new ArrayList<>();
+        if (table.coreOptions().isChainTable()) {
+            validators.add(new ChainPartitionDropValidator(table));
+        }
+        return validators;
     }
 
     @Override

@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.table.PartitionValidator;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.tag.TagTimeExpire;
@@ -92,6 +93,8 @@ public class TableCommitImpl implements InnerTableCommit {
     private boolean batchCommitted = false;
     private boolean expireForEmptyCommit = true;
 
+    private final List<PartitionValidator> partitionValidators;
+
     public TableCommitImpl(
             FileStoreCommit commit,
             @Nullable Runnable expireSnapshots,
@@ -102,7 +105,8 @@ public class TableCommitImpl implements InnerTableCommit {
             ExpireExecutionMode expireExecutionMode,
             String tableName,
             boolean forceCreatingSnapshot,
-            int threadNum) {
+            int threadNum,
+            List<PartitionValidator> partitionValidators) {
         if (partitionExpire != null) {
             commit.withPartitionExpire(partitionExpire);
         }
@@ -126,6 +130,10 @@ public class TableCommitImpl implements InnerTableCommit {
         this.tableName = tableName;
         this.forceCreatingSnapshot = forceCreatingSnapshot;
         this.fileCheckExecutor = FileOperationThreadPool.getExecutorService(threadNum);
+        this.partitionValidators =
+                partitionValidators == null
+                        ? Collections.emptyList()
+                        : Collections.unmodifiableList(new ArrayList<>(partitionValidators));
     }
 
     public boolean forceCreatingSnapshot() {
@@ -184,6 +192,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public void truncatePartitions(List<Map<String, String>> partitionSpecs) {
+        partitionValidators.forEach(validator -> validator.validatePartitionDrop(partitionSpecs));
         commit.dropPartitions(partitionSpecs, COMMIT_IDENTIFIER);
     }
 
@@ -409,6 +418,9 @@ public class TableCommitImpl implements InnerTableCommit {
     public void close() throws Exception {
         commit.close();
         maintainExecutor.shutdownNow();
+        for (PartitionValidator validator : partitionValidators) {
+            validator.close();
+        }
     }
 
     @Override
