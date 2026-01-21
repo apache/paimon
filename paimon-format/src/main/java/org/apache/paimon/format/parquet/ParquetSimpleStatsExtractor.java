@@ -206,6 +206,28 @@ public class ParquetSimpleStatsExtractor implements SimpleStatsExtractor {
                     Timestamp.fromMicros(longStats.getMin()),
                     Timestamp.fromMicros(longStats.getMax()),
                     stats.getNumNulls());
+        } else if (precision <= 9) {
+            LongStatistics longStats = (LongStatistics) stats;
+            // Convert nanoseconds since epoch to milliseconds and nanos-of-millisecond
+            long minNanos = longStats.getMin();
+            long maxNanos = longStats.getMax();
+            long minMillis = minNanos / 1_000_000;
+            long maxMillis = maxNanos / 1_000_000;
+            int minNanosOfMillis = (int) (minNanos % 1_000_000);
+            int maxNanosOfMillis = (int) (maxNanos % 1_000_000);
+            // Handle negative values correctly
+            if (minNanosOfMillis < 0) {
+                minNanosOfMillis += 1_000_000;
+                minMillis -= 1;
+            }
+            if (maxNanosOfMillis < 0) {
+                maxNanosOfMillis += 1_000_000;
+                maxMillis -= 1;
+            }
+            return new SimpleColStats(
+                    Timestamp.fromEpochMillis(minMillis, minNanosOfMillis),
+                    Timestamp.fromEpochMillis(maxMillis, maxNanosOfMillis),
+                    stats.getNumNulls());
         } else {
             return new SimpleColStats(null, null, stats.getNumNulls());
         }
