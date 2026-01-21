@@ -210,4 +210,28 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
       Row("dt=20240601") :: Nil
     )
   }
+
+  test("Paimon Partition Management: timestamp partition column") {
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, dt TIMESTAMP)
+                 |PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, CAST('2024-06-01 10:30:01' AS TIMESTAMP))")
+    spark.sql("INSERT INTO T VALUES (2, CAST('2024-06-02 15:45:30' AS TIMESTAMP))")
+
+    checkAnswer(
+      spark.sql("SHOW PARTITIONS T"),
+      Seq(
+        Row("dt=2024-06-01 10%3A30%3A01"),
+        Row("dt=2024-06-02 15%3A45%3A30")
+      )
+    )
+
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY dt"),
+      spark.sql(
+        "SELECT 1 AS a, CAST('2024-06-01 10:30:01' AS TIMESTAMP) AS dt UNION ALL SELECT 2, CAST('2024-06-02 15:45:30' AS TIMESTAMP) ORDER BY dt")
+    )
+  }
 }
