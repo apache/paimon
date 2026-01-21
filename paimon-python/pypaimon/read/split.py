@@ -120,73 +120,83 @@ class DataSplit(Split):
         self._row_count = row_count
 
     def merged_row_count(self) -> Optional[int]:
-        if not self.raw_convertible:
-            return None
-        
-        # In data evolution scenario, files with the same first_row_id represent the same logical row.
-        # We need to count each first_row_id only once to get the actual row count.
-        if len(self._files) > 1:
-            first_row_ids = [f.first_row_id for f in self._files if f.first_row_id is not None]
-            if len(first_row_ids) != len(set(first_row_ids)):
-                # Multiple files with the same first_row_id indicates data evolution scenario
-                # Calculate actual row count by counting each first_row_id only once
-                # Use the row_count from the first non-blob file for each first_row_id
-                row_count_by_first_row_id = {}
-                for file in self._files:
-                    if file.first_row_id is not None:
-                        if file.first_row_id not in row_count_by_first_row_id:
-                            # Prefer non-blob file's row_count for accuracy
-                            if not file.file_name.endswith('.blob'):
-                                row_count_by_first_row_id[file.first_row_id] = file.row_count
-                # Fill in any missing first_row_ids with the first file's row_count
-                for file in self._files:
-                    if file.first_row_id is not None and file.first_row_id not in row_count_by_first_row_id:
-                        row_count_by_first_row_id[file.first_row_id] = file.row_count
-                
-                # Sum up row counts for each unique first_row_id
-                actual_row_count = sum(row_count_by_first_row_id.values())
-                
-                # Account for deletion files if present
-                # Note: deletion files in data evolution may need special handling
-                if self.data_deletion_files is not None:
-                    if not all(
-                        f is None or f.cardinality is not None
-                        for f in self.data_deletion_files
-                    ):
-                        return None
-                    
-                    # Subtract deletion counts
-                    for i, deletion_file in enumerate(self.data_deletion_files):
-                        if deletion_file is not None and deletion_file.cardinality is not None:
-                            if i < len(self._files):
-                                file = self._files[i]
-                                if file.first_row_id is not None:
-                                    # Only subtract once per first_row_id
-                                    if file.first_row_id in row_count_by_first_row_id:
-                                        actual_row_count -= deletion_file.cardinality
-                                        # Remove from dict to avoid double subtraction
-                                        del row_count_by_first_row_id[file.first_row_id]
-                
-                return actual_row_count
-        
-        if self.data_deletion_files is not None:
-            if not all(
-                f is None or f.cardinality is not None
-                for f in self.data_deletion_files
-            ):
-                return None
-        
+        """
+        Return the merged row count of data files. For example, when the delete vector is enabled in
+        the primary key table, the number of rows that have been deleted will be subtracted from the
+        returned result. In the Data Evolution mode of the Append table, the actual number of rows
+        will be returned.
+        """
+        if self._raw_merged_row_count_available():
+            return self._raw_merged_row_count()
+        if self._data_evolution_row_count_available():
+            return self._data_evolution_merged_row_count()
+        return None
+
+    def _raw_merged_row_count_available(self) -> bool:
+        return self.raw_convertible and (
+            self.data_deletion_files is None
+            or all(f is None or f.cardinality is not None for f in self.data_deletion_files)
+        )
+
+    def _raw_merged_row_count(self) -> int:
         sum_rows = 0
         for i, file in enumerate(self._files):
-            deletion_file = (
-                None if self.data_deletion_files is None
-                else self.data_deletion_files[i] if i < len(self.data_deletion_files)
-                else None
-            )
+            deletion_file = None
+            if self.data_deletion_files is not None and i < len(self.data_deletion_files):
+                deletion_file = self.data_deletion_files[i]
             
             if deletion_file is None:
                 sum_rows += file.row_count
             elif deletion_file.cardinality is not None:
                 sum_rows += file.row_count - deletion_file.cardinality
+        
+        return sum_rows
+
+    def _data_evolution_row_count_available(self) -> bool:
+        for file in self._files:
+            if file.first_row_id is None:
+                return False
+        return True
+
+    def _data_evolution_merged_row_count(self) -> int:
+        if not self._files:
+            return 0
+        
+        file_ranges = []
+        for file in self._files:
+            if file.first_row_id is not None and file.row_count > 0:
+                start = file.first_row_id
+                end = file.first_row_id + file.row_count - 1
+                file_ranges.append((file, start, end))
+        
+        if not file_ranges:
+            return 0
+        
+        file_ranges.sort(key=lambda x: (x[1], x[2]))
+        
+        groups = []
+        current_group = [file_ranges[0]]
+        current_end = file_ranges[0][2]
+        
+        for file_range in file_ranges[1:]:
+            file, start, end = file_range
+            if start <= current_end:
+                current_group.append(file_range)
+                if end > current_end:
+                    current_end = end
+            else:
+                groups.append(current_group)
+                current_group = [file_range]
+                current_end = end
+        
+        if current_group:
+            groups.append(current_group)
+        
+        sum_rows = 0
+        for group in groups:
+            max_count = 0
+            for file, _, _ in group:
+                max_count = max(max_count, file.row_count)
+            sum_rows += max_count
         
         return sum_rows
