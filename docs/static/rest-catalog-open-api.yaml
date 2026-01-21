@@ -2578,6 +2578,8 @@ components:
       properties:
         id:
           type: string
+        databaseName:
+          type: string
         name:
           type: string
         path:

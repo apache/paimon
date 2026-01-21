@@ -1506,6 +1506,7 @@ public class RESTCatalogServer {
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
+                                identifier.getDatabaseName(),
                                 identifier.getTableName(),
                                 entry.getValue().schema().options().get(PATH.key()),
                                 entry.getValue().isExternal(),
@@ -1611,6 +1612,7 @@ public class RESTCatalogServer {
                 response =
                         new GetTableResponse(
                                 tableMetadata.uuid(),
+                                identifier.getDatabaseName(),
                                 identifier.getObjectName(),
                                 path,
                                 tableMetadata.isExternal(),

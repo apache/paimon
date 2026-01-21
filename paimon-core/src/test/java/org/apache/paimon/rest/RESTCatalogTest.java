@@ -113,6 +113,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -360,6 +361,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         Table tableById = restCatalog.getTable(table.uuid());
         assertThat(tableById.uuid()).isEqualTo(table.uuid());
         assertThat(tableById.name()).isEqualTo(identifier.getObjectName());
+        FileStoreTable fileStoreTable = (FileStoreTable) tableById;
+        assertThat(
+                        Objects.requireNonNull(fileStoreTable.catalogEnvironment().identifier())
+                                .getDatabaseName())
+                .isEqualTo("test_table_db");
         assertThrows(
                 Catalog.TableNotExistException.class,
                 () -> restCatalog.getTable("missing_table_id"));
