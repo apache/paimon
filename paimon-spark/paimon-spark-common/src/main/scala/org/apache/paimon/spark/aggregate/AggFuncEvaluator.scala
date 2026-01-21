@@ -29,6 +29,7 @@ import org.apache.spark.sql.types.{DataType, LongType}
 import org.apache.spark.unsafe.types.UTF8String
 
 trait AggFuncEvaluator[T] {
+
   def update(dataSplit: DataSplit): Unit
 
   def result(): T
@@ -42,7 +43,7 @@ class CountStarEvaluator extends AggFuncEvaluator[Long] {
   private var _result: Long = 0L
 
   override def update(dataSplit: DataSplit): Unit = {
-    _result += dataSplit.mergedRowCount()
+    _result += dataSplit.mergedRowCount().getAsLong
   }
 
   val a: Int = 1;
