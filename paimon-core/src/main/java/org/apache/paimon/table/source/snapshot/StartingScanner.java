@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.manifest.PartitionEntry;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 
 import javax.annotation.Nullable;
@@ -63,8 +63,8 @@ public interface StartingScanner {
             return plan.watermark();
         }
 
-        public List<DataSplit> splits() {
-            return (List) plan.splits();
+        public List<Split> splits() {
+            return plan.splits();
         }
 
         public SnapshotReader.Plan plan() {

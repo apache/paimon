@@ -45,6 +45,8 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -52,6 +54,9 @@ import org.apache.paimon.utils.FormatReaderMapping;
 import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.RoaringBitmap32;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -66,6 +71,8 @@ import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RawFileSplitRead.class);
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -139,15 +146,38 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
-        DataSplit split = (DataSplit) s;
-        List<DataFileMeta> files = split.dataFiles();
-        DeletionVector.Factory dvFactory =
-                DeletionVector.factory(fileIO, files, split.deletionFiles().orElse(null));
+        if (s instanceof DataSplit) {
+            DataSplit split = (DataSplit) s;
+            return createReader(
+                    split.partition(),
+                    split.bucket(),
+                    split.dataFiles(),
+                    split.deletionFiles().orElse(null));
+        } else {
+            IncrementalSplit split = (IncrementalSplit) s;
+            if (!split.beforeFiles().isEmpty()) {
+                LOG.info("Ignore split before files: {}", split.beforeFiles());
+            }
+            return createReader(
+                    split.partition(),
+                    split.bucket(),
+                    split.afterFiles(),
+                    split.afterDeletionFiles());
+        }
+    }
+
+    public RecordReader<InternalRow> createReader(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            List<DeletionFile> deletionFiles)
+            throws IOException {
+        DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = new HashMap<>();
         for (DataFileMeta file : files) {
             dvFactories.put(file.fileName(), () -> dvFactory.create(file.fileName()).orElse(null));
         }
-        return createReader(split.partition(), split.bucket(), split.dataFiles(), dvFactories);
+        return createReader(partition, bucket, files, dvFactories);
     }
 
     public RecordReader<InternalRow> createReader(
