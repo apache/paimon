@@ -144,28 +144,29 @@ public class DataSplit implements Split {
 
     @Override
     public OptionalLong mergedRowCount() {
-        if (rawConvertible
-                && (dataDeletionFiles == null
-                        || dataDeletionFiles.stream()
+        if (!rawConvertible
+                || (dataDeletionFiles != null
+                        && !dataDeletionFiles.stream()
                                 .allMatch(f -> f == null || f.cardinality() != null))) {
-            long sum = 0L;
-            List<RawFile> rawFiles = convertToRawFiles().orElse(null);
-            if (rawFiles != null) {
-                for (int i = 0; i < rawFiles.size(); i++) {
-                    RawFile rawFile = rawFiles.get(i);
-                    DeletionFile deletionFile =
-                            dataDeletionFiles == null ? null : dataDeletionFiles.get(i);
-                    Long cardinality = deletionFile == null ? null : deletionFile.cardinality();
-                    if (deletionFile == null) {
-                        sum += rawFile.rowCount();
-                    } else if (cardinality != null) {
-                        sum += rawFile.rowCount() - cardinality;
-                    }
+            return OptionalLong.empty();
+        }
+
+        long sum = 0L;
+        List<RawFile> rawFiles = convertToRawFiles().orElse(null);
+        if (rawFiles != null) {
+            for (int i = 0; i < rawFiles.size(); i++) {
+                RawFile rawFile = rawFiles.get(i);
+                DeletionFile deletionFile =
+                        dataDeletionFiles == null ? null : dataDeletionFiles.get(i);
+                Long cardinality = deletionFile == null ? null : deletionFile.cardinality();
+                if (deletionFile == null) {
+                    sum += rawFile.rowCount();
+                } else if (cardinality != null) {
+                    sum += rawFile.rowCount() - cardinality;
                 }
             }
-            return OptionalLong.of(sum);
         }
-        return OptionalLong.empty();
+        return OptionalLong.of(sum);
     }
 
     public Object minValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {
