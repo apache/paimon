@@ -37,7 +37,6 @@ import org.apache.paimon.table.BucketSpec;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
@@ -66,6 +65,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -353,15 +353,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .splits();
         long countPushed = 0;
         for (Split s : splits) {
-            if (!(s instanceof DataSplit)) {
+            OptionalLong mergedRowCount = s.mergedRowCount();
+            if (!mergedRowCount.isPresent()) {
                 return false;
             }
-            DataSplit split = (DataSplit) s;
-            if (!split.mergedRowCountAvailable()) {
-                return false;
-            }
-
-            countPushed += split.mergedRowCount();
+            countPushed += mergedRowCount.getAsLong();
         }
 
         this.countPushed = countPushed;

@@ -63,6 +63,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -249,6 +250,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
     /** Split for fallback read. */
     public interface FallbackSplit extends Split {
+
         boolean isFallback();
 
         Split wrapped();
@@ -280,6 +282,11 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public long rowCount() {
             return split.rowCount();
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return split.mergedRowCount();
         }
     }
 

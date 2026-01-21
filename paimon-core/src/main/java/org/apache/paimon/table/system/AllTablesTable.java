@@ -52,6 +52,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_AT;
@@ -199,6 +200,11 @@ public class AllTablesTable implements ReadonlyTable {
         @Override
         public int hashCode() {
             return Objects.hash(rows);
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 

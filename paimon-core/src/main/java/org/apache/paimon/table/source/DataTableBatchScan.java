@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.table.source.PushDownUtils.minmaxAvailable;
 
@@ -144,10 +145,10 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         List<Split> limitedSplits = new ArrayList<>();
         for (DataSplit dataSplit : splits) {
-            if (dataSplit.rawConvertible()) {
-                long partialMergedRowCount = dataSplit.partialMergedRowCount();
+            OptionalLong mergedRowCount = dataSplit.mergedRowCount();
+            if (mergedRowCount.isPresent()) {
                 limitedSplits.add(dataSplit);
-                scannedRowCount += partialMergedRowCount;
+                scannedRowCount += mergedRowCount.getAsLong();
                 if (scannedRowCount >= pushDownLimit) {
                     SnapshotReader.Plan newPlan =
                             new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);

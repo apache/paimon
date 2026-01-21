@@ -70,7 +70,7 @@ object AggregatePushDownUtils {
     }
     val dataSplits = splits.map(_.asInstanceOf[DataSplit])
 
-    if (!dataSplits.forall(_.mergedRowCountAvailable())) {
+    if (!dataSplits.forall(_.mergedRowCount().isPresent)) {
       return None
     }
 

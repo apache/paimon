@@ -52,6 +52,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /** This is a system table to display all the database-table-partitions. */
 public class AllPartitionsTable implements ReadonlyTable {
@@ -179,6 +180,11 @@ public class AllPartitionsTable implements ReadonlyTable {
         @Override
         public int hashCode() {
             return Objects.hash(rows);
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 

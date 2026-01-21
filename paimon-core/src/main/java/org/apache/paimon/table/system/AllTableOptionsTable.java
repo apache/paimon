@@ -50,6 +50,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /**
  * This is a system table to display all the database-table properties.
@@ -157,6 +158,11 @@ public class AllTableOptionsTable implements ReadonlyTable {
         @Override
         public int hashCode() {
             return Objects.hash(allOptions);
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 

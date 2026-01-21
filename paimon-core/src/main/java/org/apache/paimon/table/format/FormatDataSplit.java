@@ -25,6 +25,7 @@ import org.apache.paimon.table.source.Split;
 import javax.annotation.Nullable;
 
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit implements Split {
@@ -83,6 +84,11 @@ public class FormatDataSplit implements Split {
     @Override
     public long rowCount() {
         return -1;
+    }
+
+    @Override
+    public OptionalLong mergedRowCount() {
+        return OptionalLong.empty();
     }
 
     @Override
