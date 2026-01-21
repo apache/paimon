@@ -30,7 +30,7 @@ import org.apache.spark.sql.util.QueryExecutionListener
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 
-import scala.jdk.CollectionConverters.asScalaBufferConverter
+import scala.collection.JavaConverters._
 
 abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
