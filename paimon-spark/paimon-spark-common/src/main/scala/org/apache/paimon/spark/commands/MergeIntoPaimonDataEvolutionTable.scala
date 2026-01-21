@@ -18,7 +18,11 @@
 
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions.GlobalIndexColumnUpdateAction
+import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.format.blob.BlobFileFormat.isBlobFile
+import org.apache.paimon.io.{CompactIncrement, DataIncrement}
+import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
@@ -27,7 +31,7 @@ import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.CommitMessage
+import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
@@ -45,7 +49,7 @@ import org.apache.spark.sql.types.StructType
 import scala.collection.{immutable, mutable}
 import scala.collection.JavaConverters._
 import scala.collection.Searching.{search, Found, InsertionPoint}
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 
 /** Command for Merge Into for Data Evolution paimon table. */
 case class MergeIntoPaimonDataEvolutionTable(
@@ -76,6 +80,23 @@ case class MergeIntoPaimonDataEvolutionTable(
   import MergeIntoPaimonDataEvolutionTable._
 
   override val table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
+
+  private val updateColumns: Set[AttributeReference] = {
+    val columns = mutable.Set[AttributeReference]()
+    for (action <- matchedActions) {
+      action match {
+        case updateAction: UpdateAction =>
+          for (assignment <- updateAction.assignments) {
+            if (!assignment.key.equals(assignment.value)) {
+              val key = assignment.key.asInstanceOf[AttributeReference]
+              columns ++= Seq(key)
+            }
+          }
+      }
+    }
+    columns.toSet
+  }
+
   private val firstRowIds: immutable.IndexedSeq[Long] = table
     .store()
     .newScan()
@@ -169,9 +190,10 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     // step 2: invoke update action
     val updateCommit =
-      if (matchedActions.nonEmpty)
-        updateActionInvoke(sparkSession, touchedFileTargetRelation)
-      else Nil
+      if (matchedActions.nonEmpty) {
+        val updateResult = updateActionInvoke(sparkSession, touchedFileTargetRelation)
+        checkUpdateResult(updateResult)
+      } else Nil
 
     // step 3: invoke insert action
     val insertCommit =
@@ -232,18 +254,6 @@ case class MergeIntoPaimonDataEvolutionTable(
       (o1, o2) => {
         o1.toString().compareTo(o2.toString())
       }) ++ mergeFields
-    val updateColumns = mutable.Set[AttributeReference]()
-    for (action <- matchedActions) {
-      action match {
-        case updateAction: UpdateAction =>
-          for (assignment <- updateAction.assignments) {
-            if (!assignment.key.equals(assignment.value)) {
-              val key = assignment.key.asInstanceOf[AttributeReference]
-              updateColumns ++= Seq(key)
-            }
-          }
-      }
-    }
 
     val updateColumnsSorted = updateColumns.toSeq.sortBy(
       s => targetTable.output.map(x => x.toString()).indexOf(s.toString()))
@@ -456,6 +466,67 @@ case class MergeIntoPaimonDataEvolutionTable(
           if isSourceAttribute(left) && isTargetRowId(right) =>
         Some(left)
       case _ => None
+    }
+  }
+
+  private def checkUpdateResult(updateCommit: Seq[CommitMessage]): Seq[CommitMessage] = {
+    val affectedParts: Set[BinaryRow] = updateCommit.map(_.partition()).toSet
+    val rowType = table.rowType()
+
+    // find all global index files of affected partitions and updated columns
+    val latestSnapshot = table.latestSnapshot()
+    if (latestSnapshot.isEmpty) {
+      return updateCommit
+    }
+
+    val filter: org.apache.paimon.utils.Filter[IndexManifestEntry] =
+      (entry: IndexManifestEntry) => {
+        val globalIndexMeta = entry.indexFile().globalIndexMeta()
+        if (globalIndexMeta == null) {
+          false
+        } else {
+          val fieldName = rowType.getField(globalIndexMeta.indexFieldId()).name()
+          affectedParts.contains(entry.partition()) && updateColumns.exists(
+            _.name.equals(fieldName))
+        }
+      }
+
+    val affectedIndexEntries = table
+      .store()
+      .newIndexFileHandler()
+      .scan(latestSnapshot.get(), filter)
+      .asScala
+
+    if (affectedIndexEntries.isEmpty) {
+      updateCommit
+    } else {
+      table.coreOptions().globalIndexColumnUpdateAction() match {
+        case GlobalIndexColumnUpdateAction.THROW_ERROR =>
+          val updatedColNames = updateColumns.map(_.name)
+          val conflicted = affectedIndexEntries
+            .map(_.indexFile().globalIndexMeta().indexFieldId())
+            .map(id => rowType.getField(id).name())
+            .toSet
+          throw new RuntimeException(
+            s"""MergeInto: update columns contain globally indexed columns, not supported now.
+               |Updated columns: ${updatedColNames.toSeq.sorted.mkString("[", ", ", "]")}
+               |Conflicted columns: ${conflicted.toSeq.sorted.mkString("[", ", ", "]")}
+               |""".stripMargin)
+        case GlobalIndexColumnUpdateAction.DROP_PARTITION_INDEX =>
+          val grouped: Map[BinaryRow, Seq[IndexManifestEntry]] =
+            affectedIndexEntries.groupBy(_.partition())
+          val deleteCommitMessages = ArrayBuffer.empty[CommitMessage]
+          grouped.foreach {
+            case (part, entries) =>
+              deleteCommitMessages += new CommitMessageImpl(
+                part,
+                0,
+                null,
+                DataIncrement.deleteIndexIncrement(entries.map(_.indexFile()).asJava),
+                CompactIncrement.emptyIncrement())
+          }
+          updateCommit ++ deleteCommitMessages
+      }
     }
   }
 

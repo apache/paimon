@@ -2072,6 +2072,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Global index root directory, if not set, the global index files will be stored under the <table-root-directory>/index.");
 
+    public static final ConfigOption<GlobalIndexColumnUpdateAction>
+            GLOBAL_INDEX_COLUMN_UPDATE_ACTION =
+                    key("global-index.column-update-action")
+                            .enumType(GlobalIndexColumnUpdateAction.class)
+                            .defaultValue(GlobalIndexColumnUpdateAction.THROW_ERROR)
+                            .withDescription(
+                                    "Defines the action to take when an update modifies columns that are covered by a global index.");
+
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
                     .memoryType()
@@ -2778,6 +2786,10 @@ public class CoreOptions implements Serializable {
             throw new IllegalArgumentException("scheme should not be null: " + path);
         }
         return path;
+    }
+
+    public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
+        return options.get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION);
     }
 
     public LookupStrategy lookupStrategy() {
@@ -4014,5 +4026,17 @@ public class CoreOptions implements Serializable {
         public InlineElement getDescription() {
             return text(description);
         }
+    }
+
+    /**
+     * Action to take when an UPDATE (e.g. via MERGE INTO) modifies columns that are covered by a
+     * global index.
+     */
+    public enum GlobalIndexColumnUpdateAction {
+        /** Updating indexed columns is forbidden. */
+        THROW_ERROR,
+
+        /** Drop all global index entries for the whole partitions affected by the update. */
+        DROP_PARTITION_INDEX
     }
 }
