@@ -94,7 +94,8 @@ public class BucketedAppendClusterManagerTest {
                         ((AppendOnlyFileStoreTable) table)
                                 .store()
                                 .newRead()
-                                .createReader(BinaryRow.EMPTY_ROW, 0, result.after(), null))) {
+                                .createReader(
+                                        BinaryRow.EMPTY_ROW, 0, result.after(), (List) null))) {
             while (clusterRows.hasNext()) {
                 InternalRow row = clusterRows.next();
                 rows.add(String.format("%d,%d", row.getInt(1), row.getInt(2)));
