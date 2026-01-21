@@ -62,6 +62,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
@@ -153,6 +154,11 @@ public class TableIndexesTable implements ReadonlyTable {
                 return true;
             }
             return o != null && getClass() == o.getClass();
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 

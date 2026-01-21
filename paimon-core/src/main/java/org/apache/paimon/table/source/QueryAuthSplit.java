@@ -22,6 +22,8 @@ import org.apache.paimon.catalog.TableQueryAuthResult;
 
 import javax.annotation.Nullable;
 
+import java.util.OptionalLong;
+
 /** A wrapper class for {@link Split} that adds query authorization information. */
 public class QueryAuthSplit implements Split {
 
@@ -47,5 +49,10 @@ public class QueryAuthSplit implements Split {
     @Override
     public long rowCount() {
         return split.rowCount();
+    }
+
+    @Override
+    public OptionalLong mergedRowCount() {
+        return split.mergedRowCount();
     }
 }

@@ -55,7 +55,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
@@ -143,17 +142,30 @@ public class DataSplit implements Split {
         return rowCount;
     }
 
-    /** Whether it is possible to calculate the merged row count. */
-    public boolean mergedRowCountAvailable() {
-        return rawConvertible
+    @Override
+    public OptionalLong mergedRowCount() {
+        if (rawConvertible
                 && (dataDeletionFiles == null
                         || dataDeletionFiles.stream()
-                                .allMatch(f -> f == null || f.cardinality() != null));
-    }
-
-    public long mergedRowCount() {
-        checkState(mergedRowCountAvailable());
-        return partialMergedRowCount();
+                                .allMatch(f -> f == null || f.cardinality() != null))) {
+            long sum = 0L;
+            List<RawFile> rawFiles = convertToRawFiles().orElse(null);
+            if (rawFiles != null) {
+                for (int i = 0; i < rawFiles.size(); i++) {
+                    RawFile rawFile = rawFiles.get(i);
+                    DeletionFile deletionFile =
+                            dataDeletionFiles == null ? null : dataDeletionFiles.get(i);
+                    Long cardinality = deletionFile == null ? null : deletionFile.cardinality();
+                    if (deletionFile == null) {
+                        sum += rawFile.rowCount();
+                    } else if (cardinality != null) {
+                        sum += rawFile.rowCount() - cardinality;
+                    }
+                }
+            }
+            return OptionalLong.of(sum);
+        }
+        return OptionalLong.empty();
     }
 
     public Object minValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {

@@ -67,14 +67,11 @@ public class DataSplitCompatibleTest {
         List<DataFileMeta> dataFiles =
                 Arrays.asList(newDataFile(1000L), newDataFile(2000L), newDataFile(3000L));
         DataSplit split = newDataSplit(false, dataFiles, null);
-        assertThat(split.partialMergedRowCount()).isEqualTo(0L);
-        assertThat(split.mergedRowCountAvailable()).isEqualTo(false);
+        assertThat(split.mergedRowCount()).isEmpty();
 
         // rawConvertible without deletion files
         split = newDataSplit(true, dataFiles, null);
-        assertThat(split.partialMergedRowCount()).isEqualTo(6000L);
-        assertThat(split.mergedRowCountAvailable()).isEqualTo(true);
-        assertThat(split.mergedRowCount()).isEqualTo(6000L);
+        assertThat(split.mergedRowCount()).hasValue(6000L);
 
         // rawConvertible with deletion files without cardinality
         ArrayList<DeletionFile> deletionFiles = new ArrayList<>();
@@ -82,8 +79,7 @@ public class DataSplitCompatibleTest {
         deletionFiles.add(new DeletionFile("p", 1, 2, null));
         deletionFiles.add(new DeletionFile("p", 1, 2, 100L));
         split = newDataSplit(true, dataFiles, deletionFiles);
-        assertThat(split.partialMergedRowCount()).isEqualTo(3900L);
-        assertThat(split.mergedRowCountAvailable()).isEqualTo(false);
+        assertThat(split.mergedRowCount()).isEmpty();
 
         // rawConvertible with deletion files with cardinality
         deletionFiles = new ArrayList<>();
@@ -91,9 +87,7 @@ public class DataSplitCompatibleTest {
         deletionFiles.add(new DeletionFile("p", 1, 2, 200L));
         deletionFiles.add(new DeletionFile("p", 1, 2, 100L));
         split = newDataSplit(true, dataFiles, deletionFiles);
-        assertThat(split.partialMergedRowCount()).isEqualTo(5700L);
-        assertThat(split.mergedRowCountAvailable()).isEqualTo(true);
-        assertThat(split.mergedRowCount()).isEqualTo(5700L);
+        assertThat(split.mergedRowCount()).hasValue(5700L);
     }
 
     @Test

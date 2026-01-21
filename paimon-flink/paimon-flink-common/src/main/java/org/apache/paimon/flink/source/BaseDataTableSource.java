@@ -66,6 +66,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -356,12 +357,10 @@ public abstract class BaseDataTableSource extends FlinkTableSource
             if (!(s instanceof DataSplit)) {
                 return false;
             }
-            DataSplit split = (DataSplit) s;
-            if (!split.mergedRowCountAvailable()) {
-                return false;
+            OptionalLong mergedRowCount = s.mergedRowCount();
+            if (mergedRowCount.isPresent()) {
+                countPushed += mergedRowCount.getAsLong();
             }
-
-            countPushed += split.mergedRowCount();
         }
 
         this.countPushed = countPushed;

@@ -57,6 +57,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
 
@@ -146,6 +147,11 @@ public class BucketsTable implements ReadonlyTable {
         @Override
         public int hashCode() {
             return 1;
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 
