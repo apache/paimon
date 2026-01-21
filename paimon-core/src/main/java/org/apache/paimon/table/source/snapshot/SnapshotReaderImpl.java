@@ -461,41 +461,42 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(plan.files(FileKind.DELETE));
-        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
         LazyField<Snapshot> beforeSnapshot =
                 new LazyField<>(() -> snapshotManager.snapshot(plan.snapshot().id() - 1));
-        return toIncrementalPlan(true, plan, beforeSnapshot, beforeFiles, dataFiles);
+        return toIncrementalPlan(
+                true, beforeSnapshot, beforeFiles, plan.snapshot(), plan.watermark(), afterFiles);
     }
 
     private Plan toIncrementalPlan(
             boolean isStreaming,
-            FileStoreScan.Plan plan,
             LazyField<Snapshot> beforeSnapshot,
             Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles,
-            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles) {
-        Snapshot snapshot = plan.snapshot();
+            @Nullable Snapshot afterSnapshot,
+            @Nullable Long afterWatermark,
+            Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles) {
         List<Split> splits = new ArrayList<>();
         Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
         beforeFiles.forEach(
                 (part, bucketMap) ->
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
-        dataFiles.forEach(
+        afterFiles.forEach(
                 (part, bucketMap) ->
                         buckets.computeIfAbsent(part, k -> new HashSet<>())
                                 .addAll(bucketMap.keySet()));
         // Read deletion indexes at once to reduce file IO
         Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> beforeDeletionFilesMap = null;
-        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> deletionFilesMap = null;
+        Map<Pair<BinaryRow, Integer>, Map<String, DeletionFile>> afterDeletionFilesMap = null;
         if (!isStreaming && deletionVectors) {
             beforeDeletionFilesMap =
                     beforeSnapshot.get() != null
                             ? scanDvIndex(beforeSnapshot.get(), toPartBuckets(beforeFiles))
                             : Collections.emptyMap();
-            deletionFilesMap =
-                    snapshot != null
-                            ? scanDvIndex(snapshot, toPartBuckets(dataFiles))
+            afterDeletionFilesMap =
+                    afterSnapshot != null
+                            ? scanDvIndex(afterSnapshot, toPartBuckets(afterFiles))
                             : Collections.emptyMap();
         }
 
@@ -507,7 +508,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
                 List<ManifestEntry> dataEntries =
-                        dataFiles
+                        afterFiles
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
 
@@ -525,7 +526,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         beforeEntries.stream()
                                 .map(ManifestEntry::file)
                                 .collect(Collectors.toList());
-                List<DataFileMeta> data =
+                List<DataFileMeta> after =
                         dataEntries.stream().map(ManifestEntry::file).collect(Collectors.toList());
 
                 List<DeletionFile> beforeDeletionFiles = null;
@@ -537,44 +538,50 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                             Pair.of(part, bucket), Collections.emptyMap()));
                 }
 
-                List<DeletionFile> dataDeletionFiles = null;
-                if (deletionVectors && deletionFilesMap != null) {
-                    dataDeletionFiles =
+                List<DeletionFile> afterDeletionFiles = null;
+                if (deletionVectors && afterDeletionFilesMap != null) {
+                    afterDeletionFiles =
                             getDeletionFiles(
-                                    data,
-                                    deletionFilesMap.getOrDefault(
+                                    after,
+                                    afterDeletionFilesMap.getOrDefault(
                                             Pair.of(part, bucket), Collections.emptyMap()));
                 }
 
                 IncrementalSplit split =
                         new IncrementalSplit(
-                                snapshot.id(),
+                                afterSnapshot.id(),
                                 part,
                                 bucket,
                                 totalBuckets,
                                 before,
                                 beforeDeletionFiles,
-                                data,
-                                dataDeletionFiles,
+                                after,
+                                afterDeletionFiles,
                                 isStreaming);
 
                 splits.add(split);
             }
         }
 
-        return new PlanImpl(plan.watermark(), snapshot == null ? null : snapshot.id(), splits);
+        return new PlanImpl(
+                afterWatermark, afterSnapshot == null ? null : afterSnapshot.id(), splits);
     }
 
     @Override
     public Plan readIncrementalDiff(Snapshot before) {
         withMode(ScanMode.ALL);
         FileStoreScan.Plan plan = scan.plan();
-        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> dataFiles =
+        Map<BinaryRow, Map<Integer, List<ManifestEntry>>> afterFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
         Map<BinaryRow, Map<Integer, List<ManifestEntry>>> beforeFiles =
                 groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
         return toIncrementalPlan(
-                false, plan, new LazyField<>(() -> before), beforeFiles, dataFiles);
+                false,
+                new LazyField<>(() -> before),
+                beforeFiles,
+                plan.snapshot(),
+                plan.watermark(),
+                afterFiles);
     }
 
     private RecordComparator partitionComparator() {
