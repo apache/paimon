@@ -547,10 +547,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                             Pair.of(part, bucket), Collections.emptyMap()));
                 }
 
-                if (totalBuckets == null) {
-                    System.out.println("");
-                }
-
                 IncrementalSplit split =
                         new IncrementalSplit(
                                 afterSnapshot.id(),
