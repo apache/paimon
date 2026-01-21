@@ -159,10 +159,10 @@ class TableWrite:
         if write_cols is None:
             if data_schema.names != self.table_pyarrow_schema.names:
                 raise ValueError(
-                    f"Input schema doesn't match table schema. "
-                    f"Field names and order must exactly match.\n"
-                    f"Input schema: {data_schema}\n"
-                    f"Table schema: {self.table_pyarrow_schema}"
+                    f"Input schema isn't consistent with table schema and write cols. "
+                    f"Input schema is: {data_schema} "
+                    f"Table schema is: {self.table_pyarrow_schema} "
+                    f"Write cols is: {self.file_store_write.write_cols}"
                 )
             for input_field, table_field in zip(data_schema, self.table_pyarrow_schema):
                 if input_field.type != table_field.type:
