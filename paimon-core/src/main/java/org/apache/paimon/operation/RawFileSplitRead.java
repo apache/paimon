@@ -53,9 +53,6 @@ import org.apache.paimon.utils.FormatReaderMapping.Builder;
 import org.apache.paimon.utils.IOExceptionSupplier;
 import org.apache.paimon.utils.RoaringBitmap32;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -69,8 +66,6 @@ import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
 
 /** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
 public class RawFileSplitRead implements SplitRead<InternalRow> {
-
-    private static final Logger LOG = LoggerFactory.getLogger(RawFileSplitRead.class);
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -145,10 +140,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
         DataSplit split = (DataSplit) s;
-        if (!split.beforeFiles().isEmpty()) {
-            LOG.info("Ignore split before files: {}", split.beforeFiles());
-        }
-
         List<DataFileMeta> files = split.dataFiles();
         DeletionVector.Factory dvFactory =
                 DeletionVector.factory(fileIO, files, split.deletionFiles().orElse(null));

@@ -69,9 +69,6 @@ public class DataSplit implements Split {
     private String bucketPath;
     @Nullable private Integer totalBuckets;
 
-    private List<DataFileMeta> beforeFiles = new ArrayList<>();
-    @Nullable private List<DeletionFile> beforeDeletionFiles;
-
     private List<DataFileMeta> dataFiles;
     @Nullable private List<DeletionFile> dataDeletionFiles;
 
@@ -100,14 +97,6 @@ public class DataSplit implements Split {
         return totalBuckets;
     }
 
-    public List<DataFileMeta> beforeFiles() {
-        return beforeFiles;
-    }
-
-    public Optional<List<DeletionFile>> beforeDeletionFiles() {
-        return Optional.ofNullable(beforeDeletionFiles);
-    }
-
     public List<DataFileMeta> dataFiles() {
         return dataFiles;
     }
@@ -123,10 +112,6 @@ public class DataSplit implements Split {
 
     public boolean rawConvertible() {
         return rawConvertible;
-    }
-
-    public OptionalLong latestFileCreationEpochMillis() {
-        return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }
 
     public OptionalLong earliestFileCreationEpochMillis() {
@@ -227,32 +212,6 @@ public class DataSplit implements Split {
         return sum;
     }
 
-    /**
-     * Obtain merged row count as much as possible. There are two scenarios where accurate row count
-     * can be calculated:
-     *
-     * <p>1. raw file and no deletion file.
-     *
-     * <p>2. raw file + deletion file with cardinality.
-     */
-    public long partialMergedRowCount() {
-        long sum = 0L;
-        if (rawConvertible) {
-            List<RawFile> rawFiles = convertToRawFiles().orElse(null);
-            if (rawFiles != null) {
-                for (int i = 0; i < rawFiles.size(); i++) {
-                    RawFile rawFile = rawFiles.get(i);
-                    if (dataDeletionFiles == null || dataDeletionFiles.get(i) == null) {
-                        sum += rawFile.rowCount();
-                    } else if (dataDeletionFiles.get(i).cardinality() != null) {
-                        sum += rawFile.rowCount() - dataDeletionFiles.get(i).cardinality();
-                    }
-                }
-            }
-        }
-        return sum;
-    }
-
     @Override
     public Optional<List<RawFile>> convertToRawFiles() {
         if (rawConvertible) {
@@ -319,8 +278,6 @@ public class DataSplit implements Split {
                 && Objects.equals(partition, dataSplit.partition)
                 && Objects.equals(bucketPath, dataSplit.bucketPath)
                 && Objects.equals(totalBuckets, dataSplit.totalBuckets)
-                && Objects.equals(beforeFiles, dataSplit.beforeFiles)
-                && Objects.equals(beforeDeletionFiles, dataSplit.beforeDeletionFiles)
                 && Objects.equals(dataFiles, dataSplit.dataFiles)
                 && Objects.equals(dataDeletionFiles, dataSplit.dataDeletionFiles);
     }
@@ -333,8 +290,6 @@ public class DataSplit implements Split {
                 bucket,
                 bucketPath,
                 totalBuckets,
-                beforeFiles,
-                beforeDeletionFiles,
                 dataFiles,
                 dataDeletionFiles,
                 isStreaming,
@@ -371,8 +326,6 @@ public class DataSplit implements Split {
         this.bucket = other.bucket;
         this.bucketPath = other.bucketPath;
         this.totalBuckets = other.totalBuckets;
-        this.beforeFiles = other.beforeFiles;
-        this.beforeDeletionFiles = other.beforeDeletionFiles;
         this.dataFiles = other.dataFiles;
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
@@ -394,12 +347,10 @@ public class DataSplit implements Split {
         }
 
         DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
-        out.writeInt(beforeFiles.size());
-        for (DataFileMeta file : beforeFiles) {
-            dataFileSer.serialize(file, out);
-        }
 
-        DeletionFile.serializeList(out, beforeDeletionFiles);
+        // compatible with old beforeFiles
+        out.writeInt(0);
+        DeletionFile.serializeList(out, null);
 
         out.writeInt(dataFiles.size());
         for (DataFileMeta file : dataFiles) {
@@ -428,13 +379,15 @@ public class DataSplit implements Split {
         FunctionWithIOException<DataInputView, DeletionFile> deletionFileSerde =
                 getDeletionFileSerde(version);
         int beforeNumber = in.readInt();
-        List<DataFileMeta> beforeFiles = new ArrayList<>(beforeNumber);
-        for (int i = 0; i < beforeNumber; i++) {
-            beforeFiles.add(dataFileSer.apply(in));
+        if (beforeNumber > 0) {
+            throw new RuntimeException("Cannot deserialize data split with before files.");
         }
 
         List<DeletionFile> beforeDeletionFiles =
                 DeletionFile.deserializeList(in, deletionFileSerde);
+        if (beforeDeletionFiles != null) {
+            throw new RuntimeException("Cannot deserialize data split with before deletion files.");
+        }
 
         int fileNumber = in.readInt();
         List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
@@ -454,14 +407,10 @@ public class DataSplit implements Split {
                         .withBucket(bucket)
                         .withBucketPath(bucketPath)
                         .withTotalBuckets(totalBuckets)
-                        .withBeforeFiles(beforeFiles)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
                         .rawConvertible(rawConvertible);
 
-        if (beforeDeletionFiles != null) {
-            builder.withBeforeDeletionFiles(beforeDeletionFiles);
-        }
         if (dataDeletionFiles != null) {
             builder.withDataDeletionFiles(dataDeletionFiles);
         }
@@ -536,16 +485,6 @@ public class DataSplit implements Split {
 
         public Builder withTotalBuckets(Integer totalBuckets) {
             this.split.totalBuckets = totalBuckets;
-            return this;
-        }
-
-        public Builder withBeforeFiles(List<DataFileMeta> beforeFiles) {
-            this.split.beforeFiles = new ArrayList<>(beforeFiles);
-            return this;
-        }
-
-        public Builder withBeforeDeletionFiles(List<DeletionFile> beforeDeletionFiles) {
-            this.split.beforeDeletionFiles = new ArrayList<>(beforeDeletionFiles);
             return this;
         }
 

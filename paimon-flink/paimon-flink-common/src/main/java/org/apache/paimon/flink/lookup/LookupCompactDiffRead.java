@@ -57,9 +57,8 @@ public class LookupCompactDiffRead extends AbstractDataTableRead {
 
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
-        DataSplit dataSplit = (DataSplit) split;
-        if (dataSplit.beforeFiles().isEmpty()) {
-            return fullPhaseMergeRead.createReader(dataSplit); // full reading phase
+        if (split instanceof DataSplit) {
+            return fullPhaseMergeRead.createReader(split); // full reading phase
         } else {
             return incrementalDiffRead.createReader(split);
         }

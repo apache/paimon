@@ -318,8 +318,8 @@ public class IncrementalTableTest extends TableTestBase {
         table.createTag("TAG1", 1);
         table.createTag("TAG2", 2);
 
-        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
-                .containsExactlyInAnyOrder(GenericRow.of(1, 1, 2));
+        assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .hasMessageContaining("Unsupported split");
     }
 
     @Test

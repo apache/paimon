@@ -55,7 +55,6 @@ import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.hive.utils.HiveUtils.createPredicate;
 import static org.apache.paimon.hive.utils.HiveUtils.extractTagName;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 
 /** Generator to generate hive input splits. */
 public class HiveSplitGenerator {
@@ -174,7 +173,7 @@ public class HiveSplitGenerator {
         for (DataSplit split : splits) {
             if (split instanceof FallbackReadFileStoreTable.FallbackSplit) {
                 dataSplits.add(split);
-            } else if (split.beforeFiles().isEmpty() && split.rawConvertible()) {
+            } else if (split.rawConvertible()) {
                 numFiles += split.dataFiles().size();
                 toPack.add(split);
             } else {

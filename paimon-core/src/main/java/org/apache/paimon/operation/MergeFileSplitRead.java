@@ -229,10 +229,6 @@ public class MergeFileSplitRead implements SplitRead<KeyValue> {
     }
 
     public RecordReader<KeyValue> createReader(DataSplit split) throws IOException {
-        if (!split.beforeFiles().isEmpty()) {
-            throw new IllegalArgumentException("This read cannot accept split with before files.");
-        }
-
         if (split.isStreaming() || split.bucket() == BucketMode.POSTPONE_BUCKET) {
             return createNoMergeReader(
                     split.partition(),
