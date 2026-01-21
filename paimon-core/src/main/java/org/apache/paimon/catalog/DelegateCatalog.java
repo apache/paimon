@@ -149,7 +149,7 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
-    public Table getTableById(String tableId) throws TableNotExistException {
+    public Table getTableById(String tableId) throws TableIdNotExistException {
         return wrapped.getTableById(tableId);
     }
 

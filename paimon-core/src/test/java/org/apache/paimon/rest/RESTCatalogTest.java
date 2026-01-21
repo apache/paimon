@@ -367,7 +367,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                 .getDatabaseName())
                 .isEqualTo("test_table_db");
         assertThrows(
-                Catalog.TableNotExistException.class,
+                Catalog.TableIdNotExistException.class,
                 () -> restCatalog.getTableById("missing_table_id"));
     }
 

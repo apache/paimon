@@ -160,9 +160,9 @@ public interface Catalog extends AutoCloseable {
      *
      * @param tableId Id of the table
      * @return The requested table
-     * @throws TableNotExistException if the target does not exist
+     * @throws TableIdNotExistException if the target does not exist
      */
-    Table getTableById(String tableId) throws TableNotExistException;
+    Table getTableById(String tableId) throws TableIdNotExistException;
 
     /**
      * Get names of all tables under this database. An empty list is returned if none exists.
@@ -1208,7 +1208,7 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Table %s does not exist.";
 
-        private final String identifier;
+        private final Identifier identifier;
 
         public TableNotExistException(Identifier identifier) {
             this(identifier, null);
@@ -1216,16 +1216,28 @@ public interface Catalog extends AutoCloseable {
 
         public TableNotExistException(Identifier identifier, Throwable cause) {
             super(String.format(MSG, identifier.getFullName()), cause);
-            this.identifier = identifier.getFullName();
-        }
-
-        public TableNotExistException(String identifier, Throwable cause) {
-            super(String.format(MSG, identifier), cause);
             this.identifier = identifier;
         }
 
         public Identifier identifier() {
-            return Identifier.fromString(identifier);
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a table by ID that doesn't exist. */
+    class TableIdNotExistException extends Exception {
+
+        private static final String MSG = "Table id %s does not exist.";
+
+        private final String tableId;
+
+        public TableIdNotExistException(String tableId, Throwable cause) {
+            super(String.format(MSG, tableId), cause);
+            this.tableId = tableId;
+        }
+
+        public String getTableId() {
+            return tableId;
         }
     }
 
@@ -1234,17 +1246,13 @@ public interface Catalog extends AutoCloseable {
 
         private static final String MSG = "Table %s has no permission. Cause by %s.";
 
-        private final String identifier;
+        private final Identifier identifier;
 
         public TableNoPermissionException(Identifier identifier, Throwable cause) {
-            this(identifier.getFullName(), cause);
-        }
-
-        public TableNoPermissionException(String identifier, Throwable cause) {
             super(
                     String.format(
                             MSG,
-                            identifier,
+                            identifier.getFullName(),
                             cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
                     cause);
             this.identifier = identifier;
@@ -1256,7 +1264,29 @@ public interface Catalog extends AutoCloseable {
         }
 
         public Identifier identifier() {
-            return Identifier.fromString(identifier);
+            return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a table by ID that doesn't have permission. */
+    class TableIdNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "Table id %s has no permission. Cause by %s.";
+
+        private final String tableId;
+
+        public TableIdNoPermissionException(String tableId, Throwable cause) {
+            super(
+                    String.format(
+                            MSG,
+                            tableId,
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.tableId = tableId;
+        }
+
+        public String getTableId() {
+            return tableId;
         }
     }
 
