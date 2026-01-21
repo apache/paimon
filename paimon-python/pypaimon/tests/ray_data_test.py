@@ -117,13 +117,12 @@ class RayDataTest(unittest.TestCase):
         self.assertIsNotNone(ray_dataset, "Ray dataset should not be None")
         self.assertEqual(ray_dataset.count(), 5, "Should have 5 rows")
 
-    def test_ray_data_write_with_blob(self):
+    def test_ray_data_read_and_write_with_blob(self):
         import time
-        
         pa_schema = pa.schema([
             ('id', pa.int64()),
             ('name', pa.string()),
-            ('data', pa.large_binary()),  # Table expects large_binary for blob
+            ('data', pa.large_binary()),  # Table uses large_binary for blob
         ])
 
         schema = Schema.from_pyarrow_schema(
@@ -134,83 +133,89 @@ class RayDataTest(unittest.TestCase):
                 'blob-field': 'data',
             }
         )
-        
-        table_name = f'default.test_ray_write_blob_{int(time.time() * 1000000)}'
+
+        table_name = f'default.test_ray_read_write_blob_{int(time.time() * 1000000)}'
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
 
-        external_data = [
-            {'id': 1, 'name': 'Alice', 'data': b'blob_data_1'},
-            {'id': 2, 'name': 'Bob', 'data': b'blob_data_2'},
-            {'id': 3, 'name': 'Charlie', 'data': b'blob_data_3'},
-        ]
-        
-        ray_dataset = ray.data.from_items(external_data)
-        
+        # Step 1: Write data to Paimon table using write_arrow (large_binary type)
+        initial_data = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            'name': ['Alice', 'Bob', 'Charlie'],
+            'data': [b'blob_data_1', b'blob_data_2', b'blob_data_3'],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(initial_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Step 2: Read from Paimon table using to_ray()
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan()
+        splits = table_scan.plan().splits()
+
+        ray_dataset = table_read.to_ray(splits)
+
         df_check = ray_dataset.to_pandas()
         ray_table_check = pa.Table.from_pandas(df_check)
         ray_schema_check = ray_table_check.schema
-        
-        ray_id_field = ray_schema_check.field('id')
-        self.assertTrue(
-            pa_types.is_int64(ray_id_field.type),
-            f"External Ray Dataset should have int64() type for id, but got {ray_id_field.type}"
-        )
-        
+
         ray_data_field = ray_schema_check.field('data')
         self.assertTrue(
             pa_types.is_binary(ray_data_field.type),
-            f"External Ray Dataset should have binary() type for data, but got {ray_data_field.type}"
+            f"Ray Dataset from Paimon should have binary() type (Ray Data converts large_binary to binary), but got {ray_data_field.type}"
         )
         self.assertFalse(
             pa_types.is_large_binary(ray_data_field.type),
-            f"External Ray Dataset should NOT have large_binary() type, but got {ray_data_field.type}"
+            f"Ray Dataset from Paimon should NOT have large_binary() type, but got {ray_data_field.type}"
         )
-        
+
         table_schema = table.table_schema
         table_pa_schema = PyarrowFieldParser.from_paimon_schema(table_schema.fields)
-        table_id_field = table_pa_schema.field('id')
         table_data_field = table_pa_schema.field('data')
-        
-        self.assertTrue(
-            pa_types.is_int64(table_id_field.type),
-            f"Paimon table should have int64() type for id, but got {table_id_field.type}"
-        )
+
         self.assertTrue(
             pa_types.is_large_binary(table_data_field.type),
             f"Paimon table should have large_binary() type for data, but got {table_data_field.type}"
         )
-        
-        write_builder = table.new_batch_write_builder()
-        writer = write_builder.new_write()
-        
-        writer.write_ray(
+
+        # Step 3: Write Ray Dataset back to Paimon table using write_ray()
+        write_builder2 = table.new_batch_write_builder()
+        writer2 = write_builder2.new_write()
+
+        writer2.write_ray(
             ray_dataset,
             overwrite=False,
             concurrency=1
         )
-        writer.close()
-        
-        read_builder = table.new_read_builder()
-        table_read = read_builder.new_read()
-        result = table_read.to_arrow(read_builder.new_scan().plan().splits())
-        
-        self.assertEqual(result.num_rows, 3, "Table should have 3 rows")
-        
+        writer2.close()
+
+        # Step 4: Verify the data was written correctly
+        read_builder2 = table.new_read_builder()
+        table_read2 = read_builder2.new_read()
+        result = table_read2.to_arrow(read_builder2.new_scan().plan().splits())
+
+        self.assertEqual(result.num_rows, 6, "Table should have 6 rows after roundtrip")
+
         result_df = result.to_pandas()
         result_df_sorted = result_df.sort_values(by='id').reset_index(drop=True)
-        
-        self.assertEqual(list(result_df_sorted['id']), [1, 2, 3], "ID column should match")
+
+        self.assertEqual(list(result_df_sorted['id']), [1, 1, 2, 2, 3, 3], "ID column should match")
         self.assertEqual(
             list(result_df_sorted['name']),
-            ['Alice', 'Bob', 'Charlie'],
+            ['Alice', 'Alice', 'Bob', 'Bob', 'Charlie', 'Charlie'],
             "Name column should match"
         )
-        
+
         written_data_values = [bytes(d) if d is not None else None for d in result_df_sorted['data']]
         self.assertEqual(
             written_data_values,
-            [b'blob_data_1', b'blob_data_2', b'blob_data_3'],
+            [b'blob_data_1', b'blob_data_1', b'blob_data_2', b'blob_data_2', b'blob_data_3', b'blob_data_3'],
             "Blob data column should match"
         )
 
