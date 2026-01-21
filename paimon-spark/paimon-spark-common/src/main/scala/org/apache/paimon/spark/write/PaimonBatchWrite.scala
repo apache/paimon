@@ -112,6 +112,7 @@ case class PaimonBatchWrite(
 
   private def buildDeletedCommitMessage(
       deletedFiles: Seq[SparkDataFileMeta]): Seq[CommitMessage] = {
+    logInfo(s"[V2 Write] Building deleted commit message for ${deletedFiles.size} files")
     deletedFiles
       .groupBy(f => (f.partition, f.bucket))
       .map {
