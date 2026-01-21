@@ -25,6 +25,9 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.ChainGroupReadTable;
+import org.apache.paimon.table.FallbackReadFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
@@ -208,5 +211,18 @@ public class ChainTableUtils {
     public static boolean isScanFallbackDeltaBranch(CoreOptions options) {
         return options.isChainTable()
                 && options.scanFallbackDeltaBranch().equalsIgnoreCase(options.branch());
+    }
+
+    public static boolean isScanFallbackSnapshotBranch(CoreOptions options) {
+        return options.isChainTable()
+                && options.scanFallbackSnapshotBranch().equalsIgnoreCase(options.branch());
+    }
+
+    public static FileStoreTable resolveChainPrimaryTable(FileStoreTable table) {
+        if (table.coreOptions().isChainTable() && table instanceof FallbackReadFileStoreTable) {
+            return ((ChainGroupReadTable) ((FallbackReadFileStoreTable) table).fallback())
+                    .wrapped();
+        }
+        return table;
     }
 }
