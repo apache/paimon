@@ -41,6 +41,7 @@ public class ResourcePaths {
     protected static final String REGISTER = "register";
     protected static final String FUNCTIONS = "functions";
     protected static final String FUNCTION_DETAILS = "function-details";
+    protected static final String ID = "id";
 
     private static final Joiner SLASH = Joiner.on("/").skipNulls();
 
@@ -79,7 +80,7 @@ public class ResourcePaths {
     }
 
     public String table(String tableId) {
-        return SLASH.join(V1, prefix, TABLES, encodeString(tableId));
+        return SLASH.join(V1, prefix, TABLES, ID, encodeString(tableId));
     }
 
     public String table(String databaseName, String objectName) {

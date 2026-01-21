@@ -412,7 +412,7 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
-  /v1/{prefix}/tables/{tableId}:
+  /v1/{prefix}/tables/id/{tableId}:
     get:
       tags:
         - table
