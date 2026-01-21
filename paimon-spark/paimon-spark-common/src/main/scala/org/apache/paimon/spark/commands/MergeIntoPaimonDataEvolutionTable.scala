@@ -475,7 +475,7 @@ case class MergeIntoPaimonDataEvolutionTable(
 
     // find all global index files of affected partitions and updated columns
     val latestSnapshot = table.latestSnapshot()
-    if (latestSnapshot.isEmpty) {
+    if (!latestSnapshot.isPresent) {
       return updateCommit
     }
 
@@ -496,6 +496,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       .newIndexFileHandler()
       .scan(latestSnapshot.get(), filter)
       .asScala
+      .toSeq
 
     if (affectedIndexEntries.isEmpty) {
       updateCommit
@@ -513,8 +514,7 @@ case class MergeIntoPaimonDataEvolutionTable(
                |Conflicted columns: ${conflicted.toSeq.sorted.mkString("[", ", ", "]")}
                |""".stripMargin)
         case GlobalIndexColumnUpdateAction.DROP_PARTITION_INDEX =>
-          val grouped: Map[BinaryRow, Seq[IndexManifestEntry]] =
-            affectedIndexEntries.groupBy(_.partition())
+          val grouped = affectedIndexEntries.groupBy(_.partition())
           val deleteCommitMessages = ArrayBuffer.empty[CommitMessage]
           grouped.foreach {
             case (part, entries) =>
