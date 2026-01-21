@@ -39,6 +39,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SerializationUtils;
 
 import javax.annotation.Nullable;
@@ -144,29 +145,61 @@ public class DataSplit implements Split {
 
     @Override
     public OptionalLong mergedRowCount() {
-        if (!rawConvertible
-                || (dataDeletionFiles != null
-                        && !dataDeletionFiles.stream()
-                                .allMatch(f -> f == null || f.cardinality() != null))) {
-            return OptionalLong.empty();
+        if (rawMergedRowCountAvailable()) {
+            return OptionalLong.of(rawMergedRowCount());
         }
+        if (dataEvolutionRowCountAvailable()) {
+            return OptionalLong.of(dataEvolutionMergedRowCount());
+        }
+        return OptionalLong.empty();
+    }
 
+    private boolean rawMergedRowCountAvailable() {
+        return rawConvertible
+                && (dataDeletionFiles == null
+                        || dataDeletionFiles.stream()
+                                .allMatch(f -> f == null || f.cardinality() != null));
+    }
+
+    private long rawMergedRowCount() {
         long sum = 0L;
-        List<RawFile> rawFiles = convertToRawFiles().orElse(null);
-        if (rawFiles != null) {
-            for (int i = 0; i < rawFiles.size(); i++) {
-                RawFile rawFile = rawFiles.get(i);
-                DeletionFile deletionFile =
-                        dataDeletionFiles == null ? null : dataDeletionFiles.get(i);
-                Long cardinality = deletionFile == null ? null : deletionFile.cardinality();
-                if (deletionFile == null) {
-                    sum += rawFile.rowCount();
-                } else if (cardinality != null) {
-                    sum += rawFile.rowCount() - cardinality;
-                }
+        for (int i = 0; i < dataFiles.size(); i++) {
+            DataFileMeta file = dataFiles.get(i);
+            DeletionFile deletionFile = dataDeletionFiles == null ? null : dataDeletionFiles.get(i);
+            Long cardinality = deletionFile == null ? null : deletionFile.cardinality();
+            if (deletionFile == null) {
+                sum += file.rowCount();
+            } else if (cardinality != null) {
+                sum += file.rowCount() - cardinality;
             }
         }
-        return OptionalLong.of(sum);
+        return sum;
+    }
+
+    private boolean dataEvolutionRowCountAvailable() {
+        for (DataFileMeta file : dataFiles) {
+            if (file.firstRowId() == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private long dataEvolutionMergedRowCount() {
+        long sum = 0L;
+        RangeHelper<DataFileMeta> rangeHelper =
+                new RangeHelper<>(
+                        DataFileMeta::nonNullFirstRowId,
+                        f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+        List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(dataFiles);
+        for (List<DataFileMeta> group : ranges) {
+            long maxCount = 0;
+            for (DataFileMeta file : group) {
+                maxCount = Math.max(maxCount, file.rowCount());
+            }
+            sum += maxCount;
+        }
+        return sum;
     }
 
     public Object minValue(int fieldIndex, DataField dataField, SimpleStatsEvolutions evolutions) {

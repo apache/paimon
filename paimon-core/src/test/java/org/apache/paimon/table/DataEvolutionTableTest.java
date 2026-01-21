@@ -44,6 +44,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
@@ -55,6 +56,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -87,8 +89,20 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         }
 
         ReadBuilder readBuilder = getTableDefault().newReadBuilder();
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        // assert merged row count
+        long noMergedRowCount = plan.splits().stream().mapToLong(Split::rowCount).sum();
+        long mergedRowCount =
+                plan.splits().stream()
+                        .map(Split::mergedRowCount)
+                        .filter(OptionalLong::isPresent)
+                        .mapToLong(OptionalLong::getAsLong)
+                        .sum();
+        assertThat(noMergedRowCount).isEqualTo(2);
+        assertThat(mergedRowCount).isEqualTo(1);
+
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
         assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
         reader.forEachRemaining(
                 r -> {
@@ -105,10 +119,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                         .newRead()
                         .createReader(readBuilder.newScan().plan());
         AtomicInteger cnt = new AtomicInteger(0);
-        reader.forEachRemaining(
-                r -> {
-                    cnt.incrementAndGet();
-                });
+        reader.forEachRemaining(r -> cnt.incrementAndGet());
         assertThat(cnt.get()).isEqualTo(1);
 
         // projection with an empty read type
@@ -119,10 +130,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
                         .newRead()
                         .createReader(readBuilder.newScan().plan());
         AtomicInteger cnt1 = new AtomicInteger(0);
-        reader.forEachRemaining(
-                r -> {
-                    cnt1.incrementAndGet();
-                });
+        reader.forEachRemaining(r -> cnt1.incrementAndGet());
         assertThat(cnt1.get()).isEqualTo(1);
     }
 
