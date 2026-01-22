@@ -879,6 +879,24 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.");
 
+    public static final ConfigOption<Boolean> TABLE_READ_SEQUENCE_NUMBER_ENABLED =
+            key("table-read.sequence-number.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog "
+                                    + "system tables. This is only valid for primary key tables.");
+
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<Boolean> KEY_VALUE_SEQUENCE_NUMBER_ENABLED =
+            key("key-value.sequence_number.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to include the _SEQUENCE_NUMBER field when reading key-value data. "
+                                    + "This is an internal option used by AuditLogTable and BinlogTable "
+                                    + "when table.read_sequence_number_enabled is set to true.");
+
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
                     .stringType()
@@ -2808,6 +2826,10 @@ public class CoreOptions implements Serializable {
         return options.getOptional(CHANGELOG_PRODUCER_ROW_DEDUPLICATE_IGNORE_FIELDS)
                 .map(s -> Arrays.asList(s.split(",")))
                 .orElse(Collections.emptyList());
+    }
+
+    public boolean tableReadSequenceNumberEnabled() {
+        return options.get(TABLE_READ_SEQUENCE_NUMBER_ENABLED);
     }
 
     public boolean scanPlanSortPartition() {
