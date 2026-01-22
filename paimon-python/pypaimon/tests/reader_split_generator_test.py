@@ -298,7 +298,6 @@ class SplitGeneratorTest(unittest.TestCase):
         # Use with_shard to potentially create SlicedSplit
         # Using multiple shards increases chance of creating SlicedSplit
         from pypaimon.read.sliced_split import SlicedSplit
-        has_sliced_split = False
         
         for shard_idx in range(3):
             splits_shard = read_builder.new_scan().with_shard(shard_idx, 3).plan().splits()
