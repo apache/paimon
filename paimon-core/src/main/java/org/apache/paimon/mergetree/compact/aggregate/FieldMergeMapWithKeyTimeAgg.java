@@ -72,11 +72,9 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
         InternalMap accMap = (InternalMap) accumulator;
         InternalMap inputMap = (InternalMap) inputField;
 
-        // 将累加器转换为可修改的Map
         Map<Object, Object> resultMap = new HashMap<>();
         putToMap(resultMap, accMap);
 
-        // 合并新数据
         mergeInputMap(resultMap, inputMap);
 
         return new GenericMap(resultMap);
@@ -105,7 +103,6 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
                 continue;
             }
 
-            // 跳过value/time为null的情况（时间戳为null）
             if (newRow.isNullAt(timestampFieldIndex)) {
                 continue;
             }
@@ -115,7 +112,6 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
                 resultMap.put(key, newRow);
             } else {
                 InternalRow existingRow = (InternalRow) existingValue;
-                // 防御：检查现有行时间戳是否有效
                 if (existingRow.isNullAt(timestampFieldIndex)) {
                     resultMap.put(key, newRow);
                 } else {
@@ -131,7 +127,6 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
 
     @Override
     public Object retract(Object accumulator, Object retractField) {
-        // 在合并树场景中通常不需要实现
         return null;
     }
 }
