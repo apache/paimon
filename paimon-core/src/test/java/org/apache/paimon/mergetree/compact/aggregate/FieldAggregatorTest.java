@@ -1251,9 +1251,8 @@ public class FieldAggregatorTest {
         assertTestMap(
                 acc,
                 createExpectedEntry("key1", "A1"),
-                createExpectedEntry("key2", "B"), // 未改变
+                createExpectedEntry("key2", "B"),
                 createExpectedEntry("key3", "C"));
-
     }
 
     private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
