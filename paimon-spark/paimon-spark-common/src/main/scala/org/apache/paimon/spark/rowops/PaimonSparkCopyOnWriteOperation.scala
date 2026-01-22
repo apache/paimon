@@ -42,8 +42,7 @@ class PaimonSparkCopyOnWriteOperation(table: FileStoreTable, info: RowLevelOpera
         PaimonSparkCopyOnWriteOperation.this.table.copy(options.asCaseSensitiveMap)
 
       override def build(): Scan = {
-        val scan =
-          PaimonCopyOnWriteScan(table, requiredSchema, pushedPartitionFilters, pushedDataFilters)
+        val scan = PaimonCopyOnWriteScan(table, requiredSchema)
         PaimonSparkCopyOnWriteOperation.this.copyOnWriteScan = Option(scan)
         scan
       }

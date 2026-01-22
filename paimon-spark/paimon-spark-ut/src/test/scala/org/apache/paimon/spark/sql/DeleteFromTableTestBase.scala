@@ -518,4 +518,17 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
     }
   }
+
+  test("Paimon delete: delete with range condition") {
+    withTable("t") {
+      sql(s"CREATE TABLE t (id INT, v INT)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id FROM range (1, 50000)")
+      sql("DELETE FROM t WHERE id >= 111 and id <= 444")
+
+      checkAnswer(
+        sql("SELECT count(*) FROM t"),
+        Row(49665)
+      )
+    }
+  }
 }

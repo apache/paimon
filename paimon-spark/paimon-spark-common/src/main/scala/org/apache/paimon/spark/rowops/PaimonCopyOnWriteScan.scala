@@ -19,13 +19,13 @@
 package org.apache.paimon.spark.rowops
 
 import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.predicate.{And, CompoundPredicate, Predicate, PredicateBuilder}
 import org.apache.paimon.spark.commands.SparkDataFileMeta
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
 import org.apache.paimon.spark.scan.BaseScan
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.FILE_PATH_COLUMN
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.source.{DataSplit, Split}
+import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
 
 import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.expressions.{Expressions, NamedReference}
@@ -39,11 +39,15 @@ import java.nio.file.Paths
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
+/**
+ * Note: The [[pushedPartitionFilters]] and [[pushedDataFilters]] are intentionally set to empty
+ * because file-level filtering is handled through Spark's runtime V2 filtering mechanism.
+ */
 case class PaimonCopyOnWriteScan(
     table: FileStoreTable,
     requiredSchema: StructType,
-    pushedPartitionFilters: Seq[PartitionPredicate],
-    pushedDataFilters: Seq[Predicate])
+    pushedPartitionFilters: Seq[PartitionPredicate] = Seq.empty,
+    pushedDataFilters: Seq[Predicate] = Seq.empty)
   extends BaseScan
   with SupportsRuntimeV2Filtering {
 
@@ -79,13 +83,9 @@ case class PaimonCopyOnWriteScan(
     if (table.coreOptions().manifestDeleteFileDropStats()) {
       snapshotReader.dropStats()
     }
-    if (pushedPartitionFilters.nonEmpty) {
-      snapshotReader.withPartitionFilter(PartitionPredicate.and(pushedPartitionFilters.asJava))
-    }
-    if (pushedDataFilters.nonEmpty) {
-      snapshotReader.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
-    }
+
     snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
     dataSplits = snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
   }
+
 }
