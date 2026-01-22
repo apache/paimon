@@ -358,6 +358,11 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
       <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
       <td>true</td>
     </tr>
+    <tr>
+      <td><code>VariantType(Spark4.0+)</code></td>
+      <td><code>VariantType</code></td>
+      <td>true</td>
+    </tr>
     </tbody>
 </table>
 

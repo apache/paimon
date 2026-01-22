@@ -211,7 +211,8 @@ public class PaimonShreddingUtils {
     }
 
     public static RowType variantShreddingSchema(DataType dataType) {
-        return variantShreddingSchema(dataType, true, false);
+        return VariantMetadataUtils.addVariantMetadata(
+                variantShreddingSchema(dataType, true, false));
     }
 
     /**

@@ -45,10 +45,14 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.Type;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -545,9 +549,43 @@ public class InferVariantShreddingWriteTest {
                         fileIO, file, fileIO.getFileSize(file), new Options())) {
             MessageType schema = reader.getFooter().getFileMetaData().getSchema();
             for (int i = 0; i < expectShreddedTypes.length; i++) {
-                assertThat(VariantUtils.variantFileType(schema.getType(i)))
+                assertThat(
+                                VariantMetadataUtils.addVariantMetadata(
+                                        VariantUtils.variantFileType(schema.getType(i))))
                         .isEqualTo(variantShreddingSchema(expectShreddedTypes[i]));
             }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testVariantTypeAnnotation(boolean inferShredding) throws Exception {
+        Options options = new Options();
+        options.set(
+                CoreOptions.VARIANT_INFER_SHREDDING_SCHEMA.key(), String.valueOf(inferShredding));
+        ParquetFileFormat format = createFormat(options);
+        RowType writeType = DataTypes.ROW(DataTypes.FIELD(0, "v", DataTypes.VARIANT()));
+
+        FormatWriterFactory factory = format.createWriterFactory(writeType);
+        writeRows(
+                factory,
+                GenericRow.of(GenericVariant.fromJson("{\"name\":\"Alice\"}")),
+                GenericRow.of(GenericVariant.fromJson("{\"name\":\"Bob\"}")));
+
+        // Verify that the Parquet schema contains LogicalTypeAnnotation.variantType
+        try (ParquetFileReader reader =
+                ParquetUtil.getParquetReader(
+                        fileIO, file, fileIO.getFileSize(file), new Options())) {
+            MessageType schema = reader.getFooter().getFileMetaData().getSchema();
+            Type variantField = schema.getType(0);
+
+            // The variant field should be a group type
+            assertThat(variantField.isPrimitive()).isFalse();
+            LogicalTypeAnnotation logicalType = variantField.getLogicalTypeAnnotation();
+
+            // The variant type should have variant annotation
+            assertThat(logicalType)
+                    .isInstanceOf(LogicalTypeAnnotation.VariantLogicalTypeAnnotation.class);
         }
     }
 }
