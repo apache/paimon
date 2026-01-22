@@ -98,9 +98,18 @@ public class DataEvolutionCompactCoordinator {
 
             List<ManifestFileMeta> manifestFileMetas =
                     snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
-            RangeHelper<ManifestFileMeta> rangeHelper =
-                    new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
-            this.metas = new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
+
+            boolean allManifestMetaContainsRowId =
+                    manifestFileMetas.stream()
+                            .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null);
+            if (allManifestMetaContainsRowId) {
+                RangeHelper<ManifestFileMeta> rangeHelper =
+                        new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
+                this.metas =
+                        new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
+            } else {
+                this.metas = new ArrayDeque<>(Collections.singletonList(manifestFileMetas));
+            }
         }
 
         List<ManifestEntry> scan() {
