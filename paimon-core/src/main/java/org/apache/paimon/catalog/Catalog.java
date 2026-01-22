@@ -156,6 +156,15 @@ public interface Catalog extends AutoCloseable {
     Table getTable(Identifier identifier) throws TableNotExistException;
 
     /**
+     * Return a {@link Table} identified by the given tableId.
+     *
+     * @param tableId Id of the table
+     * @return The requested table
+     * @throws TableIdNotExistException if the target does not exist
+     */
+    Table getTableById(String tableId) throws TableIdNotExistException;
+
+    /**
      * Get names of all tables under this database. An empty list is returned if none exists.
      *
      * <p>NOTE: System tables will not be listed.
@@ -1215,6 +1224,23 @@ public interface Catalog extends AutoCloseable {
         }
     }
 
+    /** Exception for trying to operate on a table by ID that doesn't exist. */
+    class TableIdNotExistException extends Exception {
+
+        private static final String MSG = "Table id %s does not exist.";
+
+        private final String tableId;
+
+        public TableIdNotExistException(String tableId, Throwable cause) {
+            super(String.format(MSG, tableId), cause);
+            this.tableId = tableId;
+        }
+
+        public String getTableId() {
+            return tableId;
+        }
+    }
+
     /** Exception for trying to operate on the table that doesn't have permission. */
     class TableNoPermissionException extends RuntimeException {
 
@@ -1239,6 +1265,28 @@ public interface Catalog extends AutoCloseable {
 
         public Identifier identifier() {
             return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a table by ID that doesn't have permission. */
+    class TableIdNoPermissionException extends RuntimeException {
+
+        private static final String MSG = "Table id %s has no permission. Cause by %s.";
+
+        private final String tableId;
+
+        public TableIdNoPermissionException(String tableId, Throwable cause) {
+            super(
+                    String.format(
+                            MSG,
+                            tableId,
+                            cause != null && cause.getMessage() != null ? cause.getMessage() : ""),
+                    cause);
+            this.tableId = tableId;
+        }
+
+        public String getTableId() {
+            return tableId;
         }
     }
 

@@ -478,6 +478,19 @@ public class RESTApi {
     }
 
     /**
+     * Get table by tableId.
+     *
+     * @param tableId id of the table.
+     * @return {@link GetTableResponse}
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public GetTableResponse getTableById(String tableId) {
+        return client.get(resourcePaths.table(tableId), GetTableResponse.class, restAuthFunction);
+    }
+
+    /**
      * Load latest snapshot for table.
      *
      * @param identifier database name and table name.

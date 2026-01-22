@@ -412,6 +412,36 @@ paths:
           $ref: '#/components/responses/UnauthorizedErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/tables/id/{tableId}:
+    get:
+      tags:
+        - table
+      summary: Get table by id
+      operationId: getTableById
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tableId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetTableResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}:
     get:
       tags:
@@ -2547,6 +2577,8 @@ components:
       type: object
       properties:
         id:
+          type: string
+        database:
           type: string
         name:
           type: string

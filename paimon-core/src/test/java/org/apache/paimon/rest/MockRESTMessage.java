@@ -234,6 +234,7 @@ public class MockRESTMessage {
         options.put("option-2", "value-2");
         return new GetTableResponse(
                 UUID.randomUUID().toString(),
+                "default",
                 "",
                 "/tmp/",
                 false,
