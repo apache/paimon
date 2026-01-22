@@ -67,6 +67,15 @@ public class VariantMetadataUtils {
         return true;
     }
 
+    /** Add metadata to the top-level fields to mark it s a shredding schema for writers. */
+    public static RowType addVariantMetadata(RowType rowType) {
+        List<DataField> fields = new ArrayList<>();
+        for (DataField f : rowType.getFields()) {
+            fields.add((f.newDescription(METADATA_KEY)));
+        }
+        return rowType.copy(fields);
+    }
+
     /** Extract the path from variant metadata description. */
     public static String path(String description) {
         return splitDescription(description)[0];

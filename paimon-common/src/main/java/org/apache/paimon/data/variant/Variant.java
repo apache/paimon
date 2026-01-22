@@ -37,6 +37,8 @@ import java.time.ZoneOffset;
  */
 public interface Variant {
 
+    byte VARIANT_SPEC_VERSION = (byte) 1;
+
     String METADATA = "metadata";
 
     String VALUE = "value";

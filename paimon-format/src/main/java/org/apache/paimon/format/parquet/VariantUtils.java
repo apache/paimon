@@ -49,8 +49,8 @@ public class VariantUtils {
             return (RowType) ParquetSchemaConverter.convertToPaimonField(fileType).type();
         } else {
             List<DataField> dataFields = new ArrayList<>();
-            dataFields.add(new DataField(0, VALUE, DataTypes.BYTES()));
-            dataFields.add(new DataField(1, METADATA, DataTypes.BYTES()));
+            dataFields.add(new DataField(0, VALUE, DataTypes.BYTES().notNull()));
+            dataFields.add(new DataField(1, METADATA, DataTypes.BYTES().notNull()));
             return new RowType(dataFields);
         }
     }
