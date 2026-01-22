@@ -451,7 +451,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private String getDataFilePath(Identifier tableIdentifier, Table hmsTable) {
-        String tableLocation = getTableLocation(tableIdentifier, hmsTable).toUri().toString();
+        String tableLocation = getTableLocation(tableIdentifier, hmsTable).toString();
         return hmsTable.getParameters().containsKey(DATA_FILE_PATH_DIRECTORY.key())
                 ? tableLocation
                         + Path.SEPARATOR
@@ -1778,7 +1778,7 @@ public class HiveCatalog extends AbstractCatalog {
                 hiveConf,
                 options.get(HiveCatalogOptions.METASTORE_CLIENT_CLASS),
                 context,
-                warehouse.toUri().toString());
+                warehouse.toString());
     }
 
     public static HiveConf createHiveConf(CatalogContext context) {

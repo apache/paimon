@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.deletionvectors.{Bitmap64DeletionVector, BitmapDeletionVector, DeletionVector}
+import org.apache.paimon.fs.Path
 import org.apache.paimon.io.{CompactIncrement, DataFileMeta, DataIncrement}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.SparkDataFileMeta.convertToSparkDataFileMeta
@@ -156,8 +157,9 @@ trait PaimonRowLevelCommand
       sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     import sparkSession.implicits._
     // convert to a serializable map
-    val dataFileToPartitionAndBucket = dataFilePathToMeta.map {
-      case (k, v) => k -> (v.bucketPath, v.partition, v.bucket)
+    val dataFileNameToPartitionAndBucket = dataFilePathToMeta.map {
+      case (k, v) =>
+        new Path(k).getName -> (v.bucketPath, v.partition, v.bucket, k)
     }
 
     val my_table = table
@@ -174,12 +176,13 @@ trait PaimonRowLevelCommand
             dv.delete(iter.next()._2)
           }
 
-          val (bucketPath, partition, bucket) = dataFileToPartitionAndBucket.apply(filePath)
+          val (bucketPath, partition, bucket, dataFilePath) =
+            dataFileNameToPartitionAndBucket.apply(new Path(filePath).getName)
           SparkDeletionVector(
             bucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
-            filePath,
+            dataFilePath,
             DeletionVector.serializeToBytes(dv)
           )
       }

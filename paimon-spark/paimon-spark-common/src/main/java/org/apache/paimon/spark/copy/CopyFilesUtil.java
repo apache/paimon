@@ -91,8 +91,6 @@ public class CopyFilesUtil {
     }
 
     public static Optional<String> externalPathDir(String externalPath) {
-        return Optional.ofNullable(externalPath)
-                .map(Path::new)
-                .map(p -> p.getParent().toUri().toString());
+        return Optional.ofNullable(externalPath).map(Path::new).map(p -> p.getParent().toString());
     }
 }

@@ -47,7 +47,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                       |VALUES (1, 'x1'), (2, 'x3'), (3, 'x3'), (4, 'x4'), (5, 'x5')
                       |""".stripMargin)
 
-          val location = loadTable("T").location().toUri.toString
+          val location = loadTable("T").location().toString
           val res = spark.sql(
             s"""
                |SELECT SUM(cnt)
@@ -128,7 +128,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                            |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
-              val location = loadTable("T").location().toUri.toString
+              val location = loadTable("T").location().toString
 
               spark.sql("INSERT INTO T VALUES (1, 'x1'), (3, 'x3')")
 
@@ -175,7 +175,7 @@ class PaimonQueryTest extends PaimonSparkTestBase {
                            |TBLPROPERTIES ('file.format'='$fileFormat' $bucketProp)
                            |""".stripMargin)
 
-              val location = loadTable("T").location().toUri.toString
+              val location = loadTable("T").location().toString
 
               spark.sql("INSERT INTO T VALUES (1, 'x1', '2024'), (3, 'x3', '2024')")
 

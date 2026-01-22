@@ -146,7 +146,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         Set<Path> bucketDirs =
                 deleteFiles.stream()
                         .map(Path::getParent)
-                        .filter(path -> path.toUri().toString().contains(BUCKET_PATH_PREFIX))
+                        .filter(path -> path.toString().contains(BUCKET_PATH_PREFIX))
                         .collect(Collectors.toSet());
         randomlyOnlyExecute(executor, this::tryDeleteEmptyDirectory, bucketDirs);
 

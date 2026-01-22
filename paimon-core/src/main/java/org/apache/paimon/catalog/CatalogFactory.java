@@ -88,7 +88,7 @@ public interface CatalogFactory extends Factory {
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
-        String warehouse = warehouse(context).toUri().toString();
+        String warehouse = warehouse(context).toString();
 
         Path warehousePath = new Path(warehouse);
         FileIO fileIO;
