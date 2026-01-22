@@ -351,6 +351,8 @@ under the License.
                                     <include>org.apache.parquet:parquet-format-structures</include>
                                     <include>org.apache.parquet:parquet-jackson</include>
                                     <include>commons-pool:commons-pool</include>
+                                    <include>commons-pool:commons-pool</include>
+                                    <include>org.locationtech.jts:jts-core</include>
 
                                     <!-- compress -->
                                     <include>com.github.luben:zstd-jni</include>
@@ -410,6 +412,10 @@ under the License.
                                 <relocation>
                                     <pattern>shaded.parquet</pattern>
                                     <shadedPattern>org.apache.paimon.shade.parquet</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.locationtech.jts</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.org.locationtech.jts</shadedPattern>
                                 </relocation>
 
                                 <!-- Relocate Common. -->
