@@ -46,6 +46,29 @@ class BlobTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
         Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 1))
       )
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(2))
+      )
+    }
+  }
+
+  test("Blob: test multiple blobs") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING, pic1 BINARY, pic2 BINARY) TBLPROPERTIES (" +
+        "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pic1,pic2')")
+      sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F', X'5945')")
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), Array[Byte](89, 69), 0, 1))
+      )
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(3))
+      )
     }
   }
 
