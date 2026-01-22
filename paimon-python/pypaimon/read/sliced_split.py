@@ -160,7 +160,8 @@ class SlicedSplit(Split):
                 return None
             
             for i, deletion_file in enumerate(self._data_split.data_deletion_files):
-                if deletion_file is not None and deletion_file.cardinality is not None and i < len(self._data_split.files):
+                if (deletion_file is not None and deletion_file.cardinality is not None
+                        and i < len(self._data_split.files)):
                     file = self._data_split.files[i]
                     if file.first_row_id is not None:
                         file_original_count = file.row_count

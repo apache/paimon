@@ -2774,12 +2774,14 @@ class DataBlobWriterTest(unittest.TestCase):
             merged_count = split.merged_row_count()
             if merged_count is not None:
                 total_merged_count += merged_count
-                self.assertLessEqual(merged_count, split.row_count,
-                                   f"merged_row_count ({merged_count}) should be <= row_count ({split.row_count})")
+                self.assertLessEqual(
+                    merged_count, split.row_count,
+                    f"merged_row_count ({merged_count}) should be <= row_count ({split.row_count})")
         
         if total_merged_count > 0:
-            self.assertEqual(total_merged_count, num_rows,
-                           f"Total merged_row_count should be {num_rows}, got {total_merged_count}")
+            self.assertEqual(
+                total_merged_count, num_rows,
+                f"Total merged_row_count should be {num_rows}, got {total_merged_count}")
 
         ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
 
