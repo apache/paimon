@@ -143,7 +143,7 @@ public class DataFilePathFactory {
         Optional<String> externalPathDir =
                 Optional.ofNullable(aligned.externalPath())
                         .map(Path::new)
-                        .map(p -> p.getParent().toUri().toString());
+                        .map(p -> p.getParent().toString());
         return new Path(externalPathDir.map(Path::new).orElse(parent), fileName);
     }
 

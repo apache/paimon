@@ -285,7 +285,7 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             if (oldEnough(file)) {
                                                 out.collect(
                                                         Tuple2.of(
-                                                                file.getPath().toUri().toString(),
+                                                                file.getPath().toString(),
                                                                 file.getLen()));
                                             }
                                         }

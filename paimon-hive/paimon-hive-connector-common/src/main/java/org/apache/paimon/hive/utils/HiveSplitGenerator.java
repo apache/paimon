@@ -80,7 +80,7 @@ public class HiveSplitGenerator {
         List<PaimonInputSplit> splits = new ArrayList<>();
         // locations may contain multiple partitions
         for (String location : locations.split(",")) {
-            if (!location.startsWith(table.location().toUri().toString())) {
+            if (!location.startsWith(table.location().toString())) {
                 // Hive create dummy file for empty table or partition. If this location doesn't
                 // belong to this table, nothing to do.
                 continue;

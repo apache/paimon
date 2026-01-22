@@ -229,9 +229,7 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     @Override
     public Optional<String> externalPathDir() {
-        return Optional.ofNullable(externalPath)
-                .map(Path::new)
-                .map(p -> p.getParent().toUri().toString());
+        return Optional.ofNullable(externalPath).map(Path::new).map(p -> p.getParent().toString());
     }
 
     @Override
