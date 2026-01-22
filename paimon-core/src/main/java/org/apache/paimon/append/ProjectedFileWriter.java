@@ -31,13 +31,13 @@ import java.io.IOException;
  * <p>This is useful when the physical file schema is a subset of the logical write schema. The
  * projection is evaluated via {@link ProjectedRow} to avoid object allocations.
  */
-public class PeojectedFileWriter<T extends FileWriter<InternalRow, R>, R>
+public class ProjectedFileWriter<T extends FileWriter<InternalRow, R>, R>
         implements FileWriter<InternalRow, R> {
 
     private final T writer;
     private final ProjectedRow projectedRow;
 
-    public PeojectedFileWriter(T writer, int[] projection) {
+    public ProjectedFileWriter(T writer, int[] projection) {
         this.writer = writer;
         this.projectedRow = ProjectedRow.from(projection);
     }

@@ -40,6 +40,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -600,17 +601,14 @@ public class SchemaValidation {
                     "Data evolution config must disabled with deletion-vectors.enabled");
         }
 
-        List<String> blobNames =
-                BlobType.splitBlob(schema.logicalRowType()).getRight().getFieldNames();
+        Pair<RowType, RowType> normalAndBlobType = BlobType.splitBlob(schema.logicalRowType());
+        List<String> blobNames = normalAndBlobType.getRight().getFieldNames();
         if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");
             checkArgument(
-                    blobNames.size() == 1,
-                    "Table with BLOB type column only support one BLOB column.");
-            checkArgument(
-                    schema.fields().size() > 1,
+                    normalAndBlobType.getLeft().getFieldCount() > 0,
                     "Table with BLOB type column must have other normal columns.");
             checkArgument(
                     !schema.partitionKeys().contains(blobNames.get(0)),

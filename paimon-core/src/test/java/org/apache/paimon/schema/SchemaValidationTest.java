@@ -28,11 +28,12 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
@@ -49,8 +50,8 @@ class SchemaValidationTest {
                         new DataField(1, "f1", DataTypes.INT()),
                         new DataField(2, "f2", DataTypes.INT()),
                         new DataField(3, "f3", DataTypes.STRING()));
-        List<String> partitionKeys = Collections.singletonList("f0");
-        List<String> primaryKeys = Collections.singletonList("f1");
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = singletonList("f1");
         options.put(BUCKET.key(), String.valueOf(-1));
         validateTableSchema(
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
@@ -64,8 +65,7 @@ class SchemaValidationTest {
                         new DataField(2, "f2", DataTypes.BLOB()),
                         new DataField(3, "f3", DataTypes.STRING()));
         options.put(BUCKET.key(), String.valueOf(-1));
-        validateTableSchema(
-                new TableSchema(1, fields, 10, partitions, Collections.emptyList(), options, ""));
+        validateTableSchema(new TableSchema(1, fields, 10, partitions, emptyList(), options, ""));
     }
 
     @Test
@@ -139,17 +139,29 @@ class SchemaValidationTest {
     public void testBlobTableSchema() {
         Map<String, String> options = new HashMap<>();
 
-        // 1. must set row-tracking = true and data-evolution = true
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        assertThatThrownBy(() -> validateBlobSchema(options, Collections.emptyList()))
+        assertThatThrownBy(() -> validateBlobSchema(options, emptyList()))
                 .hasMessage("Data evolution config must enabled for table with BLOB type column.");
 
-        // 2. blob column cannot be part of partition keys
         options.clear();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        assertThatThrownBy(() -> validateBlobSchema(options, Collections.singletonList("f2")))
+        assertThatThrownBy(() -> validateBlobSchema(options, singletonList("f2")))
                 .hasMessage("The BLOB type column can not be part of partition keys.");
+
+        assertThatThrownBy(
+                        () -> {
+                            validateTableSchema(
+                                    new TableSchema(
+                                            1,
+                                            singletonList(new DataField(2, "f2", DataTypes.BLOB())),
+                                            10,
+                                            emptyList(),
+                                            emptyList(),
+                                            options,
+                                            ""));
+                        })
+                .hasMessage("Table with BLOB type column must have other normal columns.");
     }
 
     @Test
