@@ -597,18 +597,18 @@ class PyarrowFieldParser:
             unit = field_type.unit
             if field_type.tz is None:
                 if unit == 'us':
-                    return {"type": "long", "logicalType": "local-timestamp-micros"}
-                elif unit == 'ms':
-                    return {"type": "long", "logicalType": "local-timestamp-millis"}
-                else:
-                    return {"type": "long", "logicalType": "local-timestamp-micros"}
-            else:
-                if unit == 'us':
                     return {"type": "long", "logicalType": "timestamp-micros"}
                 elif unit == 'ms':
                     return {"type": "long", "logicalType": "timestamp-millis"}
                 else:
                     return {"type": "long", "logicalType": "timestamp-micros"}
+            else:
+                if unit == 'us':
+                    return {"type": "long", "logicalType": "local-timestamp-micros"}
+                elif unit == 'ms':
+                    return {"type": "long", "logicalType": "local-timestamp-millis"}
+                else:
+                    return {"type": "long", "logicalType": "local-timestamp-micros"}
         elif pyarrow.types.is_list(field_type) or pyarrow.types.is_large_list(field_type):
             value_field = field_type.value_field
             return {
