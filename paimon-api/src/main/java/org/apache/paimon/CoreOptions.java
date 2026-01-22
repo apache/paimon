@@ -835,6 +835,16 @@ public class CoreOptions implements Serializable {
                             "Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog "
                                     + "system tables. This is only valid for primary key tables.");
 
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<Boolean> KEY_VALUE_SEQUENCE_NUMBER_ENABLED =
+            key("key-value.sequence_number.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to include the _SEQUENCE_NUMBER field when reading key-value data. "
+                                    + "This is an internal option used by AuditLogTable and BinlogTable "
+                                    + "when table.read_sequence_number_enabled is set to true.");
+
     public static final ConfigOption<String> SEQUENCE_FIELD =
             key("sequence.field")
                     .stringType()

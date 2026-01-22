@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
@@ -169,10 +170,17 @@ public final class KeyValueTableRead extends AbstractDataTableRead {
             @Nullable
             @Override
             public RecordIterator<InternalRow> readBatch() throws IOException {
+                boolean keyValueSequenceNumberEnabled =
+                        Boolean.parseBoolean(
+                                schemaOptions.getOrDefault(
+                                        CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(),
+                                        "false"));
+
                 RecordIterator<KeyValue> batch = reader.readBatch();
                 return batch == null
                         ? null
-                        : new ValueContentRowDataRecordIterator(batch, schemaOptions);
+                        : new ValueContentRowDataRecordIterator(
+                                batch, keyValueSequenceNumberEnabled);
             }
 
             @Override

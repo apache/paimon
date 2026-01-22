@@ -84,7 +84,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED;
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.table.source.ValueContentRowDataRecordIterator.KEY_VALUE_SEQUENCE_NUMBER_ENABLED;
 
 /** A {@link Table} for reading audit log of table. */
 public class AuditLogTable implements DataTable, ReadonlyTable {
@@ -104,7 +103,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
                 CoreOptions.fromMap(wrapped.options()).tableReadSequenceNumberEnabled();
 
         if (includeSequenceNumber) {
-            this.wrapped.options().put(KEY_VALUE_SEQUENCE_NUMBER_ENABLED, "true");
+            this.wrapped.options().put(CoreOptions.KEY_VALUE_SEQUENCE_NUMBER_ENABLED.key(), "true");
             specialFields.add(SpecialFields.SEQUENCE_NUMBER);
         }
     }

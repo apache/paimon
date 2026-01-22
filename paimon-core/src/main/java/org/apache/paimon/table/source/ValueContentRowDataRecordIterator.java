@@ -25,26 +25,21 @@ import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.reader.RecordReader;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
 
 /** A {@link RecordReader.RecordIterator} mapping a {@link KeyValue} to its value. */
 public class ValueContentRowDataRecordIterator extends ResetRowKindRecordIterator {
 
-    public static final String KEY_VALUE_SEQUENCE_NUMBER_ENABLED =
-            "key-value.sequence_number.enabled";
     private final boolean keyValueSequenceNumberEnabled;
 
     public ValueContentRowDataRecordIterator(RecordReader.RecordIterator<KeyValue> kvIterator) {
-        this(kvIterator, new HashMap<>(1));
+        this(kvIterator, false);
     }
 
     public ValueContentRowDataRecordIterator(
-            RecordReader.RecordIterator<KeyValue> kvIterator, Map<String, String> schemaOptions) {
+            RecordReader.RecordIterator<KeyValue> kvIterator,
+            boolean keyValueSequenceNumberEnabled) {
         super(kvIterator);
-        this.keyValueSequenceNumberEnabled =
-                Boolean.parseBoolean(
-                        schemaOptions.getOrDefault(KEY_VALUE_SEQUENCE_NUMBER_ENABLED, "false"));
+        this.keyValueSequenceNumberEnabled = keyValueSequenceNumberEnabled;
     }
 
     @Override
