@@ -71,6 +71,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -1214,5 +1215,116 @@ public class FieldAggregatorTest {
             result.put(keyArray.getInt(i), valueArray.getString(i));
         }
         return result;
+    }
+
+    // ... 原有代码保持不变 ...
+    @Test
+    public void testFieldMergeMapWithKeyTimeAgg() {
+        // 创建聚合函数
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType);
+
+        // 测试数据准备
+        GenericMap map1 =
+                createTestMap(
+                        createEntry("key1", "A", "17682882903686900100"),
+                        createEntry("key2", "B", "17682882903686900100"));
+        GenericMap map2 =
+                createTestMap(
+                        createEntry("key1", "A1", "17682882903686900200"),
+                        createEntry("key3", "C", "17682882903686900200"));
+        GenericMap map3 = createTestMap(createEntry("key2", "B2", "17682882903686900050"));
+        GenericMap map4 =
+                createTestMap(
+                        createEntry("key3", null, null) // 删除标记
+                        );
+
+        // 执行测试
+        Object acc = agg.agg(null, map1);
+        assertTestMap(acc, createExpectedEntry("key1", "A"), createExpectedEntry("key2", "B"));
+
+        acc = agg.agg(acc, map2);
+        assertTestMap(
+                acc,
+                createExpectedEntry("key1", "A1"),
+                createExpectedEntry("key2", "B"),
+                createExpectedEntry("key3", "C"));
+
+        acc = agg.agg(acc, map3);
+        assertTestMap(
+                acc,
+                createExpectedEntry("key1", "A1"),
+                createExpectedEntry("key2", "B"), // 未改变
+                createExpectedEntry("key3", "C"));
+
+        acc = agg.agg(acc, map4);
+        assertTestMap(
+                acc, createExpectedEntry("key1", "A1"), createExpectedEntry("key2", "B") // key3 被删除
+                );
+    }
+
+    // 辅助方法：创建测试条目
+    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
+        return new AbstractMap.SimpleEntry<>(
+                BinaryString.fromString(key),
+                GenericRow.of(
+                        value == null ? null : BinaryString.fromString(value),
+                        ts == null ? null : BinaryString.fromString(ts)));
+    }
+
+    // 辅助方法：创建预期条目
+    private Map.Entry<String, String> createExpectedEntry(String key, String value) {
+        return new AbstractMap.SimpleEntry<>(key, value);
+    }
+
+    @SafeVarargs
+    private final GenericMap createTestMap(Map.Entry<BinaryString, InternalRow>... entries) {
+        Map<BinaryString, InternalRow> map = new HashMap<>();
+        for (Map.Entry<BinaryString, InternalRow> entry : entries) {
+            map.put(entry.getKey(), entry.getValue());
+        }
+        return new GenericMap(map);
+    }
+
+    // 修复后的断言方法
+    @SafeVarargs
+    private final void assertTestMap(Object mapObj, Map.Entry<String, String>... expected) {
+        InternalMap map = (InternalMap) mapObj;
+        Map<String, String> actual = new HashMap<>();
+
+        // 使用 InternalArray 替代 ArrayData
+        InternalArray keyArray = map.keyArray();
+        InternalArray valueArray = map.valueArray();
+
+        for (int i = 0; i < map.size(); i++) {
+            // 获取键（BinaryString）
+            BinaryString keyBinary = keyArray.getString(i);
+            String key = keyBinary.toString();
+
+            // 获取值行（InternalRow）
+            InternalRow row = valueArray.getRow(i, 2);
+
+            // 处理可能为 null 的值
+            String value = null;
+            if (!row.isNullAt(0)) {
+                BinaryString valueBinary = row.getString(0);
+                value = valueBinary != null ? valueBinary.toString() : null;
+            }
+            actual.put(key, value);
+        }
+
+        // 构建预期结果
+        Map<String, String> expectedMap = new HashMap<>();
+        for (Map.Entry<String, String> e : expected) {
+            expectedMap.put(e.getKey(), e.getValue());
+        }
+
+        // 断言
+        assertThat(actual).containsExactlyInAnyOrderEntriesOf(expectedMap);
     }
 }
