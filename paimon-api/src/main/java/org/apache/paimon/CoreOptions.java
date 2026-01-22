@@ -2143,7 +2143,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
                     .booleanType()
-                    .defaultValue(false)
+                    .defaultValue(true)
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
