@@ -2128,6 +2128,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withFallbackKeys(FILE_COMPRESSION.key())
                     .withDescription("Format table file compression.");
+
     public static final ConfigOption<String> FORMAT_TABLE_COMMIT_HIVE_SYNC_URI =
             ConfigOptions.key("format-table.commit-hive-sync-url")
                     .stringType()
@@ -2138,7 +2139,9 @@ public class CoreOptions implements Serializable {
             key("blob-field")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Specify the blob field.");
+                    .withDescription(
+                            "Specifies column names that should be stored as blob type. "
+                                    + "This is used when you want to treat a BYTES column as a BLOB.");
 
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
