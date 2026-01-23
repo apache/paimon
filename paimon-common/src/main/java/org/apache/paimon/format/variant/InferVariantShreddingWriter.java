@@ -27,8 +27,11 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 
+import javax.annotation.Nonnull;
+
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -87,7 +90,22 @@ public class InferVariantShreddingWriter implements BundleFormatWriter {
     @Override
     public void writeBundle(BundleRecords bundle) throws IOException {
         if (!schemaFinalized) {
-            bufferedBundles.add(bundle);
+            final List<InternalRow> rows = new ArrayList<>();
+            bundle.forEach(row -> rows.add(InternalRowUtils.copyInternalRow(row, rowType)));
+            BundleRecords copiedBundle =
+                    new BundleRecords() {
+                        @Override
+                        @Nonnull
+                        public Iterator<InternalRow> iterator() {
+                            return rows.iterator();
+                        }
+
+                        @Override
+                        public long rowCount() {
+                            return rows.size();
+                        }
+                    };
+            bufferedBundles.add(copiedBundle);
             totalBufferedRowCount += bundle.rowCount();
             if (totalBufferedRowCount >= maxBufferRow) {
                 finalizeSchemaAndFlush();
