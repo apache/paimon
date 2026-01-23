@@ -34,6 +34,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
@@ -44,6 +45,8 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
@@ -53,6 +56,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
+
+    private final ConcurrentMap<Pair<Long, List<String>>, List<String>> fileFields;
 
     private boolean dropStats = false;
     @Nullable private RowType readType;
@@ -76,6 +81,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 scanManifestParallelism,
                 false,
                 deletionVectorsEnabled);
+
+        this.fileFields = new ConcurrentHashMap<>();
     }
 
     @Override
@@ -241,10 +248,17 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         if (readType != null) {
             boolean containsReadCol = false;
-            RowType fileType =
-                    scanTableSchema(file.schemaId()).project(file.writeCols()).logicalRowType();
+            List<String> fileFieldNmes =
+                    fileFields.computeIfAbsent(
+                            Pair.of(file.schemaId(), file.writeCols()),
+                            pair ->
+                                    scanTableSchema(file.schemaId())
+                                            .project(file.writeCols())
+                                            .logicalRowType()
+                                            .getFieldNames());
+
             for (String field : readType.getFieldNames()) {
-                if (fileType.containsField(field)) {
+                if (fileFieldNmes.contains(field)) {
                     containsReadCol = true;
                     break;
                 }
