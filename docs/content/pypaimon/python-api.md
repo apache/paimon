@@ -1,9 +1,9 @@
 ---
 title: "Python API"
-weight: 5
+weight: 2
 type: docs
 aliases:
-  - /api/python-api.html
+  - /pypaimon/python-api.html
 ---
 
 <!--
@@ -27,23 +27,13 @@ under the License.
 
 # Python API
 
-PyPaimon is a Python implementation for connecting Paimon catalog, reading & writing tables. The complete Python
-implementation of the brand new PyPaimon does not require JDK installation.
-
-## Environment Settings
-
-SDK is published at [pypaimon](https://pypi.org/project/pypaimon/). You can install by
-
-```shell
-pip install pypaimon
-```
-
 ## Create Catalog
 
 Before coming into contact with the Table, you need to create a Catalog.
 
 {{< tabs "create-catalog" >}}
 {{< tab "filesystem" >}}
+
 ```python
 from pypaimon import CatalogFactory
 
@@ -53,9 +43,10 @@ catalog_options = {
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
+
 {{< /tab >}}
 {{< tab "rest catalog" >}}
-The sample code is as follows. The detailed meaning of option can be found in [DLF Token](../concepts/rest/dlf.md).
+The sample code is as follows. The detailed meaning of option can be found in [REST]({{< ref "concepts/rest/overview" >}}).
 
 ```python
 from pypaimon import CatalogFactory
@@ -65,10 +56,7 @@ catalog_options = {
   'metastore': 'rest',
   'warehouse': 'xxx',
   'uri': 'xxx',
-  'dlf.region': 'xxx',
-  'token.provider': 'xxx',
-  'dlf.access-key-id': 'xxx',
-  'dlf.access-key-secret': 'xxx'
+  'token.provider': 'xxx'
 }
 catalog = CatalogFactory.create(catalog_options)
 ```
@@ -194,18 +182,6 @@ table_write.write_arrow(pa_table)
 record_batch = ...
 table_write.write_arrow_batch(record_batch)
 
-# 2.4 Write Ray Dataset (requires ray to be installed)
-import ray
-ray_dataset = ray.data.read_json("/path/to/data.jsonl")
-table_write.write_ray(ray_dataset, overwrite=False, concurrency=2)
-# Parameters:
-#   - dataset: Ray Dataset to write
-#   - overwrite: Whether to overwrite existing data (default: False)
-#   - concurrency: Optional max number of concurrent Ray tasks
-#   - ray_remote_args: Optional kwargs passed to ray.remote() (e.g., {"num_cpus": 2})
-# Note: write_ray() handles commit internally through Ray Datasink API.
-#       Skip steps 3-4 if using write_ray() - just close the writer.
-
 # 3. Commit data (required for write_pandas/write_arrow/write_arrow_batch only)
 commit_messages = table_write.prepare_commit()
 table_commit.commit(commit_messages)
@@ -224,56 +200,6 @@ write_builder = table.new_batch_write_builder().overwrite()
 
 # overwrite partition 'dt=2024-01-01'
 write_builder = table.new_batch_write_builder().overwrite({'dt': '2024-01-01'})
-```
-
-### Update columns
-
-You can create `TableUpdate.update_by_arrow_with_row_id` to update columns to data evolution tables.
-
-The input data should include the `_ROW_ID` column, update operation will automatically sort and match each `_ROW_ID` to
-its corresponding `first_row_id`, then groups rows with the same `first_row_id` and writes them to a separate file.
-
-```python
-simple_pa_schema = pa.schema([
-  ('f0', pa.int8()),
-  ('f1', pa.int16()),
-])
-schema = Schema.from_pyarrow_schema(simple_pa_schema,
-                                    options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'})
-catalog.create_table('default.test_row_tracking', schema, False)
-table = catalog.get_table('default.test_row_tracking')
-
-# write all columns
-write_builder = table.new_batch_write_builder()
-table_write = write_builder.new_write()
-table_commit = write_builder.new_commit()
-expect_data = pa.Table.from_pydict({
-  'f0': [-1, 2],
-  'f1': [-1001, 1002]
-}, schema=simple_pa_schema)
-table_write.write_arrow(expect_data)
-table_commit.commit(table_write.prepare_commit())
-table_write.close()
-table_commit.close()
-
-# update partial columns
-write_builder = table.new_batch_write_builder()
-table_update = write_builder.new_update().with_update_type(['f0'])
-table_commit = write_builder.new_commit()
-data2 = pa.Table.from_pydict({
-  '_ROW_ID': [0, 1],
-  'f0': [5, 6],
-}, schema=pa.schema([
-  ('_ROW_ID', pa.int64()),
-  ('f0', pa.int8()),
-]))
-cmts = table_update.update_by_arrow_with_row_id(data2)
-table_commit.commit(cmts)
-table_commit.close()
-
-# content should be:
-#   'f0': [5, 6],
-#   'f1': [-1001, 1002]
 ```
 
 ## Batch Read
@@ -413,110 +339,6 @@ print(duckdb_con.query("SELECT * FROM duckdb_table WHERE f0 = 1").fetchdf())
 #    f0 f1
 # 0   1  a
 ```
-
-### Read Ray
-
-This requires `ray` to be installed.
-
-You can convert the splits into a Ray Dataset and handle it by Ray Data API for distributed processing:
-
-```python
-table_read = read_builder.new_read()
-ray_dataset = table_read.to_ray(splits)
-
-print(ray_dataset)
-# MaterializedDataset(num_blocks=1, num_rows=9, schema={f0: int32, f1: string})
-
-print(ray_dataset.take(3))
-# [{'f0': 1, 'f1': 'a'}, {'f0': 2, 'f1': 'b'}, {'f0': 3, 'f1': 'c'}]
-
-print(ray_dataset.to_pandas())
-#    f0 f1
-# 0   1  a
-# 1   2  b
-# 2   3  c
-# 3   4  d
-# ...
-```
-
-The `to_ray()` method supports Ray Data API parameters for distributed processing:
-
-```python
-# Basic usage
-ray_dataset = table_read.to_ray(splits)
-
-# Specify number of output blocks
-ray_dataset = table_read.to_ray(splits, override_num_blocks=4)
-
-# Configure Ray remote arguments
-ray_dataset = table_read.to_ray(
-    splits,
-    override_num_blocks=4,
-    ray_remote_args={"num_cpus": 2, "max_retries": 3}
-)
-
-# Use Ray Data operations
-mapped_dataset = ray_dataset.map(lambda row: {'value': row['value'] * 2})
-filtered_dataset = ray_dataset.filter(lambda row: row['score'] > 80)
-df = ray_dataset.to_pandas()
-```
-
-**Parameters:**
-- `override_num_blocks`: Optional override for the number of output blocks. By default,
-  Ray automatically determines the optimal number.
-- `ray_remote_args`: Optional kwargs passed to `ray.remote()` in read tasks
-  (e.g., `{"num_cpus": 2, "max_retries": 3}`).
-- `concurrency`: Optional max number of Ray tasks to run concurrently. By default,
-  dynamically decided based on available resources.
-- `**read_args`: Additional kwargs passed to the datasource (e.g., `per_task_row_limit`
-  in Ray 2.52.0+).
-
-**Ray Block Size Configuration:**
-
-If you need to configure Ray's block size (e.g., when Paimon splits exceed Ray's default
-128MB block size), set it before calling `to_ray()`:
-
-```python
-from ray.data import DataContext
-
-ctx = DataContext.get_current()
-ctx.target_max_block_size = 256 * 1024 * 1024  # 256MB (default is 128MB)
-ray_dataset = table_read.to_ray(splits)
-```
-
-See [Ray Data API Documentation](https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html) for more details.
-
-### Read Pytorch Dataset
-
-This requires `torch` to be installed.
-
-You can read all the data into a `torch.utils.data.Dataset` or `torch.utils.data.IterableDataset`:
-
-```python
-from torch.utils.data import DataLoader
-
-table_read = read_builder.new_read()
-dataset = table_read.to_torch(splits, streaming=True)
-dataloader = DataLoader(
-    dataset,
-    batch_size=2,
-    num_workers=2,  # Concurrency to read data
-    shuffle=False
-)
-
-# Collect all data from dataloader
-for batch_idx, batch_data in enumerate(dataloader):
-    print(batch_data)
-
-# output:
-#   {'user_id': tensor([1, 2]), 'behavior': ['a', 'b']}
-#   {'user_id': tensor([3, 4]), 'behavior': ['c', 'd']}
-#   {'user_id': tensor([5, 6]), 'behavior': ['e', 'f']}
-#   {'user_id': tensor([7, 8]), 'behavior': ['g', 'h']}
-```
-
-When the `streaming` parameter is true, it will iteratively read;
-when it is false, it will read the full amount of data into memory.
 
 ### Incremental Read
 

@@ -1,9 +1,9 @@
 ---
-title: Program API
+title: PyPaimon
 icon: <i class="fa fa-briefcase title maindish" aria-hidden="true"></i>
 bold: true
 bookCollapseSection: true
-weight: 95
+weight: 96
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
