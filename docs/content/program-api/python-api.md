@@ -195,6 +195,8 @@ record_batch = ...
 table_write.write_arrow_batch(record_batch)
 
 # 2.4 Write Ray Dataset (requires ray to be installed)
+
+**Note:** Ray Data converts `large_binary()` to `binary()` when reading. `write_ray()` automatically converts `binary()` back to `large_binary()` to match the table schema.
 import ray
 ray_dataset = ray.data.read_json("/path/to/data.jsonl")
 table_write.write_ray(ray_dataset, overwrite=False, concurrency=2)
@@ -470,6 +472,8 @@ df = ray_dataset.to_pandas()
   dynamically decided based on available resources.
 - `**read_args`: Additional kwargs passed to the datasource (e.g., `per_task_row_limit`
   in Ray 2.52.0+).
+
+**Note:** Ray Data converts `large_binary()` to `binary()` when reading. When writing back via `write_ray()`, the conversion is handled automatically.
 
 **Ray Block Size Configuration:**
 

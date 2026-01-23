@@ -46,6 +46,10 @@ class RayDatasource(Datasource):
 
     This datasource enables distributed parallel reading of Paimon table splits,
     allowing Ray to read multiple splits concurrently across the cluster.
+
+    .. note::
+        Ray Data converts ``large_binary()`` to ``binary()`` when reading.
+        When writing back via :meth:`TableWrite.write_ray`, the conversion is handled automatically.
     """
 
     def __init__(self, table_read: TableRead, splits: List[Split]):

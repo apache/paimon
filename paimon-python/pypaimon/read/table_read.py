@@ -194,6 +194,11 @@ class TableRead:
         **read_args,
     ) -> "ray.data.dataset.Dataset":
         """Convert Paimon table data to Ray Dataset.
+        
+        .. note::
+            Ray Data converts ``large_binary()`` to ``binary()`` when reading.
+            When writing back via :meth:`write_ray`, the conversion is handled automatically.
+        
         Args:
             splits: List of splits to read from the Paimon table.
             ray_remote_args: Optional kwargs passed to :func:`ray.remote` in read tasks.
