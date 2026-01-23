@@ -2958,6 +2958,15 @@ public class CoreOptions implements Serializable {
                 .orElse(Collections.emptyList());
     }
 
+    public static List<String> blobField(Map<String, String> options) {
+        String string = options.get(BLOB_FIELD.key());
+        if (string == null) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(string.split(",")).map(String::trim).collect(Collectors.toList());
+    }
+
     public boolean sequenceFieldSortOrderIsAscending() {
         return options.get(SEQUENCE_FIELD_SORT_ORDER) == SortOrder.ASCENDING;
     }

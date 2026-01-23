@@ -83,7 +83,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -457,7 +456,7 @@ public class SparkCatalog extends SparkBaseCatalog
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
-        String blobFieldName = properties.get(CoreOptions.BLOB_FIELD.key());
+        List<String> blobFields = CoreOptions.blobField(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -491,7 +490,7 @@ public class SparkCatalog extends SparkBaseCatalog
         for (StructField field : schema.fields()) {
             String name = field.name();
             DataType type;
-            if (Objects.equals(blobFieldName, name)) {
+            if (blobFields.contains(name)) {
                 checkArgument(
                         field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
                         "The type of blob field must be binary");

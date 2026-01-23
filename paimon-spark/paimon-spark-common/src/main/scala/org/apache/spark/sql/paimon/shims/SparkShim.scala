@@ -53,7 +53,7 @@ trait SparkShim {
 
   def createSparkInternalRowWithBlob(
       rowType: RowType,
-      blobFieldIndex: Int,
+      blobFields: Set[Int],
       blobAsDescriptor: Boolean): SparkInternalRow
 
   def createSparkArrayData(elementType: DataType): SparkArrayData
