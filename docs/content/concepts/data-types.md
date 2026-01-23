@@ -186,7 +186,7 @@ All data types supported by Paimon are as follows:
       <td><code>BLOB</code></td>
       <td><code>Data type of a binary large object.</code><br><br>
           <code>Designed for storing large binary data such as images, videos, audio files, and other multimodal data. Unlike BYTES type which stores data inline, BLOB stores large binary data in separate files and maintains references to them, providing better performance for large objects.</code><br><br>
-          <code>Note: Requires 'row-tracking.enabled' and 'data-evolution.enabled' to be set to true. See <a href="{{< ref "concepts/spec/blob" >}}">Blob Specification</a> for details.</code>
+          <code>Note: Requires 'row-tracking.enabled' and 'data-evolution.enabled' to be set to true. See <a href="{{< ref "append-table/data-evolution#blob-type" >}}">Blob Type</a> for details.</code>
       </td>
     </tr>
     </tbody>

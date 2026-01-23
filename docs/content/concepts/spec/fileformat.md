@@ -790,4 +790,4 @@ Limitations:
 2. BLOB format does not support predicate pushdown.
 3. Statistics collection is not supported for BLOB columns.
 
-For usage details, configuration options, and examples, see [Blob Type]({{< ref "concepts/spec/blob" >}}).
+For usage details, configuration options, and examples, see [Blob Type]({{< ref "append-table/data-evolution#blob-type" >}}).
