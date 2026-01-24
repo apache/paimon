@@ -37,8 +37,9 @@ object PaimonMetrics {
 
   // commit metrics
   val COMMIT_DURATION = "commitDuration"
-  val APPENDED_TABLE_FILES = "appendedTableFiles"
-  val APPENDED_RECORDS = "appendedRecords"
+  val ADDED_TABLE_FILES = "addedTableFiles"
+  val DELETED_TABLE_FILES = "deletedTableFiles"
+  val INSERTED_RECORDS = "insertedRecords"
   val APPENDED_CHANGELOG_FILES = "appendedChangelogFiles"
   val PARTITIONS_WRITTEN = "partitionsWritten"
   val BUCKETS_WRITTEN = "bucketsWritten"
@@ -183,22 +184,31 @@ case class PaimonCommitDurationTaskMetric(value: Long) extends PaimonTaskMetric 
   override def name(): String = PaimonMetrics.COMMIT_DURATION
 }
 
-case class PaimonAppendedTableFilesMetric() extends PaimonSumMetric {
-  override def name(): String = PaimonMetrics.APPENDED_TABLE_FILES
-  override def description(): String = "number of appended table files"
+case class PaimonAddedTableFilesMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.ADDED_TABLE_FILES
+  override def description(): String = "number of added table files"
 }
 
-case class PaimonAppendedTableFilesTaskMetric(value: Long) extends PaimonTaskMetric {
-  override def name(): String = PaimonMetrics.APPENDED_TABLE_FILES
+case class PaimonAddedTableFilesTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.ADDED_TABLE_FILES
 }
 
-case class PaimonAppendedRecordsMetric() extends PaimonSumMetric {
-  override def name(): String = PaimonMetrics.APPENDED_RECORDS
-  override def description(): String = "number of appended records"
+case class PaimonDeletedTableFilesMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.DELETED_TABLE_FILES
+  override def description(): String = "number of deleted table files"
 }
 
-case class PaimonAppendedRecordsTaskMetric(value: Long) extends PaimonTaskMetric {
-  override def name(): String = PaimonMetrics.APPENDED_RECORDS
+case class PaimonDeletedTableFilesTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.DELETED_TABLE_FILES
+}
+
+case class PaimonInsertedRecordsMetric() extends PaimonSumMetric {
+  override def name(): String = PaimonMetrics.INSERTED_RECORDS
+  override def description(): String = "number of inserted records"
+}
+
+case class PaimonInsertedRecordsTaskMetric(value: Long) extends PaimonTaskMetric {
+  override def name(): String = PaimonMetrics.INSERTED_RECORDS
 }
 
 case class PaimonAppendedChangelogFilesMetric() extends PaimonSumMetric {

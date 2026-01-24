@@ -25,10 +25,12 @@ import org.apache.paimon.spark.util.ScanPlanHelper
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.scheduler.{SparkListener, SparkListenerTaskEnd}
+import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.connector.metric.CustomTaskMetric
 import org.apache.spark.sql.execution.CommandResultExec
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
+import org.apache.spark.sql.execution.metric.SQLMetric
 import org.junit.jupiter.api.Assertions
 
 class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
@@ -127,17 +129,12 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
     withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
       sql("CREATE TABLE T (id INT, name STRING, pt STRING) PARTITIONED BY (pt)")
       val df = sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
-      val metrics =
-        df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
-      val statusStore = spark.sharedState.statusStore
-      val lastExecId = statusStore.executionsList().last.executionId
-      val executionMetrics = statusStore.executionMetrics(lastExecId)
+      val metrics = commandMetrics(df)
+      val executionMetrics = lastExecutionMetrics
 
-      assert(executionMetrics(metrics("appendedTableFiles").id) == "2")
-      assert(executionMetrics(metrics("appendedRecords").id) == "2")
-      assert(executionMetrics(metrics("appendedChangelogFiles").id) == "0")
+      assert(executionMetrics(metrics("addedTableFiles").id) == "2")
+      assert(executionMetrics(metrics("insertedRecords").id) == "2")
       assert(executionMetrics(metrics("partitionsWritten").id) == "2")
-      assert(executionMetrics(metrics("bucketsWritten").id) == "2")
     }
   }
 
@@ -145,20 +142,68 @@ class PaimonMetricTest extends PaimonSparkTestBase with ScanPlanHelper {
     withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
       sql("CREATE TABLE T (id INT, pt INT) PARTITIONED BY (pt)")
       val df = sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id FROM range(1, 10)")
-      val metrics =
-        df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
-      val statusStore = spark.sharedState.statusStore
-      val lastExecId = statusStore.executionsList().last.executionId
-      val executionMetrics = statusStore.executionMetrics(lastExecId)
+      val metrics = commandMetrics(df)
+      val executionMetrics = lastExecutionMetrics
 
-      assert(executionMetrics(metrics("appendedTableFiles").id) == "9")
-      assert(executionMetrics(metrics("appendedRecords").id) == "9")
+      assert(executionMetrics(metrics("addedTableFiles").id) == "9")
+      assert(executionMetrics(metrics("insertedRecords").id) == "9")
       assert(executionMetrics(metrics("partitionsWritten").id) == "9")
-      assert(executionMetrics(metrics("bucketsWritten").id) == "9")
+    }
+  }
+
+  test(s"Paimon Metric: insert bucket table") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, v INT) TBLPROPERTIES ('bucket'='3', 'bucket-key'='id')")
+      val df = sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 100)")
+      val metrics = commandMetrics(df)
+      val executionMetrics = lastExecutionMetrics
+      assert(executionMetrics(metrics("addedTableFiles").id) == "3")
+      assert(executionMetrics(metrics("bucketsWritten").id) == "3")
+    }
+  }
+
+  test(s"Paimon Metric: insert overwrite") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, v INT)")
+      sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 10)")
+      val df =
+        sql(s"INSERT OVERWRITE T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 100)")
+      val metrics = commandMetrics(df)
+      val executionMetrics = lastExecutionMetrics
+      assert(executionMetrics(metrics("addedTableFiles").id) == "1")
+      assert(executionMetrics(metrics("insertedRecords").id) == "100")
+    }
+  }
+
+  test(s"Paimon Metric: delete") {
+    withSparkSQLConf("spark.paimon.write.use-v2-write" -> "true") {
+      sql("CREATE TABLE T (id INT, v INT)")
+      sql(s"INSERT INTO T SELECT /*+ REPARTITION(1) */ id, id as v FROM range(0, 10)")
+      val df = sql("DELETE FROM T WHERE id < 3")
+      val metrics = commandMetrics(df)
+      val executionMetrics = lastExecutionMetrics
+      assert(executionMetrics(metrics("addedTableFiles").id) == "1")
+      assert(executionMetrics(metrics("deletedTableFiles").id) == "1")
+
+      val df1 = sql("DELETE FROM T WHERE id > 0")
+      val metrics1 = commandMetrics(df1)
+      val executionMetrics1 = lastExecutionMetrics
+      assert(executionMetrics1(metrics1("addedTableFiles").id) == "0")
+      assert(executionMetrics1(metrics1("deletedTableFiles").id) == "1")
     }
   }
 
   def metric(metrics: Array[CustomTaskMetric], name: String): Long = {
     metrics.find(_.name() == name).get.value()
+  }
+
+  def commandMetrics(df: DataFrame): Map[String, SQLMetric] = {
+    df.queryExecution.executedPlan.asInstanceOf[CommandResultExec].commandPhysicalPlan.metrics
+  }
+
+  def lastExecutionMetrics: Map[Long, String] = {
+    val statusStore = spark.sharedState.statusStore
+    val lastExecId = statusStore.executionsList().last.executionId
+    statusStore.executionMetrics(lastExecId)
   }
 }
