@@ -53,7 +53,6 @@ import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.rest.RESTCatalogServer;
 import org.apache.iceberg.rest.RESTServerExtension;
-import org.junit.Ignore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -209,7 +208,6 @@ public class IcebergRestMetadataCommitterTest {
                 Record::toString);
     }
 
-    @Ignore
     @Test
     public void testPartitionedPrimaryKeyTableWithNonZeroFieldId() throws Exception {
         RowType rowType =
@@ -227,8 +225,8 @@ public class IcebergRestMetadataCommitterTest {
                 (pt1, pt2) -> {
                     BinaryRow b = new BinaryRow(2);
                     BinaryRowWriter writer = new BinaryRowWriter(b);
-                    writer.writeInt(1, pt1);
-                    writer.writeString(2, BinaryString.fromString(pt2));
+                    writer.writeInt(0, pt1);
+                    writer.writeString(1, BinaryString.fromString(pt2));
                     writer.complete();
                     return b;
                 };

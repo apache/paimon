@@ -281,7 +281,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 spec.fields().stream().anyMatch(f -> f.sourceId() == 0);
         if (spec.isUnpartitioned() || isPartitionedWithZeroFieldId) {
             if (isPartitionedWithZeroFieldId) {
-                LOG.warn("LOG MESSAGE HERE");
+                LOG.warn(
+                        "When partition field is 0 fieldId Icebert REST committer will use partition evolution in oreder to support Iceberg compatabilty with Paimon schema. If you want to avoid it uses non 0 field id as partition");
             }
             Schema emptySchema = new Schema();
             return restCatalog.createTable(icebergTableIdentifier, emptySchema);
@@ -291,6 +292,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                             .filter(nf -> nf.fieldId() != 0)
                             .collect(Collectors.toList());
             Schema dummySchema = new Schema(columns);
+            LOG.info(
+                    "In order to support schema compatability between Paimon and Iceberg REST dummy schema will be created first");
             return restCatalog.createTable(icebergTableIdentifier, dummySchema, spec);
         }
     }
