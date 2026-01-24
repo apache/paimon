@@ -22,7 +22,7 @@ import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
 
 object PaimonMetrics {
-  // scan metrics
+  // read metrics
   val NUM_SPLITS = "numSplits"
   val PARTITION_SIZE = "partitionSize"
   val READ_BATCH_TIME = "readBatchTime"
@@ -91,7 +91,7 @@ sealed trait PaimonSummaryMetric extends PaimonCustomMetric {
 sealed trait PaimonSizeSummaryMetric extends PaimonSummaryMetric with PaimonSizeMetric
 sealed trait PaimonTimingSummaryMetric extends PaimonSummaryMetric with PaimonTimingMetric
 
-// Scan metrics
+// Read metrics
 case class PaimonNumSplitMetric() extends PaimonSumMetric {
   override def name(): String = PaimonMetrics.NUM_SPLITS
   override def description(): String = "number of splits read"
