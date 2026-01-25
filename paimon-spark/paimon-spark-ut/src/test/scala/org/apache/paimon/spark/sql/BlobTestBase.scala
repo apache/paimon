@@ -19,14 +19,14 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.CatalogContext
-import org.apache.paimon.data.Blob
-import org.apache.paimon.data.BlobDescriptor
+import org.apache.paimon.data.{Blob, BlobDescriptor}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.UriReaderFactory
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 
 import java.util
@@ -35,6 +35,10 @@ import java.util.Random
 class BlobTestBase extends PaimonSparkTestBase {
 
   private val RANDOM = new Random
+
+  override def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
 
   test("Blob: test basic") {
     withTable("t") {
@@ -216,11 +220,17 @@ class BlobTestBase extends PaimonSparkTestBase {
 
   def bytesToHex(bytes: Array[Byte]): String = {
     val hexChars = new Array[Char](bytes.length * 2)
-    for (j <- 0 until bytes.length) {
+    for (j <- bytes.indices) {
       val v = bytes(j) & 0xff
       hexChars(j * 2) = HEX_ARRAY(v >>> 4)
       hexChars(j * 2 + 1) = HEX_ARRAY(v & 0x0f)
     }
     new String(hexChars)
+  }
+}
+
+class BlobTestWithV2Write extends BlobTestBase {
+  override def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
   }
 }
