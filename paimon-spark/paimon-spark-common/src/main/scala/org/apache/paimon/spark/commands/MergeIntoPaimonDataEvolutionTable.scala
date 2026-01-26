@@ -150,6 +150,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       .splits()
       .asScala
       .map(_.asInstanceOf[DataSplit])
+      .toSeq
 
     val firstRowIds: immutable.IndexedSeq[Long] = tableSplits
       .flatMap(_.dataFiles().asScala)
@@ -563,7 +564,7 @@ case class MergeIntoPaimonDataEvolutionTable(
     }
 
     traverse(expression)
-    fields.distinct
+    fields.distinct.toSeq
   }
 
   private def attribute(name: String, plan: LogicalPlan) =
