@@ -99,13 +99,14 @@ public class CompactorSourceBuilder {
         if (isContinuous) {
             return new ContinuousFileStoreSource(readBuilder, compactBucketsTable.options(), null);
         } else {
-            Options options = compactBucketsTable.coreOptions().toConfiguration();
+            CoreOptions coreOptions = compactBucketsTable.coreOptions();
+            Options options = coreOptions.toConfiguration();
             return new StaticFileStoreSource(
                     readBuilder,
                     null,
                     options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                     options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                    options.get(CoreOptions.BLOB_AS_DESCRIPTOR));
+                    coreOptions.readBlobAsDescriptor());
         }
     }
 

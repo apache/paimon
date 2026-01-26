@@ -51,12 +51,6 @@ under the License.
             <td>Whether to create underlying storage when reading and writing the table.</td>
         </tr>
         <tr>
-            <td><h5>blob-as-descriptor</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Write blob field using blob descriptor rather than blob bytes.</td>
-        </tr>
-        <tr>
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -151,12 +145,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.</td>
-        </tr>
-        <tr>
-            <td><h5>table-read.sequence-number.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
         </tr>
         <tr>
             <td><h5>changelog.num-retained.max</h5></td>
@@ -1044,6 +1032,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Enable query auth to give Catalog the opportunity to perform column level and row level permission validation on queries.</td>
         </tr>
         <tr>
+            <td><h5>read-blob-as-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Read blob field as blob descriptor (returns BlobDescriptor bytes) rather than actual blob bytes. </td>
+        </tr>
+        <tr>
             <td><h5>read.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
@@ -1309,6 +1303,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>The delay duration of stream read when scan incremental snapshots.</td>
         </tr>
         <tr>
+            <td><h5>table-read.sequence-number.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
+        </tr>
+        <tr>
             <td><h5>tag.automatic-completion</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -1439,6 +1439,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The Variant shredding schema for writing.</td>
+        </tr>
+        <tr>
+            <td><h5>write-blob-from-descriptor</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Write blob field from blob descriptor rather than blob bytes. </td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>

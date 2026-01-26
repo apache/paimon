@@ -191,6 +191,73 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: test write-blob-from-descriptor and read-blob-as-descriptor") {
+    for (writeBlobFromDescriptor <- Seq("true", "false")) {
+      withTable("t") {
+        val blobData = new Array[Byte](1024 * 1024)
+        RANDOM.nextBytes(blobData)
+
+        sql("""
+              |CREATE TABLE IF NOT EXISTS t (
+              |  id STRING,
+              |  name STRING,
+              |  content BINARY
+              |)
+              |PARTITIONED BY (ds STRING)
+              |TBLPROPERTIES (
+              |  'row-tracking.enabled' = 'true',
+              |  'data-evolution.enabled' = 'true',
+              |  'blob-field' = 'content'
+              |)
+        """.stripMargin)
+
+        withSparkSQLConf("spark.paimon.write-blob-from-descriptor" -> writeBlobFromDescriptor) {
+          if (writeBlobFromDescriptor.toBoolean) {
+            val fileIO = new LocalFileIO
+            val uri = "file://" + tempDBDir.toString + "/external_blob_split_config"
+            try {
+              val outputStream = fileIO.newOutputStream(new Path(uri), true)
+              try outputStream.write(blobData)
+              finally if (outputStream != null) outputStream.close()
+            }
+            sql(s"""
+                   |INSERT OVERWRITE TABLE t
+                   |PARTITION(ds = '20240126')
+                   |VALUES ('1', 'paimon', sys.path_to_descriptor('$uri'))
+                   |""".stripMargin)
+          } else {
+            sql(s"""
+                   |INSERT OVERWRITE TABLE t
+                   |PARTITION(ds = '20240126')
+                   |VALUES ('1', 'paimon', X'${bytesToHex(blobData)}')
+                   |""".stripMargin)
+          }
+        }
+
+        withSparkSQLConf("spark.paimon.read-blob-as-descriptor" -> "true") {
+          val descriptorBytes =
+            sql("SELECT content FROM t WHERE id = '1'")
+              .collect()(0)
+              .get(0)
+              .asInstanceOf[Array[Byte]]
+          val readDescriptor = BlobDescriptor.deserialize(descriptorBytes)
+          val catalogContext = loadTable("t").catalogEnvironment().catalogContext()
+          val uriReaderFactory = new UriReaderFactory(catalogContext)
+          val blob =
+            Blob.fromDescriptor(uriReaderFactory.create(readDescriptor.uri), readDescriptor)
+          assert(util.Arrays.equals(blobData, blob.toData))
+        }
+
+        withSparkSQLConf("spark.paimon.read-blob-as-descriptor" -> "false") {
+          checkAnswer(
+            sql("SELECT id, name, content, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = '1'"),
+            Seq(Row("1", "paimon", blobData, 0, 1))
+          )
+        }
+      }
+    }
+  }
+
   test("Blob: test compaction") {
     withTable("t") {
       sql(

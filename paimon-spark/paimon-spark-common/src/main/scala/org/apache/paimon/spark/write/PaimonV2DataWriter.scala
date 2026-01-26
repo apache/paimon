@@ -45,7 +45,7 @@ case class PaimonV2DataWriter(
 
   val fullCompactionDeltaCommits: Option[Int] =
     Option.apply(coreOptions.fullCompactionDeltaCommits())
-  val blobAsDescriptor: Boolean = coreOptions.blobAsDescriptor()
+  val blobAsDescriptor: Boolean = coreOptions.writeBlobFromDescriptor()
 
   val write: TableWriteImpl[InternalRow] = {
     writeBuilder

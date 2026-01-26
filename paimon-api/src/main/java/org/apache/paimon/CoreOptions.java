@@ -2143,12 +2143,21 @@ public class CoreOptions implements Serializable {
                             "Specifies column names that should be stored as blob type. "
                                     + "This is used when you want to treat a BYTES column as a BLOB.");
 
-    public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
-            key("blob-as-descriptor")
+    public static final ConfigOption<Boolean> READ_BLOB_AS_DESCRIPTOR =
+            key("read-blob-as-descriptor")
                     .booleanType()
                     .defaultValue(false)
+                    .withFallbackKeys("blob-as-descriptor")
                     .withDescription(
-                            "Write blob field using blob descriptor rather than blob bytes.");
+                            "Read blob field as blob descriptor (returns BlobDescriptor bytes) rather than actual blob bytes. ");
+
+    public static final ConfigOption<Boolean> WRITE_BLOB_FROM_DESCRIPTOR =
+            key("write-blob-from-descriptor")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withFallbackKeys("blob-as-descriptor")
+                    .withDescription(
+                            "Write blob field from blob descriptor rather than blob bytes. ");
 
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
@@ -2666,8 +2675,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean blobSplitByFileSize() {
-        return options.getOptional(BLOB_SPLIT_BY_FILE_SIZE)
-                .orElse(!options.get(BLOB_AS_DESCRIPTOR));
+        return options.getOptional(BLOB_SPLIT_BY_FILE_SIZE).orElse(!readBlobAsDescriptor());
     }
 
     public long compactionFileSize(boolean hasPrimaryKey) {
@@ -3383,8 +3391,12 @@ public class CoreOptions implements Serializable {
         return options.get(FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH);
     }
 
-    public boolean blobAsDescriptor() {
-        return options.get(BLOB_AS_DESCRIPTOR);
+    public boolean readBlobAsDescriptor() {
+        return options.get(READ_BLOB_AS_DESCRIPTOR);
+    }
+
+    public boolean writeBlobFromDescriptor() {
+        return options.get(WRITE_BLOB_FROM_DESCRIPTOR);
     }
 
     public boolean postponeBatchWriteFixedBucket() {
