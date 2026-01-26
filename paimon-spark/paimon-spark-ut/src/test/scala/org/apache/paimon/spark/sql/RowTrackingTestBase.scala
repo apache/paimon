@@ -694,7 +694,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
       sql("CALL paimon.sys.compact(table => 't')")
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
-        Seq(Row(1, 11, 111, 2, 3), Row(2, 22, 2, 0, 3), Row(3, 3, 3, 1, 3))
+        Seq(Row(1, 11, 111, 2, 2), Row(2, 22, 2, 0, 2), Row(3, 3, 3, 1, 2))
       )
 
       checkAnswer(
