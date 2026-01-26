@@ -571,11 +571,10 @@ SELECT * FROM video_table;  -- Returns actual blob bytes from Paimon storage
 
 ## Limitations
 
-1. **Single Blob Field**: Currently, only one blob field per table is supported.
-2. **Append Table Only**: Blob type is designed for append-only tables. Primary key tables are not supported.
-3. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
-4. **No Statistics**: Statistics collection is not supported for blob columns.
-5. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
+1. **Append Table Only**: Blob type is designed for append-only tables. Primary key tables are not supported.
+2. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
+3. **No Statistics**: Statistics collection is not supported for blob columns.
+4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
 
 ## Best Practices
 
