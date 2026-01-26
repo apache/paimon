@@ -47,6 +47,10 @@ public class Range implements Serializable {
         return new Range(from + offset, to + offset);
     }
 
+    public boolean hasIntersection(Range range) {
+        return from <= range.to && to >= range.from;
+    }
+
     public boolean isBefore(Range other) {
         return to < other.from;
     }

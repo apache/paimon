@@ -87,6 +87,135 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution: concurrent merge and merge") {
+    withTable("s", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'data-evolution.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, 0, 0)")
+      Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
+
+      def doMerge(): Unit = {
+        var success = false
+        while (!success) {
+          try {
+            sql(s"""
+                   |MERGE INTO t
+                   |USING s
+                   |ON t.id = s.id
+                   |WHEN MATCHED THEN
+                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                   |""".stripMargin).collect()
+            success = true
+          } catch {
+            case e: Exception =>
+              if (
+                !e.getMessage.contains(
+                  "multiple 'MERGE INTO' operations have encountered conflicts")
+              ) {
+                throw e
+              }
+          }
+        }
+      }
+
+      val mergeInto1 = Future {
+        for (_ <- 1 to 10) {
+          doMerge()
+        }
+      }
+
+      val mergeInto2 = Future {
+        for (_ <- 1 to 10) {
+          doMerge()
+        }
+      }
+
+      Await.result(mergeInto1, 60.seconds)
+      Await.result(mergeInto2, 60.seconds)
+
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 20, 20)))
+    }
+  }
+
+  test("Data Evolution: concurrent merge and small files compact") {
+    withTable("s", "t") {
+      sql(s"""
+            CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
+                 'row-tracking.enabled' = 'true',
+                 'compaction.min.file-num' = '2',
+                 'data-evolution.enabled' = 'true')
+          """)
+      sql("INSERT INTO t VALUES (1, 0, 0)")
+      Seq((1, 1, 1)).toDF("id", "b", "c").createOrReplaceTempView("s")
+
+      def doWithRetry(doAction: () => Unit): Unit = {
+        var success = false
+        while (!success) {
+          try {
+            doAction.apply()
+            success = true
+          } catch {
+            case e: Exception =>
+              if (!e.getMessage.contains("multiple 'MERGE INTO' and 'COMPACT' operations")) {
+                throw e
+              }
+          }
+        }
+      }
+
+      val mergeInto = Future {
+        for (i <- 1 to 10) {
+          doWithRetry(() => sql(s"""
+                                   |MERGE INTO t
+                                   |USING s
+                                   |ON t.id = s.id
+                                   |WHEN MATCHED THEN
+                                   |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                                   |""".stripMargin).collect())
+          if (i > 1) {
+            sql(s"INSERT INTO t VALUES ($i, $i, $i)")
+          }
+        }
+      }
+
+      val t = loadTable("t")
+
+      def canBeCompacted: Boolean = {
+        val split = t.newSnapshotReader().read().splits().get(0).asInstanceOf[DataSplit]
+        split.dataFiles().size() > 1
+      }
+
+      val compact = Future {
+        for (_ <- 1 to 10) {
+          while (!canBeCompacted) {
+            Thread.sleep(1)
+          }
+          doWithRetry(() => sql("CALL sys.compact(table => 't')"))
+        }
+      }
+
+      Await.result(mergeInto, 60.seconds)
+      Await.result(compact, 60.seconds)
+
+      checkAnswer(
+        sql("SELECT * FROM t"),
+        Seq(
+          Row(1, 10, 10),
+          Row(2, 2, 2),
+          Row(3, 3, 3),
+          Row(4, 4, 4),
+          Row(5, 5, 5),
+          Row(6, 6, 6),
+          Row(7, 7, 7),
+          Row(8, 8, 8),
+          Row(9, 9, 9),
+          Row(10, 10, 10)))
+    }
+  }
+
   test("Row Tracking: read row Tracking") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
