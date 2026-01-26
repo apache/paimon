@@ -809,7 +809,6 @@ public class FormatTableScanTest {
 
     @TestTemplate
     void testSearchPartSpecAndPathsWithRangeFilter() throws IOException {
-        // Test range filter (ds > '2023' AND ds < '2025')
         Path tableLocation = new Path(tmpPath.toUri());
         LocalFileIO fileIO = LocalFileIO.create();
 
