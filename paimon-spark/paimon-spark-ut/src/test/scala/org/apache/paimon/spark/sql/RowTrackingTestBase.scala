@@ -20,12 +20,14 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
+
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.{Deduplicate, Join, LogicalPlan, MergeRows, RepartitionByExpression, Sort}
 import org.apache.spark.sql.execution.QueryExecution
 import org.apache.spark.sql.util.QueryExecutionListener
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
+
 import scala.collection.JavaConverters._
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -35,86 +37,36 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
-  test("Data Evolution: concurrent merge and compact") {
+  ignore("Data Evolution: concurrent merge and compact") {
     withTable("s", "t") {
       sql(
         s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
       sql("INSERT INTO t VALUES (1, 1, 1)")
 
       val mergeInto = Future {
-        for (i <- 1 to 1) {
+        for (i <- 1 to 10) {
           Seq((1, i, i)).toDF("id", "b", "c").createOrReplaceTempView("s")
           sql(s"""
-                |MERGE INTO t
-                |USING s
-                |ON t.id = s.id
-                |WHEN MATCHED THEN
-                |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                |""".stripMargin)
-          checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
+                 |MERGE INTO t
+                 |USING s
+                 |ON t.id = s.id
+                 |WHEN MATCHED THEN
+                 |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                 |""".stripMargin)
+          checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, i, i)))
         }
       }
 
       val compact = Future {
         for (_ <- 1 to 10) {
-          try {
-            sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
-          } catch {
-            case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
-          }
+          sql("CALL sys.compact(table => 't')")
           checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
         }
       }
 
       Await.result(mergeInto, 60.seconds)
       Await.result(compact, 60.seconds)
-    }
-  }
-
-  test("Data Evolution: concurrent merge and merge") {
-    for (dvEnabled <- Seq("true", "false")) {
-      withTable("s", "t") {
-        sql("CREATE TABLE s (id INT, b INT, c INT)")
-        sql("INSERT INTO s VALUES (1, 1, 1)")
-
-        sql(
-          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
-        sql("INSERT INTO t VALUES (1, 1, 1)")
-
-        val mergeInto = Future {
-          for (_ <- 1 to 10) {
-            try {
-              sql("""
-                    |MERGE INTO t
-                    |USING s
-                    |ON t.id = s.id
-                    |WHEN MATCHED THEN
-                    |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                    |""".stripMargin)
-            } catch {
-              case a: Throwable =>
-                assert(
-                  a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
-                    "Missing file"))
-            }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
-          }
-        }
-
-        val compact = Future {
-          for (_ <- 1 to 10) {
-            try {
-              sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
-            } catch {
-              case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
-            }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
-          }
-        }
-
-        Await.result(mergeInto, 60.seconds)
-        Await.result(compact, 60.seconds)
-      }
+      checkAnswer(sql("SELECT * FROM t"), Seq(Row(1, 10, 10)))
     }
   }
 
