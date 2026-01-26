@@ -83,12 +83,16 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                 }
 
                 Blob blob;
-                long offset = fileMeta.blobOffset(currentPosition) + 4;
-                long length = fileMeta.blobLength(currentPosition) - 16;
-                if (in != null) {
-                    blob = Blob.fromData(readInlineBlob(in, offset, length));
+                if (fileMeta.isNull(currentPosition)) {
+                    blob = null;
                 } else {
-                    blob = Blob.fromFile(fileIO, filePathString, offset, length);
+                    long offset = fileMeta.blobOffset(currentPosition) + 4;
+                    long length = fileMeta.blobLength(currentPosition) - 16;
+                    if (in != null) {
+                        blob = Blob.fromData(readInlineBlob(in, offset, length));
+                    } else {
+                        blob = Blob.fromFile(fileIO, filePathString, offset, length);
+                    }
                 }
                 currentPosition++;
                 return GenericRow.of(blob);

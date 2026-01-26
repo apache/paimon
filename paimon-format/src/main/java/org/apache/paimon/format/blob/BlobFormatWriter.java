@@ -80,7 +80,10 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
     @Override
     public void addElement(InternalRow element) throws IOException {
         checkArgument(element.getFieldCount() == 1, "BlobFormatWriter only support one field.");
-        checkArgument(!element.isNullAt(0), "BlobFormatWriter only support non-null blob.");
+        if (element.isNullAt(0)) {
+            lengths.add(-1L);
+            return;
+        }
         Blob blob = element.getBlob(0);
 
         long previousPos = out.getPos();
