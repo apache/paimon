@@ -52,6 +52,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
@@ -293,6 +294,28 @@ public class DataSplit implements Split {
         }
 
         return hasIndexFile ? Optional.of(indexFiles) : Optional.empty();
+    }
+
+    public Optional<DataSplit> filterDataFile(Predicate<DataFileMeta> filter) {
+        List<DataFileMeta> filtered = new ArrayList<>();
+        List<DeletionFile> filteredDeletion = dataDeletionFiles == null ? null : new ArrayList<>();
+        for (int i = 0; i < dataFiles.size(); i++) {
+            DataFileMeta file = dataFiles.get(i);
+            if (filter.test(file)) {
+                filtered.add(file);
+                if (filteredDeletion != null) {
+                    filteredDeletion.add(dataDeletionFiles.get(i));
+                }
+            }
+        }
+        if (filtered.isEmpty()) {
+            return Optional.empty();
+        }
+        DataSplit split = new DataSplit();
+        split.assign(this);
+        split.dataFiles = filtered;
+        split.dataDeletionFiles = filteredDeletion;
+        return Optional.of(split);
     }
 
     @Override
