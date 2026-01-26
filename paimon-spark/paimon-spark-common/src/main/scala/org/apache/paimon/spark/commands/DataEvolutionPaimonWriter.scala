@@ -20,39 +20,40 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.spark.commands.DataEvolutionPaimonWriter.dynamicOp
 import org.apache.paimon.spark.write.{DataEvolutionTableDataWrite, WriteHelper, WriteTaskResult}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink._
+import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.DataType
 import org.apache.paimon.types.DataTypeRoot.BLOB
 
 import org.apache.spark.sql._
 
-import java.io.IOException
 import java.util.Collections
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
-case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteHelper {
+case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Seq[DataSplit])
+  extends WriteHelper {
 
-  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)] =
-    initPartitionMap()
-  override val table: FileStoreTable = paimonTable.copy(dynamicOp)
-
-  private def initPartitionMap(): mutable.HashMap[Long, (BinaryRow, Long)] = {
+  private lazy val firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)] = {
     val firstRowIdToPartitionMap = new mutable.HashMap[Long, (BinaryRow, Long)]
-    table
-      .store()
-      .newScan()
-      .readFileIterator()
-      .forEachRemaining(
-        k =>
-          firstRowIdToPartitionMap
-            .put(k.file().firstRowId(), (k.partition(), k.file().rowCount())))
+    dataSplits.foreach(
+      split =>
+        split
+          .dataFiles()
+          .asScala
+          .foreach(
+            file =>
+              firstRowIdToPartitionMap
+                .put(file.firstRowId(), (split.partition(), file.rowCount()))))
     firstRowIdToPartitionMap
   }
+
+  // File rolling will never be performed
+  override val table: FileStoreTable =
+    paimonTable.copy(Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G"))
 
   def writePartialFields(data: DataFrame, columnNames: Seq[String]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
@@ -84,24 +85,5 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable) extends WriteH
           }
       }
     WriteTaskResult.merge(written.collect())
-  }
-}
-
-object DataEvolutionPaimonWriter {
-  final private val dynamicOp =
-    Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G")
-  def apply(table: FileStoreTable): DataEvolutionPaimonWriter = {
-    new DataEvolutionPaimonWriter(table)
-  }
-
-  private def deserializeCommitMessage(
-      serializer: CommitMessageSerializer,
-      bytes: Array[Byte]): CommitMessage = {
-    try {
-      serializer.deserialize(serializer.getVersion, bytes)
-    } catch {
-      case e: IOException =>
-        throw new RuntimeException("Failed to deserialize CommitMessage's object", e)
-    }
   }
 }
