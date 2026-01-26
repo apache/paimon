@@ -43,7 +43,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
       val mergeInto = Future {
         for (i <- 1 to 10) {
-          Seq((i, i, i)).toDF("id", "b", "c").createOrReplaceTempView("s")
+          Seq((1, i, i)).toDF("id", "b", "c").createOrReplaceTempView("s")
           sql(s"""
                 |MERGE INTO t
                 |USING s
