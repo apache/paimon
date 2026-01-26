@@ -67,12 +67,14 @@ case class DataEvolutionTableDataWrite(
 
   private def newCurrentWriter(firstRowId: Long): Unit = {
     finishCurrentWriter()
-    val (partition, numRecords) = firstRowIdToPartitionMap.getOrElse(firstRowId, null)
-    if (partition == null) {
+    val pair = firstRowIdToPartitionMap.getOrElse(firstRowId, null)
+    if (pair == null) {
       throw new IllegalArgumentException(
         s"First row ID $firstRowId not found in partition map. " +
           s"Available first row IDs: ${firstRowIdToPartitionMap.keys.mkString(", ")}")
     }
+
+    val (partition, numRecords) = pair
 
     val writer = writeBuilder
       .newWrite()
