@@ -18,11 +18,15 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -33,6 +37,8 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** Utils for file system. */
 public class PartitionPathUtils {
@@ -272,7 +278,47 @@ public class PartitionPathUtils {
             int partitionNumber,
             List<String> partitionKeys,
             boolean onlyValueInPath) {
-        FileStatus[] generatedParts = getFileStatusRecurse(path, partitionNumber, fileIO);
+        return searchPartSpecAndPaths(
+                fileIO, path, partitionNumber, partitionKeys, onlyValueInPath, null, null, null);
+    }
+
+    /**
+     * Search all partitions in this path with partition filter support.
+     *
+     * <p>This method applies the partition filter during directory traversal, which can
+     * significantly reduce the number of remote filesystem calls for cloud storage like OSS/S3. For
+     * example, if the filter is "ds > '2026' AND ds < '2029'", directories like "ds=2024",
+     * "ds=2023" will be skipped without traversing their subdirectories.
+     *
+     * @param path search path.
+     * @param partitionNumber partition number, it will affect path structure.
+     * @param partitionKeys partition key names in order.
+     * @param onlyValueInPath whether partition path only contains value (not key=value).
+     * @param partitionFilter optional predicate to filter partitions during traversal.
+     * @param partitionType partition row type, required if partitionFilter is provided.
+     * @param defaultPartValue default partition value for null, required if partitionFilter is
+     *     provided.
+     * @return all partition specs to their paths that match the filter.
+     */
+    public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
+            FileIO fileIO,
+            Path path,
+            int partitionNumber,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            @Nullable Predicate partitionFilter,
+            @Nullable RowType partitionType,
+            @Nullable String defaultPartValue) {
+        FileStatus[] generatedParts =
+                getFileStatusRecurse(
+                        path,
+                        partitionNumber,
+                        fileIO,
+                        partitionKeys,
+                        onlyValueInPath,
+                        partitionFilter,
+                        partitionType,
+                        defaultPartValue);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
         for (FileStatus part : generatedParts) {
             // ignore hidden file
@@ -297,14 +343,41 @@ public class PartitionPathUtils {
         return ret;
     }
 
-    private static FileStatus[] getFileStatusRecurse(Path path, int expectLevel, FileIO fileIO) {
+    private static FileStatus[] getFileStatusRecurse(
+            Path path,
+            int expectLevel,
+            FileIO fileIO,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            @Nullable Predicate partitionFilter,
+            @Nullable RowType partitionType,
+            @Nullable String defaultPartValue) {
         ArrayList<FileStatus> result = new ArrayList<>();
 
         try {
             if (fileIO.exists(path)) {
                 // ignore hidden file
                 FileStatus fileStatus = fileIO.getFileStatus(path);
-                listStatusRecursively(fileIO, fileStatus, 0, expectLevel, result);
+                // Create an array to hold accumulated partition values at each level
+                Object[] partitionValues =
+                        partitionFilter != null ? new Object[partitionKeys.size()] : null;
+                // Calculate the starting offset when we begin from a prefix path
+                // For example, if partitionKeys = [ds, hr] and expectLevel = 1 (only hr remaining),
+                // then levelOffset = 2 - 1 = 1, so we access partitionKeys[1] for level 0
+                int levelOffset = partitionKeys.size() - expectLevel;
+                listStatusRecursively(
+                        fileIO,
+                        fileStatus,
+                        0,
+                        expectLevel,
+                        result,
+                        partitionKeys,
+                        onlyValueInPath,
+                        partitionFilter,
+                        partitionType,
+                        defaultPartValue,
+                        partitionValues,
+                        levelOffset);
             } else {
                 return new FileStatus[0];
             }
@@ -320,7 +393,14 @@ public class PartitionPathUtils {
             FileStatus fileStatus,
             int level,
             int expectLevel,
-            List<FileStatus> results)
+            List<FileStatus> results,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            @Nullable Predicate partitionFilter,
+            @Nullable RowType partitionType,
+            @Nullable String defaultPartValue,
+            @Nullable Object[] partitionValues,
+            int levelOffset)
             throws IOException {
         if (isHiddenFile(fileStatus.getPath())) {
             return;
@@ -333,7 +413,94 @@ public class PartitionPathUtils {
 
         if (fileStatus.isDir()) {
             for (FileStatus stat : fileIO.listStatus(fileStatus.getPath())) {
-                listStatusRecursively(fileIO, stat, level + 1, expectLevel, results);
+                // Calculate the actual partition key index considering the level offset
+                // When starting from a prefix path, levelOffset accounts for already-traversed
+                // levels
+                int partitionKeyIndex = levelOffset + level;
+
+                // Apply partition filter if available
+                if (partitionFilter != null
+                        && partitionType != null
+                        && partitionValues != null
+                        && partitionKeyIndex < partitionKeys.size()) {
+                    // Extract the partition value from the directory name
+                    String dirName = stat.getPath().getName();
+                    String partitionKey = partitionKeys.get(partitionKeyIndex);
+                    String partitionValue;
+
+                    if (onlyValueInPath) {
+                        partitionValue = unescapePathName(dirName);
+                    } else {
+                        // Parse key=value format
+                        Matcher m = PARTITION_NAME_PATTERN.matcher(dirName);
+                        if (m.matches()) {
+                            String key = unescapePathName(m.group(1));
+                            if (!key.equals(partitionKey)) {
+                                // Key doesn't match expected partition key, skip filtering
+                                partitionValue = null;
+                            } else {
+                                partitionValue = unescapePathName(m.group(2));
+                            }
+                        } else {
+                            // Not a valid partition directory format
+                            partitionValue = null;
+                        }
+                    }
+
+                    if (partitionValue != null) {
+                        // Convert the partition value to internal format
+                        Object internalValue =
+                                defaultPartValue != null && defaultPartValue.equals(partitionValue)
+                                        ? null
+                                        : castFromString(
+                                                partitionValue,
+                                                partitionType.getTypeAt(partitionKeyIndex));
+
+                        // Create a copy of partition values and set the current partition key value
+                        Object[] currentPartitionValues = partitionValues.clone();
+                        currentPartitionValues[partitionKeyIndex] = internalValue;
+
+                        // Build a partial row with the accumulated partition values
+                        GenericRow partialRow = new GenericRow(partitionKeys.size());
+                        for (int i = 0; i <= partitionKeyIndex; i++) {
+                            partialRow.setField(i, currentPartitionValues[i]);
+                        }
+
+                        if (!partitionFilter.test(partialRow)) {
+                            continue;
+                        }
+
+                        // Pass the accumulated values to the next level
+                        listStatusRecursively(
+                                fileIO,
+                                stat,
+                                level + 1,
+                                expectLevel,
+                                results,
+                                partitionKeys,
+                                onlyValueInPath,
+                                partitionFilter,
+                                partitionType,
+                                defaultPartValue,
+                                currentPartitionValues,
+                                levelOffset);
+                        continue;
+                    }
+                }
+
+                listStatusRecursively(
+                        fileIO,
+                        stat,
+                        level + 1,
+                        expectLevel,
+                        results,
+                        partitionKeys,
+                        onlyValueInPath,
+                        partitionFilter,
+                        partitionType,
+                        defaultPartValue,
+                        partitionValues,
+                        levelOffset);
             }
         }
     }
