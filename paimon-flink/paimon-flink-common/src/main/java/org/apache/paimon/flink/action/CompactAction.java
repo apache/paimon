@@ -144,7 +144,6 @@ public class CompactAction extends TableActionBase {
         if (fileStoreTable.coreOptions().bucket() == BucketMode.POSTPONE_BUCKET) {
             buildForPostponeBucketCompaction(env, fileStoreTable, isStreaming);
         } else if (fileStoreTable.bucketMode() == BucketMode.BUCKET_UNAWARE) {
-
             if (fileStoreTable.coreOptions().dataEvolutionEnabled()) {
                 buildForDataEvolutionTableCompact(env, fileStoreTable, isStreaming);
             } else if (fileStoreTable.coreOptions().clusteringIncrementalEnabled()) {

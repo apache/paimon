@@ -599,6 +599,9 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+            checkArgument(
+                    !options.clusteringIncrementalEnabled(),
+                    "Data evolution config must disabled with clustering.incremental");
         }
 
         Pair<RowType, RowType> normalAndBlobType = BlobType.splitBlob(schema.logicalRowType());
