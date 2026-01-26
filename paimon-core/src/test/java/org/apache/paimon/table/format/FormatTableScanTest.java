@@ -892,5 +892,21 @@ public class FormatTableScanTest {
                         .distinct()
                         .collect(java.util.stream.Collectors.toList());
         assertEquals(Arrays.asList("4", "5", "6", "7", "8", "9"), month);
+
+        atomicInteger.set(0);
+        predicate = PredicateBuilder.and(builder.greaterThan(1, 3), builder.lessThan(1, 10));
+
+        scan = ((FormatTableScan) formatTable.newReadBuilder().withFilter(predicate).newScan());
+        result = scan.findPartitions();
+        assertEquals(30, result.size());
+        // equals predicate reduce 1 io
+        assertEquals(6, atomicInteger.get());
+        month =
+                result.stream()
+                        .map(pair -> pair.getKey().get("month"))
+                        .sorted()
+                        .distinct()
+                        .collect(java.util.stream.Collectors.toList());
+        assertEquals(Arrays.asList("4", "5", "6", "7", "8", "9"), month);
     }
 }
