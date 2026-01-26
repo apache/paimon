@@ -373,7 +373,13 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return readManifestEntries(readManifests().filteredManifests, true);
     }
 
-    protected Iterator<ManifestEntry> readManifestEntries(
+    @Override
+    public Iterator<ManifestEntry> readFileIterator(List<ManifestFileMeta> manifestFileMetas) {
+        // useSequential: reduce memory and iterator can be stopping
+        return readManifestEntries(manifestFileMetas, true);
+    }
+
+    public Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifests, boolean useSequential) {
         return scanMode == ScanMode.ALL
                 ? readAndMergeFileEntries(manifests, Function.identity(), useSequential)

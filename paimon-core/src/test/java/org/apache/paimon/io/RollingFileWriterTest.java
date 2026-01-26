@@ -92,7 +92,7 @@ public class RollingFileWriterTest {
                                                 .newPath(),
                                         SCHEMA,
                                         0L,
-                                        new LongCounter(0),
+                                        () -> new LongCounter(0),
                                         new FileIndexOptions(),
                                         FileSource.APPEND,
                                         true,

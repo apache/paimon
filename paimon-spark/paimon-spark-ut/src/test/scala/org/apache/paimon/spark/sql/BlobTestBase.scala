@@ -204,14 +204,14 @@ class BlobTestBase extends PaimonSparkTestBase {
         sql("SELECT COUNT(*) FROM `t$files`"),
         Seq(Row(22))
       )
-      sql("CALL paimon.sys.compact('t')")
+      sql("CALL paimon.sys.compact('t')").collect()
       checkAnswer(
         sql("SELECT COUNT(*) FROM `t$files`"),
         Seq(Row(12))
       )
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t LIMIT 1"),
-        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 12))
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 11))
       )
     }
   }

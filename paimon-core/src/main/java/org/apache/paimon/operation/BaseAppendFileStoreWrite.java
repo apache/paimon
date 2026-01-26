@@ -60,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.types.DataTypeRoot.BLOB;
@@ -151,7 +152,8 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 fileIndexOptions,
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
-                blobConsumer);
+                blobConsumer,
+                options.dataEvolutionEnabled());
     }
 
     @Override
@@ -191,7 +193,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
-                        partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
+                        partition,
+                        bucket,
+                        () -> new LongCounter(toCompact.get(0).minSequenceNumber()));
         Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
             dvFactories = new HashMap<>();
@@ -226,7 +230,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         Sorter sorter = Sorter.getSorter(reader, ioManager, rowType, options);
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
-                        partition, bucket, new LongCounter(toCluster.get(0).minSequenceNumber()));
+                        partition,
+                        bucket,
+                        () -> new LongCounter(toCluster.get(0).minSequenceNumber()));
         try {
             MutableObjectIterator<BinaryRow> sorted = sorter.sort();
             BinaryRow binaryRow = new BinaryRow(sorter.arity());
@@ -253,7 +259,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     private RowDataRollingFileWriter createRollingFileWriter(
-            BinaryRow partition, int bucket, LongCounter seqNumCounter) {
+            BinaryRow partition, int bucket, Supplier<LongCounter> seqNumCounterSupplier) {
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
@@ -261,7 +267,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.targetFileSize(false),
                 writeType,
                 pathFactory.createDataFilePathFactory(partition, bucket),
-                seqNumCounter,
+                seqNumCounterSupplier,
                 options.fileCompression(),
                 statsCollectors(),
                 fileIndexOptions,

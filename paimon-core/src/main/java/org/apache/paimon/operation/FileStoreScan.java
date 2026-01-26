@@ -117,6 +117,8 @@ public interface FileStoreScan {
 
     Iterator<ManifestEntry> readFileIterator();
 
+    Iterator<ManifestEntry> readFileIterator(List<ManifestFileMeta> manifestFileMetas);
+
     default List<BinaryRow> listPartitions() {
         return readPartitionEntries().stream()
                 .map(PartitionEntry::partition)

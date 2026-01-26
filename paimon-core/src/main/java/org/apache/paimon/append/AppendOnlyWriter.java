@@ -60,6 +60,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.types.DataTypeRoot.BLOB;
 
@@ -86,7 +87,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
-    private final LongCounter seqNumCounter;
+    private final Supplier<LongCounter> seqNumCounterProvider;
     private final String fileCompression;
     private final CompressOptions spillCompression;
     private final StatsCollectorFactories statsCollectorFactories;
@@ -123,7 +124,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             FileIndexOptions fileIndexOptions,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable BlobConsumer blobConsumer) {
+            @Nullable BlobConsumer blobConsumer,
+            boolean dataEvolutionEnabled) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -142,7 +144,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
-        this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
+        final LongCounter seqNumCounter = new LongCounter(maxSequenceNumber + 1);
+        this.seqNumCounterProvider =
+                dataEvolutionEnabled ? () -> new LongCounter(0) : () -> seqNumCounter;
         this.fileCompression = fileCompression;
         this.spillCompression = spillCompression;
         this.ioManager = ioManager;
@@ -224,7 +228,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
 
     @Override
     public long maxSequenceNumber() {
-        return seqNumCounter.getValue() - 1;
+        return seqNumCounterProvider.get().getValue() - 1;
     }
 
     @Override
@@ -309,7 +313,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     blobTargetFileSize,
                     writeSchema,
                     pathFactory,
-                    seqNumCounter,
+                    seqNumCounterProvider,
                     fileCompression,
                     statsCollectorFactories,
                     fileIndexOptions,
@@ -325,7 +329,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                 targetFileSize,
                 writeSchema,
                 pathFactory,
-                seqNumCounter,
+                seqNumCounterProvider,
                 fileCompression,
                 statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
                 fileIndexOptions,
