@@ -55,7 +55,7 @@ import java.util.Map;
 
 import scala.collection.JavaConverters;
 
-/** A {@link InternalRow} wraps spark {@link Row}. */
+/** An {@link InternalRow} wraps spark {@link Row} for v1 write. */
 public class SparkRow implements InternalRow, Serializable {
 
     private final RowType type;
@@ -78,7 +78,7 @@ public class SparkRow implements InternalRow, Serializable {
         this.row = row;
         this.rowKind = rowkind;
         this.blobAsDescriptor = blobAsDescriptor;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = blobAsDescriptor ? new UriReaderFactory(catalogContext) : null;
     }
 
     @Override

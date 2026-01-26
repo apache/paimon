@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.spark.{SparkInternalRowWrapper, SparkUtils}
 import org.apache.paimon.spark.metric.SparkMetricRegistry
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage, TableWriteImpl}
@@ -32,14 +34,18 @@ case class PaimonV2DataWriter(
     writeBuilder: BatchWriteBuilder,
     writeSchema: StructType,
     dataSchema: StructType,
-    fullCompactionDeltaCommits: Option[Int],
+    coreOptions: CoreOptions,
+    catalogContext: CatalogContext,
     batchId: Option[Long] = None)
   extends abstractInnerTableDataWrite[InternalRow]
   with InnerTableV2DataWrite {
 
   private val ioManager = SparkUtils.createIOManager()
-
   private val metricRegistry = SparkMetricRegistry()
+
+  val fullCompactionDeltaCommits: Option[Int] =
+    Option.apply(coreOptions.fullCompactionDeltaCommits())
+  val blobAsDescriptor: Boolean = coreOptions.blobAsDescriptor()
 
   val write: TableWriteImpl[InternalRow] = {
     writeBuilder
@@ -51,7 +57,12 @@ case class PaimonV2DataWriter(
 
   private val rowConverter: InternalRow => SparkInternalRowWrapper = {
     val numFields = writeSchema.fields.length
-    val reusableWrapper = new SparkInternalRowWrapper(-1, writeSchema, dataSchema, numFields)
+    val reusableWrapper = new SparkInternalRowWrapper(
+      writeSchema,
+      numFields,
+      dataSchema,
+      blobAsDescriptor,
+      catalogContext)
     record => reusableWrapper.replace(record)
   }
 
