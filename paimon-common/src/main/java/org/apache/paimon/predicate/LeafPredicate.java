@@ -56,12 +56,12 @@ public class LeafPredicate implements Predicate {
     public static final String FIELD_LITERALS = "literals";
 
     @JsonProperty(FIELD_TRANSFORM)
-    private final Transform transform;
+    protected final Transform transform;
 
     @JsonProperty(FIELD_FUNCTION)
-    private final LeafFunction function;
+    protected final LeafFunction function;
 
-    private transient List<Object> literals;
+    protected transient List<Object> literals;
 
     public LeafPredicate(
             LeafFunction function,

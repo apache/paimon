@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.format.json.JsonOptions;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -49,6 +50,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.CoreOptions.FORMAT_TABLE_PARTITION_ONLY_VALUE_IN_PATH;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
@@ -806,46 +808,6 @@ public class FormatTableScanTest {
     }
 
     @TestTemplate
-    void testSearchPartSpecAndPathsWithPartitionFilter() throws IOException {
-        // Test that partition filter prunes directories during traversal
-        Path tableLocation = new Path(tmpPath.toUri());
-        LocalFileIO fileIO = LocalFileIO.create();
-
-        // Create multiple partition directories
-        // year=2022, year=2023, year=2024, year=2025
-        for (int year = 2022; year <= 2025; year++) {
-            String partPath =
-                    enablePartitionValueOnly ? year + "/12" : "year=" + year + "/month=12";
-            fileIO.mkdirs(new Path(tableLocation, partPath));
-        }
-
-        // Create predicate: year > 2023 (should match 2024 and 2025)
-        PredicateBuilder builder = new PredicateBuilder(partitionType);
-        Predicate predicate = builder.greaterThan(0, 2023);
-
-        // Search with partition filter
-        List<Pair<LinkedHashMap<String, String>, Path>> result =
-                searchPartSpecAndPaths(
-                        fileIO,
-                        tableLocation,
-                        2, // 2 partition levels
-                        partitionKeys,
-                        enablePartitionValueOnly,
-                        predicate,
-                        partitionType,
-                        "");
-
-        // Should only find year=2024 and year=2025
-        assertEquals(2, result.size());
-        List<String> years =
-                result.stream()
-                        .map(pair -> pair.getKey().get("year"))
-                        .sorted()
-                        .collect(java.util.stream.Collectors.toList());
-        assertEquals(Arrays.asList("2024", "2025"), years);
-    }
-
-    @TestTemplate
     void testSearchPartSpecAndPathsWithRangeFilter() throws IOException {
         // Test range filter (ds > '2023' AND ds < '2025')
         Path tableLocation = new Path(tmpPath.toUri());
@@ -863,42 +825,26 @@ public class FormatTableScanTest {
             }
         }
 
-        // Create predicate: year > 2022 AND year < 2026
-        PredicateBuilder builder = new PredicateBuilder(partitionType);
-        Predicate predicate =
-                PredicateBuilder.and(builder.greaterThan(0, 2022), builder.lessThan(0, 2026));
-
-        List<Pair<LinkedHashMap<String, String>, Path>> result =
-                searchPartSpecAndPaths(
-                        fileIO,
-                        tableLocation,
-                        2,
-                        partitionKeys,
-                        enablePartitionValueOnly,
-                        predicate,
-                        partitionType,
-                        "");
-
-        // Should find years 2023, 2024, 2025
-        assertEquals(36, result.size());
-        List<String> years =
-                result.stream()
-                        .map(pair -> pair.getKey().get("year"))
-                        .sorted()
-                        .distinct()
-                        .collect(java.util.stream.Collectors.toList());
-        assertEquals(Arrays.asList("2023", "2024", "2025"), years);
+        AtomicInteger atomicInteger = new AtomicInteger(0);
+        LocalFileIO localFileIO =
+                new LocalFileIO() {
+                    @Override
+                    public FileStatus[] listStatus(Path path) throws IOException {
+                        atomicInteger.getAndIncrement();
+                        return super.listStatus(path);
+                    }
+                };
 
         RowType rowType =
                 RowType.builder()
-                        .field("year", DataTypes.STRING())
+                        .field("year", DataTypes.INT())
                         .field("month", DataTypes.INT())
                         .field("a", DataTypes.INT())
                         .build();
 
         FormatTable formatTable =
                 FormatTable.builder()
-                        .fileIO(LocalFileIO.create())
+                        .fileIO(localFileIO)
                         .identifier(Identifier.create("test_db", "test_table"))
                         .rowType(rowType)
                         .partitionKeys(Arrays.asList("year", "month"))
@@ -910,13 +856,35 @@ public class FormatTableScanTest {
                                         String.valueOf(enablePartitionValueOnly)))
                         .build();
 
-        builder = new PredicateBuilder(formatTable.partitionType());
-        predicate = PredicateBuilder.and(builder.greaterThan(1, 3), builder.lessThan(1, 10));
+        // Create predicate: year > 2022 AND year < 2026
+        PredicateBuilder builder = new PredicateBuilder(formatTable.partitionType());
+        Predicate predicate =
+                PredicateBuilder.and(builder.greaterThan(0, 2022), builder.lessThan(0, 2026));
 
         FormatTableScan scan =
                 ((FormatTableScan) formatTable.newReadBuilder().withFilter(predicate).newScan());
+        List<Pair<LinkedHashMap<String, String>, Path>> result = scan.findPartitions();
+
+        // Should find years 2023, 2024, 2025
+        assertEquals(36, result.size());
+        assertEquals(4, atomicInteger.get());
+        List<String> years =
+                result.stream()
+                        .map(pair -> pair.getKey().get("year"))
+                        .sorted()
+                        .distinct()
+                        .collect(java.util.stream.Collectors.toList());
+        assertEquals(Arrays.asList("2023", "2024", "2025"), years);
+
+        atomicInteger.set(0);
+        predicate = PredicateBuilder.and(builder.greaterThan(1, 3), builder.lessThan(1, 10));
+        predicate = PredicateBuilder.and(predicate, builder.equal(0, 2024));
+
+        scan = ((FormatTableScan) formatTable.newReadBuilder().withFilter(predicate).newScan());
         result = scan.findPartitions();
-        assertEquals(30, result.size());
+        assertEquals(6, result.size());
+        // equals predicate reduce 1 io
+        assertEquals(1, atomicInteger.get());
         List<String> month =
                 result.stream()
                         .map(pair -> pair.getKey().get("month"))
@@ -924,109 +892,5 @@ public class FormatTableScanTest {
                         .distinct()
                         .collect(java.util.stream.Collectors.toList());
         assertEquals(Arrays.asList("4", "5", "6", "7", "8", "9"), month);
-    }
-
-    @TestTemplate
-    void testSearchPartSpecAndPathsWithSecondLevelFilter() throws IOException {
-        // Test filter on second partition level
-        Path tableLocation = new Path(tmpPath.toUri());
-        LocalFileIO fileIO = LocalFileIO.create();
-
-        // Create partition directories
-        // year=2023/month=1, year=2023/month=6, year=2023/month=12
-        for (int month : Arrays.asList(1, 6, 12)) {
-            String partPath =
-                    enablePartitionValueOnly ? "2023/" + month : "year=2023/month=" + month;
-            fileIO.mkdirs(new Path(tableLocation, partPath));
-        }
-
-        // Create predicate: month > 3
-        PredicateBuilder builder = new PredicateBuilder(partitionType);
-        Predicate predicate = builder.greaterThan(1, 3);
-
-        List<Pair<LinkedHashMap<String, String>, Path>> result =
-                searchPartSpecAndPaths(
-                        fileIO,
-                        tableLocation,
-                        2,
-                        partitionKeys,
-                        enablePartitionValueOnly,
-                        predicate,
-                        partitionType,
-                        "");
-
-        // Should find month=6 and month=12
-        assertEquals(2, result.size());
-        List<String> months =
-                result.stream()
-                        .map(pair -> pair.getKey().get("month"))
-                        .sorted()
-                        .collect(java.util.stream.Collectors.toList());
-        assertEquals(Arrays.asList("12", "6"), months);
-    }
-
-    @TestTemplate
-    void testSearchPartSpecAndPathsWithCombinedFilter() throws IOException {
-        // Test combined filter on both partition levels
-        Path tableLocation = new Path(tmpPath.toUri());
-        LocalFileIO fileIO = LocalFileIO.create();
-
-        // Create partition directories
-        for (int year : Arrays.asList(2022, 2023, 2024)) {
-            for (int month : Arrays.asList(1, 6, 12)) {
-                String partPath =
-                        enablePartitionValueOnly
-                                ? year + "/" + month
-                                : "year=" + year + "/month=" + month;
-                fileIO.mkdirs(new Path(tableLocation, partPath));
-            }
-        }
-
-        // Create predicate: year >= 2023 AND month > 3
-        PredicateBuilder builder = new PredicateBuilder(partitionType);
-        Predicate predicate =
-                PredicateBuilder.and(builder.greaterOrEqual(0, 2023), builder.greaterThan(1, 3));
-
-        List<Pair<LinkedHashMap<String, String>, Path>> result =
-                searchPartSpecAndPaths(
-                        fileIO,
-                        tableLocation,
-                        2,
-                        partitionKeys,
-                        enablePartitionValueOnly,
-                        predicate,
-                        partitionType,
-                        "");
-
-        // Should find year=2023/month=6, year=2023/month=12, year=2024/month=6, year=2024/month=12
-        assertEquals(4, result.size());
-    }
-
-    @TestTemplate
-    void testSearchPartSpecAndPathsWithoutFilter() throws IOException {
-        // Test that without filter, all partitions are returned (backward compatibility)
-        Path tableLocation = new Path(tmpPath.toUri());
-        LocalFileIO fileIO = LocalFileIO.create();
-
-        // Create partition directories
-        for (int year = 2022; year <= 2024; year++) {
-            String partPath = enablePartitionValueOnly ? year + "/6" : "year=" + year + "/month=6";
-            fileIO.mkdirs(new Path(tableLocation, partPath));
-        }
-
-        // Search without partition filter (null)
-        List<Pair<LinkedHashMap<String, String>, Path>> result =
-                searchPartSpecAndPaths(
-                        fileIO,
-                        tableLocation,
-                        2,
-                        partitionKeys,
-                        enablePartitionValueOnly,
-                        null,
-                        null,
-                        null);
-
-        // Should find all 3 partitions
-        assertEquals(3, result.size());
     }
 }

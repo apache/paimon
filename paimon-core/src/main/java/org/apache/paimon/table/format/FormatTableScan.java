@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NullableLeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
@@ -182,13 +183,7 @@ public class FormatTableScan implements InnerTableScan {
             if (partitionFilter instanceof DefaultPartitionPredicate) {
                 predicate = ((DefaultPartitionPredicate) partitionFilter).predicate();
 
-                PredicateBuilder predicateBuilder = new PredicateBuilder(table.partitionType());
-                List<Predicate> predicates = new ArrayList<>();
-                for (int i = 0; i < table.partitionKeys().size(); i++) {
-                    predicates.add(predicateBuilder.isNull(i));
-                }
-
-                predicate = PredicateBuilder.or(predicate, PredicateBuilder.or(predicates));
+                predicate = NullableLeafPredicate.from(predicate);
             }
 
             Pair<Path, Integer> scanPathAndLevel =
