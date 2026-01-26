@@ -62,7 +62,6 @@ case class MergeIntoPaimonDataEvolutionTable(
   extends PaimonLeafRunnableCommand
   with WithFileStoreTable {
 
-  private lazy val partialColumnWriter = DataEvolutionPaimonWriter(table)
   private lazy val writer = PaimonSparkWriter(table)
 
   assert(
@@ -178,7 +177,7 @@ case class MergeIntoPaimonDataEvolutionTable(
       map.toMap
     }
 
-    // step 1: find the related data split, make it target file plan
+    // step 1: find the related data splits, make it target file plan
     val dataSplits: Seq[DataSplit] =
       targetRelatedSplits(sparkSession, tableSplits, firstRowIds, firstRowIdToBlobFirstRowIds)
     val touchedFileTargetRelation =
@@ -187,7 +186,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     // step 2: invoke update action
     val updateCommit =
       if (matchedActions.nonEmpty) {
-        val updateResult = updateActionInvoke(sparkSession, touchedFileTargetRelation, firstRowIds)
+        val updateResult =
+          updateActionInvoke(dataSplits, sparkSession, touchedFileTargetRelation, firstRowIds)
         checkUpdateResult(updateResult)
       } else Nil
 
@@ -245,6 +245,7 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def updateActionInvoke(
+      dataSplits: Seq[DataSplit],
       sparkSession: SparkSession,
       touchedFileTargetRelation: DataSourceV2Relation,
       firstRowIds: immutable.IndexedSeq[Long]): Seq[CommitMessage] = {
@@ -387,7 +388,8 @@ case class MergeIntoPaimonDataEvolutionTable(
         .sortWithinPartitions(FIRST_ROW_ID_NAME, ROW_ID_NAME)
     }
 
-    partialColumnWriter.writePartialFields(toWrite, updateColumnsSorted.map(_.name))
+    val writer = DataEvolutionPaimonWriter(table, dataSplits)
+    writer.writePartialFields(toWrite, updateColumnsSorted.map(_.name))
   }
 
   private def insertActionInvoke(

@@ -65,7 +65,7 @@ case class DataEvolutionTableDataWrite(
     currentWriter.write(toPaimonRow(row), rowId)
   }
 
-  def newCurrentWriter(firstRowId: Long): Unit = {
+  private def newCurrentWriter(firstRowId: Long): Unit = {
     finishCurrentWriter()
     val (partition, numRecords) = firstRowIdToPartitionMap.getOrElse(firstRowId, null)
     if (partition == null) {
@@ -84,7 +84,7 @@ case class DataEvolutionTableDataWrite(
     currentWriter = PerFileWriter(partition, firstRowId, writer, numRecords)
   }
 
-  def finishCurrentWriter(): Unit = {
+  private def finishCurrentWriter(): Unit = {
     if (currentWriter != null) {
       commitMessages.append(currentWriter.finish())
     }
@@ -111,7 +111,7 @@ case class DataEvolutionTableDataWrite(
       recordWriter: RecordWriter[InternalRow],
       numRecords: Long) {
 
-    var numWritten = 0
+    private var numWritten = 0
 
     def matchFirstRowId(firstRowId: Long): Boolean = {
       this.firstRowId == firstRowId
