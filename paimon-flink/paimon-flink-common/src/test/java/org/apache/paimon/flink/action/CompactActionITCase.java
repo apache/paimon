@@ -849,7 +849,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         FileStoreTable table =
                 prepareTable(
-                        Arrays.asList("k"),
+                        Collections.singletonList("k"),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         tableOptions);

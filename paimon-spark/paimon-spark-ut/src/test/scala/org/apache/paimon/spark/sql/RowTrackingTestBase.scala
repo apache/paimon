@@ -651,6 +651,20 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Data Evolution: compact sort throw exception") {
+    withTable("s", "t") {
+      sql(
+        s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')")
+      sql("INSERT INTO t VALUES (1, 1, 1)")
+      assert(
+        intercept[Exception](
+          sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+            .collect()).getMessage
+          .contains("Data Evolution table cannot be sorted!"))
+
+    }
+  }
+
   test("Data Evolution: test global indexed column update action -- throw error") {
     withTable("T") {
       spark.sql("""
