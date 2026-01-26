@@ -282,24 +282,6 @@ public class PartitionPathUtils {
                 fileIO, path, partitionNumber, partitionKeys, onlyValueInPath, null, null, null);
     }
 
-    /**
-     * Search all partitions in this path with partition filter support.
-     *
-     * <p>This method applies the partition filter during directory traversal, which can
-     * significantly reduce the number of remote filesystem calls for cloud storage like OSS/S3. For
-     * example, if the filter is "ds > '2026' AND ds < '2029'", directories like "ds=2024",
-     * "ds=2023" will be skipped without traversing their subdirectories.
-     *
-     * @param path search path.
-     * @param partitionNumber partition number, it will affect path structure.
-     * @param partitionKeys partition key names in order.
-     * @param onlyValueInPath whether partition path only contains value (not key=value).
-     * @param partitionFilter optional predicate to filter partitions during traversal.
-     * @param partitionType partition row type, required if partitionFilter is provided.
-     * @param defaultPartValue default partition value for null, required if partitionFilter is
-     *     provided.
-     * @return all partition specs to their paths that match the filter.
-     */
     public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
             FileIO fileIO,
             Path path,
