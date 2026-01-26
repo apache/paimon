@@ -38,7 +38,7 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
-  ignore("Data Evolution: concurrent merge and compact") {
+  test("Data Evolution: concurrent merge and compact") {
     withTable("s", "t") {
       sql(s"""
             CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES (
