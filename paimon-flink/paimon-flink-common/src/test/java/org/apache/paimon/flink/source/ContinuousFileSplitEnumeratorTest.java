@@ -927,7 +927,8 @@ public class ContinuousFileSplitEnumeratorTest
                     unawareBucket,
                     this.splitMaxPerTask,
                     false,
-                    maxSnapshotCount);
+                    maxSnapshotCount,
+                    null);
         }
     }
 
