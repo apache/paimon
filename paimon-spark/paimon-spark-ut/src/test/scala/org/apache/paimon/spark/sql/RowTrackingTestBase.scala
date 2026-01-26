@@ -18,9 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.Snapshot.CommitKind
-import org.apache.paimon.format.FileFormat
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
