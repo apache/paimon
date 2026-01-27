@@ -37,7 +37,8 @@ import java.util.List;
     @JsonSubTypes.Type(value = CastTransform.class, name = CastTransform.NAME),
     @JsonSubTypes.Type(value = ConcatTransform.class, name = ConcatTransform.NAME),
     @JsonSubTypes.Type(value = ConcatWsTransform.class, name = ConcatWsTransform.NAME),
-    @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME)
+    @JsonSubTypes.Type(value = UpperTransform.class, name = UpperTransform.NAME),
+    @JsonSubTypes.Type(value = LowerTransform.class, name = LowerTransform.NAME)
 })
 public interface Transform extends Serializable {
     String FIELD_NAME = "name";
