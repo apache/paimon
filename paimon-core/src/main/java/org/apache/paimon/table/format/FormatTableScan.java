@@ -36,6 +36,7 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.NullableLeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
@@ -162,7 +163,7 @@ public class FormatTableScan implements InnerTableScan {
         }
     }
 
-    private List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
+    List<Pair<LinkedHashMap<String, String>, Path>> findPartitions() {
         boolean onlyValueInPath = coreOptions.formatTablePartitionOnlyValueInPath();
         if (partitionFilter instanceof MultiplePartitionPredicate) {
             // generate partitions directly
@@ -175,7 +176,16 @@ public class FormatTableScan implements InnerTableScan {
                     partitions,
                     onlyValueInPath);
         } else {
-            // search paths
+            // search paths with partition filter optimization
+            // This will prune partition directories early during traversal,
+            // which is especially important for cloud storage like OSS/S3
+            Predicate predicate = null;
+            if (partitionFilter instanceof DefaultPartitionPredicate) {
+                predicate = ((DefaultPartitionPredicate) partitionFilter).predicate();
+
+                predicate = NullableLeafPredicate.from(predicate);
+            }
+
             Pair<Path, Integer> scanPathAndLevel =
                     computeScanPathAndLevel(
                             new Path(table.location()),
@@ -188,7 +198,10 @@ public class FormatTableScan implements InnerTableScan {
                     scanPathAndLevel.getLeft(),
                     scanPathAndLevel.getRight(),
                     table.partitionKeys(),
-                    onlyValueInPath);
+                    onlyValueInPath,
+                    predicate,
+                    table.partitionType(),
+                    table.defaultPartName());
         }
     }
 
