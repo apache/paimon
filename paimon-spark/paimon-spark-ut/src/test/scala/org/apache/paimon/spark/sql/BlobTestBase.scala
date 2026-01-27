@@ -183,6 +183,11 @@ class BlobTestBase extends PaimonSparkTestBase {
       val blob = Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), blobDescriptor)
       assert(util.Arrays.equals(blobData, blob.toData))
 
+      checkAnswer(
+        sql("SELECT sys.descriptor_to_string(content) FROM t"),
+        Seq(Row(newBlobDescriptor.toString))
+      )
+
       sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
       checkAnswer(
         sql("SELECT id, name, content, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = 1"),
