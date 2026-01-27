@@ -228,9 +228,8 @@ public class LuceneVectorGlobalIndexTest {
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
-            LuceneVectorSearchGlobalIndexResult result =
-                    (LuceneVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            LuceneScoredGlobalIndexResult result =
+                    (LuceneScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             long expectedRowId = 0;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
@@ -240,16 +239,12 @@ public class LuceneVectorGlobalIndexTest {
             filterResults.add(expectedRowId);
             vectorSearch =
                     new VectorSearch(vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
-            result =
-                    (LuceneVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            result = (LuceneScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
             vectorSearch = new VectorSearch(queryVector, 2, fieldName);
-            result =
-                    (LuceneVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            result = (LuceneScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             long rowId1 = 1;
             long rowId2 = 3;
