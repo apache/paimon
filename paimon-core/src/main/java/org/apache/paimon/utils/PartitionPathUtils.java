@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -279,7 +280,14 @@ public class PartitionPathUtils {
             List<String> partitionKeys,
             boolean onlyValueInPath) {
         return searchPartSpecAndPaths(
-                fileIO, path, partitionNumber, partitionKeys, onlyValueInPath, null, null, null);
+                fileIO,
+                path,
+                partitionNumber,
+                partitionKeys,
+                onlyValueInPath,
+                Collections.emptyMap(),
+                null,
+                null);
     }
 
     public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
@@ -288,7 +296,7 @@ public class PartitionPathUtils {
             int partitionNumber,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            @Nullable Map<String, Predicate> partitionFilter,
+            Map<String, Predicate> partitionFilter,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue) {
         FileStatus[] generatedParts =
@@ -331,7 +339,7 @@ public class PartitionPathUtils {
             FileIO fileIO,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            @Nullable Map<String, Predicate> partitionFilter,
+            Map<String, Predicate> partitionFilter,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue) {
         ArrayList<FileStatus> result = new ArrayList<>();
@@ -396,7 +404,8 @@ public class PartitionPathUtils {
                 int partitionKeyIndex = levelOffset + level;
 
                 // Apply partition filter if available
-                if (partitionFilter.containsKey(partitionKeys.get(partitionKeyIndex)) && partitionType != null) {
+                if (partitionFilter.containsKey(partitionKeys.get(partitionKeyIndex))
+                        && partitionType != null) {
 
                     Predicate partitionPredicate =
                             partitionFilter.get(partitionKeys.get(partitionKeyIndex));

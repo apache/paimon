@@ -182,8 +182,8 @@ public class FormatTableScan implements InnerTableScan {
             Map<String, Predicate> partitionPredicates = new HashMap<>();
             if (partitionFilter instanceof DefaultPartitionPredicate) {
                 Predicate predicate = ((DefaultPartitionPredicate) partitionFilter).predicate();
-                partitionPredicates = PredicateUtils.splitPartitionPredicate(
-                        table.partitionType(), predicate);
+                partitionPredicates =
+                        PredicateUtils.splitPartitionPredicate(table.partitionType(), predicate);
             }
 
             Pair<Path, Integer> scanPathAndLevel =

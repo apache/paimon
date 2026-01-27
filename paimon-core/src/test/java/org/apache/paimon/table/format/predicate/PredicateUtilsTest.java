@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.format.predicate;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
