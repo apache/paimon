@@ -31,7 +31,6 @@ on:
       - '.github/workflows/paimon-python-checks.yml'
 
 env:
-  PYTHON_VERSIONS: "['3.6.15', '3.10']"
   JDK_VERSION: 8
   MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
 
@@ -52,8 +51,9 @@ jobs:
     needs: build_native
     container: "python:${{ matrix.python-version }}-slim"
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [ '3.6.15', '3.10' ]
+        python-version: [ '3.6.15', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13' ]
 
     steps:
       - name: Checkout code
@@ -131,6 +131,10 @@ jobs:
             python -m pip install --upgrade pip==21.3.1
             python --version
             python -m pip install --no-cache-dir pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 faiss-cpu==1.7.2 2>&1 >/dev/null
+          elif [[ "${{ matrix.python-version }}" == "3.12" ]] || [[ "${{ matrix.python-version }}" == "3.13" ]]; then
+            python -m pip install --upgrade pip
+            pip install torch --index-url https://download.pytorch.org/whl/cpu
+            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.48.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 'faiss-cpu>=1.10,<2'
           else
             python -m pip install --upgrade pip
             pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -261,38 +265,3 @@ jobs:
           # done
         env:
           PYTHONPATH: ${{ github.workspace }}/paimon-python
-
-  # Verify dev/requirements.txt can be installed on multiple Python versions.
-  # Catches version constraints that have no wheel for a given Python (e.g. faiss-cpu 1.7.4 on 3.12).
-  # Runs without Java/native build so we can cheaply test many versions.
-  verify-requirements-txt:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Verify dev/requirements.txt on Python ${{ matrix.python-version }}
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          cd paimon-python
-          # Resolve and install to a temp dir; same logic as former lint-python step
-          TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || {
-            echo "ERROR: dev/requirements.txt failed on Python ${{ matrix.python-version }}."
-            echo "Check that every dependency has a wheel or sdist for this Python version."
-            rm -rf "$TEMP_DIR"
-            exit 1
-          }
-          rm -rf "$TEMP_DIR"
-          echo "✓ dev/requirements.txt OK on Python ${{ matrix.python-version }}"
