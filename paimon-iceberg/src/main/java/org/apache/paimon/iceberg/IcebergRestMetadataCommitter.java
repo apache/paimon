@@ -31,6 +31,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.MetadataUpdate;
+import org.apache.iceberg.PartitionField;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
@@ -42,6 +43,7 @@ import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.RESTCatalog;
+import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.NestedField;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -281,19 +283,27 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                 spec.fields().stream().anyMatch(f -> f.sourceId() == 0);
         if (spec.isUnpartitioned() || isPartitionedWithZeroFieldId) {
             if (isPartitionedWithZeroFieldId) {
-                LOG.warn(
-                        "When partition field is 0 fieldId Icebert REST committer will use partition evolution in oreder to support Iceberg compatabilty with Paimon schema. If you want to avoid it uses non 0 field id as partition");
+                LOG.info(
+                        "When the partition field has a fieldId of 0, the Iceberg REST committer will use partition evolution in order to support Iceberg compatibility with the Paimon schema. If you want to avoid this, use a non-zero field ID as the partition");
             }
             Schema emptySchema = new Schema();
             return restCatalog.createTable(icebergTableIdentifier, emptySchema);
         } else {
-            List<NestedField> columns =
-                    newMetadata.schema().columns().stream()
-                            .filter(nf -> nf.fieldId() != 0)
-                            .collect(Collectors.toList());
-            Schema dummySchema = new Schema(columns);
             LOG.info(
-                    "In order to support schema compatability between Paimon and Iceberg REST dummy schema will be created first");
+                    "In order to support schema compatibility between Paimon and Iceberg REST, a dummy schema will be created first");
+
+            int size =
+                    spec.fields().stream().mapToInt(PartitionField::sourceId).max().orElseThrow();
+            NestedField[] c = new NestedField[size];
+            for (int idx = 0; idx < size; idx++) {
+                int fieldId = idx + 1;
+                c[idx] = NestedField.optional(fieldId, "f" + fieldId, Types.BooleanType.get());
+            }
+            for (PartitionField f : spec.fields()) {
+                c[f.sourceId() - 1] = newMetadata.schema().findField(f.sourceId());
+            }
+
+            Schema dummySchema = new Schema(c);
             return restCatalog.createTable(icebergTableIdentifier, dummySchema, spec);
         }
     }

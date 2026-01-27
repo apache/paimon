@@ -219,7 +219,9 @@ public class IcebergRestMetadataCommitterTest {
                             DataTypes.INT(),
                             DataTypes.BIGINT()
                         },
-                        new String[] {"k", "pt1", "pt2", "v1", "v2"});
+                        new String[] {
+                            "k", "pt1", "pt2", "v1", "v2"
+                        }); // partition starts from fieldId 1
 
         BiFunction<Integer, String, BinaryRow> binaryRow =
                 (pt1, pt2) -> {
