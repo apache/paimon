@@ -18,4 +18,10 @@
 
 package org.apache.paimon.spark.sql
 
-class UpdateTableTest extends UpdateTableTestBase {}
+import org.apache.spark.SparkConf
+
+class UpdateTableTest extends UpdateTableTestBase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
+}
