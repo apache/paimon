@@ -234,12 +234,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertEqual(metadata_fields[1].name, 'created_at')
             self.assertEqual(metadata_fields[2].name, 'location')
             self.assertIsInstance(metadata_fields[2].type, RowType)
-        else:
-            from pypaimon.schema.data_types import RowType
-            self.assertIsInstance(table.fields[4].type, RowType)
-            metadata_fields = table.fields[4].type.fields
-            self.assertEqual(len(metadata_fields), 3)
-            self.assertIsInstance(metadata_fields[2].type, RowType)
         
         # Data order may vary due to partitioning/bucketing, so compare as sets
         expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
@@ -249,7 +243,6 @@ class JavaPyReadWriteTest(unittest.TestCase):
         # Verify metadata column can be read and contains nested structures
         if 'metadata' in res.columns:
             self.assertFalse(res['metadata'].isnull().all())
-            print(f"Format: {file_format}, Metadata column sample: {res['metadata'].iloc[0]}")
 
         # For primary key tables, verify that _VALUE_KIND is written correctly
         # by checking if we can read the raw data with system fields

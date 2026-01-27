@@ -220,18 +220,15 @@ public class JavaPyE2ETest {
                     new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
             TableRead read = fileStoreTable.newRead();
             List<String> res =
-                    getResult(
-                            read,
-                            splits,
-                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+                    getResult(read, splits, row -> rowToStringWithStruct(row, table.rowType()));
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, +I[store1, 1001, +I[Beijing, China]]",
-                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, +I[store1, 1002, +I[Shanghai, China]]",
-                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, +I[store2, 1003, +I[Tokyo, Japan]]",
-                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, +I[store2, 1004, +I[Seoul, Korea]]",
-                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, +I[store3, 1005, +I[NewYork, USA]]",
-                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, +I[store3, 1006, +I[London, UK]]");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
         }
     }
 
@@ -380,10 +377,7 @@ public class JavaPyE2ETest {
                     new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
             TableRead read = fileStoreTable.newRead();
             List<String> res =
-                    getResult(
-                            read,
-                            splits,
-                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+                    getResult(read, splits, row -> rowToStringWithStruct(row, table.rowType()));
             System.out.println("Result for " + format + " : " + res);
             assertThat(table.rowType().getFieldTypes().get(4)).isEqualTo(DataTypes.TIMESTAMP());
             assertThat(table.rowType().getFieldTypes().get(5))
@@ -393,12 +387,12 @@ public class JavaPyE2ETest {
             assertThat(metadataType.getFieldTypes().get(2)).isInstanceOf(RowType.class);
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, +I[store1, 1001, +I[Beijing, China]]",
-                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, +I[store1, 1002, +I[Shanghai, China]]",
-                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, +I[store2, 1003, +I[Tokyo, Japan]]",
-                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, +I[store2, 1004, +I[Seoul, Korea]]",
-                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, +I[store3, 1005, +I[NewYork, USA]]",
-                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, +I[store3, 1006, +I[London, UK]]");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
         }
     }
 
@@ -462,5 +456,25 @@ public class JavaPyE2ETest {
 
     protected GenericRow createRow3ColsWithKind(RowKind rowKind, Object... values) {
         return GenericRow.ofKind(rowKind, values[0], values[1], values[2]);
+    }
+
+    private static String rowToStringWithStruct(InternalRow row, RowType type) {
+        StringBuilder build = new StringBuilder();
+        build.append(row.getRowKind().shortString()).append("[");
+        for (int i = 0; i < type.getFieldCount(); i++) {
+            if (i != 0) {
+                build.append(", ");
+            }
+            if (row.isNullAt(i)) {
+                build.append("NULL");
+            } else {
+                InternalRow.FieldGetter fieldGetter =
+                        InternalRow.createFieldGetter(type.getTypeAt(i), i);
+                Object field = fieldGetter.getFieldOrNull(row);
+                build.append(DataFormatTestUtil.getDataFieldString(field, type.getTypeAt(i)));
+            }
+        }
+        build.append("]");
+        return build.toString();
     }
 }
