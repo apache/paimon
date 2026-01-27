@@ -40,7 +40,7 @@ public class DescriptorToStringUnbound implements UnboundFunction {
                             + inputType.fields()[0].dataType().simpleString());
         }
 
-        return new PathToDescriptorFunction();
+        return new DescriptorToStringFunction();
     }
 
     @Override
