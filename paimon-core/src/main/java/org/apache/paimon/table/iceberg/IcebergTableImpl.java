@@ -25,6 +25,7 @@ import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
@@ -44,6 +45,7 @@ public class IcebergTableImpl implements ReadonlyTable, IcebergTable {
     private final String location;
     private final Map<String, String> options;
     @Nullable private final String comment;
+    @Nullable private final String uuid;
 
     public IcebergTableImpl(
             Identifier identifier,
@@ -52,14 +54,16 @@ public class IcebergTableImpl implements ReadonlyTable, IcebergTable {
             List<String> partitionKeys,
             String location,
             Map<String, String> options,
-            @Nullable String comment) {
+            @Nullable String comment,
+            @Nullable String uuid) {
         this.identifier = identifier;
         this.fileIO = fileIO;
         this.rowType = rowType;
         this.partitionKeys = partitionKeys;
         this.location = location;
-        this.options = options;
+        this.options = options == null ? Collections.emptyMap() : options;
         this.comment = comment;
+        this.uuid = uuid;
     }
 
     @Override
@@ -70,6 +74,11 @@ public class IcebergTableImpl implements ReadonlyTable, IcebergTable {
     @Override
     public String fullName() {
         return identifier.getFullName();
+    }
+
+    @Override
+    public String uuid() {
+        return StringUtils.isEmpty(uuid) ? fullName() : uuid;
     }
 
     @Override
@@ -117,7 +126,7 @@ public class IcebergTableImpl implements ReadonlyTable, IcebergTable {
         Map<String, String> newOptions = new HashMap<>(options);
         newOptions.putAll(dynamicOptions);
         return new IcebergTableImpl(
-                identifier, fileIO, rowType, partitionKeys, location, newOptions, comment);
+                identifier, fileIO, rowType, partitionKeys, location, newOptions, comment, uuid);
     }
 
     @Override
