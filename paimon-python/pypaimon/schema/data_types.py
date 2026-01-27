@@ -472,6 +472,12 @@ class PyarrowFieldParser:
             key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
             value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
             return pyarrow.map_(key_type, value_type)
+        elif isinstance(data_type, RowType):
+            pa_fields = []
+            for field in data_type.fields:
+                pa_field_type = PyarrowFieldParser.from_paimon_type(field.type)
+                pa_fields.append(pyarrow.field(field.name, pa_field_type, nullable=field.type.nullable))
+            return pyarrow.struct(pa_fields)
         raise ValueError("Unsupported data type: {}".format(data_type))
 
     @staticmethod
@@ -539,6 +545,17 @@ class PyarrowFieldParser:
             key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
             value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
             return MapType(nullable, key_type, value_type)
+        elif types.is_struct(pa_type):
+            pa_type: pyarrow.StructType
+            fields = []
+            for i, pa_field in enumerate(pa_type):
+                field_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+                fields.append(DataField(
+                    id=i,
+                    name=pa_field.name,
+                    type=field_type
+                ))
+            return RowType(nullable, fields)
         if type_name is not None:
             return AtomicType(type_name, nullable)
         raise ValueError("Unsupported pyarrow type: {}".format(pa_type))
