@@ -17,8 +17,10 @@ limitations under the License.
 """
 import unittest
 from parameterized import parameterized
+import pyarrow as pa
 
-from pypaimon.schema.data_types import DataField, AtomicType, ArrayType, MultisetType, MapType, RowType
+from pypaimon.schema.data_types import (DataField, AtomicType, ArrayType, MultisetType, MapType,
+                                        RowType, PyarrowFieldParser)
 
 
 class DataTypesTest(unittest.TestCase):
@@ -65,3 +67,70 @@ class DataTypesTest(unittest.TestCase):
                                   DataField(1, "b", AtomicType("TIMESTAMP(6)"),)])
         self.assertEqual(str(row_data),
                          str(RowType.from_dict(row_data.to_dict())))
+
+    def test_struct_from_paimon_to_pyarrow(self):
+        paimon_row = RowType(
+            nullable=True,
+            fields=[
+                DataField(0, "field1", AtomicType("INT")),
+                DataField(1, "field2", AtomicType("STRING")),
+                DataField(2, "field3", AtomicType("DOUBLE"))
+            ]
+        )
+        pa_struct = PyarrowFieldParser.from_paimon_type(paimon_row)
+
+        self.assertTrue(pa.types.is_struct(pa_struct))
+        self.assertEqual(len(pa_struct), 3)
+        self.assertEqual(pa_struct[0].name, "field1")
+        self.assertEqual(pa_struct[1].name, "field2")
+        self.assertEqual(pa_struct[2].name, "field3")
+        self.assertTrue(pa.types.is_int32(pa_struct[0].type))
+        self.assertTrue(pa.types.is_string(pa_struct[1].type))
+        self.assertTrue(pa.types.is_float64(pa_struct[2].type))
+
+    def test_struct_from_pyarrow_to_paimon(self):
+        pa_struct = pa.struct([
+            pa.field("name", pa.string()),
+            pa.field("age", pa.int32()),
+            pa.field("score", pa.float64())
+        ])
+        paimon_row = PyarrowFieldParser.to_paimon_type(pa_struct, nullable=True)
+        
+        self.assertIsInstance(paimon_row, RowType)
+        self.assertTrue(paimon_row.nullable)
+        self.assertEqual(len(paimon_row.fields), 3)
+        self.assertEqual(paimon_row.fields[0].name, "name")
+        self.assertEqual(paimon_row.fields[1].name, "age")
+        self.assertEqual(paimon_row.fields[2].name, "score")
+        self.assertEqual(paimon_row.fields[0].type.type, "STRING")
+        self.assertEqual(paimon_row.fields[1].type.type, "INT")
+        self.assertEqual(paimon_row.fields[2].type.type, "DOUBLE")
+
+    def test_nested_field_roundtrip(self):
+        nested_field = RowType(
+            nullable=True,
+            fields=[
+                DataField(0, "inner_field1", AtomicType("STRING")),
+                DataField(1, "inner_field2", AtomicType("INT"))
+            ]
+        )
+        paimon_row = RowType(
+            nullable=True,
+            fields=[
+                DataField(0, "outer_field1", AtomicType("BIGINT")),
+                DataField(1, "nested", nested_field)
+            ]
+        )
+        pa_struct = PyarrowFieldParser.from_paimon_type(paimon_row)
+
+        converted_paimon_row = PyarrowFieldParser.to_paimon_type(pa_struct, nullable=True)
+        self.assertIsInstance(converted_paimon_row, RowType)
+        self.assertEqual(len(converted_paimon_row.fields), 2)
+        self.assertEqual(converted_paimon_row.fields[0].name, "outer_field1")
+        self.assertEqual(converted_paimon_row.fields[1].name, "nested")
+        
+        converted_nested_field = converted_paimon_row.fields[1].type
+        self.assertIsInstance(converted_nested_field, RowType)
+        self.assertEqual(len(converted_nested_field.fields), 2)
+        self.assertEqual(converted_nested_field.fields[0].name, "inner_field1")
+        self.assertEqual(converted_nested_field.fields[1].name, "inner_field2")
