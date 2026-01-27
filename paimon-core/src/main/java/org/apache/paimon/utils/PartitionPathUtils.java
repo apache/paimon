@@ -31,6 +31,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -279,7 +280,14 @@ public class PartitionPathUtils {
             List<String> partitionKeys,
             boolean onlyValueInPath) {
         return searchPartSpecAndPaths(
-                fileIO, path, partitionNumber, partitionKeys, onlyValueInPath, null, null, null);
+                fileIO,
+                path,
+                partitionNumber,
+                partitionKeys,
+                onlyValueInPath,
+                Collections.emptyMap(),
+                null,
+                null);
     }
 
     public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
@@ -288,7 +296,7 @@ public class PartitionPathUtils {
             int partitionNumber,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            @Nullable Predicate partitionFilter,
+            Map<String, Predicate> partitionFilter,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue) {
         FileStatus[] generatedParts =
@@ -331,7 +339,7 @@ public class PartitionPathUtils {
             FileIO fileIO,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            @Nullable Predicate partitionFilter,
+            Map<String, Predicate> partitionFilter,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue) {
         ArrayList<FileStatus> result = new ArrayList<>();
@@ -340,9 +348,6 @@ public class PartitionPathUtils {
             if (fileIO.exists(path)) {
                 // ignore hidden file
                 FileStatus fileStatus = fileIO.getFileStatus(path);
-                // Create an array to hold accumulated partition values at each level
-                Object[] partitionValues =
-                        partitionFilter != null ? new Object[partitionKeys.size()] : null;
                 // Calculate the starting offset when we begin from a prefix path
                 // For example, if partitionKeys = [ds, hr] and expectLevel = 1 (only hr remaining),
                 // then levelOffset = 2 - 1 = 1, so we access partitionKeys[1] for level 0
@@ -358,7 +363,6 @@ public class PartitionPathUtils {
                         partitionFilter,
                         partitionType,
                         defaultPartValue,
-                        partitionValues,
                         levelOffset);
             } else {
                 return new FileStatus[0];
@@ -378,10 +382,9 @@ public class PartitionPathUtils {
             List<FileStatus> results,
             List<String> partitionKeys,
             boolean onlyValueInPath,
-            @Nullable Predicate partitionFilter,
+            Map<String, Predicate> partitionFilter,
             @Nullable RowType partitionType,
             @Nullable String defaultPartValue,
-            @Nullable Object[] partitionValues,
             int levelOffset)
             throws IOException {
         if (isHiddenFile(fileStatus.getPath())) {
@@ -401,10 +404,11 @@ public class PartitionPathUtils {
                 int partitionKeyIndex = levelOffset + level;
 
                 // Apply partition filter if available
-                if (partitionFilter != null
-                        && partitionType != null
-                        && partitionValues != null
-                        && partitionKeyIndex < partitionKeys.size()) {
+                if (partitionFilter.containsKey(partitionKeys.get(partitionKeyIndex))
+                        && partitionType != null) {
+
+                    Predicate partitionPredicate =
+                            partitionFilter.get(partitionKeys.get(partitionKeyIndex));
                     // Extract the partition value from the directory name
                     String dirName = stat.getPath().getName();
                     String partitionKey = partitionKeys.get(partitionKeyIndex);
@@ -438,17 +442,8 @@ public class PartitionPathUtils {
                                                 partitionValue,
                                                 partitionType.getTypeAt(partitionKeyIndex));
 
-                        // Create a copy of partition values and set the current partition key value
-                        Object[] currentPartitionValues = partitionValues.clone();
-                        currentPartitionValues[partitionKeyIndex] = internalValue;
-
-                        // Build a partial row with the accumulated partition values
-                        GenericRow partialRow = new GenericRow(partitionKeys.size());
-                        for (int i = 0; i <= partitionKeyIndex; i++) {
-                            partialRow.setField(i, currentPartitionValues[i]);
-                        }
-
-                        if (!partitionFilter.test(partialRow)) {
+                        GenericRow partialRow = GenericRow.of(internalValue);
+                        if (!partitionPredicate.test(partialRow)) {
                             continue;
                         }
 
@@ -464,7 +459,6 @@ public class PartitionPathUtils {
                                 partitionFilter,
                                 partitionType,
                                 defaultPartValue,
-                                currentPartitionValues,
                                 levelOffset);
                         continue;
                     }
@@ -481,7 +475,6 @@ public class PartitionPathUtils {
                         partitionFilter,
                         partitionType,
                         defaultPartValue,
-                        partitionValues,
                         levelOffset);
             }
         }
