@@ -220,7 +220,6 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         .withSourceTable("S")
                         .withTargetAlias("TempT")
                         .withSinkParallelism(2);
-        ;
 
         builder.build().run();
 
