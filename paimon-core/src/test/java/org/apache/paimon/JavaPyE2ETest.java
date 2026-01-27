@@ -105,6 +105,25 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testReadAppendTable() throws Exception {
+        for (String format : Arrays.asList("parquet", "orc", "avro")) {
+            Identifier identifier = identifier("mixed_test_append_tablep_" + format);
+            Table table = catalog.getTable(identifier);
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            List<Split> splits =
+                    new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+            TableRead read = fileStoreTable.newRead();
+            List<String> res =
+                    getResult(
+                            read,
+                            splits,
+                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+            System.out.println(res);
+        }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testJavaWriteReadPkTable() throws Exception {
         for (String format : Arrays.asList("parquet", "orc", "avro")) {
             Identifier identifier = identifier("mixed_test_pk_tablej_" + format);
