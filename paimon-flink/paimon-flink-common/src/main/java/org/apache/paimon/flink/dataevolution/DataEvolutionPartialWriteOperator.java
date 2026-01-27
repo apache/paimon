@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.dataevolution;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
@@ -59,7 +58,10 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 
-/** The Flink Batch Operator to process sorted new rows for data-evolution partial write. */
+/**
+ * The Flink Batch Operator to process sorted new rows for data-evolution partial write. It assumes
+ * that input data has already been shuffled by firstRowId and sorted by rowId.
+ */
 public class DataEvolutionPartialWriteOperator
         extends BoundedOneInputOperator<InternalRow, Committable> {
 
@@ -99,7 +101,6 @@ public class DataEvolutionPartialWriteOperator
         this.dataType =
                 SpecialFields.rowTypeWithRowId(table.rowType()).project(dataType.getFieldNames());
         this.rowIdIndex = this.dataType.getFieldIndex(SpecialFields.ROW_ID.name());
-        System.out.print(dataType);
         this.fieldGetters = new InternalRow.FieldGetter[dataType.getFieldCount()];
         List<DataField> fields = this.dataType.getFields();
         for (int i = 0; i < fields.size(); i++) {
@@ -157,22 +158,14 @@ public class DataEvolutionPartialWriteOperator
     @Override
     public void processElement(StreamRecord<InternalRow> element) throws Exception {
         InternalRow row = element.getValue();
-        System.out.print("Processing element :");
-        printRow(row);
         long rowId = row.getLong(rowIdIndex);
+
         if (writer == null || !writer.contains(rowId)) {
             finishWriter();
             writer = createWriter(firstRowIdLookup.lookup(rowId));
         }
 
         writer.write(row);
-    }
-
-    private void printRow(InternalRow row) {
-        for (InternalRow.FieldGetter fieldGetter : this.fieldGetters) {
-            System.out.print(fieldGetter.getFieldOrNull(row) + ", ");
-        }
-        System.out.println();
     }
 
     private void finishWriter() throws Exception {
@@ -183,16 +176,18 @@ public class DataEvolutionPartialWriteOperator
     }
 
     private Writer createWriter(long firstRowId) throws IOException {
-        System.out.println("Creating writer for row id " + firstRowId);
         LOG.debug("Creating writer for row id {}", firstRowId);
+
         BinaryRow partition = firstIdToPartition.get(firstRowId);
         Preconditions.checkNotNull(
                 partition,
                 String.format("Cannot find the partition for firstRowId: %s ", firstRowId));
+
         List<DataFileMeta> files = firstIdToFiles.get(firstRowId);
         Preconditions.checkState(
                 files != null && !files.isEmpty(),
                 String.format("Cannot find files for firstRowId: %s", firstRowId));
+
         long rowCount = files.get(0).rowCount();
 
         DataSplit dataSplit =
@@ -237,6 +232,7 @@ public class DataEvolutionPartialWriteOperator
         private final BinaryRow partition;
 
         private long writtenNum = 0;
+        private long prevRowId = -1;
 
         Writer(
                 RecordReader<InternalRow> reader,
@@ -245,13 +241,20 @@ public class DataEvolutionPartialWriteOperator
                 long rowCount) {
             this.reader = reader.toCloseableIterator();
             this.writer = writer;
-            this.reusedRow = ProjectedRow.from(writeType, table.rowType());
+            this.reusedRow = ProjectedRow.from(writeType, dataType);
             this.firstRowId = firstRowId;
             this.rowCount = rowCount;
             this.partition = firstIdToPartition.get(firstRowId);
         }
 
         void write(InternalRow row) throws Exception {
+            long currentRowId = row.getLong(rowIdIndex);
+
+            // for rows with duplicated _ROW_ID, just choose the first one.
+            if (checkDuplication(currentRowId)) {
+                return;
+            }
+
             if (!reader.hasNext()) {
                 throw new IllegalStateException(
                         "New file should be aligned with original file, it's a bug.");
@@ -260,28 +263,23 @@ public class DataEvolutionPartialWriteOperator
             InternalRow originalRow;
             while (reader.hasNext()) {
                 originalRow = reader.next();
-                System.out.print("originalRow: ");
-                printRow(originalRow);
-                System.out.print("new Row: ");
-                printRow(row);
-
                 long originalRowId = originalRow.getLong(rowIdIndex);
-                long currentRowId = row.getLong(rowIdIndex);
+
                 if (originalRowId < currentRowId) {
                     // new row is absent, we should use the original row
                     reusedRow.replaceRow(originalRow);
                     writer.write(reusedRow);
                     writtenNum++;
                 } else if (originalRowId == currentRowId) {
-                    // new row is present, we should partial-update with new row and original row
-                    reusedRow.replaceRow(partialUpdate(originalRow, row));
+                    // new row is present, we should use the new row
+                    reusedRow.replaceRow(row);
                     writer.write(reusedRow);
                     writtenNum++;
                     break;
                 } else {
                     // original row id > new row id, this means there are duplicated row ids
-                    // in the input rows, we just simply choose a random one i.e. the first one.
-                    break;
+                    // in the input rows, it cannot happen here.
+                    throw new IllegalStateException("Duplicated row id " + currentRowId);
                 }
             }
         }
@@ -331,16 +329,12 @@ public class DataEvolutionPartialWriteOperator
             return rowId >= firstRowId && rowId < firstRowId + rowCount;
         }
 
-        private InternalRow partialUpdate(InternalRow original, InternalRow current) {
-            GenericRow result = new GenericRow(original.getFieldCount());
-            for (int i = 0; i < original.getFieldCount(); i++) {
-                if (!current.isNullAt(i)) {
-                    result.setField(i, fieldGetters[i].getFieldOrNull(current));
-                } else {
-                    result.setField(i, fieldGetters[i].getFieldOrNull(original));
-                }
+        private boolean checkDuplication(long rowId) {
+            if (prevRowId == rowId) {
+                return true;
             }
-            return result;
+            prevRowId = rowId;
+            return false;
         }
     }
 }

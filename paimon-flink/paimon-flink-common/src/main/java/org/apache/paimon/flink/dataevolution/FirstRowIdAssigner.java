@@ -70,7 +70,12 @@ public class FirstRowIdAssigner extends RichMapFunction<RowData, Tuple2<Long, Ro
             // Now we just simply floorMod the hash result of the firstRowId.
             // We could make it more balanced by considering the number of records of each row id
             // range.
-            return Math.floorMod(MurmurHashUtils.fmix(firstRowId), numPartitions);
+            return floorMod(MurmurHashUtils.fmix(firstRowId), numPartitions);
+        }
+
+        /** For compatible with java-1.8. */
+        private int floorMod(long x, int y) {
+            return (int) (x - Math.floorDiv(x, (long) y) * y);
         }
     }
 }

@@ -18,29 +18,35 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.utils.BlockingIterator;
-
 import org.apache.flink.types.Row;
-import org.apache.flink.util.CloseableIterator;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertInto;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** ITCase for {@link DataEvolutionMergeIntoAction}. */
 public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(DataEvolutionMergeIntoActionITCase.class);
 
     @BeforeEach
     public void setup() throws Exception {
@@ -52,39 +58,216 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void test() throws Exception {
-        Map<String, String> config = new HashMap<>();
-        config.put("warehouse", warehouse);
-        DataEvolutionMergeIntoAction action =
-                new DataEvolutionMergeIntoAction(database, "T", config);
-        action.withMergeCondition("T.id=S.id")
-                .withMatchedUpdateSet("T.name=S.name")
-                .withSourceTable("S")
-                .withSinkParallelism(2);
+    public void testUpdateSingleColumn() throws Exception {
+        DataEvolutionMergeIntoActionBuilder builder =
+                builder(warehouse, database, "T")
+                        .withMergeCondition("T.id=S.id")
+                        .withMatchedUpdateSet("T.name=S.name")
+                        .withSourceTable("S")
+                        .withSinkParallelism(2);
 
-        //        Tuple2<DataStream<RowData>, RowType> source = action.buildSource();
-        //        DataStream<Tuple2<Long, RowData>> assigned =
-        //                action.shuffleByFirstRowId(source.f0, source.f1);
-        //        DataStream<Committable> written = action.writePartialColumns(assigned, source.f1,
-        // 1);
-        //        DataStream<Committable> committed = action.commit(written);
-        //        try (CloseableIterator<Committable> result = committed.executeAndCollect()) {
-        //            while (result.hasNext()) {
-        //                Committable committable = result.next();
-        //                CommitMessageImpl commitMessage = (CommitMessageImpl)
-        // committable.commitMessage();
-        //                System.out.println(commitMessage);
-        //            }
-        //        }
+        builder.build().run();
 
-        action.run();
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "new_name1"),
+                        changelogRow("+I", 2, "name2"),
+                        changelogRow("+I", 3, "name3"),
+                        changelogRow("+I", 7, "new_name7"),
+                        changelogRow("+I", 8, "name8"),
+                        changelogRow("+I", 11, "new_name11"),
+                        changelogRow("+I", 15, null),
+                        changelogRow("+I", 18, "new_name18"));
 
-        CloseableIterator<Row> finalData = bEnv.executeSql("SELECT * FROM T").collect();
-        try (BlockingIterator<Row, Row> result = BlockingIterator.of(finalData)) {
-            for (Row row : result.collect(20)) {
-                System.out.println(row);
+        testBatchRead("SELECT id, name FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)", expected);
+    }
+
+    @Test
+    public void testUpdateMultipleColumns() throws Exception {
+        DataEvolutionMergeIntoActionBuilder builder =
+                builder(warehouse, database, "T")
+                        .withMergeCondition("T.id=S.id")
+                        .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
+                        .withSourceTable("S")
+                        .withSinkParallelism(2);
+
+        builder.build().run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "new_name1", 100.1),
+                        changelogRow("+I", 2, "name2", 0.2),
+                        changelogRow("+I", 3, "name3", 0.3),
+                        changelogRow("+I", 7, "new_name7", null),
+                        changelogRow("+I", 8, "name8", 0.8),
+                        changelogRow("+I", 11, "new_name11", 101.1),
+                        changelogRow("+I", 15, null, 101.1),
+                        changelogRow("+I", 18, "new_name18", 101.8));
+
+        testBatchRead(
+                "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",
+                expected);
+    }
+
+    @Test
+    public void testSetLiterals() throws Exception {
+        DataEvolutionMergeIntoActionBuilder builder =
+                builder(warehouse, database, "T")
+                        .withMergeCondition("T.id=S.id")
+                        .withMatchedUpdateSet("T.name='testName',T.value=CAST(0.0 as DOUBLE)")
+                        .withSourceTable("S")
+                        .withSinkParallelism(2);
+
+        builder.build().run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "testName", 0.0),
+                        changelogRow("+I", 2, "name2", 0.2),
+                        changelogRow("+I", 3, "name3", 0.3),
+                        changelogRow("+I", 7, "testName", 0.0),
+                        changelogRow("+I", 8, "name8", 0.8),
+                        changelogRow("+I", 11, "testName", 0.0),
+                        changelogRow("+I", 15, "testName", 0.0),
+                        changelogRow("+I", 18, "testName", 0.0));
+
+        testBatchRead(
+                "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",
+                expected);
+    }
+
+    @Test
+    public void testUpdatePartitionColumnThrowsError() throws Exception {
+        DataEvolutionMergeIntoActionBuilder builder =
+                builder(warehouse, database, "T")
+                        .withMergeCondition("T.id=S.id")
+                        .withMatchedUpdateSet("T.dt=S.id")
+                        .withSourceTable("S")
+                        .withSinkParallelism(2);
+
+        Throwable t =
+                Assertions.assertThrows(IllegalStateException.class, () -> builder.build().run());
+        Assertions.assertTrue(
+                t.getMessage().startsWith("User should not update partition columns:"));
+    }
+
+    @Test
+    public void testOneToManyUpdate() throws Exception {
+        // A single row in the target table may map to multiple rows in the source table.
+        // For example:
+        // In target table we have: (id=1, value='val', _ROW_ID=0)
+        // In source table we have: (id=1, value='val1'), (id=1, value='val2')
+        // If we execute MERGE INTO T SET T.`value`=S.`VALUE` ON T.id=S.id
+        // There would be 2 rows with the same _ROW_ID but different new values:
+        // (id=1, value='val1', _ROW_ID=0) and (id=1, value='val2', _ROW_ID=0)
+        // At that case, we will choose a random row as the final result
+
+        insertInto("S", "(1, 'dup_new_name1', 200.1)");
+
+        DataEvolutionMergeIntoActionBuilder builder =
+                builder(warehouse, database, "T")
+                        .withMergeCondition("T.id=S.id")
+                        .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
+                        .withSourceTable("S")
+                        .withSinkParallelism(2);
+
+        builder.build().run();
+
+        // First validate results except of id=1 row.
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 2, "name2", 0.2),
+                        changelogRow("+I", 3, "name3", 0.3),
+                        changelogRow("+I", 7, "new_name7", null),
+                        changelogRow("+I", 8, "name8", 0.8),
+                        changelogRow("+I", 11, "new_name11", 101.1),
+                        changelogRow("+I", 15, null, 101.1),
+                        changelogRow("+I", 18, "new_name18", 101.8));
+
+        testBatchRead(
+                "SELECT id, name, `value` FROM T where id in (2, 3, 7, 8, 11, 15, 18)", expected);
+
+        // then validate id=1 row
+        List<Row> possibleRows =
+                Arrays.asList(
+                        changelogRow("+I", 1, "dup_new_name1", 200.1),
+                        changelogRow("+I", 1, "new_name1", 100.1));
+        boolean passed = false;
+        for (Row row : possibleRows) {
+            try {
+                testBatchRead(
+                        "SELECT id, name, `value` FROM T where id = 1",
+                        Collections.singletonList(row));
+                passed = true;
+                break;
+            } catch (Throwable e) {
+                // error happens, just log it.
+                LOG.info("Error happens in testing one-to-many merge into.", e);
             }
         }
+
+        Assertions.assertTrue(
+                passed,
+                "one-to-many merge into test fails, please check log for more information.");
+    }
+
+    @Test
+    public void testAlias() throws Exception {
+        DataEvolutionMergeIntoActionBuilder builder =
+                builder(warehouse, database, "T")
+                        .withMergeCondition("TempT.id=S.id")
+                        .withMatchedUpdateSet("TempT.name=S.name,TempT.value=S.`value`")
+                        .withSourceTable("S")
+                        .withTargetAlias("TempT")
+                        .withSinkParallelism(2);
+        ;
+
+        builder.build().run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "new_name1", 100.1),
+                        changelogRow("+I", 2, "name2", 0.2),
+                        changelogRow("+I", 3, "name3", 0.3),
+                        changelogRow("+I", 7, "new_name7", null),
+                        changelogRow("+I", 8, "name8", 0.8),
+                        changelogRow("+I", 11, "new_name11", 101.1),
+                        changelogRow("+I", 15, null, 101.1),
+                        changelogRow("+I", 18, "new_name18", 101.8));
+
+        testBatchRead(
+                "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",
+                expected);
+    }
+
+    @Test
+    public void testSqls() throws Exception {
+        DataEvolutionMergeIntoActionBuilder builder =
+                builder(warehouse, database, "T")
+                        .withMergeCondition("TempT.id=SS.id")
+                        .withMatchedUpdateSet("TempT.name=SS.name,TempT.value=SS.`value`")
+                        .withSourceTable("SS")
+                        .withTargetAlias("TempT")
+                        .withSourceSqls(
+                                "CREATE TEMPORARY VIEW SS AS SELECT id, name, `value` FROM S")
+                        .withSinkParallelism(2);
+
+        builder.build().run();
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "new_name1", 100.1),
+                        changelogRow("+I", 2, "name2", 0.2),
+                        changelogRow("+I", 3, "name3", 0.3),
+                        changelogRow("+I", 7, "new_name7", null),
+                        changelogRow("+I", 8, "name8", 0.8),
+                        changelogRow("+I", 11, "new_name11", 101.1),
+                        changelogRow("+I", 15, null, 101.1),
+                        changelogRow("+I", 18, "new_name18", 101.8));
+
+        testBatchRead(
+                "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",
+                expected);
     }
 
     @Test
@@ -174,5 +357,73 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 "(15, CAST(NULL AS STRING), 101.1)",
                 "(18, 'new_name18', 101.8)",
                 "(21, 'new_name21', 102.1)");
+    }
+
+    private DataEvolutionMergeIntoActionBuilder builder(
+            String warehouse, String database, String table) {
+        return new DataEvolutionMergeIntoActionBuilder(warehouse, database, table);
+    }
+
+    private class DataEvolutionMergeIntoActionBuilder {
+        private final List<String> args;
+
+        DataEvolutionMergeIntoActionBuilder(String warehouse, String database, String table) {
+            this.args =
+                    new ArrayList<>(
+                            Arrays.asList(
+                                    "data_evolution_merge_into",
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database,
+                                    "--table",
+                                    table));
+        }
+
+        public DataEvolutionMergeIntoActionBuilder withTargetAlias(String targetAlias) {
+            if (targetAlias != null) {
+                args.add("--target_as");
+                args.add(targetAlias);
+            }
+            return this;
+        }
+
+        public DataEvolutionMergeIntoActionBuilder withSourceTable(String sourceTable) {
+            args.add("--source_table");
+            args.add(sourceTable);
+            return this;
+        }
+
+        public DataEvolutionMergeIntoActionBuilder withSourceSqls(String... sourceSqls) {
+            if (sourceSqls != null) {
+                for (String sql : sourceSqls) {
+                    args.add("--source_sql");
+                    args.add(sql);
+                }
+            }
+            return this;
+        }
+
+        public DataEvolutionMergeIntoActionBuilder withMergeCondition(String mergeCondition) {
+            args.add("--on");
+            args.add(mergeCondition);
+            return this;
+        }
+
+        public DataEvolutionMergeIntoActionBuilder withMatchedUpdateSet(String matchedUpdateSet) {
+            args.add("--matched_update_set");
+            args.add(matchedUpdateSet);
+            return this;
+        }
+
+        public DataEvolutionMergeIntoActionBuilder withSinkParallelism(int sinkParallelism) {
+            args.add("--sink_parallelism");
+            args.add(String.valueOf(sinkParallelism));
+            return this;
+        }
+
+        public DataEvolutionMergeIntoAction build() {
+            return createAction(DataEvolutionMergeIntoAction.class, args);
+        }
     }
 }

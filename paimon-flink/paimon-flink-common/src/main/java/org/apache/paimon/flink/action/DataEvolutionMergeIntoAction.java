@@ -99,7 +99,14 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     // field names of target table
     private final List<String> targetFieldNames;
 
-    // target table alias
+    /**
+     * Target Table's alias. The alias is implemented through rewriting merge-condition. For
+     * example, if the original condition is `TempT.id=S.id`, it will be rewritten to `RT.id=S.id`.
+     * `RT` means 'row-tracking target'. The reason is that _ROW_ID metadata field is exposed via
+     * system table like `T$row_tracking`, so we have to rewrite merge condition. Moreover, if we
+     * still create a temporary view such as `viewT`, then `viewT$row_tracking` is not a valid
+     * table.
+     */
     @Nullable private String targetAlias;
 
     // source table name
@@ -139,8 +146,6 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                 table.rowType().getFields().stream()
                         .map(DataField::name)
                         .collect(Collectors.toList());
-
-        System.out.println(table.fullName());
     }
 
     public DataEvolutionMergeIntoAction withSourceTable(String sourceTable) {
@@ -201,9 +206,6 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     }
 
     public Tuple2<DataStream<RowData>, RowType> buildSource() {
-        // handle aliases
-        handleTargetAlias();
-
         // handle sqls
         handleSqls();
 
@@ -216,8 +218,6 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         } else {
             // validate upsert changes
             Map<String, String> changes = parseCommaSeparatedKeyValues(matchedUpdateSet);
-            System.out.println("Target fieldNames: " + targetFieldNames);
-            System.out.println("Changes: " + changes);
             for (String targetField : changes.keySet()) {
                 if (!targetFieldNames.contains(extractFieldName(targetField))) {
                     throw new RuntimeException(
@@ -233,9 +233,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                             .map(
                                     entry ->
                                             String.format(
-                                                    "%s.`%s` AS `%s`",
-                                                    escapedSourceName(),
-                                                    extractFieldName(entry.getValue()),
+                                                    "%s AS `%s`",
+                                                    entry.getValue(),
                                                     extractFieldName(entry.getKey())))
                             .collect(Collectors.toList());
         }
@@ -253,11 +252,8 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
 
         LOG.info("Source query: {}", query);
 
-        System.out.println("Source query: " + query);
-
         Table source = batchTEnv.sqlQuery(query);
 
-        System.out.println("source schema:" + source.getResolvedSchema().toString());
         checkSchema(source);
         RowType sourceType =
                 SpecialFields.rowTypeWithRowId(table.rowType())
@@ -283,8 +279,6 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
 
         Preconditions.checkState(
                 !firstRowIds.isEmpty(), "Should not MERGE INTO an empty target table.");
-
-        System.out.print("First RowIDs: " + firstRowIds);
 
         OneInputTransformation<RowData, Tuple2<Long, RowData>> assignedFirstRowId =
                 new OneInputTransformation<>(
@@ -377,7 +371,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
      * Rewrite merge condition, replacing all references to target table with the alias 'RT'. This
      * is necessary because in Flink, row-tracking metadata columns (e.g. _ROW_ID, SEQUENCE_NUMBER)
      * are exposed through system table (i.e. {@code SELECT * FROM T$row_tracking}), we use 'RT' to
-     * simplify it.
+     * simplify its representation.
      */
     @VisibleForTesting
     public String rewriteMergeCondition(String mergeCondition) {
@@ -456,15 +450,6 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
         }
     }
 
-    private void handleTargetAlias() {
-        if (targetAlias != null) {
-            // create a view 'targetAlias' in the path of target table, then we can find it with the
-            // qualified name
-            batchTEnv.createTemporaryView(
-                    escapedTargetName(), batchTEnv.from(identifier.getFullName()));
-        }
-    }
-
     private void handleSqls() {
         // NOTE: sql may change current catalog and database
         if (sourceSqls != null) {
@@ -498,12 +483,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
     private String escapedRowTrackingTargetName() {
         return String.format(
                 "`%s`.`%s`.`%s$row_tracking`",
-                catalogName, identifier.getDatabaseName(), targetTableName());
-    }
-
-    private String escapedTargetName() {
-        return String.format(
-                "`%s`.`%s`.`%s`", catalogName, identifier.getDatabaseName(), targetTableName());
+                catalogName, identifier.getDatabaseName(), identifier.getObjectName());
     }
 
     private List<String> normalizeFieldName(List<String> fieldNames) {
