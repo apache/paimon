@@ -38,8 +38,8 @@ public class LowerTransform extends StringTransform {
     @JsonCreator
     public LowerTransform(
             @JsonProperty(StringTransform.FIELD_INPUTS)
-            @JsonDeserialize(contentUsing = StringTransform.InputDeserializer.class)
-            List<Object> inputs) {
+                    @JsonDeserialize(contentUsing = StringTransform.InputDeserializer.class)
+                    List<Object> inputs) {
         super(inputs);
         checkArgument(inputs.size() == 1);
     }

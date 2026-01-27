@@ -164,18 +164,16 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     // Spark support push down LOWER since Spark 3.4.
     if (gteqSpark3_4) {
       withTable("t") {
-        sql(
-          """
-            |CREATE TABLE t (id int, value int, dt STRING)
-            |using paimon
-            |PARTITIONED BY (dt)
-            |""".stripMargin)
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
 
-        sql(
-          """
-            |INSERT INTO t values
-            |(1, 100, 'hello')
-            |""".stripMargin)
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, 'hello')
+              |""".stripMargin)
 
         val q =
           """
