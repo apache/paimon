@@ -32,8 +32,10 @@ import org.apache.spark.sql.catalyst.plans.logical.Filter
 import org.assertj.core.api.Assertions.assertThat
 
 import java.util.{List => JList}
+import java.util.concurrent.{CountDownLatch, Executors, ExecutorService}
 
 import scala.collection.JavaConverters._
+import scala.collection.mutable.ArrayBuffer
 
 class SparkCatalystPartitionPredicateTest extends PaimonSparkTestBase {
 
@@ -226,9 +228,6 @@ class SparkCatalystPartitionPredicateTest extends PaimonSparkTestBase {
       val partitionPredicate = SparkCatalystPartitionPredicate(partitionFilters, partitionRowType)
 
       val allPartitions = table.newScan().listPartitions().asScala.toSeq
-
-      import java.util.concurrent.{CountDownLatch, ExecutorService, Executors}
-      import scala.collection.mutable.ArrayBuffer
 
       val threadCount = 10
       val iterationsPerThread = 100
