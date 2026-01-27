@@ -442,10 +442,7 @@ public class PartitionPathUtils {
                                                 partitionValue,
                                                 partitionType.getTypeAt(partitionKeyIndex));
 
-                        // Build a partial row with the accumulated partition values
-                        GenericRow partialRow = new GenericRow(1);
-                        partialRow.setField(0, internalValue);
-
+                        GenericRow partialRow = GenericRow.of(internalValue);
                         if (!partitionPredicate.test(partialRow)) {
                             continue;
                         }
