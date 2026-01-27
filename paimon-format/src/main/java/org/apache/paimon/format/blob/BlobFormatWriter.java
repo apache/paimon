@@ -82,6 +82,9 @@ public class BlobFormatWriter implements FileAwareFormatWriter {
         checkArgument(element.getFieldCount() == 1, "BlobFormatWriter only support one field.");
         if (element.isNullAt(0)) {
             lengths.add(-1L);
+            if (writeConsumer != null) {
+                writeConsumer.accept(blobFieldName, null);
+            }
             return;
         }
         Blob blob = element.getBlob(0);
