@@ -39,6 +39,7 @@ metastore_db/
 paimon-python/dist/
 paimon-python/*.egg-info/
 paimon-python/dev/log
+paimon-spark/paimon-spark-ut/PaimonLambdaFunctionfunction_test.java
 
 ### Misc ###
 *.swp
