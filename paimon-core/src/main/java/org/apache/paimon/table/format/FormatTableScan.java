@@ -36,10 +36,10 @@ import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.LeafFunction;
 import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.NullableLeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.format.predicate.PredicateUtils;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
@@ -179,11 +179,11 @@ public class FormatTableScan implements InnerTableScan {
             // search paths with partition filter optimization
             // This will prune partition directories early during traversal,
             // which is especially important for cloud storage like OSS/S3
-            Predicate predicate = null;
+            Map<String, Predicate> partitionPredicates = new HashMap<>();
             if (partitionFilter instanceof DefaultPartitionPredicate) {
-                predicate = ((DefaultPartitionPredicate) partitionFilter).predicate();
-
-                predicate = NullableLeafPredicate.from(predicate);
+                Predicate predicate = ((DefaultPartitionPredicate) partitionFilter).predicate();
+                partitionPredicates = PredicateUtils.splitPartitionPredicate(
+                        table.partitionType(), predicate);
             }
 
             Pair<Path, Integer> scanPathAndLevel =
@@ -199,7 +199,7 @@ public class FormatTableScan implements InnerTableScan {
                     scanPathAndLevel.getRight(),
                     table.partitionKeys(),
                     onlyValueInPath,
-                    predicate,
+                    partitionPredicates,
                     table.partitionType(),
                     table.defaultPartName());
         }
