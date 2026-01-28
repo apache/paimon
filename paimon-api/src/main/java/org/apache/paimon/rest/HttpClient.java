@@ -89,19 +89,14 @@ public class HttpClient implements RESTClient {
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        try {
-            String bodyStr = RESTApi.toJson(body);
-            Header[] authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
-            HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
-            httpPost.setHeaders(authHeaders);
-            String encodedBody = RESTUtil.encodedBody(body);
-            if (encodedBody != null) {
-                httpPost.setEntity(new StringEntity(encodedBody));
-            }
-            return exec(httpPost, responseType);
-        } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build post request failed.");
+        HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpPost.setEntity(new StringEntity(encodedBody));
         }
+        Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
+        httpPost.setHeaders(authHeaders);
+        return exec(httpPost, responseType);
     }
 
     @Override
@@ -112,19 +107,14 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
-        try {
-            String bodyStr = RESTApi.toJson(body);
-            Header[] authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
-            HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
-            httpDelete.setHeaders(authHeaders);
-            String encodedBody = RESTUtil.encodedBody(body);
-            if (encodedBody != null) {
-                httpDelete.setEntity(new StringEntity(encodedBody));
-            }
-            return exec(httpDelete, null);
-        } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build delete request failed.");
+        HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpDelete.setEntity(new StringEntity(encodedBody));
         }
+        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
+        httpDelete.setHeaders(authHeaders);
+        return exec(httpDelete, null);
     }
 
     @VisibleForTesting
