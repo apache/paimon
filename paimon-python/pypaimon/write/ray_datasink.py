@@ -20,9 +20,14 @@ Module to write a Paimon table from a Ray Dataset, by using the Ray Datasink API
 """
 
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional
 
-from ray.data.datasource.datasink import Datasink, WriteResult
+from ray.data.datasource.datasink import Datasink
+try:
+    from ray.data.datasource.datasink import WriteResult
+except ImportError:
+    WriteResult = None  # type: ignore[misc, assignment]  # Ray < 2.44 has no WriteResult
+
 from ray.util.annotations import DeveloperAPI
 from ray.data.block import BlockAccessor, Block
 from ray.data._internal.execution.interfaces import TaskContext
@@ -100,14 +105,19 @@ class PaimonDatasink(Datasink[List["CommitMessage"]]):
         return commit_messages_list
 
     def on_write_complete(
-        self, write_result: WriteResult[List["CommitMessage"]]
+        self, write_result: Any
     ):
         table_commit = None
         commit_messages_to_abort = []
         try:
+            # WriteResult.write_returns (Ray 2.44+); older Ray may pass compatible object
+            if hasattr(write_result, "write_returns"):
+                write_returns = write_result.write_returns
+            else:
+                write_returns = write_result if isinstance(write_result, list) else []
             all_commit_messages = [
                 commit_message
-                for commit_messages in write_result.write_returns
+                for commit_messages in write_returns
                 for commit_message in commit_messages
             ]
 
