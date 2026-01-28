@@ -138,9 +138,9 @@ jobs:
           else
             python -m pip install --upgrade pip
             pip install torch --index-url https://download.pytorch.org/whl/cpu
-            # Python 3.8: no wheels for ray 2.48+, fastavro 1.11+, zstandard 0.24+, polars 1.32+; use last 3.8-compatible
-            if [[ "${{ matrix.python-version }}" == "3.8" ]]; then RAY_VER=2.10.0; FASTAVRO_VER=1.9.7; ZSTD_VER=0.23.0; POLARS_VER=1.8.2; else RAY_VER=2.48.0; FASTAVRO_VER=1.11.1; ZSTD_VER=0.24.0; POLARS_VER=1.32.0; fi
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==$RAY_VER fastavro==$FASTAVRO_VER pyarrow==16.0.0 zstandard==$ZSTD_VER polars==$POLARS_VER duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 faiss-cpu==1.7.4
+            # Python 3.8: no wheels for ray 2.48+, fastavro 1.11+, zstandard 0.24+, polars 1.32+, pylance 0.39+; use last 3.8-compatible
+            if [[ "${{ matrix.python-version }}" == "3.8" ]]; then RAY_VER=2.10.0; FASTAVRO_VER=1.9.7; ZSTD_VER=0.23.0; POLARS_VER=1.8.2; PYLANCE_VER=0.10.15; else RAY_VER=2.48.0; FASTAVRO_VER=1.11.1; ZSTD_VER=0.24.0; POLARS_VER=1.32.0; PYLANCE_VER=0.39.0; fi
+            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==$RAY_VER fastavro==$FASTAVRO_VER pyarrow==16.0.0 zstandard==$ZSTD_VER polars==$POLARS_VER duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==$PYLANCE_VER cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 faiss-cpu==1.7.4
           fi
           df -h
       - name: Run lint-python.sh
