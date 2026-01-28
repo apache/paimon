@@ -166,20 +166,21 @@ public class CloneHiveSchemaFunction
         checkState(
                 existedSchema.primaryKeys().isEmpty(),
                 "Can not clone data to existed paimon table which has primary keys. Existed paimon table is "
-                        + existedTable.name());
+                        + existedTable.fullName());
 
         // check bucket
         checkState(
                 existedTable.coreOptions().bucket() == -1,
                 "Can not clone data to existed paimon table which bucket is not -1. Existed paimon table is "
-                        + existedTable.name());
+                        + existedTable.fullName());
 
         // check format
         checkState(
                 Objects.equals(
                         sourceSchema.options().get(FILE_FORMAT.key()),
                         existedTable.coreOptions().formatType()),
-                "source table format is not compatible with existed paimon table format.");
+                "source table format is not compatible with existed paimon table format. Existed paimon table is "
+                        + existedTable.fullName());
 
         // check partition keys
         List<String> sourcePartitionFields = sourceSchema.partitionKeys();
@@ -188,7 +189,8 @@ public class CloneHiveSchemaFunction
         checkState(
                 sourcePartitionFields.size() == existedPartitionFields.size()
                         && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
-                "source table partition keys is not compatible with existed paimon table partition keys.");
+                "source table partition keys is not compatible with existed paimon table partition keys. Existed paimon table is "
+                        + existedTable.fullName());
 
         // check all fields
         List<DataField> sourceFields = sourceSchema.fields();
@@ -197,6 +199,7 @@ public class CloneHiveSchemaFunction
         checkState(
                 existedFields.size() >= sourceFields.size()
                         && new HashSet<>(existedPartitionFields).containsAll(sourcePartitionFields),
-                "source table partition keys is not compatible with existed paimon table partition keys.");
+                "source table partition keys is not compatible with existed paimon table partition keys. Existed paimon table is "
+                        + existedTable.fullName());
     }
 }
