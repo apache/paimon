@@ -21,6 +21,7 @@
 duckdb==1.3.2
 flake8==4.0.1
 pytest~=7.0
-ray==2.48.0
+# Ray: 2.48+ has no wheel for Python 3.8; use 2.10.0 on 3.8, 2.48.0 on 3.9+
+ray>=2.10.0
 requests
 parameterized
