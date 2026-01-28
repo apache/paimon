@@ -40,9 +40,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
+try:
+    _DatasinkBase = Datasink[List["CommitMessage"]]
+except TypeError:
+    _DatasinkBase = Datasink
+
 
 @DeveloperAPI
-class PaimonDatasink(Datasink[List["CommitMessage"]]):
+class PaimonDatasink(_DatasinkBase):
     def __init__(
         self,
         table: "Table",
