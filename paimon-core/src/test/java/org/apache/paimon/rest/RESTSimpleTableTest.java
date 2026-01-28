@@ -32,6 +32,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -106,4 +108,9 @@ public abstract class RESTSimpleTableTest extends SimpleTableTestBase {
                         new Identifier(
                                 identifier.getDatabaseName(), identifier.getTableName(), branch));
     }
+
+    @Test
+    @Disabled("REST catalog does not support branchesCreatedFromTag yet")
+    @Override
+    public void testDeleteTagReferencedByBranch() {}
 }
