@@ -176,19 +176,26 @@ class TorchIterDataset(IterableDataset):
         q = queue.Queue(maxsize=self._PREFETCH_QUEUE_MAXSIZE)
         stop = threading.Event()
 
+        def put_item(tag: int, payload):
+            while not stop.is_set():
+                try:
+                    q.put((tag, payload), timeout=self._PREFETCH_PUT_TIMEOUT_SEC)
+                    return True
+                except queue.Full:
+                    continue
+            return False
+
         def producer(split_group: List):
             try:
                 for offset_row in self.table_read.to_iterator(split_group):
                     if stop.is_set():
                         break
-                    try:
-                        q.put((self._ROW, self._row_to_dict(offset_row)), timeout=self._PREFETCH_PUT_TIMEOUT_SEC)
-                    except queue.Full:
-                        if not stop.is_set():
-                            q.put((self._ROW, self._row_to_dict(offset_row)))
-                q.put((self._SENTINEL, None))
+                    row_dict = self._row_to_dict(offset_row)
+                    if not put_item(self._ROW, row_dict):
+                        break
+                put_item(self._SENTINEL, None)
             except Exception as e:
-                q.put((self._ERR, e))
+                put_item(self._ERR, e)
 
         threads = [threading.Thread(target=producer, args=(split_groups[i],), daemon=True)
                    for i in range(n)]
