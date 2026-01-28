@@ -2585,6 +2585,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         assertThat(table.partitionKeys()).containsExactly("pt");
         assertThat(table.fileIO()).isInstanceOf(RESTTokenFileIO.class);
         assertThat(tables).containsExactlyInAnyOrder("table1");
+        assertThat(table.uuid()).isNotEmpty();
+        assertThat(table.uuid()).isNotEqualTo(table.fullName());
     }
 
     @Test
