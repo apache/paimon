@@ -89,6 +89,9 @@ class TorchIterDataset(IterableDataset):
     _ROW = 1
     _ERR = 2
     _PREFETCH_QUEUE_MAXSIZE = 512
+    _PREFETCH_PUT_TIMEOUT_SEC = 30.0
+    _PREFETCH_GET_TIMEOUT_SEC = 300.0
+    _PREFETCH_JOIN_TIMEOUT_SEC = 5.0
 
     def __init__(self, table_read: TableRead, splits: List[Split], prefetch_concurrency: int = 1):
         """
@@ -134,10 +137,13 @@ class TorchIterDataset(IterableDataset):
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
 
+            # Calculate start and end indices for this worker
+            # Distribute splits evenly by slicing
             total_splits = len(self.splits)
             splits_per_worker = total_splits // num_workers
             remainder = total_splits % num_workers
 
+            # Workers with id < remainder get one extra split
             if worker_id < remainder:
                 start_idx = worker_id * (splits_per_worker + 1)
                 end_idx = start_idx + splits_per_worker + 1
@@ -176,7 +182,7 @@ class TorchIterDataset(IterableDataset):
                     if stop.is_set():
                         break
                     try:
-                        q.put((self._ROW, self._row_to_dict(offset_row)), timeout=30.0)
+                        q.put((self._ROW, self._row_to_dict(offset_row)), timeout=self._PREFETCH_PUT_TIMEOUT_SEC)
                     except queue.Full:
                         if not stop.is_set():
                             q.put((self._ROW, self._row_to_dict(offset_row)))
@@ -193,7 +199,7 @@ class TorchIterDataset(IterableDataset):
             done = 0
             while done < n:
                 try:
-                    tag, payload = q.get(timeout=300.0)
+                    tag, payload = q.get(timeout=self._PREFETCH_GET_TIMEOUT_SEC)
                 except queue.Empty:
                     if stop.is_set():
                         break
@@ -207,5 +213,5 @@ class TorchIterDataset(IterableDataset):
         finally:
             stop.set()
             for t in threads:
-                t.join(timeout=5.0)
+                t.join(timeout=self._PREFETCH_JOIN_TIMEOUT_SEC)
 
