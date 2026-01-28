@@ -117,7 +117,13 @@ class TorchIterDataset(IterableDataset):
 
     def __iter__(self):
         """
-        Iterate over the dataset, converting each row to a dict keyed by field names.
+        Iterate over the dataset, converting each OffsetRow to a dictionary.
+
+        Supports multi-worker data loading by partitioning splits across workers.
+        When num_workers > 0 in DataLoader, each worker will process a subset of splits.
+
+        Yields:
+            row data of dict type, where keys are column names.
         """
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is not None:
