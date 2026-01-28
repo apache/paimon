@@ -115,3 +115,59 @@ WITH (
     -- 'dlf.token-ecs-role-name' = 'my_ecs_role_name'
 );
 ```
+
+## Signing Algorithm Configuration
+
+Paimon supports multiple signing algorithms for DLF authentication. You can configure the signing algorithm explicitly,
+or let Paimon automatically select it based on the endpoint host.
+
+### Automatic Selection (Recommended)
+
+By default, Paimon automatically selects the appropriate signing algorithm based on the endpoint URI:
+
+- **DLF endpoints** (e.g., `cn-hangzhou-vpc.dlf.aliyuncs.com`): Automatically uses `dlf-default`
+  (backward compatible). Recommended for VPC environments with better performance.
+- **OpenAPI endpoints** (e.g., `dlfnext.cn-hangzhou.aliyuncs.com`): Automatically uses
+  `dlf-openapi` for DlfNext/2026-01-18 OpenAPI. Supports public network access through Alibaba Cloud API infrastructure
+   for special scenarios.
+
+```sql
+CREATE CATALOG `paimon-rest-catalog`
+WITH (
+    'type' = 'paimon',
+    'uri' = 'https://dlfnext.cn-hangzhou.aliyuncs.com',  -- Auto-detected as dlf-openapi
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.access-key-id'='<access-key-id>',
+    'dlf.access-key-secret'='<access-key-secret>'
+    -- 'dlf.signing-algorithm' is not set, will be auto-detected
+);
+```
+
+### Explicit Configuration
+
+You can explicitly specify the signing algorithm:
+
+```sql
+CREATE CATALOG `paimon-rest-catalog`
+WITH (
+    'type' = 'paimon',
+    'uri' = '<catalog server url>',
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.access-key-id'='<access-key-id>',
+    'dlf.access-key-secret'='<access-key-secret>',
+    'dlf.signing-algorithm' = 'dlf-default'  -- or 'dlf-openapi'
+);
+```
+
+**Available signing algorithms:**
+
+- `dlf-default` (default): DLF4-HMAC-SHA256 signer for default VPC endpoint, backward compatible
+  with existing DLF authentication
+- `dlf-openapi`: ROA v2 style signer for DlfNext/2026-01-18 OpenAPI, implements HMAC-SHA1
+  signature with ROA style canonicalization
+
+**Note:** When `dlf.signing-algorithm` is explicitly configured, it takes precedence over automatic detection.

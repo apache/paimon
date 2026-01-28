@@ -22,12 +22,17 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Joiner;
 
+import javax.annotation.Nullable;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -40,9 +45,13 @@ import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_CONTENT_TYPE_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_DATE_HEADER_KEY;
 import static org.apache.paimon.rest.auth.DLFAuthProvider.DLF_SECURITY_TOKEN_HEADER_KEY;
 
-/** generate authorization for <b>Ali CLoud</b> DLF. */
-public class DLFAuthSignature {
+/**
+ * Signer for DLF default VPC endpoint authentication. This is the default signer for backward
+ * compatibility.
+ */
+public class DLFDefaultSigner implements DLFRequestSigner {
 
+    public static final String IDENTIFIER = "dlf-default";
     public static final String VERSION = "v1";
 
     private static final String SIGNATURE_ALGORITHM = "DLF4-HMAC-SHA256";
@@ -60,10 +69,62 @@ public class DLFAuthSignature {
                     DLF_AUTH_VERSION_HEADER_KEY.toLowerCase(),
                     DLF_SECURITY_TOKEN_HEADER_KEY.toLowerCase());
 
-    public static String getAuthorization(
+    private final String region;
+
+    public DLFDefaultSigner(String region) {
+        this.region = region;
+    }
+
+    @Override
+    public Map<String, String> signHeaders(
+            @Nullable String body, Instant now, @Nullable String securityToken, String host) {
+        try {
+            String dateTime =
+                    ZonedDateTime.ofInstant(now, ZoneOffset.UTC)
+                            .format(DLFAuthProvider.AUTH_DATE_TIME_FORMATTER);
+            return generateSignHeaders(body, dateTime, securityToken);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate sign headers", e);
+        }
+    }
+
+    @Override
+    public String authorization(
             RESTAuthParameter restAuthParameter,
-            DLFToken dlfToken,
+            DLFToken token,
+            String host,
+            Map<String, String> signHeaders)
+            throws Exception {
+        String dateTime = signHeaders.get(DLFAuthProvider.DLF_DATE_HEADER_KEY);
+        String date = dateTime.substring(0, 8);
+        return getAuthorization(restAuthParameter, region, token, signHeaders, dateTime, date);
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
+
+    private static Map<String, String> generateSignHeaders(
+            String data, String dateTime, String securityToken) throws Exception {
+        Map<String, String> signHeaders = new HashMap<>();
+        signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
+        signHeaders.put(DLF_CONTENT_SHA56_HEADER_KEY, DLFAuthProvider.DLF_CONTENT_SHA56_VALUE);
+        signHeaders.put(DLF_AUTH_VERSION_HEADER_KEY, VERSION);
+        if (data != null && !data.isEmpty()) {
+            signHeaders.put(DLF_CONTENT_TYPE_KEY, DLFAuthProvider.MEDIA_TYPE);
+            signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, md5(data));
+        }
+        if (securityToken != null) {
+            signHeaders.put(DLF_SECURITY_TOKEN_HEADER_KEY, securityToken);
+        }
+        return signHeaders;
+    }
+
+    private static String getAuthorization(
+            RESTAuthParameter restAuthParameter,
             String region,
+            DLFToken dlfToken,
             Map<String, String> headers,
             String dateTime,
             String date)
@@ -95,7 +156,7 @@ public class DLFAuthSignature {
                         String.format("%s=%s", SIGNATURE_KEY, signature));
     }
 
-    public static String md5(String raw) throws Exception {
+    private static String md5(String raw) throws Exception {
         MessageDigest messageDigest = MessageDigest.getInstance("MD5");
         messageDigest.update(raw.getBytes(UTF_8));
         byte[] md5 = messageDigest.digest();
@@ -113,7 +174,7 @@ public class DLFAuthSignature {
         }
     }
 
-    public static String getCanonicalRequest(
+    private static String getCanonicalRequest(
             RESTAuthParameter restAuthParameter, Map<String, String> headers) {
         String canonicalRequest =
                 Joiner.on(NEW_LINE)
