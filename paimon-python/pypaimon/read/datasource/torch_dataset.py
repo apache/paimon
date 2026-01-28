@@ -221,4 +221,3 @@ class TorchIterDataset(IterableDataset):
             stop.set()
             for t in threads:
                 t.join(timeout=self._PREFETCH_JOIN_TIMEOUT_SEC)
-

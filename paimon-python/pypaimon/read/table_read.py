@@ -231,7 +231,12 @@ class TableRead:
             **read_args
         )
 
-    def to_torch(self, splits: List[Split], streaming: bool = False, prefetch_concurrency: int = 1) -> "torch.utils.data.Dataset":
+    def to_torch(
+        self,
+        splits: List[Split],
+        streaming: bool = False,
+        prefetch_concurrency: int = 1,
+    ) -> "torch.utils.data.Dataset":
         """Wrap Paimon table data to PyTorch Dataset."""
         if streaming:
             from pypaimon.read.datasource.torch_dataset import TorchIterDataset
