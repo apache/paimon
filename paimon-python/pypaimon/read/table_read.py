@@ -204,7 +204,7 @@ class TableRead:
                 You needn't manually set this in most cases.
             **read_args: Additional kwargs passed to the datasource.
                 For example, ``per_task_row_limit`` (Ray 2.52.0+).
-        
+
         See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
         for details.
         """
@@ -231,11 +231,11 @@ class TableRead:
             **read_args
         )
 
-    def to_torch(self, splits: List[Split], streaming: bool = False) -> "torch.utils.data.Dataset":
+    def to_torch(self, splits: List[Split], streaming: bool = False, prefetch_concurrency: int = 1) -> "torch.utils.data.Dataset":
         """Wrap Paimon table data to PyTorch Dataset."""
         if streaming:
             from pypaimon.read.datasource.torch_dataset import TorchIterDataset
-            dataset = TorchIterDataset(self, splits)
+            dataset = TorchIterDataset(self, splits, prefetch_concurrency)
             return dataset
         else:
             from pypaimon.read.datasource.torch_dataset import TorchDataset
