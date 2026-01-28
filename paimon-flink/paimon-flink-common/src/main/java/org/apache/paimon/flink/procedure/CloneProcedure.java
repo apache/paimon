@@ -77,6 +77,10 @@ public class CloneProcedure extends ProcedureBase {
                 @ArgumentHint(
                         name = "meta_only",
                         type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true),
+                @ArgumentHint(
+                        name = "clone_if_exists",
+                        type = @DataTypeHint("BOOLEAN"),
                         isOptional = true)
             })
     public String[] call(
@@ -93,7 +97,8 @@ public class CloneProcedure extends ProcedureBase {
             String excludedTablesStr,
             String preferFileFormat,
             String cloneFrom,
-            Boolean metaOnly)
+            Boolean metaOnly,
+            Boolean cloneIfExists)
             throws Exception {
         Map<String, String> sourceCatalogConfig =
                 new HashMap<>(optionalConfigMap(sourceCatalogConfigStr));
@@ -124,7 +129,8 @@ public class CloneProcedure extends ProcedureBase {
                         excludedTables,
                         preferFileFormat,
                         cloneFrom,
-                        metaOnly != null && metaOnly);
+                        metaOnly != null && metaOnly,
+                        cloneIfExists == null || cloneIfExists);
         return execute(procedureContext, action, "Clone Job");
     }
 
