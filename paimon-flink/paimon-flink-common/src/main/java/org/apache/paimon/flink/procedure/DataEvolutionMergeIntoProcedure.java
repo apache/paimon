@@ -91,14 +91,14 @@ public class DataEvolutionMergeIntoProcedure extends ProcedureBase {
             String sourceSqls,
             String sourceTable,
             String mergeCondition,
-            String matched_update_set,
+            String matchedUpdateSet,
             Integer sinkParallelism) {
         targetTableId = notnull(targetTableId);
         targetAlias = notnull(targetAlias);
         sourceSqls = notnull(sourceSqls);
         sourceTable = notnull(sourceTable);
         mergeCondition = notnull(mergeCondition);
-        matched_update_set = notnull(matched_update_set);
+        matchedUpdateSet = notnull(matchedUpdateSet);
         Preconditions.checkArgument(sinkParallelism != null && sinkParallelism > 0);
 
         Map<String, String> catalogOptions = catalog.options();
@@ -119,8 +119,8 @@ public class DataEvolutionMergeIntoProcedure extends ProcedureBase {
         checkArgument(!mergeCondition.isEmpty(), "Must specify merge condition.");
         action.withMergeCondition(mergeCondition);
 
-        checkArgument(!matched_update_set.isEmpty(), "Must specify matched update set.");
-        action.withMatchedUpdateSet(matched_update_set);
+        checkArgument(!matchedUpdateSet.isEmpty(), "Must specify matched update set.");
+        action.withMatchedUpdateSet(matchedUpdateSet);
 
         action.withSinkParallelism(sinkParallelism);
 
