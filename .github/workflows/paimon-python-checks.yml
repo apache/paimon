@@ -46,14 +46,40 @@ jobs:
       platform: linux-amd64
       jdk-version: '8'
 
-  lint-python:
+  check-requirements:
     runs-on: ubuntu-latest
-    needs: build_native
-    container: "python:${{ matrix.python-version }}-slim"
     strategy:
       fail-fast: false
       matrix:
         python-version: [ '3.6.15', '3.8', '3.9', '3.10', '3.11', '3.12', '3.13' ]
+    container: "python:${{ matrix.python-version }}-slim"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Verify Python version
+        run: python --version
+      - name: Install build deps for source-built packages
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends cmake build-essential \
+            && rm -rf /var/lib/apt/lists/*
+      - name: Verify dev/requirements.txt can be resolved
+        shell: bash
+        run: |
+          cd paimon-python
+          python -m pip install --upgrade pip
+          TEMP_DIR=$(mktemp -d)
+          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || {
+            echo "ERROR: Failed to resolve dependencies from dev/requirements.txt"
+            rm -rf "$TEMP_DIR"
+            exit 1
+          }
+          rm -rf "$TEMP_DIR"
+          echo "✓ dev/requirements.txt can be resolved on Python ${{ matrix.python-version }}"
+
+  lint-python:
+    runs-on: ubuntu-latest
+    needs: build_native
+    container: "python:3.10-slim"
 
     steps:
       - name: Checkout code
@@ -88,20 +114,6 @@ jobs:
       - name: Verify Python version
         run: python --version
 
-      - name: Verify requirements.txt dependencies can be installed
-        shell: bash
-        run: |
-          cd paimon-python
-          python -m pip install --upgrade pip
-          TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || {
-            echo "ERROR: Failed to resolve dependencies from dev/requirements.txt"
-            rm -rf "$TEMP_DIR"
-            exit 1
-          }
-          rm -rf "$TEMP_DIR"
-          echo "✓ dev/requirements.txt can be resolved on this Python"
-
       - name: Download native library artifact
         uses: actions/download-artifact@v7
         with:
@@ -127,21 +139,9 @@ jobs:
         shell: bash
         run: |
           df -h
-          if [[ "${{ matrix.python-version }}" == "3.6.15" ]]; then
-            python -m pip install --upgrade pip==21.3.1
-            python --version
-            python -m pip install --no-cache-dir pyroaring readerwriterlock==1.0.9 'fsspec==2021.10.1' 'cachetools==4.2.4' 'ossfs==2021.8.0' pyarrow==6.0.1 pandas==1.1.5 'polars==0.9.12' 'fastavro==1.4.7' zstandard==0.19.0 dataclasses==0.8.0 flake8 pytest py4j==0.10.9.9 requests parameterized==0.8.1 faiss-cpu==1.7.2 2>&1 >/dev/null
-          elif [[ "${{ matrix.python-version }}" == "3.12" ]] || [[ "${{ matrix.python-version }}" == "3.13" ]]; then
-            python -m pip install --upgrade pip
-            pip install torch --index-url https://download.pytorch.org/whl/cpu
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.48.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 'numpy>=1.26' 'pandas>=2.1' pylance==0.39.0 cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 'faiss-cpu>=1.10,<2'
-          else
-            python -m pip install --upgrade pip
-            pip install torch --index-url https://download.pytorch.org/whl/cpu
-            # Python 3.8: pin versions compatible with each other (pylance 0.10.15 needs pyarrow<15.0.1)
-            if [[ "${{ matrix.python-version }}" == "3.8" ]]; then RAY_VER=2.10.0; FASTAVRO_VER=1.9.7; ZSTD_VER=0.23.0; POLARS_VER=1.8.2; PYLANCE_VER=0.10.15; PYARROW_VER=15.0.0; else RAY_VER=2.48.0; FASTAVRO_VER=1.11.1; ZSTD_VER=0.24.0; POLARS_VER=1.32.0; PYLANCE_VER=0.39.0; PYARROW_VER=16.0.0; fi
-            python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==$RAY_VER fastavro==$FASTAVRO_VER pyarrow==$PYARROW_VER zstandard==$ZSTD_VER polars==$POLARS_VER duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==$PYLANCE_VER cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 faiss-cpu==1.7.4
-          fi
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.48.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 cramjam flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0 faiss-cpu==1.7.4
           df -h
       - name: Run lint-python.sh
         shell: bash

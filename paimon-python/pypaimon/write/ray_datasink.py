@@ -23,10 +23,6 @@ import logging
 from typing import TYPE_CHECKING, Any, Iterable, List, Optional
 
 from ray.data.datasource.datasink import Datasink
-try:
-    from ray.data.datasource.datasink import WriteResult
-except ImportError:
-    WriteResult = None  # type: ignore[misc, assignment]  # Ray < 2.44 has no WriteResult
 
 from ray.util.annotations import DeveloperAPI
 from ray.data.block import BlockAccessor, Block
@@ -116,11 +112,17 @@ class PaimonDatasink(_DatasinkBase):
         table_commit = None
         commit_messages_to_abort = []
         try:
-            # WriteResult.write_returns (Ray 2.44+); older Ray may pass compatible object
+            # WriteResult.write_returns (Ray 2.44+); older Ray may pass list of returns
             if hasattr(write_result, "write_returns"):
                 write_returns = write_result.write_returns
+            elif isinstance(write_result, list):
+                write_returns = write_result
             else:
-                write_returns = write_result if isinstance(write_result, list) else []
+                raise TypeError(
+                    f"Unexpected write_result type {type(write_result).__name__}: "
+                    "expected object with .write_returns or list of commit message lists. "
+                    "Refusing to proceed to avoid silent data loss."
+                )
             all_commit_messages = [
                 commit_message
                 for commit_messages in write_returns
