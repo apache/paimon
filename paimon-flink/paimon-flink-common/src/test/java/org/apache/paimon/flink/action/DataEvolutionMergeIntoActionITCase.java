@@ -22,6 +22,9 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,10 +34,12 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertInto;
@@ -48,6 +53,14 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
     private static final Logger LOG =
             LoggerFactory.getLogger(DataEvolutionMergeIntoActionITCase.class);
 
+    private static Stream<Arguments> testArguments() {
+        return Stream.of(
+                Arguments.of(true, "action"),
+                Arguments.of(false, "action"),
+                Arguments.of(true, "procedure"),
+                Arguments.of(false, "procedure"));
+    }
+
     @BeforeEach
     public void setup() throws Exception {
         init(warehouse);
@@ -57,16 +70,18 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
         prepareSourceTable();
     }
 
-    @Test
-    public void testUpdateSingleColumn() throws Exception {
-        DataEvolutionMergeIntoActionBuilder builder =
-                builder(warehouse, database, "T")
-                        .withMergeCondition("T.id=S.id")
-                        .withMatchedUpdateSet("T.name=S.name")
-                        .withSourceTable("S")
-                        .withSinkParallelism(2);
-
-        builder.build().run();
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testUpdateSingleColumn(boolean inDefault, String invoker) throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
 
         List<Row> expected =
                 Arrays.asList(
@@ -79,19 +94,39 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 15, null),
                         changelogRow("+I", 18, "new_name18"));
 
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("T.id=S.id")
+                            .withMatchedUpdateSet("T.name=S.name")
+                            .withSourceTable("S")
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T.id=S.id', 'name=S.name', 2)",
+                            targetDb);
+
+            executeSQL(procedureStatement, false, true);
+        }
+
         testBatchRead("SELECT id, name FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)", expected);
     }
 
-    @Test
-    public void testUpdateMultipleColumns() throws Exception {
-        DataEvolutionMergeIntoActionBuilder builder =
-                builder(warehouse, database, "T")
-                        .withMergeCondition("T.id=S.id")
-                        .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
-                        .withSourceTable("S")
-                        .withSinkParallelism(2);
-
-        builder.build().run();
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testUpdateMultipleColumns(boolean inDefault, String invoker) throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
 
         List<Row> expected =
                 Arrays.asList(
@@ -104,21 +139,41 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 15, null, 101.1),
                         changelogRow("+I", 18, "new_name18", 101.8));
 
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("T.id=S.id")
+                            .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
+                            .withSourceTable("S")
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T.id=S.id', 'name=S.name,value=S.`value`', 2)",
+                            targetDb);
+
+            executeSQL(procedureStatement, false, true);
+        }
+
         testBatchRead(
                 "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",
                 expected);
     }
 
-    @Test
-    public void testSetLiterals() throws Exception {
-        DataEvolutionMergeIntoActionBuilder builder =
-                builder(warehouse, database, "T")
-                        .withMergeCondition("T.id=S.id")
-                        .withMatchedUpdateSet("T.name='testName',T.value=CAST(0.0 as DOUBLE)")
-                        .withSourceTable("S")
-                        .withSinkParallelism(2);
-
-        builder.build().run();
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testSetLiterals(boolean inDefault, String invoker) throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
 
         List<Row> expected =
                 Arrays.asList(
@@ -131,28 +186,60 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 15, "testName", 0.0),
                         changelogRow("+I", 18, "testName", 0.0));
 
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("T.id=S.id")
+                            .withMatchedUpdateSet("T.name='testName',T.value=CAST(0.0 as DOUBLE)")
+                            .withSourceTable("S")
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T.id=S.id', 'name=''testName'',value=CAST(0.0 as DOUBLE)', 2)",
+                            targetDb);
+
+            executeSQL(procedureStatement, false, true);
+        }
+
         testBatchRead(
                 "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",
                 expected);
     }
 
-    @Test
-    public void testUpdatePartitionColumnThrowsError() throws Exception {
-        DataEvolutionMergeIntoActionBuilder builder =
-                builder(warehouse, database, "T")
-                        .withMergeCondition("T.id=S.id")
-                        .withMatchedUpdateSet("T.dt=S.id")
-                        .withSourceTable("S")
-                        .withSinkParallelism(2);
-
-        Throwable t =
-                Assertions.assertThrows(IllegalStateException.class, () -> builder.build().run());
-        Assertions.assertTrue(
-                t.getMessage().startsWith("User should not update partition columns:"));
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testUpdatePartitionColumnThrowsError(boolean inDefault, String invoker)
+            throws Exception {
+        Throwable t;
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, database, "T")
+                            .withMergeCondition("T.id=S.id")
+                            .withMatchedUpdateSet("T.dt=S.id")
+                            .withSourceTable("S")
+                            .withSinkParallelism(2);
+            t = Assertions.assertThrows(IllegalStateException.class, () -> builder.build().run());
+            Assertions.assertTrue(
+                    t.getMessage().startsWith("User should not update partition columns:"));
+        } else {
+            String procedureStatement =
+                    "CALL sys.data_evolution_merge_into('default.T', '', '', 'S', 'T.id=S.id', 'dt=S.id', 2)";
+            t =
+                    Assertions.assertThrows(
+                            Exception.class, () -> executeSQL(procedureStatement, false, true));
+            org.assertj.core.api.Assertions.assertThat(t)
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .message()
+                    .contains("User should not update partition columns:");
+        }
     }
 
-    @Test
-    public void testOneToManyUpdate() throws Exception {
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testOneToManyUpdate(boolean inDefault, String invoker) throws Exception {
         // A single row in the target table may map to multiple rows in the source table.
         // For example:
         // In target table we have: (id=1, value='val', _ROW_ID=0)
@@ -161,17 +248,17 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
         // There would be 2 rows with the same _ROW_ID but different new values:
         // (id=1, value='val1', _ROW_ID=0) and (id=1, value='val2', _ROW_ID=0)
         // At that case, we will choose a random row as the final result
-
         insertInto("S", "(1, 'dup_new_name1', 200.1)");
 
-        DataEvolutionMergeIntoActionBuilder builder =
-                builder(warehouse, database, "T")
-                        .withMergeCondition("T.id=S.id")
-                        .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
-                        .withSourceTable("S")
-                        .withSinkParallelism(2);
-
-        builder.build().run();
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
 
         // First validate results except of id=1 row.
         List<Row> expected =
@@ -183,6 +270,24 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 11, "new_name11", 101.1),
                         changelogRow("+I", 15, null, 101.1),
                         changelogRow("+I", 18, "new_name18", 101.8));
+
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("T.id=S.id")
+                            .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
+                            .withSourceTable("S")
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T.id=S.id', 'name=S.name,value=S.`value`', 2)",
+                            targetDb);
+
+            executeSQL(procedureStatement, false, true);
+        }
 
         testBatchRead(
                 "SELECT id, name, `value` FROM T where id in (2, 3, 7, 8, 11, 15, 18)", expected);
@@ -211,17 +316,18 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 "one-to-many merge into test fails, please check log for more information.");
     }
 
-    @Test
-    public void testAlias() throws Exception {
-        DataEvolutionMergeIntoActionBuilder builder =
-                builder(warehouse, database, "T")
-                        .withMergeCondition("TempT.id=S.id")
-                        .withMatchedUpdateSet("TempT.name=S.name,TempT.value=S.`value`")
-                        .withSourceTable("S")
-                        .withTargetAlias("TempT")
-                        .withSinkParallelism(2);
-
-        builder.build().run();
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testAlias(boolean inDefault, String invoker) throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
 
         List<Row> expected =
                 Arrays.asList(
@@ -233,25 +339,43 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 11, "new_name11", 101.1),
                         changelogRow("+I", 15, null, 101.1),
                         changelogRow("+I", 18, "new_name18", 101.8));
+
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("TempT.id=S.id")
+                            .withMatchedUpdateSet("TempT.name=S.name,TempT.value=S.`value`")
+                            .withSourceTable("S")
+                            .withTargetAlias("TempT")
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', 'TempT', '', 'S', 'TempT.id=S.id', 'name=S.name,value=S.`value`', 2)",
+                            targetDb);
+
+            executeSQL(procedureStatement, false, true);
+        }
 
         testBatchRead(
                 "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",
                 expected);
     }
 
-    @Test
-    public void testSqls() throws Exception {
-        DataEvolutionMergeIntoActionBuilder builder =
-                builder(warehouse, database, "T")
-                        .withMergeCondition("TempT.id=SS.id")
-                        .withMatchedUpdateSet("TempT.name=SS.name,TempT.value=SS.`value`")
-                        .withSourceTable("SS")
-                        .withTargetAlias("TempT")
-                        .withSourceSqls(
-                                "CREATE TEMPORARY VIEW SS AS SELECT id, name, `value` FROM S")
-                        .withSinkParallelism(2);
-
-        builder.build().run();
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testSqls(boolean inDefault, String invoker) throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
 
         List<Row> expected =
                 Arrays.asList(
@@ -263,6 +387,28 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 11, "new_name11", 101.1),
                         changelogRow("+I", 15, null, 101.1),
                         changelogRow("+I", 18, "new_name18", 101.8));
+
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("TempT.id=SS.id")
+                            .withMatchedUpdateSet("TempT.name=SS.name,TempT.value=SS.`value`")
+                            .withSourceTable("SS")
+                            .withTargetAlias("TempT")
+                            .withSourceSqls(
+                                    "CREATE TEMPORARY VIEW SS AS SELECT id, name, `value` FROM S")
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', 'TempT', 'CREATE TEMPORARY VIEW SS AS SELECT id, name, `value` FROM S',"
+                                    + " 'SS', 'TempT.id=SS.id', 'name=SS.name,value=SS.`value`', 2)",
+                            targetDb);
+
+            executeSQL(procedureStatement, false, true);
+        }
 
         testBatchRead(
                 "SELECT id, name, `value` FROM T where id in (1, 2, 3, 7, 8, 11, 15, 18)",

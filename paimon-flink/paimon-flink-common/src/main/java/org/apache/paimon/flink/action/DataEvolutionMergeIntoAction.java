@@ -52,6 +52,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.api.operators.StreamMap;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.table.api.Table;
+import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -180,6 +181,10 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
+        runInternal().await();
+    }
+
+    public TableResult runInternal() {
         // 1. build source
         Tuple2<DataStream<RowData>, RowType> sourceWithType = buildSource();
         // 2. shuffle by firstRowId
@@ -199,10 +204,9 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                         .setParallelism(1)
                         .getTransformation();
 
-        executeInternal(
-                        Collections.singletonList(transformations),
-                        Collections.singletonList(identifier.getFullName()))
-                .await();
+        return executeInternal(
+                Collections.singletonList(transformations),
+                Collections.singletonList(identifier.getFullName()));
     }
 
     public Tuple2<DataStream<RowData>, RowType> buildSource() {
@@ -320,6 +324,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                         coreOptions.sequenceFieldSortOrderIsAscending()))
                         .setParallelism(sinkParallelism);
 
+        // 2. write partial columns
         return sorted.transform(
                         "PARTIAL WRITE COLUMNS",
                         new CommittableTypeInfo(),
