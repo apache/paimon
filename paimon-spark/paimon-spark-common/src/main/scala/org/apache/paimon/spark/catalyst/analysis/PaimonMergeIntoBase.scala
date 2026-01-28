@@ -23,7 +23,7 @@ import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.{MergeIntoPaimonDataEvolutionTable, MergeIntoPaimonTable}
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeSet, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
 
@@ -62,64 +62,34 @@ trait PaimonMergeIntoBase
             updateActions,
             primaryKeys)
         }
-        val alignedMatchedActions =
-          merge.matchedActions.map(
-            checkAndAlignActionAssignment(_, targetOutput, dataEvolutionEnabled))
-        val alignedNotMatchedActions =
-          merge.notMatchedActions.map(
-            checkAndAlignActionAssignment(_, targetOutput, dataEvolutionEnabled))
-        val alignedNotMatchedBySourceActions =
-          resolveNotMatchedBySourceActions(merge, targetOutput, dataEvolutionEnabled)
 
-        if (dataEvolutionEnabled) {
-          MergeIntoPaimonDataEvolutionTable(
-            v2Table,
-            merge.targetTable,
-            merge.sourceTable,
-            merge.mergeCondition,
-            alignedMatchedActions,
-            alignedNotMatchedActions,
-            alignedNotMatchedBySourceActions
-          )
+        val alignedMergeIntoTable = alignMergeIntoTable(merge, targetOutput)
+
+        if (!shouldFallbackToV1MergeInto(alignedMergeIntoTable)) {
+          alignedMergeIntoTable
         } else {
-          MergeIntoPaimonTable(
-            v2Table,
-            merge.targetTable,
-            merge.sourceTable,
-            merge.mergeCondition,
-            alignedMatchedActions,
-            alignedNotMatchedActions,
-            alignedNotMatchedBySourceActions
-          )
+          if (dataEvolutionEnabled) {
+            MergeIntoPaimonDataEvolutionTable(
+              v2Table,
+              merge.targetTable,
+              merge.sourceTable,
+              merge.mergeCondition,
+              alignedMergeIntoTable.matchedActions,
+              alignedMergeIntoTable.notMatchedActions,
+              resolveNotMatchedBySourceActions(alignedMergeIntoTable)
+            )
+          } else {
+            MergeIntoPaimonTable(
+              v2Table,
+              merge.targetTable,
+              merge.sourceTable,
+              merge.mergeCondition,
+              alignedMergeIntoTable.matchedActions,
+              alignedMergeIntoTable.notMatchedActions,
+              resolveNotMatchedBySourceActions(alignedMergeIntoTable)
+            )
+          }
         }
-    }
-  }
-
-  def resolveNotMatchedBySourceActions(
-      merge: MergeIntoTable,
-      targetOutput: Seq[AttributeReference],
-      dataEvolutionEnabled: Boolean): Seq[MergeAction]
-
-  protected def checkAndAlignActionAssignment(
-      action: MergeAction,
-      targetOutput: Seq[AttributeReference],
-      dataEvolutionEnabled: Boolean): MergeAction = {
-    action match {
-      case d @ DeleteAction(_) => d
-      case u @ UpdateAction(_, assignments) =>
-        u.copy(assignments = alignAssignments(targetOutput, assignments))
-
-      case i @ InsertAction(_, assignments) =>
-        i.copy(assignments = alignAssignments(targetOutput, assignments, isInsert = true))
-
-      case _: UpdateStarAction =>
-        throw new RuntimeException(s"UpdateStarAction should not be here.")
-
-      case _: InsertStarAction =>
-        throw new RuntimeException(s"InsertStarAction should not be here.")
-
-      case _ =>
-        throw new RuntimeException(s"Can't recognize this action: $action")
     }
   }
 
@@ -156,4 +126,8 @@ trait PaimonMergeIntoBase
       throw new RuntimeException("Can't update the primary key column in update clause.")
     }
   }
+
+  def resolveNotMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction]
+
+  def alignMergeIntoTable(m: MergeIntoTable, targetOutput: Seq[Attribute]): MergeIntoTable
 }

@@ -42,6 +42,9 @@ import scala.collection.mutable
 /**
  * Note: The [[pushedPartitionFilters]] and [[pushedDataFilters]] are intentionally set to empty
  * because file-level filtering is handled through Spark's runtime V2 filtering mechanism.
+ *
+ * When Spark's runtime filter is not applied (e.g., when NOT MATCHED is present in MergeInto which
+ * requires FULL OUTER JOIN), this scan will read all data from the table.
  */
 case class PaimonCopyOnWriteScan(
     table: FileStoreTable,
@@ -51,9 +54,28 @@ case class PaimonCopyOnWriteScan(
   extends BaseScan
   with SupportsRuntimeV2Filtering {
 
-  override def inputSplits: Array[Split] = dataSplits.asInstanceOf[Array[Split]]
+  // Track whether filter() has been called
+  @volatile private var filterApplied: Boolean = false
+
+  private val filteredFileNames: mutable.Set[String] = mutable.Set[String]()
+
+  override def inputSplits: Array[Split] = {
+    loadSplits()
+    dataSplits.asInstanceOf[Array[Split]]
+  }
 
   var dataSplits: Array[DataSplit] = Array()
+
+  private def loadSplits(): Unit = {
+    val snapshotReader = table.newSnapshotReader()
+    if (table.coreOptions().manifestDeleteFileDropStats()) {
+      snapshotReader.dropStats()
+    }
+    if (filterApplied) {
+      snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
+    }
+    dataSplits = snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
+  }
 
   def scannedFiles: Seq[SparkDataFileMeta] = {
     dataSplits
@@ -66,9 +88,9 @@ case class PaimonCopyOnWriteScan(
   }
 
   override def filter(predicates: Array[SparkPredicate]): Unit = {
-    val filteredFileNames: mutable.Set[String] = mutable.Set[String]()
-    val runtimefilters: Array[Filter] = predicates.flatMap(PaimonUtils.filterV2ToV1)
-    for (filter <- runtimefilters) {
+    filterApplied = true
+    val runtimeFilters: Array[Filter] = predicates.flatMap(PaimonUtils.filterV2ToV1)
+    for (filter <- runtimeFilters) {
       filter match {
         case in: In if in.attribute.equalsIgnoreCase(FILE_PATH_COLUMN) =>
           for (value <- in.values) {
@@ -78,14 +100,6 @@ case class PaimonCopyOnWriteScan(
         case _ => logWarning("Unsupported runtime filter")
       }
     }
-
-    val snapshotReader = table.newSnapshotReader()
-    if (table.coreOptions().manifestDeleteFileDropStats()) {
-      snapshotReader.dropStats()
-    }
-
-    snapshotReader.withDataFileNameFilter(fileName => filteredFileNames.contains(fileName))
-    dataSplits = snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }.toArray
   }
 
 }
