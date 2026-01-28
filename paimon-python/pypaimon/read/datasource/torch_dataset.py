@@ -123,16 +123,18 @@ class TorchIterDataset(IterableDataset):
         When num_workers > 0 in DataLoader, each worker will process a subset of splits.
 
         Yields:
-            row data of dict type, where keys are column names.
+            row data of dict type, where keys are column names
         """
         worker_info = torch.utils.data.get_worker_info()
-        if worker_info is not None:
+        if worker_info is None:
+            # Single-process data loading, iterate over all splits
+            splits_for_worker = self.splits
+        else:
+            # Multi-worker: partition splits across workers
             per_worker = int(math.ceil(len(self.splits) / float(worker_info.num_workers)))
             start = worker_info.id * per_worker
             end = min(start + per_worker, len(self.splits))
             splits_for_worker = self.splits[start:end]
-        else:
-            splits_for_worker = self.splits
 
         if self.prefetch_concurrency <= 1:
             iterator = self.table_read.to_iterator(splits_for_worker)
