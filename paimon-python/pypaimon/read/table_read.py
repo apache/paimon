@@ -204,7 +204,7 @@ class TableRead:
                 You needn't manually set this in most cases.
             **read_args: Additional kwargs passed to the datasource.
                 For example, ``per_task_row_limit`` (Ray 2.52.0+).
-
+        
         See `Ray Data API <https://docs.ray.io/en/latest/data/api/doc/ray.data.read_datasource.html>`_
         for details.
         """
