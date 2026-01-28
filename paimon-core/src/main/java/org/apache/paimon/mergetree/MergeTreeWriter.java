@@ -23,11 +23,13 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
+import org.apache.paimon.compact.CompactMetricMeta;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -84,6 +86,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private long newSequenceNumber;
     private WriteBuffer writeBuffer;
+
+    private CompactMetricMeta compactMetricMeta;
 
     public MergeTreeWriter(
             boolean writeBufferSpillable,
@@ -288,6 +292,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         new ArrayList<>(compactBefore.values()),
                         new ArrayList<>(compactAfter),
                         new ArrayList<>(compactChangelog));
+        CompactMetricIncrement compactMetricIncrement =
+                new CompactMetricIncrement(compactMetricMeta);
         CompactDeletionFile drainDeletionFile = compactDeletionFile;
 
         newFiles.clear();
@@ -298,7 +304,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactChangelog.clear();
         compactDeletionFile = null;
 
-        return new CommitIncrement(dataIncrement, compactIncrement, drainDeletionFile);
+        return new CommitIncrement(
+                dataIncrement, compactIncrement, compactMetricIncrement, drainDeletionFile);
     }
 
     private void trySyncLatestCompaction(boolean blocking) throws Exception {
@@ -326,6 +333,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         }
         compactAfter.addAll(result.after());
         compactChangelog.addAll(result.changelog());
+        compactMetricMeta =
+                new CompactMetricMeta(result.compactionType(), result.compactionTimeMillis());
 
         updateCompactDeletionFile(result.deletionFile());
     }

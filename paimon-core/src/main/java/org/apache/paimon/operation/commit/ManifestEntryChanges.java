@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -45,6 +46,9 @@ public class ManifestEntryChanges {
     public List<ManifestEntry> compactTableFiles;
     public List<ManifestEntry> compactChangelog;
     public List<IndexManifestEntry> compactIndexFiles;
+    public List<String> buckets;
+    public List<String> types;
+    public List<Long> compactionDurationTime;
 
     public ManifestEntryChanges(int defaultNumBucket) {
         this.defaultNumBucket = defaultNumBucket;
@@ -54,6 +58,9 @@ public class ManifestEntryChanges {
         this.compactTableFiles = new ArrayList<>();
         this.compactChangelog = new ArrayList<>();
         this.compactIndexFiles = new ArrayList<>();
+        this.buckets = new ArrayList<>();
+        this.types = new ArrayList<>();
+        this.compactionDurationTime = new ArrayList<>();
     }
 
     public void collect(CommitMessage message) {
@@ -127,6 +134,18 @@ public class ManifestEntryChanges {
                                                 commitMessage.partition(),
                                                 commitMessage.bucket(),
                                                 m)));
+    }
+
+    public void collectMetrics(CommitMessage message, FileStorePathFactory factory) {
+        CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+        buckets.add(
+                factory.bucketPath(commitMessage.partition(), commitMessage.bucket()).toString());
+        if (commitMessage.compactMetricIncrement() != null
+                && commitMessage.compactMetricIncrement().metric() != null
+                && !commitMessage.compactMetricIncrement().metric().isNullable()) {
+            types.add(commitMessage.compactMetricIncrement().metric().type());
+            compactionDurationTime.add(commitMessage.compactMetricIncrement().metric().duration());
+        }
     }
 
     private ManifestEntry makeEntry(FileKind kind, CommitMessage commitMessage, DataFileMeta file) {
