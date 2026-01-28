@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** A simple {@link FileEntry} only contains identifier and min max key. */
 public class SimpleFileEntry implements FileEntry {
 
@@ -40,6 +42,8 @@ public class SimpleFileEntry implements FileEntry {
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
     @Nullable private final String externalPath;
+    private final long rowCount;
+    @Nullable private final Long firstRowId;
 
     public SimpleFileEntry(
             FileKind kind,
@@ -52,7 +56,9 @@ public class SimpleFileEntry implements FileEntry {
             @Nullable byte[] embeddedIndex,
             BinaryRow minKey,
             BinaryRow maxKey,
-            @Nullable String externalPath) {
+            @Nullable String externalPath,
+            long rowCount,
+            @Nullable Long firstRowId) {
         this.kind = kind;
         this.partition = partition;
         this.bucket = bucket;
@@ -64,6 +70,8 @@ public class SimpleFileEntry implements FileEntry {
         this.minKey = minKey;
         this.maxKey = maxKey;
         this.externalPath = externalPath;
+        this.rowCount = rowCount;
+        this.firstRowId = firstRowId;
     }
 
     public static SimpleFileEntry from(ManifestEntry entry) {
@@ -78,7 +86,9 @@ public class SimpleFileEntry implements FileEntry {
                 entry.file().embeddedIndex(),
                 entry.minKey(),
                 entry.maxKey(),
-                entry.externalPath());
+                entry.externalPath(),
+                entry.file().rowCount(),
+                entry.firstRowId());
     }
 
     public SimpleFileEntry toDelete() {
@@ -93,7 +103,9 @@ public class SimpleFileEntry implements FileEntry {
                 embeddedIndex,
                 minKey,
                 maxKey,
-                externalPath);
+                externalPath,
+                rowCount,
+                firstRowId);
     }
 
     public static List<SimpleFileEntry> from(List<ManifestEntry> entries) {
@@ -163,6 +175,22 @@ public class SimpleFileEntry implements FileEntry {
     }
 
     @Override
+    public long rowCount() {
+        return rowCount;
+    }
+
+    @Override
+    public @Nullable Long firstRowId() {
+        return firstRowId;
+    }
+
+    public long nonNullFirstRowId() {
+        Long firstRowId = firstRowId();
+        checkArgument(firstRowId != null, "First row id of '%s' should not be null.", fileName());
+        return firstRowId;
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -180,7 +208,9 @@ public class SimpleFileEntry implements FileEntry {
                 && Objects.equals(extraFiles, that.extraFiles)
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey)
-                && Objects.equals(externalPath, that.externalPath);
+                && Objects.equals(externalPath, that.externalPath)
+                && rowCount == that.rowCount
+                && Objects.equals(firstRowId, that.firstRowId);
     }
 
     @Override
@@ -195,7 +225,9 @@ public class SimpleFileEntry implements FileEntry {
                 extraFiles,
                 minKey,
                 maxKey,
-                externalPath);
+                externalPath,
+                rowCount,
+                firstRowId);
     }
 
     @Override
@@ -221,6 +253,10 @@ public class SimpleFileEntry implements FileEntry {
                 + maxKey
                 + ", externalPath="
                 + externalPath
+                + ", rowCount="
+                + rowCount
+                + ", firstRowId="
+                + firstRowId
                 + '}';
     }
 }

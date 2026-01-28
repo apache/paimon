@@ -92,6 +92,16 @@ public class PojoManifestEntry implements ManifestEntry {
     }
 
     @Override
+    public long rowCount() {
+        return file.rowCount();
+    }
+
+    @Override
+    public @Nullable Long firstRowId() {
+        return file.firstRowId();
+    }
+
+    @Override
     public int totalBuckets() {
         return totalBuckets;
     }

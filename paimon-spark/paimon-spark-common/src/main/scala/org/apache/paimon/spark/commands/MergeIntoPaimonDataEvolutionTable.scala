@@ -136,16 +136,13 @@ case class MergeIntoPaimonDataEvolutionTable(
   lazy val tableSchema: StructType = v2Table.schema
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    // Avoid that more than one source rows match the same target row.
-    val commitMessages = invokeMergeInto(sparkSession)
-    writer.commit(commitMessages)
+    invokeMergeInto(sparkSession)
     Seq.empty[Row]
   }
 
-  private def invokeMergeInto(sparkSession: SparkSession): Seq[CommitMessage] = {
-    val tableSplits: Seq[DataSplit] = table
-      .newSnapshotReader()
-      .read()
+  private def invokeMergeInto(sparkSession: SparkSession): Unit = {
+    val plan = table.newSnapshotReader().read()
+    val tableSplits: Seq[DataSplit] = plan
       .splits()
       .asScala
       .map(_.asInstanceOf[DataSplit])
@@ -197,7 +194,10 @@ case class MergeIntoPaimonDataEvolutionTable(
         insertActionInvoke(sparkSession, touchedFileTargetRelation)
       else Nil
 
-    updateCommit ++ insertCommit
+    if (plan.snapshotId() != null) {
+      writer.rowIdCheckConflict(plan.snapshotId())
+    }
+    writer.commit(updateCommit ++ insertCommit)
   }
 
   private def targetRelatedSplits(

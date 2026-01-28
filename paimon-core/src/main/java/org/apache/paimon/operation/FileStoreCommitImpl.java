@@ -197,7 +197,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitMaxRetryWait,
             boolean rowTrackingEnabled,
             boolean discardDuplicateFiles,
-            ConflictDetection conflictDetection,
+            ConflictDetection.Factory conflictDetectFactory,
             @Nullable StrictModeChecker strictModeChecker,
             @Nullable CommitRollback rollback) {
         this.snapshotCommit = snapshotCommit;
@@ -239,7 +239,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.rowTrackingEnabled = rowTrackingEnabled;
         this.discardDuplicateFiles = discardDuplicateFiles;
         this.strictModeChecker = strictModeChecker;
-        this.conflictDetection = conflictDetection;
+        this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
     }
 
@@ -258,6 +258,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Override
     public FileStoreCommit appendCommitCheckConflict(boolean appendCommitCheckConflict) {
         this.appendCommitCheckConflict = appendCommitCheckConflict;
+        return this;
+    }
+
+    @Override
+    public FileStoreCommit rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
+        this.conflictDetection.setRowIdCheckFromSnapshot(rowIdCheckFromSnapshot);
         return this;
     }
 
@@ -320,7 +326,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 }
 
                 boolean allowRollback = false;
-                if (containsFileDeletionOrDeletionVectors(
+                if (conflictDetection.shouldBeOverwriteCommit(
                         appendSimpleEntries, changes.appendIndexFiles)) {
                     commitKind = CommitKind.OVERWRITE;
                     checkAppendFiles = true;

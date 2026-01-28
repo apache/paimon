@@ -275,16 +275,20 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (snapshotCommit == null) {
             snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
         }
-        ConflictDetection conflictDetection =
-                new ConflictDetection(
-                        tableName,
-                        commitUser,
-                        partitionType,
-                        pathFactory(),
-                        newKeyComparator(),
-                        bucketMode(),
-                        options.deletionVectorsEnabled(),
-                        newIndexFileHandler());
+        ConflictDetection.Factory conflictDetectFactory =
+                scanner ->
+                        new ConflictDetection(
+                                tableName,
+                                commitUser,
+                                partitionType,
+                                pathFactory(),
+                                newKeyComparator(),
+                                bucketMode(),
+                                options.deletionVectorsEnabled(),
+                                options.dataEvolutionEnabled(),
+                                newIndexFileHandler(),
+                                snapshotManager,
+                                scanner);
         StrictModeChecker strictModeChecker =
                 StrictModeChecker.create(
                         snapshotManager,
@@ -327,7 +331,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitMaxRetryWait(),
                 options.rowTrackingEnabled(),
                 options.commitDiscardDuplicateFiles(),
-                conflictDetection,
+                conflictDetectFactory,
                 strictModeChecker,
                 rollback);
     }
