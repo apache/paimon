@@ -153,6 +153,34 @@ catalog.create_table(
 table = catalog.get_table('database_name.table_name')
 ```
 
+## Alter Table
+
+Alter a table with a list of schema changes. Use `SchemaChange` from `pypaimon.schema.schema_change` and types from `pypaimon.schema.data_types` (e.g. `AtomicType`).
+
+```python
+from pypaimon.schema.schema_change import SchemaChange
+from pypaimon.schema.data_types import AtomicType
+
+# Add column(s)
+catalog.alter_table(
+    'database_name.table_name',
+    [
+        SchemaChange.add_column('new_col', AtomicType('STRING')),
+        SchemaChange.add_column('score', AtomicType('DOUBLE'), comment='optional'),
+    ],
+    ignore_if_not_exists=False
+)
+
+# Drop column
+catalog.alter_table(
+    'database_name.table_name',
+    [SchemaChange.drop_column('col_name')],
+    ignore_if_not_exists=False
+)
+```
+
+Other supported changes: `SchemaChange.rename_column`, `update_column_type`, `update_column_comment`, `set_option`, `remove_option`, `update_comment`.
+
 ## Batch Write
 
 Paimon table write is Two-Phase Commit, you can write many times, but once committed, no more data can be written.
