@@ -61,7 +61,7 @@ public class IcebergTableImpl implements ReadonlyTable, IcebergTable {
         this.rowType = rowType;
         this.partitionKeys = partitionKeys;
         this.location = location;
-        this.options = options == null ? Collections.emptyMap() : options;
+        this.options = options;
         this.comment = comment;
         this.uuid = uuid;
     }
