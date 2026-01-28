@@ -16,7 +16,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional, Dict, Tuple
+from typing import Callable, List, Optional, Tuple
+
+from pyroaring import BitMap
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
@@ -30,27 +32,28 @@ class AbstractSplitGenerator(ABC):
     """
     Abstract base class for generating splits.
     """
-    
+
     # Special key for tracking file end position in split file index map
     NEXT_POS_KEY = '_next_pos'
 
     def __init__(
-        self,
-        table,
-        target_split_size: int,
-        open_file_cost: int,
-        deletion_files_map: Optional[Dict] = None
+            self,
+            table,
+            target_split_size: int,
+            open_file_cost: int,
     ):
         self.table = table
         self.target_split_size = target_split_size
         self.open_file_cost = open_file_cost
-        self.deletion_files_map = deletion_files_map or {}
-        
+        self.deletion_files_map = {}
+
         # Shard configuration
         self.idx_of_this_subtask = None
         self.number_of_para_subtasks = None
         self.start_pos_of_this_subtask = None
         self.end_pos_of_this_subtask = None
+
+        self.sample_num_rows = None
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int):
         """Configure sharding for parallel processing."""
@@ -72,6 +75,14 @@ class AbstractSplitGenerator(ABC):
         self.end_pos_of_this_subtask = end_pos
         return self
 
+    def with_sample(self, num_rows: int):
+        if self.idx_of_this_subtask is not None:
+            raise ValueError("with_sample and with_shard cannot be used simultaneously now")
+        if self.start_pos_of_this_subtask is not None:
+            raise ValueError("with_sample and with_slice cannot be used simultaneously now")
+        self.sample_num_rows = num_rows
+        return self
+
     @abstractmethod
     def create_splits(self, file_entries: List[ManifestEntry]) -> List[Split]:
         """
@@ -80,11 +91,11 @@ class AbstractSplitGenerator(ABC):
         pass
 
     def _build_split_from_pack(
-        self,
-        packed_files: List[List[DataFileMeta]],
-        file_entries: List[ManifestEntry],
-        for_primary_key_split: bool,
-        use_optimized_path: bool = False
+            self,
+            packed_files: List[List[DataFileMeta]],
+            file_entries: List[ManifestEntry],
+            for_primary_key_split: bool,
+            use_optimized_path: bool = False
     ) -> List[Split]:
         """
         Build splits from packed files.
@@ -136,10 +147,10 @@ class AbstractSplitGenerator(ABC):
         return splits
 
     def _get_deletion_files_for_split(
-        self,
-        data_files: List[DataFileMeta],
-        partition: GenericRow,
-        bucket: int
+            self,
+            data_files: List[DataFileMeta],
+            partition: GenericRow,
+            bucket: int
     ) -> Optional[List[DeletionFile]]:
         """Get deletion files for the given data files in a split."""
         if not self.deletion_files_map:
@@ -170,9 +181,9 @@ class AbstractSplitGenerator(ABC):
 
     @staticmethod
     def _pack_for_ordered(
-        items: List,
-        weight_func: Callable,
-        target_weight: int
+            items: List,
+            weight_func: Callable,
+            target_weight: int
     ) -> List[List]:
         """Pack items into groups based on target weight."""
         packed = []
@@ -216,12 +227,54 @@ class AbstractSplitGenerator(ABC):
         end_pos = start_pos + num_row
         return start_pos, end_pos
 
+    def _compute_file_sample_idx_map(self, partitioned_files, filtered_partitioned_files, file_positions,
+                                     sample_indexes, is_blob):
+        current_row = 0
+        sample_idx = 0
+
+        for key, file_entries in partitioned_files.items():
+            filtered_entries = []
+            for entry in file_entries:
+                if not is_blob and self._is_blob_file(entry.file.file_name):
+                    continue
+                if is_blob and not self._is_blob_file(entry.file.file_name):
+                    continue
+                file_start_row = current_row
+                file_end_row = current_row + entry.file.row_count
+
+                # Find all sample indexes that fall within this file
+                local_indexes = BitMap()
+                while sample_idx < len(sample_indexes) and sample_indexes[sample_idx] < file_end_row:
+                    if sample_indexes[sample_idx] >= file_start_row:
+                        # Convert global index to local index within this file
+                        local_index = sample_indexes[sample_idx] - file_start_row
+                        local_indexes.add(local_index)
+                    sample_idx += 1
+
+                # If this file contains any sampled rows, include it
+                if len(local_indexes) > 0:
+                    filtered_entries.append(entry)
+                    file_positions[entry.file.file_name] = local_indexes
+
+                current_row = file_end_row
+
+                # Early exit if we've processed all sample indexes
+                if sample_idx >= len(sample_indexes):
+                    break
+
+            if filtered_entries:
+                filtered_partitioned_files[key] = filtered_partitioned_files.get(key, []) + filtered_entries
+
+                # Early exit if we've processed all sample indexes
+            if sample_idx >= len(sample_indexes):
+                break
+
     @staticmethod
     def _compute_file_range(
-        plan_start_pos: int,
-        plan_end_pos: int,
-        file_begin_pos: int,
-        file_row_count: int
+            plan_start_pos: int,
+            plan_end_pos: int,
+            file_begin_pos: int,
+            file_row_count: int
     ) -> Optional[Tuple[int, int]]:
         """
         Compute the row range to read from a file given shard range and file position.

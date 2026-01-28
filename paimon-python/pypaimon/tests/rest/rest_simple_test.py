@@ -660,6 +660,231 @@ class RESTSimpleTest(RESTBaseTest):
         expected = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(expected, actual)
 
+    def test_with_sample(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_with_sample', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_sample')
+        write_builder = table.new_batch_write_builder()
+        # first write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014],
+            'behavior': ['a', 'b', 'c', None, 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        # second write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data2 = {
+            'user_id': [5, 6, 7, 8, 18],
+            'item_id': [1005, 1006, 1007, 1008, 1018],
+            'behavior': ['e', 'f', 'g', 'h', 'z'],
+            'dt': ['p2', 'p1', 'p2', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().with_sample(3).plan().splits()
+        actual = table_read.to_arrow(splits).sort_by('user_id')
+        expected_user_ids = set(data1['user_id'] + data2['user_id'])
+        actual_user_ids = set(actual['user_id'].to_pylist())
+        self.assertEqual(3, len(actual))
+        self.assertTrue(actual_user_ids.issubset(expected_user_ids),
+                        f"Actual user_ids {actual_user_ids} should be subset of written user_ids {expected_user_ids}")
+
+        splits = read_builder.new_scan().with_sample(0).plan().splits()
+        actual = table_read.to_arrow(splits).sort_by('user_id')
+        self.assertEqual(0, len(actual))
+
+    def test_with_sample_all_data(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_with_sample_all_data', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_sample_all_data')
+        write_builder = table.new_batch_write_builder()
+        # first write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014],
+            'behavior': ['a', 'b', 'c', None, 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        # second write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data2 = {
+            'user_id': [5, 6, 7, 8, 18],
+            'item_id': [1005, 1006, 1007, 1008, 1018],
+            'behavior': ['e', 'f', 'g', 'h', 'z'],
+            'dt': ['p2', 'p1', 'p2', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().with_sample(19).plan().splits()
+        actual = table_read.to_arrow(splits).sort_by('user_id')
+        expected_user_ids = set(data1['user_id'] + data2['user_id'])
+        actual_user_ids = set(actual['user_id'].to_pylist())
+        self.assertEqual(19, len(actual))
+        self.assertTrue(actual_user_ids.issubset(expected_user_ids),
+                        f"Actual user_ids {actual_user_ids} should be subset of written user_ids {expected_user_ids}")
+
+    def test_with_sample_larger_than_population(self):
+        """Test that sampling with num_rows larger than total rows raises ValueError"""
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_with_sample_larger_than_population', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_sample_larger_than_population')
+        write_builder = table.new_batch_write_builder()
+
+        # Write only 5 rows
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = {
+            'user_id': [1, 2, 3, 4, 5],
+            'item_id': [1001, 1002, 1003, 1004, 1005],
+            'behavior': ['a', 'b', 'c', 'd', 'e'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2'],
+        }
+        pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Try to sample 100 rows from a table with only 5 rows
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+
+        # This should raise ValueError: Sample larger than population or is negative
+        with self.assertRaises(ValueError) as context:
+            splits = read_builder.new_scan().with_sample(100).plan().splits()
+            table_read.to_arrow(splits)
+
+        self.assertIn("Sample larger than population or is negative", str(context.exception))
+
+    def test_with_sample_projection(self):
+        """Test sampling with projection"""
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_with_sample_projection', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_sample_projection')
+        write_builder = table.new_batch_write_builder()
+        # first write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014],
+            'behavior': ['a', 'b', 'c', None, 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        # second write
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data2 = {
+            'user_id': [5, 6, 7, 8, 18],
+            'item_id': [1005, 1006, 1007, 1008, 1018],
+            'behavior': ['e', 'f', 'g', 'h', 'z'],
+            'dt': ['p2', 'p1', 'p2', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder().with_projection(['user_id', 'dt'])
+        splits = read_builder.new_scan().with_sample(3).plan().splits()
+        table_read = read_builder.new_read()
+        actual = table_read.to_arrow(splits).sort_by('user_id')
+        expected_user_ids = set(data1['user_id'] + data2['user_id'])
+        actual_user_ids = set(actual['user_id'].to_pylist())
+        self.assertEqual(2, len(actual.columns))
+        self.assertEqual(3, len(actual))
+        self.assertTrue(actual_user_ids.issubset(expected_user_ids),
+                        f"Actual user_ids {actual_user_ids} should be subset of written user_ids {expected_user_ids}")
+
+    def test_with_sample_large_data(self):
+        """Test sampling with large data volume"""
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_with_sample_large', schema, False)
+        table = self.rest_catalog.get_table('default.test_with_sample_large')
+        write_builder = table.new_batch_write_builder()
+
+        # Write large volume of data in multiple batches
+        all_user_ids = []
+        batch_size = 1000
+        num_batches = 10
+
+        for batch_idx in range(num_batches):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+
+            start_id = batch_idx * batch_size + 1
+            end_id = (batch_idx + 1) * batch_size + 1
+            user_ids = list(range(start_id, end_id))
+            all_user_ids.extend(user_ids)
+
+            data = {
+                'user_id': user_ids,
+                'item_id': [1000 + uid for uid in user_ids],
+                'behavior': [chr(97 + (uid % 26)) for uid in user_ids],  # 'a' to 'z' cycling
+                'dt': ['p1' if uid % 2 == 0 else 'p2' for uid in user_ids],
+            }
+            pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+            table_write.write_arrow(pa_table)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Test sampling with different sample sizes
+        sample_sizes = [10, 50, 100]
+        for sample_size in sample_sizes:
+            read_builder = table.new_read_builder()
+            table_read = read_builder.new_read()
+            splits = read_builder.new_scan().with_sample(sample_size).plan().splits()
+            actual = table_read.to_arrow(splits)
+
+            # Verify sample size
+            self.assertEqual(sample_size, len(actual),
+                             f"Sample size should be {sample_size}, but got {len(actual)}")
+            # Verify sampled data is from written data
+            expected_user_ids = set(all_user_ids)
+            actual_user_ids = set(actual['user_id'].to_pylist())
+            self.assertTrue(actual_user_ids.issubset(expected_user_ids),
+                            "Sampled user_ids should be subset of all written user_ids")
+
+            # Verify no duplicate rows in sample
+            self.assertEqual(len(actual_user_ids), len(actual),
+                             "Sample should not contain duplicate rows")
+
     def test_create_drop_database_table(self):
         # test create database
         self.rest_catalog.create_database("db1", False)

@@ -230,6 +230,47 @@ class RayDataTest(unittest.TestCase):
         self.assertEqual(set(df['category'].tolist()), {'A'}, "All rows should have category='A'")
         self.assertEqual(set(df['id'].tolist()), {1, 3}, "Should have IDs 1 and 3")
 
+    def test_ray_data_with_sample(self):
+        """Test Ray Data read with sample filtering."""
+        # Create schema
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('category', pa.string()),
+            ('amount', pa.int64()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('default.test_ray_sample', schema, False)
+        table = self.catalog.get_table('default.test_ray_sample')
+
+        # Write test data
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'category': ['A', 'B', 'A', 'C', 'B'],
+            'amount': [100, 200, 150, 300, 250],
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Read with predicate
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        table_scan = read_builder.new_scan().with_sample(3)
+        splits = table_scan.plan().splits()
+
+        ray_dataset = table_read.to_ray(splits, override_num_blocks=2)
+
+        # Verify filtered results
+        df = ray_dataset.to_pandas()
+        self.assertTrue(set(df['id'].tolist()).issubset(set(test_data['id'].to_pylist())))
+        self.assertEqual(3, len(df), "Should have 3 rows after sampling")
+
     def test_ray_data_with_projection(self):
         """Test Ray Data read with column projection."""
         # Create schema
@@ -696,6 +737,7 @@ class RayDataTest(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             table_read.to_ray(splits, override_num_blocks=-10)
         self.assertIn("override_num_blocks must be at least 1", str(context.exception))
+
 
 if __name__ == '__main__':
     unittest.main()

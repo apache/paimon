@@ -67,11 +67,6 @@ class FullStartingScanner(StartingScanner):
         self.target_split_size = options.source_split_target_size()
         self.open_file_cost = options.source_split_open_file_cost()
 
-        self.idx_of_this_subtask = None
-        self.number_of_para_subtasks = None
-        self.start_pos_of_this_subtask = None
-        self.end_pos_of_this_subtask = None
-
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
@@ -84,28 +79,12 @@ class FullStartingScanner(StartingScanner):
             self.table.table_schema.id
         )
 
-    def scan(self) -> Plan:
-        file_entries = self.plan_files()
-        if not file_entries:
-            return Plan([])
-        # Get deletion files map if deletion vectors are enabled.
-        # {partition-bucket -> {filename -> DeletionFile}}
-        deletion_files_map: dict[tuple, dict[str, DeletionFile]] = {}
-        if self.deletion_vectors_enabled:
-            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            # Extract unique partition-bucket pairs from file entries
-            buckets = set()
-            for entry in file_entries:
-                buckets.add((tuple(entry.partition.values), entry.bucket))
-            deletion_files_map = self._scan_dv_index(latest_snapshot, buckets)
-
         # Create appropriate split generator based on table type
         if self.table.is_primary_key_table:
-            split_generator = PrimaryKeyTableSplitGenerator(
+            self.split_generator = PrimaryKeyTableSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                deletion_files_map
             )
         elif self.data_evolution:
             global_index_result = self._eval_global_index()
@@ -115,30 +94,37 @@ class FullStartingScanner(StartingScanner):
                 row_ranges = global_index_result.results().to_range_list()
                 if isinstance(global_index_result, VectorSearchGlobalIndexResult):
                     score_getter = global_index_result.score_getter()
-            split_generator = DataEvolutionSplitGenerator(
+            self.split_generator = DataEvolutionSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                deletion_files_map,
                 row_ranges,
                 score_getter
             )
         else:
-            split_generator = AppendTableSplitGenerator(
+            self.split_generator = AppendTableSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                deletion_files_map
             )
 
-        # Configure sharding if needed
-        if self.idx_of_this_subtask is not None:
-            split_generator.with_shard(self.idx_of_this_subtask, self.number_of_para_subtasks)
-        elif self.start_pos_of_this_subtask is not None:
-            split_generator.with_slice(self.start_pos_of_this_subtask, self.end_pos_of_this_subtask)
+    def scan(self) -> Plan:
+        file_entries = self.plan_files()
+        if not file_entries:
+            return Plan([])
+        # Get deletion files map if deletion vectors are enabled.
+        # {partition-bucket -> {filename -> DeletionFile}}
+        if self.deletion_vectors_enabled:
+            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
+            # Extract unique partition-bucket pairs from file entries
+            buckets = set()
+            for entry in file_entries:
+                buckets.add((tuple(entry.partition.values), entry.bucket))
+            deletion_files_map = self._scan_dv_index(latest_snapshot, buckets)
+            self.split_generator.deletion_files_map = deletion_files_map
 
         # Generate splits
-        splits = split_generator.create_splits(file_entries)
+        splits = self.split_generator.create_splits(file_entries)
 
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
@@ -223,21 +209,15 @@ class FullStartingScanner(StartingScanner):
         )
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FullStartingScanner':
-        if idx_of_this_subtask >= number_of_para_subtasks:
-            raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
-        if self.start_pos_of_this_subtask is not None:
-            raise Exception("with_shard and with_slice cannot be used simultaneously")
-        self.idx_of_this_subtask = idx_of_this_subtask
-        self.number_of_para_subtasks = number_of_para_subtasks
+        self.split_generator.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         return self
 
     def with_slice(self, start_pos: int, end_pos: int) -> 'FullStartingScanner':
-        if start_pos >= end_pos:
-            raise ValueError("start_pos must be less than end_pos")
-        if self.idx_of_this_subtask is not None:
-            raise Exception("with_slice and with_shard cannot be used simultaneously")
-        self.start_pos_of_this_subtask = start_pos
-        self.end_pos_of_this_subtask = end_pos
+        self.split_generator.with_slice(start_pos, end_pos)
+        return self
+
+    def with_sample(self, num_rows: int) -> 'FullStartingScanner':
+        self.split_generator.with_sample(num_rows)
         return self
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:
