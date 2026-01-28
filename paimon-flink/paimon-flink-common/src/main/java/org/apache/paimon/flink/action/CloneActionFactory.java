@@ -41,6 +41,7 @@ public class CloneActionFactory implements ActionFactory {
     private static final String PREFER_FILE_FORMAT = "prefer_file_format";
     private static final String CLONE_FROM = "clone_from";
     private static final String META_ONLY = "meta_only";
+    private static final String CLONE_IF_EXISTS = "clone_if_exists";
 
     @Override
     public String identifier() {
@@ -83,6 +84,11 @@ public class CloneActionFactory implements ActionFactory {
                 !StringUtils.isNullOrWhitespaceOnly(metaOnlyStr)
                         && Boolean.parseBoolean(metaOnlyStr);
 
+        String cloneIfExistsStr = params.get(CLONE_IF_EXISTS);
+        boolean cloneIfExists =
+                StringUtils.isNullOrWhitespaceOnly(cloneIfExistsStr)
+                        || Boolean.parseBoolean(cloneIfExistsStr);
+
         CloneAction cloneAction =
                 new CloneAction(
                         params.get(DATABASE),
@@ -97,7 +103,8 @@ public class CloneActionFactory implements ActionFactory {
                         excludedTables,
                         preferFileFormat,
                         cloneFrom,
-                        metaOnly);
+                        metaOnly,
+                        cloneIfExists);
 
         return Optional.of(cloneAction);
     }
