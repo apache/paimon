@@ -127,68 +127,66 @@ class TorchIterDataset(IterableDataset):
         """
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:
-            # Single-process data loading, iterate over all splits
-            splits_for_worker = self.splits
+            splits_to_process = self.splits
         else:
-            # Multi-worker: partition splits across workers
             per_worker = int(math.ceil(len(self.splits) / float(worker_info.num_workers)))
             start = worker_info.id * per_worker
             end = min(start + per_worker, len(self.splits))
-            splits_for_worker = self.splits[start:end]
+            splits_to_process = self.splits[start:end]
 
+        for row in self._iter_rows(splits_to_process):
+            yield row
+
+    def _iter_rows(self, splits: List[Split]):
         if self.prefetch_concurrency <= 1:
-            iterator = self.table_read.to_iterator(splits_for_worker)
-            for offset_row in iterator:
+            for offset_row in self.table_read.to_iterator(splits):
                 yield self._row_to_dict(offset_row)
             return
 
-        n = min(self.prefetch_concurrency, len(splits_for_worker))
-        split_groups = [splits_for_worker[i::n] for i in range(n)]
+        n = min(self.prefetch_concurrency, len(splits))
         if n == 0:
             return
+        split_groups = [splits[i::n] for i in range(n)]
 
         q = queue.Queue(maxsize=self._PREFETCH_QUEUE_MAXSIZE)
-        stop_event = threading.Event()
+        stop = threading.Event()
 
-        def producer(thread_id: int, split_group: List):
+        def producer(split_group: List):
             try:
                 for offset_row in self.table_read.to_iterator(split_group):
-                    if stop_event.is_set():
+                    if stop.is_set():
                         break
                     try:
                         q.put((self._ROW, self._row_to_dict(offset_row)), timeout=30.0)
                     except queue.Full:
-                        if stop_event.is_set():
-                            break
-                        q.put((self._ROW, self._row_to_dict(offset_row)))
-                q.put((self._SENTINEL, thread_id))
+                        if not stop.is_set():
+                            q.put((self._ROW, self._row_to_dict(offset_row)))
+                q.put((self._SENTINEL, None))
             except Exception as e:
                 q.put((self._ERR, e))
 
-        threads = [
-            threading.Thread(target=producer, args=(i, split_groups[i]), daemon=True)
-            for i in range(n)
-        ]
+        threads = [threading.Thread(target=producer, args=(split_groups[i],), daemon=True)
+                   for i in range(n)]
         for t in threads:
             t.start()
 
         try:
-            sentinel_count = 0
-            while sentinel_count < n:
+            done = 0
+            while done < n:
                 try:
                     tag, payload = q.get(timeout=300.0)
                 except queue.Empty:
-                    if stop_event.is_set():
+                    if stop.is_set():
                         break
                     continue
                 if tag == self._SENTINEL:
-                    sentinel_count += 1
+                    done += 1
                 elif tag == self._ERR:
                     raise payload
-                elif tag == self._ROW:
+                else:
                     yield payload
         finally:
-            stop_event.set()
+            stop.set()
             for t in threads:
                 t.join(timeout=5.0)
 
