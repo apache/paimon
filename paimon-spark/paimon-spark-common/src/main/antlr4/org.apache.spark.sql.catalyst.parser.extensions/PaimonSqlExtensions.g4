@@ -74,6 +74,7 @@ statement
     | ALTER TABLE multipartIdentifier createReplaceTagClause                                #createOrReplaceTag
     | ALTER TABLE multipartIdentifier DELETE TAG (IF EXISTS)? identifier                    #deleteTag
     | ALTER TABLE multipartIdentifier RENAME TAG identifier TO identifier                   #renameTag
+    | ALTER TABLE multipartIdentifier PARTITION partitionSpec archiveClause                 #alterTableArchive
   ;
 
 callArgument
@@ -102,6 +103,25 @@ timeUnit
   : DAYS
   | HOURS
   | MINUTES
+  ;
+
+partitionSpec
+  : '(' partitionKeyValue (',' partitionKeyValue)* ')'
+  ;
+
+partitionKeyValue
+  : identifier '=' constant
+  ;
+
+archiveClause
+  : ARCHIVE                                                           #archiveStandard
+  | COLD ARCHIVE                                                      #archiveCold
+  | RESTORE ARCHIVE (WITH DURATION durationSpec)?                    #restoreArchive
+  | UNARCHIVE                                                         #unarchive
+  ;
+
+durationSpec
+  : number timeUnit
   ;
 
 expression
@@ -151,18 +171,21 @@ quotedIdentifier
     ;
 
 nonReserved
-    : ALTER | AS | CALL | CREATE | DAYS | DELETE | EXISTS | HOURS | IF | NOT | OF | OR | TABLE
-    | REPLACE | RETAIN | VERSION | TAG
+    : ALTER | ARCHIVE | AS | CALL | COLD | CREATE | DAYS | DELETE | DURATION | EXISTS | HOURS | IF | MINUTES | NOT | OF | OR | PARTITION
+    | REPLACE | RESTORE | RETAIN | TABLE | TO | UNARCHIVE | VERSION | TAG | WITH
     | TRUE | FALSE
     | MAP
     ;
 
 ALTER: 'ALTER';
+ARCHIVE: 'ARCHIVE';
 AS: 'AS';
 CALL: 'CALL';
+COLD: 'COLD';
 CREATE: 'CREATE';
 DAYS: 'DAYS';
 DELETE: 'DELETE';
+DURATION: 'DURATION';
 EXISTS: 'EXISTS';
 HOURS: 'HOURS';
 IF : 'IF';
@@ -170,15 +193,19 @@ MINUTES: 'MINUTES';
 NOT: 'NOT';
 OF: 'OF';
 OR: 'OR';
+PARTITION: 'PARTITION';
 RENAME: 'RENAME';
 REPLACE: 'REPLACE';
+RESTORE: 'RESTORE';
 RETAIN: 'RETAIN';
 SHOW: 'SHOW';
 TABLE: 'TABLE';
 TAG: 'TAG';
 TAGS: 'TAGS';
 TO: 'TO';
+UNARCHIVE: 'UNARCHIVE';
 VERSION: 'VERSION';
+WITH: 'WITH';
 
 TRUE: 'TRUE';
 FALSE: 'FALSE';
