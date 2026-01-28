@@ -18,7 +18,6 @@
 """
 Module to read a Paimon table into PyTorch Dataset.
 """
-import math
 import queue
 import threading
 from typing import List
@@ -126,23 +125,43 @@ class TorchIterDataset(IterableDataset):
             row data of dict type, where keys are column names
         """
         worker_info = torch.utils.data.get_worker_info()
+
         if worker_info is None:
+            # Single-process data loading, iterate over all splits
             splits_to_process = self.splits
         else:
-            per_worker = int(math.ceil(len(self.splits) / float(worker_info.num_workers)))
-            start = worker_info.id * per_worker
-            end = min(start + per_worker, len(self.splits))
-            splits_to_process = self.splits[start:end]
+            # Multi-process data loading, partition splits across workers
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
 
-        for row in self._iter_rows(splits_to_process):
-            yield row
+            total_splits = len(self.splits)
+            splits_per_worker = total_splits // num_workers
+            remainder = total_splits % num_workers
 
-    def _iter_rows(self, splits: List[Split]):
-        if self.prefetch_concurrency <= 1:
-            for offset_row in self.table_read.to_iterator(splits):
-                yield self._row_to_dict(offset_row)
+            if worker_id < remainder:
+                start_idx = worker_id * (splits_per_worker + 1)
+                end_idx = start_idx + splits_per_worker + 1
+            else:
+                start_idx = worker_id * splits_per_worker + remainder
+                end_idx = start_idx + splits_per_worker
+
+            splits_to_process = self.splits[start_idx:end_idx]
+
+        if self.prefetch_concurrency > 1:
+            for row in self._iter_rows(splits_to_process):
+                yield row
             return
 
+        worker_iterator = self.table_read.to_iterator(splits_to_process)
+
+        for offset_row in worker_iterator:
+            row_dict = {}
+            for i, field_name in enumerate(self.field_names):
+                value = offset_row.get_field(i)
+                row_dict[field_name] = value
+            yield row_dict
+
+    def _iter_rows(self, splits: List[Split]):
         n = min(self.prefetch_concurrency, len(splits))
         if n == 0:
             return
