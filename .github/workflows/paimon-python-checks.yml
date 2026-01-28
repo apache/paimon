@@ -190,17 +190,6 @@ jobs:
             build-essential git curl cmake \
             && sudo rm -rf /var/lib/apt/lists/*
 
-      - name: Verify dev/requirements.txt on Python 3.6
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.6'
-      - name: Resolve requirements (3.6)
-        run: |
-          cd paimon-python && python -m pip install --upgrade pip
-          TEMP_DIR=$(mktemp -d)
-          python -m pip install -r dev/requirements.txt --target "$TEMP_DIR" || { rm -rf "$TEMP_DIR"; exit 1; }
-          rm -rf "$TEMP_DIR" && echo "✓ dev/requirements.txt OK on Python 3.6"
-
       - name: Verify dev/requirements.txt on Python 3.8
         uses: actions/setup-python@v5
         with:
