@@ -50,7 +50,7 @@ public class PredicateUtils {
 
         for (Predicate sub : predicates) {
             // Collect all field names referenced by this predicate
-            Set<String> referencedFields = sub.visit(new FieldNameCollector());
+            Set<String> referencedFields = collectFieldNames(sub);
             Optional<Predicate> transformed = transformFieldMapping(sub, fieldMap);
             if (transformed.isPresent() && referencedFields.size() == 1) {
                 Predicate child = transformed.get();
@@ -68,6 +68,10 @@ public class PredicateUtils {
         }
 
         return result;
+    }
+
+    public static Set<String> collectFieldNames(Predicate predicate) {
+        return predicate.visit(new FieldNameCollector());
     }
 
     /** A visitor that collects all field names referenced by a predicate. */
