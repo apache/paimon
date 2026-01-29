@@ -116,61 +116,25 @@ WITH (
 );
 ```
 
-## Signing Algorithm Configuration
+## DLF Endpoint Configuration
 
-Paimon supports multiple signing algorithms for DLF authentication. You can configure the signing algorithm explicitly,
-or let Paimon automatically select it based on the endpoint host.
+Paimon supports two types of DLF endpoints and automatically selects the appropriate signing algorithm:
 
-### Automatic Selection (Recommended)
+- **DLF VPC endpoints** (e.g., `cn-hangzhou-vpc.dlf.aliyuncs.com`): Recommended for VPC environments with better performance and lower latency.
+- **DLF OpenAPI endpoints** (e.g., `dlfnext.cn-hangzhou.aliyuncs.com`): Supports public network access through Alibaba Cloud API infrastructure. 
+  **Note:** Currently OpenAPI Endpoints only supports database and table names with alphanumeric characters (A-Z, a-z, 0-9) and specific symbols.
 
-By default, Paimon automatically selects the appropriate signing algorithm based on the endpoint URI:
-
-- **DLF endpoints** (e.g., `cn-hangzhou-vpc.dlf.aliyuncs.com`): Automatically uses `default`
-  (backward compatible). Recommended for VPC environments with better performance.
-- **OpenAPI endpoints** (e.g., `dlfnext.cn-hangzhou.aliyuncs.com`): Automatically uses
-  `openapi` for DlfNext/2026-01-18 OpenAPI. Supports public network access through Alibaba Cloud API infrastructure
-   for special scenarios.
+Simply configure the endpoint URI, and Paimon will automatically handle the authentication:
 
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
     'type' = 'paimon',
-    'uri' = 'https://dlfnext.cn-hangzhou.aliyuncs.com',  -- Auto-detected as openapi
+    'uri' = 'https://${region}-vpc.dlf.aliyuncs.com',  -- or OpenAPI endpoint: https://dlfnext.cn-hangzhou.aliyuncs.com
     'metastore' = 'rest',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
     'dlf.access-key-id'='<access-key-id>',
     'dlf.access-key-secret'='<access-key-secret>'
-    -- 'dlf.signing-algorithm' is not set, will be auto-detected
 );
 ```
-
-### Explicit Configuration
-
-You can explicitly specify the signing algorithm:
-
-```sql
-CREATE CATALOG `paimon-rest-catalog`
-WITH (
-    'type' = 'paimon',
-    'uri' = '<catalog server url>',
-    'metastore' = 'rest',
-    'warehouse' = 'my_instance_name',
-    'token.provider' = 'dlf',
-    'dlf.access-key-id'='<access-key-id>',
-    'dlf.access-key-secret'='<access-key-secret>',
-    'dlf.signing-algorithm' = 'default'  -- or 'openapi'
-);
-```
-
-**Available signing algorithms:**
-
-- `default` (default): DLF4-HMAC-SHA256 signer for default VPC endpoint, backward compatible
-  with existing DLF authentication
-- `openapi`: ROA v2 style signer for DlfNext/2026-01-18 OpenAPI, implements HMAC-SHA1
-  signature with ROA style canonicalization
-
-**Note:**
-- The `openapi` signer currently supports only alphanumeric characters (A-Z, a-z, 0-9) and specific
-  symbols in database and table names.
-- When `dlf.signing-algorithm` is explicitly configured, it takes precedence over automatic detection.
