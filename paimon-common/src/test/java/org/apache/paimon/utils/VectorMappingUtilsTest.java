@@ -21,6 +21,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BooleanColumnVector;
@@ -33,6 +34,8 @@ import org.apache.paimon.data.columnar.IntColumnVector;
 import org.apache.paimon.data.columnar.LongColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.data.columnar.VecColumnVector;
+import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -106,10 +109,11 @@ public class VectorMappingUtilsTest {
                                 DataTypes.DATE(),
                                 DataTypes.TIME(),
                                 DataTypes.TIMESTAMP(),
-                                DataTypes.FLOAT())
+                                DataTypes.FLOAT(),
+                                DataTypes.VECTOR(3, DataTypes.FLOAT()))
                         .build();
 
-        BinaryRow binaryRow = new BinaryRow(13);
+        BinaryRow binaryRow = new BinaryRow(14);
         BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
         binaryRowWriter.writeInt(0, 0);
         binaryRowWriter.writeByte(1, (byte) 1);
@@ -125,9 +129,14 @@ public class VectorMappingUtilsTest {
         binaryRowWriter.writeTimestamp(
                 11, Timestamp.fromEpochMillis(System.currentTimeMillis()), 10);
         binaryRowWriter.writeFloat(12, (float) 12.0);
+        float[] vectorValues = new float[] {1.0f, 2.0f, 3.0f};
+        InternalVectorSerializer vectorSerializer =
+                new InternalVectorSerializer(DataTypes.FLOAT(), vectorValues.length);
+        binaryRowWriter.writeVector(
+                13, BinaryVector.fromPrimitiveArray(vectorValues), vectorSerializer);
         binaryRowWriter.complete();
 
-        int[] map = {-1, -2, -3, -4, -5, -6, 1, -7, -8, -9, -10, -11, -12, -13, 0};
+        int[] map = {-1, -2, -3, -4, -5, -6, 1, -7, -8, -9, -10, -11, -12, -13, -14, 0};
         PartitionInfo partitionInfo = new PartitionInfo(map, rowType, binaryRow);
         ColumnVector[] columnVectors = new ColumnVector[1];
 
@@ -181,5 +190,10 @@ public class VectorMappingUtilsTest {
         Assertions.assertThat(newColumnVectors[13]).isInstanceOf(FloatColumnVector.class);
         Assertions.assertThat(((FloatColumnVector) newColumnVectors[13]).getFloat(0))
                 .isEqualTo((float) 12.0);
+
+        Assertions.assertThat(newColumnVectors[14]).isInstanceOf(VecColumnVector.class);
+        VecColumnVector vecColumnVector = (VecColumnVector) newColumnVectors[14];
+        Assertions.assertThat(vecColumnVector.getVectorSize()).isEqualTo(vectorValues.length);
+        Assertions.assertThat(vecColumnVector.getVector(0).toFloatArray()).isEqualTo(vectorValues);
     }
 }

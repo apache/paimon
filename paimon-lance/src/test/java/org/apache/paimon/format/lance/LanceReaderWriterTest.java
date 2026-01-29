@@ -19,6 +19,7 @@
 package org.apache.paimon.format.lance;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -91,6 +93,54 @@ public class LanceReaderWriterTest {
                 assertEquals(expectedRows.get(i).getInt(0), actualRows.get(i).getInt(0));
                 assertEquals(expectedRows.get(i).getString(1), actualRows.get(i).getString(1));
             }
+        }
+    }
+
+    @Test
+    public void testWriteAndReadVector(@TempDir java.nio.file.Path tempDir) throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.VECTOR(3, DataTypes.FLOAT()));
+        Options options = new Options();
+        LanceFileFormat format =
+                new LanceFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile = new Path(tempDir.resolve("test_vector_" + UUID.randomUUID()).toString());
+
+        float[] values1 = new float[] {1.0f, 2.0f, 3.0f};
+        float[] values2 = new float[] {4.0f, 5.0f, 6.0f};
+
+        // Write data
+        List<InternalRow> expectedRows = new ArrayList<>();
+        try (FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                        .create(fileIO, testFile, "")) {
+            expectedRows.add(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values1)));
+            writer.addElement(expectedRows.get(0));
+            expectedRows.add(GenericRow.of(2, BinaryVector.fromPrimitiveArray(values2)));
+            writer.addElement(expectedRows.get(1));
+        }
+
+        InternalRowSerializer internalRowSerializer = new InternalRowSerializer(rowType);
+        // Read data and check
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
+        try (RecordReader<InternalRow> reader =
+                        readerFactory.createReader(
+                                new FormatReaderContext(
+                                        fileIO, testFile, fileIO.getFileSize(testFile), null));
+                RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader)) {
+            assertNotNull(reader);
+
+            List<InternalRow> actualRows = new ArrayList<>();
+            while (iterator.hasNext()) {
+                actualRows.add(internalRowSerializer.copy(iterator.next()));
+            }
+
+            assertEquals(expectedRows.size(), actualRows.size());
+            assertEquals(expectedRows.get(0).getInt(0), actualRows.get(0).getInt(0));
+            assertArrayEquals(values1, actualRows.get(0).getVector(1).toFloatArray(), 0.0f);
+            assertEquals(expectedRows.get(1).getInt(0), actualRows.get(1).getInt(0));
+            assertArrayEquals(values2, actualRows.get(1).getVector(1).toFloatArray(), 0.0f);
         }
     }
 }
