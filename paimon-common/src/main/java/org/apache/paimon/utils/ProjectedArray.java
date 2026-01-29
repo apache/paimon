@@ -24,6 +24,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataType;
@@ -42,7 +43,7 @@ public class ProjectedArray implements InternalArray {
 
     private InternalArray array;
 
-    private ProjectedArray(int[] indexMapping) {
+    protected ProjectedArray(int[] indexMapping) {
         this.indexMapping = indexMapping;
     }
 
@@ -140,6 +141,11 @@ public class ProjectedArray implements InternalArray {
     @Override
     public InternalArray getArray(int pos) {
         return array.getArray(indexMapping[pos]);
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return array.getVector(indexMapping[pos]);
     }
 
     @Override

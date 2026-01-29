@@ -30,6 +30,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.types.DataType;
@@ -133,6 +134,16 @@ public class EqualiserCodeGeneratorTest {
                                 castFromString("[1,2,3]", DataTypes.ARRAY(new VarCharType())),
                                 castFromString("[4,5,6]", DataTypes.ARRAY(new VarCharType()))),
                         new InternalArraySerializer(DataTypes.VARCHAR(1))));
+        TEST_DATA.put(
+                DataTypeRoot.VECTOR,
+                new GeneratedData(
+                        DataTypes.VECTOR(3, DataTypes.FLOAT()),
+                        Pair.of(
+                                castFromString(
+                                        "[1.1,2.2,3.3]", DataTypes.VECTOR(3, DataTypes.FLOAT())),
+                                castFromString(
+                                        "[4.4,5.5,6.6]", DataTypes.VECTOR(3, DataTypes.FLOAT()))),
+                        new InternalVectorSerializer(DataTypes.FLOAT(), 3)));
         TEST_DATA.put(
                 DataTypeRoot.MULTISET,
                 new GeneratedData(

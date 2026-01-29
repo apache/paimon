@@ -66,6 +66,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
@@ -480,6 +481,11 @@ public interface Arrow2PaimonVectorConverter {
                             return columnVector;
                         }
                     };
+        }
+
+        @Override
+        public Arrow2PaimonVectorConverter visit(VectorType vectorType) {
+            throw new UnsupportedOperationException("Doesn't support VectorType.");
         }
 
         @Override

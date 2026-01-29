@@ -23,6 +23,7 @@ import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.data.serializer.InternalVectorSerializer;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.memory.MemorySegment;
@@ -516,6 +517,39 @@ public class BinaryRowTest {
         assertThat(array2.getInt(0)).isEqualTo(6);
         assertThat(array2.isNullAt(1)).isTrue();
         assertThat(array2.getInt(2)).isEqualTo(666);
+    }
+
+    @Test
+    public void testBinaryVector() {
+        // 1. vector test
+        final Random rnd = new Random(System.currentTimeMillis());
+        float[] vectorValues = new float[rnd.nextInt(128) + 1];
+        {
+            byte[] bytes = new byte[vectorValues.length];
+            rnd.nextBytes(bytes);
+            for (int i = 0; i < vectorValues.length; i++) {
+                vectorValues[i] = bytes[i];
+            }
+        }
+        BinaryVector vector = BinaryVector.fromPrimitiveArray(vectorValues);
+
+        assertThat(vectorValues.length).isEqualTo(vector.size());
+        int[] checkIndexList = {0, rnd.nextInt(vectorValues.length), vectorValues.length - 1};
+        for (int checkIndex : checkIndexList) {
+            assertThat(vectorValues[checkIndex]).isEqualTo(vector.getFloat(checkIndex));
+        }
+
+        // 2. test write vector to binary row
+        BinaryRow row = new BinaryRow(1);
+        BinaryRowWriter rowWriter = new BinaryRowWriter(row);
+        InternalVectorSerializer serializer =
+                new InternalVectorSerializer(DataTypes.FLOAT(), vector.size());
+        rowWriter.writeVector(0, vector, serializer);
+        rowWriter.complete();
+
+        InternalVector vector2 = row.getVector(0);
+        assertThat(vector2.size()).isEqualTo(vector.size());
+        assertThat(vector2.toFloatArray()).isEqualTo(vector.toFloatArray());
     }
 
     @Test
