@@ -58,7 +58,7 @@ public interface DLFRequestSigner {
             throws Exception;
 
     /**
-     * Get the identifier for this signer (e.g., "dlf-default", "dlf-openapi").
+     * Get the identifier for this signer (e.g., "default", "openapi").
      *
      * @return signer identifier
      */

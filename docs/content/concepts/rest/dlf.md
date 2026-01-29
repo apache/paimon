@@ -125,17 +125,17 @@ or let Paimon automatically select it based on the endpoint host.
 
 By default, Paimon automatically selects the appropriate signing algorithm based on the endpoint URI:
 
-- **DLF endpoints** (e.g., `cn-hangzhou-vpc.dlf.aliyuncs.com`): Automatically uses `dlf-default`
+- **DLF endpoints** (e.g., `cn-hangzhou-vpc.dlf.aliyuncs.com`): Automatically uses `default`
   (backward compatible). Recommended for VPC environments with better performance.
 - **OpenAPI endpoints** (e.g., `dlfnext.cn-hangzhou.aliyuncs.com`): Automatically uses
-  `dlf-openapi` for DlfNext/2026-01-18 OpenAPI. Supports public network access through Alibaba Cloud API infrastructure
+  `openapi` for DlfNext/2026-01-18 OpenAPI. Supports public network access through Alibaba Cloud API infrastructure
    for special scenarios.
 
 ```sql
 CREATE CATALOG `paimon-rest-catalog`
 WITH (
     'type' = 'paimon',
-    'uri' = 'https://dlfnext.cn-hangzhou.aliyuncs.com',  -- Auto-detected as dlf-openapi
+    'uri' = 'https://dlfnext.cn-hangzhou.aliyuncs.com',  -- Auto-detected as openapi
     'metastore' = 'rest',
     'warehouse' = 'my_instance_name',
     'token.provider' = 'dlf',
@@ -159,18 +159,18 @@ WITH (
     'token.provider' = 'dlf',
     'dlf.access-key-id'='<access-key-id>',
     'dlf.access-key-secret'='<access-key-secret>',
-    'dlf.signing-algorithm' = 'dlf-default'  -- or 'dlf-openapi'
+    'dlf.signing-algorithm' = 'default'  -- or 'openapi'
 );
 ```
 
 **Available signing algorithms:**
 
-- `dlf-default` (default): DLF4-HMAC-SHA256 signer for default VPC endpoint, backward compatible
+- `default` (default): DLF4-HMAC-SHA256 signer for default VPC endpoint, backward compatible
   with existing DLF authentication
-- `dlf-openapi`: ROA v2 style signer for DlfNext/2026-01-18 OpenAPI, implements HMAC-SHA1
+- `openapi`: ROA v2 style signer for DlfNext/2026-01-18 OpenAPI, implements HMAC-SHA1
   signature with ROA style canonicalization
 
 **Note:**
-- The `dlf-openapi` signer currently supports only alphanumeric characters (A-Z, a-z, 0-9) and specific
+- The `openapi` signer currently supports only alphanumeric characters (A-Z, a-z, 0-9) and specific
   symbols in database and table names.
 - When `dlf.signing-algorithm` is explicitly configured, it takes precedence over automatic detection.

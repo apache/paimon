@@ -107,10 +107,10 @@ public class RESTCatalogOptions {
     public static final ConfigOption<String> DLF_SIGNING_ALGORITHM =
             ConfigOptions.key("dlf.signing-algorithm")
                     .stringType()
-                    .defaultValue("dlf-default")
+                    .defaultValue("default")
                     .withDescription(
-                            "DLF signing algorithm. Options: 'dlf-default' (for default VPC endpoint), "
-                                    + "'dlf-openapi' (for DlfNext/2026-01-18). "
+                            "DLF signing algorithm. Options: 'default' (for default VPC endpoint), "
+                                    + "'openapi' (for DlfNext/2026-01-18). "
                                     + "If not set, will be automatically selected based on endpoint host.");
 
     public static final ConfigOption<Boolean> IO_CACHE_ENABLED =

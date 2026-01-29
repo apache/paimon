@@ -45,7 +45,7 @@ import static org.apache.paimon.rest.RESTUtil.decodeString;
  */
 public class DLFOpenApiSigner implements DLFRequestSigner {
 
-    public static final String IDENTIFIER = "dlf-openapi";
+    public static final String IDENTIFIER = "openapi";
 
     private static final String HMAC_SHA1 = "HmacSHA1";
     private static final String DATE_HEADER = "Date";
