@@ -153,12 +153,6 @@ under the License.
             <td>Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.</td>
         </tr>
         <tr>
-            <td><h5>table-read.sequence-number.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
-        </tr>
-        <tr>
             <td><h5>changelog.num-retained.max</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -1315,6 +1309,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>The delay duration of stream read when scan incremental snapshots.</td>
         </tr>
         <tr>
+            <td><h5>table-read.sequence-number.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
+        </tr>
+        <tr>
             <td><h5>tag.automatic-completion</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -1445,6 +1445,24 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The Variant shredding schema for writing.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-store.fields</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the vector store fields.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-store.format</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the vector store file format.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-store.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a vector-store file. Default is 10 * TARGET_FILE_SIZE.</td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>

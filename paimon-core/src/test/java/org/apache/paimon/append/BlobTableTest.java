@@ -38,7 +38,9 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
@@ -52,6 +54,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
@@ -105,7 +108,8 @@ public class BlobTableTest extends TableTestBase {
                         .collect(Collectors.toList());
 
         List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
-                DataEvolutionSplitRead.splitFieldBunches(filesMetas, key -> 0);
+                DataEvolutionSplitRead.splitFieldBunches(
+                        filesMetas, key -> makeBlobRowType(key.writeCols(), f -> 0));
 
         assertThat(fieldGroups.size()).isEqualTo(2);
         assertThat(fieldGroups.get(0).files().size()).isEqualTo(1);
@@ -155,7 +159,8 @@ public class BlobTableTest extends TableTestBase {
         assertThat(batches.size()).isEqualTo(2);
         for (List<DataFileMeta> batch : batches) {
             List<DataEvolutionSplitRead.FieldBunch> fieldGroups =
-                    DataEvolutionSplitRead.splitFieldBunches(batch, file -> 0);
+                    DataEvolutionSplitRead.splitFieldBunches(
+                            batch, file -> makeBlobRowType(file.writeCols(), f -> 0));
             assertThat(fieldGroups.size()).isEqualTo(2);
             assertThat(fieldGroups.get(0).files().size()).isEqualTo(1);
             assertThat(fieldGroups.get(1).files().size()).isEqualTo(10);
@@ -247,6 +252,20 @@ public class BlobTableTest extends TableTestBase {
     protected InternalRow dataDefault(int time, int size) {
         return GenericRow.of(
                 RANDOM.nextInt(), BinaryString.fromBytes(randomBytes()), new BlobData(blobBytes));
+    }
+
+    private static RowType makeBlobRowType(
+            List<String> fieldNames, Function<String, Integer> fieldIdFunc) {
+        List<DataField> fields = new ArrayList<>();
+        if (fieldNames == null) {
+            fieldNames = Collections.emptyList();
+        }
+        for (String fieldName : fieldNames) {
+            int fieldId = fieldIdFunc.apply(fieldName);
+            DataField blobField = new DataField(fieldId, fieldName, DataTypes.BLOB());
+            fields.add(blobField);
+        }
+        return new RowType(fields);
     }
 
     @Override
