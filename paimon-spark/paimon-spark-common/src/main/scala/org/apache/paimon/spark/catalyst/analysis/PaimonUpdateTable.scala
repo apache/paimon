@@ -41,21 +41,25 @@ object PaimonUpdateTable
 
         table.getTable match {
           case paimonTable: FileStoreTable =>
+            val relation = PaimonRelation.getPaimonRelation(u.table)
+            val alignedExpressions =
+              generateAlignedExpressions(relation.output, assignments).zip(relation.output)
+
             val primaryKeys = paimonTable.primaryKeys().asScala.toSeq
             if (!validUpdateAssignment(u.table.outputSet, primaryKeys, assignments)) {
               throw new RuntimeException("Can't update the primary key column.")
             }
 
-            val relation = PaimonRelation.getPaimonRelation(u.table)
             if (paimonTable.coreOptions().dataEvolutionEnabled()) {
               throw new RuntimeException(
                 "Update operation is not supported when data evolution is enabled yet.")
             }
+
             UpdatePaimonTableCommand(
               relation,
               paimonTable,
               condition.getOrElse(TrueLiteral),
-              assignments)
+              alignedExpressions)
 
           case _ =>
             throw new RuntimeException("Update Operation is only supported for FileStoreTable.")
