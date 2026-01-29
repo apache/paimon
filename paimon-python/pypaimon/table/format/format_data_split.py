@@ -20,10 +20,10 @@ from typing import Dict, Optional, Any
 
 @dataclass(frozen=True)
 class FormatDataSplit:
+    """Split for format table: one file (or future: byte range) per split."""
+
     file_path: str
     file_size: int
-    offset: int = 0
-    length: Optional[int] = None  # None means read whole file
     partition: Optional[Dict[str, Any]] = None  # partition column name -> value
 
     def data_path(self) -> str:

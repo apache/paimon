@@ -153,6 +153,43 @@ class RESTFormatTableTest(RESTBaseTest):
         self.assertEqual(set(actual["value"].fillna("").astype(str)), {"", "hello", "world"})
         self.assertIn("", actual["value"].values)
 
+    def test_format_table_text_partitioned_read_write(self):
+        """Partitioned TEXT table: partition columns are stripped before write; read back with partition."""
+        pa_schema = pa.schema([
+            ("value", pa.string()),
+            ("dt", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["dt"],
+            options={"type": "format-table", "file.format": "text"},
+        )
+        table_name = "default.format_table_rw_text_partitioned"
+        try:
+            self.rest_catalog.drop_table(table_name, True)
+        except Exception:
+            pass
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        self.assertIsInstance(table, FormatTable)
+        self.assertEqual(table.format().value, "text")
+
+        write_builder = table.new_batch_write_builder()
+        tw = write_builder.new_write()
+        tc = write_builder.new_commit()
+        tw.write_pandas(pd.DataFrame({"value": ["a", "b"], "dt": [1, 1]}))
+        tw.write_pandas(pd.DataFrame({"value": ["c"], "dt": [2]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        actual = read_builder.new_read().to_pandas(splits).sort_values(by=["dt", "value"]).reset_index(drop=True)
+        self.assertEqual(actual.shape[0], 3)
+        self.assertEqual(actual["value"].tolist(), ["a", "b", "c"])
+        self.assertEqual(actual["dt"].tolist(), [1, 1, 2])
+
     def test_format_table_read_with_limit_to_iterator(self):
         """with_limit(N) must be respected by to_iterator (same as to_arrow/to_pandas)."""
         pa_schema = pa.schema([
@@ -227,6 +264,93 @@ class RESTFormatTableTest(RESTBaseTest):
         self.assertEqual(len(actual), 2)
         self.assertEqual(actual["b"].tolist(), [100, 200])
 
+    def test_format_table_overwrite_only_specified_partition(self):
+        """overwrite(static_partition) must only clear that partition; other partitions unchanged."""
+        pa_schema = pa.schema([
+            ("a", pa.int32()),
+            ("b", pa.int32()),
+            ("c", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["c"],
+            options={"type": "format-table", "file.format": "parquet"},
+        )
+        table_name = "default.format_table_overwrite_one_partition"
+        try:
+            self.rest_catalog.drop_table(table_name, True)
+        except Exception:
+            pass
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_pandas(pd.DataFrame({"a": [10, 10], "b": [10, 20], "c": [1, 1]}))
+        tw.write_pandas(pd.DataFrame({"a": [30, 30], "b": [30, 40], "c": [2, 2]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        tw = table.new_batch_write_builder().overwrite({"c": 1}).new_write()
+        tc = table.new_batch_write_builder().overwrite({"c": 1}).new_commit()
+        tw.write_pandas(pd.DataFrame({"a": [12, 12], "b": [100, 200], "c": [1, 1]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        actual = table.new_read_builder().new_read().to_pandas(
+            table.new_read_builder().new_scan().plan().splits()
+        ).sort_values(by=["c", "b"])
+        self.assertEqual(len(actual), 4)
+        self.assertEqual(actual["b"].tolist(), [100, 200, 30, 40])
+        self.assertEqual(actual["c"].tolist(), [1, 1, 2, 2])
+        c1 = actual[actual["c"] == 1]["b"].tolist()
+        c2 = actual[actual["c"] == 2]["b"].tolist()
+        self.assertEqual(c1, [100, 200], "partition c=1 must be overwritten")
+        self.assertEqual(c2, [30, 40], "partition c=2 must be unchanged")
+
+    def test_format_table_overwrite_multiple_batches_same_partition(self):
+        """Overwrite mode must clear partition dir only once; multiple batches same partition keep all data."""
+        pa_schema = pa.schema([
+            ("a", pa.int32()),
+            ("b", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={"type": "format-table", "file.format": "parquet"},
+        )
+        table_name = "default.format_table_overwrite_multi_batch"
+        try:
+            self.rest_catalog.drop_table(table_name, True)
+        except Exception:
+            pass
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_pandas(pd.DataFrame({"a": [1, 2], "b": [10, 20]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        tw = wb.overwrite().new_write()
+        tc = wb.overwrite().new_commit()
+        tw.write_pandas(pd.DataFrame({"a": [3, 4], "b": [30, 40]}))
+        tw.write_pandas(pd.DataFrame({"a": [5, 6], "b": [50, 60]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        actual = table.new_read_builder().new_read().to_pandas(
+            table.new_read_builder().new_scan().plan().splits()
+        ).sort_values(by="b")
+        self.assertEqual(len(actual), 4, "overwrite + 2 write_pandas same partition must keep all 4 rows")
+        self.assertEqual(actual["b"].tolist(), [30, 40, 50, 60])
+
     @parameterized.expand(_format_table_read_write_formats())
     def test_format_table_partitioned_read_write(self, file_format):
         pa_schema = pa.schema([
@@ -271,6 +395,83 @@ class RESTFormatTableTest(RESTBaseTest):
         actual_dt10 = rb_dt10.new_read().to_pandas(splits_dt10).sort_values(by="b")
         self.assertEqual(len(actual_dt10), 2)
         self.assertEqual(actual_dt10["b"].tolist(), [10, 20])
+
+    def test_format_table_with_filter_extracts_partition_like_java(self):
+        """with_filter(partition equality) extracts partition like Java; does not overwrite partition filter."""
+        pa_schema = pa.schema([
+            ("a", pa.int32()),
+            ("b", pa.int32()),
+            ("dt", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["dt"],
+            options={"type": "format-table", "file.format": "parquet"},
+        )
+        table_name = "default.format_table_with_filter_assert"
+        try:
+            self.rest_catalog.drop_table(table_name, True)
+        except Exception:
+            pass
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_pandas(pd.DataFrame({"a": [1, 2], "b": [10, 20], "dt": [10, 10]}))
+        tw.write_pandas(pd.DataFrame({"a": [3, 4], "b": [30, 40], "dt": [11, 11]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        predicate_eq_dt10 = table.new_read_builder().new_predicate_builder().equal("dt", 10)
+        splits_by_partition_filter = (
+            table.new_read_builder().with_partition_filter({"dt": "10"}).new_scan().plan().splits()
+        )
+        splits_by_with_filter = (
+            table.new_read_builder().with_filter(predicate_eq_dt10).new_scan().plan().splits()
+        )
+        self.assertEqual(
+            len(splits_by_with_filter), len(splits_by_partition_filter),
+            "with_filter(partition equality) must behave like with_partition_filter (Java-aligned)",
+        )
+        actual_from_filter = (
+            table.new_read_builder().with_filter(predicate_eq_dt10).new_read().to_pandas(splits_by_with_filter)
+        )
+        self.assertEqual(len(actual_from_filter), 2)
+        self.assertEqual(actual_from_filter["b"].tolist(), [10, 20])
+
+        splits_partition_then_filter = (
+            table.new_read_builder()
+            .with_partition_filter({"dt": "10"})
+            .with_filter(predicate_eq_dt10)
+            .new_scan()
+            .plan()
+            .splits()
+        )
+        self.assertEqual(
+            len(splits_partition_then_filter), len(splits_by_partition_filter),
+            "with_filter must not overwrite a previously set partition filter",
+        )
+        actual = (
+            table.new_read_builder()
+            .with_partition_filter({"dt": "10"})
+            .with_filter(predicate_eq_dt10)
+            .new_read()
+            .to_pandas(splits_partition_then_filter)
+        )
+        self.assertEqual(len(actual), 2)
+        self.assertEqual(actual["b"].tolist(), [10, 20])
+
+        predicate_non_partition = table.new_read_builder().new_predicate_builder().equal("a", 1)
+        splits_no_filter = table.new_read_builder().new_scan().plan().splits()
+        splits_with_non_partition_predicate = (
+            table.new_read_builder().with_filter(predicate_non_partition).new_scan().plan().splits()
+        )
+        self.assertEqual(
+            len(splits_with_non_partition_predicate), len(splits_no_filter),
+            "with_filter(non-partition predicate) must not change scan when no partition spec extracted",
+        )
 
     @parameterized.expand(_format_table_read_write_formats())
     def test_format_table_full_overwrite(self, file_format):

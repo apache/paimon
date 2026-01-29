@@ -17,7 +17,7 @@
 import io
 import uuid
 from collections import defaultdict
-from typing import List
+from typing import Dict, List, Optional
 
 import pyarrow
 
@@ -55,10 +55,17 @@ def _partition_from_row(
 class FormatTableWrite:
     """Batch write for format table: writes Arrow/Pandas to partition dirs as files."""
 
-    def __init__(self, table: FormatTable, overwrite: bool = False):
+    def __init__(
+        self,
+        table: FormatTable,
+        overwrite: bool = False,
+        static_partitions: Optional[Dict[str, str]] = None,
+    ):
         self.table = table
         self._overwrite = overwrite
+        self._static_partitions = static_partitions if static_partitions is not None else {}
         self._written_paths: List[str] = []
+        self._overwritten_dirs: set = set()
         self._partition_only_value = (
             table.options().get("format-table.partition-path-only-value", "false").lower() == "true"
         )
@@ -115,9 +122,19 @@ class FormatTableWrite:
             dir_path = f"{location}/{part_path}"
         else:
             dir_path = location
-        if self._overwrite and self.table.file_io.exists(dir_path):
-            from pypaimon.table.format.format_table_commit import _delete_data_files_in_path
-            _delete_data_files_in_path(self.table.file_io, dir_path)
+        # When overwrite: clear each partition dir only once per write session (first write to it)
+        if self._overwrite and dir_path not in self._overwritten_dirs and self.table.file_io.exists(dir_path):
+            should_delete = (
+                not self._static_partitions
+                or all(
+                    str(partition_spec.get(k)) == str(v)
+                    for k, v in self._static_partitions.items()
+                )
+            )
+            if should_delete:
+                from pypaimon.table.format.format_table_commit import _delete_data_files_in_path
+                _delete_data_files_in_path(self.table.file_io, dir_path)
+                self._overwritten_dirs.add(dir_path)
         self.table.file_io.check_or_mkdirs(dir_path)
         file_name = f"{self._data_file_prefix}{uuid.uuid4().hex}{self._suffix}"
         path = f"{dir_path}/{file_name}"
@@ -161,6 +178,10 @@ class FormatTableWrite:
                 )
         elif fmt == Format.TEXT:
             tbl = pyarrow.Table.from_batches([data])
+            partition_keys = self.table.partition_keys
+            if partition_keys:
+                data_cols = [c for c in tbl.column_names if c not in partition_keys]
+                tbl = tbl.select(data_cols)
             if tbl.num_columns != 1 or not pyarrow.types.is_string(tbl.schema.field(0).type):
                 raise ValueError(
                     "TEXT format only supports a single string column, "

@@ -18,6 +18,7 @@ from typing import List, Optional
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read.push_down_utils import extract_partition_spec_from_predicate
 from pypaimon.schema.data_types import DataField
 from pypaimon.table.format.format_table import FormatTable
 from pypaimon.table.format.format_table_scan import FormatTableScan
@@ -32,8 +33,16 @@ class FormatReadBuilder:
         self._partition_filter: Optional[dict] = None
 
     def with_filter(self, predicate: Predicate) -> "FormatReadBuilder":
-        # Format table supports partition filter only; data predicate applied in read
-        self._partition_filter = None  # could extract partition from predicate
+        """
+        Store predicate and, when table has partition keys and no partition filter is set,
+        try to extract partition spec from predicate (AND of equality on partition columns)
+        and set partition filter for scan, aligned with Java FormatReadBuilder.withFilter.
+        Data predicate is not yet applied in read (FormatTableRead does not support filter).
+        """
+        if self._partition_filter is None and self.table.partition_keys and predicate:
+            spec = extract_partition_spec_from_predicate(predicate, self.table.partition_keys)
+            if spec is not None:
+                self._partition_filter = spec
         return self
 
     def with_projection(self, projection: List[str]) -> "FormatReadBuilder":

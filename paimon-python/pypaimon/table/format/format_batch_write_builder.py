@@ -45,7 +45,11 @@ class FormatBatchWriteBuilder:
                 raise ValueError(f"Unknown static partition column: {key}")
 
     def new_write(self) -> FormatTableWrite:
-        return FormatTableWrite(self.table, overwrite=self._overwrite)
+        return FormatTableWrite(
+            self.table,
+            overwrite=self._overwrite,
+            static_partitions=self._static_partition,
+        )
 
     def new_commit(self) -> FormatTableCommit:
         return FormatTableCommit(table=self.table)

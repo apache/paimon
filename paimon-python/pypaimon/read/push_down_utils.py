@@ -16,10 +16,27 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+
+
+def extract_partition_spec_from_predicate(
+    predicate: Predicate, partition_keys: List[str]
+) -> Optional[Dict[str, str]]:
+    if not predicate or not partition_keys:
+        return None
+    parts = _split_and(predicate)
+    spec: Dict[str, str] = {}
+    for p in parts:
+        if p.method != "equal" or p.field is None or p.literals is None or len(p.literals) != 1:
+            continue
+        if p.field in partition_keys:
+            spec[p.field] = str(p.literals[0])
+    if set(spec.keys()) == set(partition_keys):
+        return spec
+    return None
 
 
 def trim_and_transform_predicate(input_predicate: Predicate, all_fields: List[str], trimmed_keys: List[str]):
