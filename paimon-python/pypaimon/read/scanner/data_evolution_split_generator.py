@@ -352,7 +352,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     data_file_range = fr
                     data_file_first_row_id = df_first
                     break
-            if data_file_range is None or data_file_first_row_id is None:
+            if data_file_range is None:
                 continue
             if data_file_range == (-1, -1):
                 shard_file_idx_map[file.file_name] = (-1, -1)
