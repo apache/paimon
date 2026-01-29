@@ -60,7 +60,12 @@ def _read_file_to_arrow(
         except pyarrow.ArrowInvalid:
             return pyarrow.table({})
     elif fmt == Format.CSV:
-        tbl = pyarrow.csv.read_csv(pyarrow.BufferReader(data), **opts)
+        if hasattr(pyarrow, "csv"):
+            tbl = pyarrow.csv.read_csv(pyarrow.BufferReader(data), **opts)
+        else:
+            import io
+            df = pandas.read_csv(io.BytesIO(data))
+            tbl = pyarrow.Table.from_pandas(df)
     elif fmt == Format.JSON:
         import json
         text = data.decode("utf-8") if isinstance(data, bytes) else data
@@ -72,6 +77,26 @@ def _read_file_to_arrow(
         if not records:
             return pyarrow.table({})
         tbl = pyarrow.Table.from_pylist(records)
+    elif fmt == Format.ORC:
+        import io
+        data = bytes(data) if not isinstance(data, bytes) else data
+        if hasattr(pyarrow, "orc"):
+            try:
+                tbl = pyarrow.orc.read_table(io.BytesIO(data))
+            except Exception:
+                return pyarrow.table({})
+        else:
+            raise ValueError(
+                "Format table read for ORC requires PyArrow with ORC support (pyarrow.orc)"
+            )
+    elif fmt == Format.TEXT:
+        text = data.decode("utf-8") if isinstance(data, bytes) else data
+        line_delimiter = "\n"
+        lines = text.rstrip(line_delimiter).split(line_delimiter) if text else []
+        if not lines:
+            return pyarrow.table({})
+        col_name = "value" if not read_fields else read_fields[0]
+        tbl = pyarrow.table({col_name: lines})
     else:
         raise ValueError(f"Format {fmt} read not implemented in Python")
 

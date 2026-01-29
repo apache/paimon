@@ -64,9 +64,13 @@ class FormatTableWrite:
         )
         self._file_format = table.format()
         self._data_file_prefix = "data-"
-        self._suffix = {"parquet": ".parquet", "csv": ".csv", "json": ".json"}.get(
-            self._file_format.value, ".parquet"
-        )
+        self._suffix = {
+            "parquet": ".parquet",
+            "csv": ".csv",
+            "json": ".json",
+            "orc": ".orc",
+            "text": ".txt",
+        }.get(self._file_format.value, ".parquet")
 
     def write_arrow(self, data: pyarrow.Table) -> None:
         for batch in data.to_batches():
@@ -128,12 +132,15 @@ class FormatTableWrite:
             )
             raw = buf.getvalue()
         elif fmt == Format.CSV:
-            buf = io.BytesIO()
-            pyarrow.csv.write_csv(
-                pyarrow.Table.from_batches([data]),
-                buf,
-            )
-            raw = buf.getvalue()
+            tbl = pyarrow.Table.from_batches([data])
+            if hasattr(pyarrow, "csv"):
+                buf = io.BytesIO()
+                pyarrow.csv.write_csv(tbl, buf)
+                raw = buf.getvalue()
+            else:
+                buf = io.StringIO()
+                tbl.to_pandas().to_csv(buf, index=False)
+                raw = buf.getvalue().encode("utf-8")
         elif fmt == Format.JSON:
             tbl = pyarrow.Table.from_batches([data])
             import json
@@ -141,6 +148,30 @@ class FormatTableWrite:
             for i in range(tbl.num_rows):
                 row = {tbl.column_names[j]: tbl.column(j)[i].as_py() for j in range(tbl.num_columns)}
                 lines.append(json.dumps(row) + "\n")
+            raw = "".join(lines).encode("utf-8")
+        elif fmt == Format.ORC:
+            tbl = pyarrow.Table.from_batches([data])
+            if hasattr(pyarrow, "orc"):
+                buf = io.BytesIO()
+                pyarrow.orc.write_table(tbl, buf)
+                raw = buf.getvalue()
+            else:
+                raise ValueError(
+                    "Format table write for ORC requires PyArrow with ORC support (pyarrow.orc)"
+                )
+        elif fmt == Format.TEXT:
+            tbl = pyarrow.Table.from_batches([data])
+            if tbl.num_columns != 1 or not pyarrow.types.is_string(tbl.schema.field(0).type):
+                raise ValueError(
+                    "TEXT format only supports a single string column, "
+                    f"got {tbl.num_columns} columns"
+                )
+            line_delimiter = self.table.options.get("text.line-delimiter", "\n")
+            lines = []
+            col = tbl.column(0)
+            for i in range(tbl.num_rows):
+                val = col[i]
+                lines.append((val.as_py() if val is not None else "") + line_delimiter)
             raw = "".join(lines).encode("utf-8")
         else:
             raise ValueError(f"Format table write not implemented for {fmt}")
