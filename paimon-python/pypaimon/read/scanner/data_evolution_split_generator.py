@@ -317,7 +317,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         """
         shard_file_idx_map = {}
         
-        # Find the first non-blob file to determine the row range for this split
+        # First pass: data files only. Compute range and apply directly to avoid second-pass lookup.
         current_pos = file_end_pos
         data_file_infos = []
         for file in split.files:
@@ -329,6 +329,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 plan_start_pos, plan_end_pos, file_begin_pos, file.row_count
             )
             data_file_infos.append((file, data_file_range))
+            shard_file_idx_map[file.file_name] = data_file_range
 
         if not data_file_infos:
             # No data file, skip this split
@@ -337,53 +338,39 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         next_pos = current_pos
 
-        # Apply ranges to each file in the split
+        # Second pass: only blob files (data files already in shard_file_idx_map from first pass)
         for file in split.files:
-            if self._is_blob_file(file.file_name):
-                # For blob files, calculate range based on their first_row_id
-                blob_first_row_id = file.first_row_id if file.first_row_id is not None else 0
-                data_file = None
-                data_file_range = None
-                data_file_first_row_id = None
-                for df, fr in data_file_infos:
-                    df_first = df.first_row_id if df.first_row_id is not None else 0
-                    if df_first <= blob_first_row_id < df_first + df.row_count:
-                        data_file = df
-                        data_file_range = fr
-                        data_file_first_row_id = df_first
-                        break
-                if data_file is None or data_file_range is None or data_file_first_row_id is None:
-                    continue
-                if data_file_range == (-1, -1):
-                    # Data file is completely outside shard, blob files should be skipped
-                    shard_file_idx_map[file.file_name] = (-1, -1)
-                    continue
-                # Blob's position relative to data file start
-                blob_rel_start = blob_first_row_id - data_file_first_row_id
-                blob_rel_end = blob_rel_start + file.row_count
-                # Shard range relative to data file start
-                shard_start, shard_end = data_file_range
-                # Intersect blob's range with shard range
-                intersect_start = max(blob_rel_start, shard_start)
-                intersect_end = min(blob_rel_end, shard_end)
-                if intersect_start >= intersect_end:
-                    # Blob file is completely outside shard range
-                    shard_file_idx_map[file.file_name] = (-1, -1)
-                elif intersect_start == blob_rel_start and intersect_end == blob_rel_end:
-                    # Blob file is completely within shard range, no slicing needed
-                    pass
-                else:
-                    # Convert to file-local indices
-                    local_start = intersect_start - blob_rel_start
-                    local_end = intersect_end - blob_rel_start
-                    shard_file_idx_map[file.file_name] = (local_start, local_end)
+            if not self._is_blob_file(file.file_name):
+                continue
+            blob_first_row_id = file.first_row_id if file.first_row_id is not None else 0
+            data_file = None
+            data_file_range = None
+            data_file_first_row_id = None
+            for df, fr in data_file_infos:
+                df_first = df.first_row_id if df.first_row_id is not None else 0
+                if df_first <= blob_first_row_id < df_first + df.row_count:
+                    data_file = df
+                    data_file_range = fr
+                    data_file_first_row_id = df_first
+                    break
+            if data_file is None or data_file_range is None or data_file_first_row_id is None:
+                continue
+            if data_file_range == (-1, -1):
+                shard_file_idx_map[file.file_name] = (-1, -1)
+                continue
+            blob_rel_start = blob_first_row_id - data_file_first_row_id
+            blob_rel_end = blob_rel_start + file.row_count
+            shard_start, shard_end = data_file_range
+            intersect_start = max(blob_rel_start, shard_start)
+            intersect_end = min(blob_rel_end, shard_end)
+            if intersect_start >= intersect_end:
+                shard_file_idx_map[file.file_name] = (-1, -1)
+            elif intersect_start == blob_rel_start and intersect_end == blob_rel_end:
+                pass
             else:
-                # Data file
-                for df, fr in data_file_infos:
-                    if df.file_name == file.file_name:
-                        if fr is not None:
-                            shard_file_idx_map[file.file_name] = fr
-                        break
+                local_start = intersect_start - blob_rel_start
+                local_end = intersect_end - blob_rel_start
+                shard_file_idx_map[file.file_name] = (local_start, local_end)
 
         shard_file_idx_map[self.NEXT_POS_KEY] = next_pos
         return shard_file_idx_map
