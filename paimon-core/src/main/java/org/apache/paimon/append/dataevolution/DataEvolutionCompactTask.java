@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -36,6 +37,7 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.VectorStoreUtils;
 
 import java.util.Collections;
 import java.util.List;
@@ -68,6 +70,16 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
             // TODO: support blob file compaction
             throw new UnsupportedOperationException("Blob task is not supported");
         }
+        if (VectorStoreUtils.isVectorStoreFile(compactBefore.get(0).fileName())) {
+            // TODO: support vector-store file compaction
+            throw new UnsupportedOperationException("Vector-store task is not supported");
+        }
+        List<String> separatedVectorStoreFields =
+                VectorStoreUtils.isDifferentFormat(
+                                FileFormat.vectorStoreFileFormat(table.coreOptions()),
+                                FileFormat.fileFormat(table.coreOptions()))
+                        ? table.coreOptions().vectorStoreFieldNames()
+                        : Collections.emptyList();
 
         table = table.copy(DYNAMIC_WRITE_OPTIONS);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
@@ -76,6 +88,7 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
                 new RowType(
                         table.rowType().getFields().stream()
                                 .filter(f -> f.type().getTypeRoot() != DataTypeRoot.BLOB)
+                                .filter(f -> !separatedVectorStoreFields.contains(f.name()))
                                 .collect(Collectors.toList()));
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();

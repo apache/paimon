@@ -42,6 +42,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.VectorStoreUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -77,6 +78,7 @@ import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.types.BlobType.fieldsInBlobFile;
 import static org.apache.paimon.types.BlobType.fieldsNotInBlobFile;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
@@ -161,8 +163,17 @@ public class SchemaValidation {
         RowType tableRowType = new RowType(schema.fields());
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
-        fileFormat.validateDataFields(
-                new RowType(fieldsNotInBlobFile(tableRowType, blobDescriptorFields)));
+        if (VectorStoreUtils.isDifferentFormat(
+                FileFormat.vectorStoreFileFormat(options), fileFormat)) {
+            fileFormat.validateDataFields(
+                    VectorStoreUtils.splitVectorStore(
+                                    fieldsNotInBlobFile(tableRowType, blobDescriptorFields),
+                                    options.vectorStoreFieldNames())
+                            .getLeft());
+        } else {
+            fileFormat.validateDataFields(
+                    new RowType(fieldsNotInBlobFile(tableRowType, blobDescriptorFields)));
+        }
 
         // Check column names in schema
         schema.fieldNames()
@@ -626,6 +637,39 @@ public class SchemaValidation {
             checkArgument(
                     blobNames.stream().noneMatch(schema.partitionKeys()::contains),
                     "The BLOB type column can not be part of partition keys.");
+        }
+
+        FileFormat vectorStoreFileFormat = FileFormat.vectorStoreFileFormat(options);
+        if (VectorStoreUtils.isDifferentFormat(
+                vectorStoreFileFormat, FileFormat.fileFormat(options))) {
+            List<String> vectorStoreNames = options.vectorStoreFieldNames();
+            List<DataField> fieldsNotInBlobFile =
+                    fieldsNotInBlobFile(schema.logicalRowType(), options.blobDescriptorField());
+            Set<String> nonBlobNames =
+                    fieldsNotInBlobFile.stream().map(DataField::name).collect(Collectors.toSet());
+            checkArgument(
+                    blobNames.stream().noneMatch(vectorStoreNames::contains),
+                    "The vector-store columns can not be blob type.");
+            checkArgument(
+                    nonBlobNames.containsAll(vectorStoreNames),
+                    "Some of the columns specified as vector-store are unknown.");
+            checkArgument(
+                    schema.partitionKeys().stream().noneMatch(vectorStoreNames::contains),
+                    "The vector-store columns can not be part of partition keys.");
+            checkArgument(
+                    nonBlobNames.size() > vectorStoreNames.size(),
+                    "Table with vector-store must have other normal columns.");
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Data evolution config must enabled for table with vector-store file format.");
+
+            RowType vectorStoreRowType =
+                    VectorStoreUtils.splitVectorStore(
+                                    fieldsInBlobFile(
+                                            schema.logicalRowType(), options.blobDescriptorField()),
+                                    vectorStoreNames)
+                            .getRight();
+            vectorStoreFileFormat.validateDataFields(vectorStoreRowType);
         }
     }
 

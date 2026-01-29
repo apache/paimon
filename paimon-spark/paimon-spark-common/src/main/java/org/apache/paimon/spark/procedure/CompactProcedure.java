@@ -491,7 +491,7 @@ public class CompactProcedure extends BaseProcedure {
             JavaSparkContext javaSparkContext) {
         List<DataEvolutionCompactTask> compactionTasks;
         DataEvolutionCompactCoordinator compactCoordinator =
-                new DataEvolutionCompactCoordinator(table, partitionPredicate, false);
+                new DataEvolutionCompactCoordinator(table, partitionPredicate, false, false);
         CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
         String commitUser = createCommitUser(table.coreOptions().toConfiguration());
         try {
