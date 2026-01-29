@@ -94,7 +94,7 @@ class FormatTableScan:
         self.limit = limit
 
     def plan(self) -> Plan:
-        partition_only_value = self.table.options.get(
+        partition_only_value = self.table.options().get(
             "format-table.partition-path-only-value", "false"
         ).lower() == "true"
         splits = _list_data_files_recursive(

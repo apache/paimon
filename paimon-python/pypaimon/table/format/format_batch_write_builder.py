@@ -48,8 +48,4 @@ class FormatBatchWriteBuilder:
         return FormatTableWrite(self.table, overwrite=self._overwrite)
 
     def new_commit(self) -> FormatTableCommit:
-        return FormatTableCommit(
-            table=self.table,
-            overwrite=self._overwrite,
-            static_partitions=self._static_partition,
-        )
+        return FormatTableCommit(table=self.table)

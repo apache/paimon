@@ -22,7 +22,6 @@ from pypaimon.table.format.format_table_read import FormatTableRead
 from pypaimon.table.format.format_batch_write_builder import FormatBatchWriteBuilder
 from pypaimon.table.format.format_table_write import FormatTableWrite
 from pypaimon.table.format.format_table_commit import FormatTableCommit
-from pypaimon.table.format.format_commit_message import FormatTableCommitMessage
 
 __all__ = [
     "FormatDataSplit",

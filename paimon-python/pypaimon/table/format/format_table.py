@@ -19,11 +19,6 @@ from typing import Dict, List, Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.options.core_options import CoreOptions
-from pypaimon.common.options.options import Options
-
-PARTITION_DEFAULT_NAME_KEY = "partition.default-name"
-PARTITION_DEFAULT_NAME_DEFAULT = "__DEFAULT_PARTITION__"
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.table import Table
 
@@ -63,13 +58,12 @@ class FormatTable(Table):
         self._table_schema = table_schema
         self._location = location.rstrip("/")
         self._format = format
-        self.options = options or dict(table_schema.options)
+        self._options = options or dict(table_schema.options)
         self.comment = comment
         self.fields = table_schema.fields
         self.field_names = [f.name for f in self.fields]
         self.partition_keys = table_schema.partition_keys or []
         self.primary_keys: List[str] = []  # format table has no primary key
-        self._core_options = CoreOptions(Options(self.options))
 
     def name(self) -> str:
         return self.identifier.get_table_name()
@@ -92,10 +86,7 @@ class FormatTable(Table):
         return self._format
 
     def options(self) -> Dict[str, str]:
-        return self.options
-
-    def default_part_name(self) -> str:
-        return self.options.get(PARTITION_DEFAULT_NAME_KEY, PARTITION_DEFAULT_NAME_DEFAULT)
+        return self._options
 
     def new_read_builder(self):
         from pypaimon.table.format.format_read_builder import FormatReadBuilder

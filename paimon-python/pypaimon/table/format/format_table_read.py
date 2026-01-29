@@ -32,9 +32,9 @@ def _read_file_to_arrow(
     read_fields: Optional[List[str]],
 ) -> pyarrow.Table:
     path = split.data_path()
-    opts = {}
-    if fmt == Format.CSV:
-        opts = {"max_read_options": {"block_size": 1 << 20}}
+    csv_read_options = None
+    if fmt == Format.CSV and hasattr(pyarrow, "csv"):
+        csv_read_options = pyarrow.csv.ReadOptions(block_size=1 << 20)
     try:
         with file_io.new_input_stream(path) as stream:
             chunks = []
@@ -61,7 +61,10 @@ def _read_file_to_arrow(
             return pyarrow.table({})
     elif fmt == Format.CSV:
         if hasattr(pyarrow, "csv"):
-            tbl = pyarrow.csv.read_csv(pyarrow.BufferReader(data), **opts)
+            tbl = pyarrow.csv.read_csv(
+                pyarrow.BufferReader(data),
+                read_options=csv_read_options,
+            )
         else:
             import io
             df = pandas.read_csv(io.BytesIO(data))
@@ -176,7 +179,10 @@ class FormatTableRead:
         self,
         splits: List[FormatDataSplit],
     ) -> Iterator[Any]:
+        n_yielded = 0
         for split in splits:
+            if self.limit is not None and n_yielded >= self.limit:
+                break
             t = _read_file_to_arrow(
                 self.table.file_io,
                 split,
@@ -186,4 +192,7 @@ class FormatTableRead:
             )
             for batch in t.to_batches():
                 for i in range(batch.num_rows):
+                    if self.limit is not None and n_yielded >= self.limit:
+                        return
                     yield batch.slice(i, 1)
+                    n_yielded += 1

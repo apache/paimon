@@ -56,6 +56,9 @@ class RESTFormatTableTest(RESTBaseTest):
         table = self.rest_catalog.get_table(table_name)
         self.assertIsInstance(table, FormatTable)
         self.assertEqual(table.format().value, file_format)
+        opts = table.options()
+        self.assertIsInstance(opts, dict)
+        self.assertEqual(opts.get("file.format"), file_format)
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -98,6 +101,9 @@ class RESTFormatTableTest(RESTBaseTest):
         table = self.rest_catalog.get_table(table_name)
         self.assertIsInstance(table, FormatTable)
         self.assertEqual(table.format().value, "text")
+        opts = table.options()
+        self.assertIsInstance(opts, dict)
+        self.assertEqual(opts.get("file.format"), "text")
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -114,6 +120,74 @@ class RESTFormatTableTest(RESTBaseTest):
         actual = table_read.to_pandas(splits).sort_values(by="value").reset_index(drop=True)
         expected = pd.DataFrame({"value": ["hello", "world"]})
         pd.testing.assert_frame_equal(actual, expected)
+
+    def test_format_table_text_read_write_with_nulls(self):
+        """TEXT format: null string values are written as empty string and read back as empty."""
+        pa_schema = pa.schema([("value", pa.string())])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={"type": "format-table", "file.format": "text"},
+        )
+        table_name = "default.format_table_rw_text_nulls"
+        try:
+            self.rest_catalog.drop_table(table_name, True)
+        except Exception:
+            pass
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        df = pd.DataFrame({"value": ["hello", None, "world"]})
+        table_write.write_pandas(df)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        table_read = read_builder.new_read()
+        actual = table_read.to_pandas(splits)
+        self.assertEqual(actual.shape[0], 3)
+        # Nulls are written as empty string; read back as ""
+        self.assertEqual(set(actual["value"].fillna("").astype(str)), {"", "hello", "world"})
+        self.assertIn("", actual["value"].values)
+
+    def test_format_table_read_with_limit_to_iterator(self):
+        """with_limit(N) must be respected by to_iterator (same as to_arrow/to_pandas)."""
+        pa_schema = pa.schema([
+            ("a", pa.int32()),
+            ("b", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={"type": "format-table", "file.format": "parquet"},
+        )
+        table_name = "default.format_table_limit_iterator"
+        try:
+            self.rest_catalog.drop_table(table_name, True)
+        except Exception:
+            pass
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        write_builder = table.new_batch_write_builder()
+        tw = write_builder.new_write()
+        tc = write_builder.new_commit()
+        tw.write_pandas(pd.DataFrame({"a": [1, 2, 3, 4], "b": [10, 20, 30, 40]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        splits = table.new_read_builder().new_scan().plan().splits()
+        limit = 2
+        read_builder = table.new_read_builder().with_limit(limit)
+        table_read = read_builder.new_read()
+
+        df = table_read.to_pandas(splits)
+        self.assertEqual(len(df), limit, "to_pandas must respect with_limit(2)")
+
+        batches = list(table_read.to_iterator(splits))
+        self.assertEqual(len(batches), limit, "to_iterator must respect with_limit(2)")
 
     @parameterized.expand(_format_table_read_write_formats())
     def test_format_table_partitioned_overwrite(self, file_format):

@@ -60,7 +60,7 @@ class FormatTableWrite:
         self._overwrite = overwrite
         self._written_paths: List[str] = []
         self._partition_only_value = (
-            table.options.get("format-table.partition-path-only-value", "false").lower() == "true"
+            table.options().get("format-table.partition-path-only-value", "false").lower() == "true"
         )
         self._file_format = table.format()
         self._data_file_prefix = "data-"
@@ -166,12 +166,13 @@ class FormatTableWrite:
                     "TEXT format only supports a single string column, "
                     f"got {tbl.num_columns} columns"
                 )
-            line_delimiter = self.table.options.get("text.line-delimiter", "\n")
+            line_delimiter = self.table.options().get("text.line-delimiter", "\n")
             lines = []
             col = tbl.column(0)
             for i in range(tbl.num_rows):
                 val = col[i]
-                lines.append((val.as_py() if val is not None else "") + line_delimiter)
+                py_val = val.as_py() if hasattr(val, "as_py") else val
+                lines.append(("" if py_val is None else str(py_val)) + line_delimiter)
             raw = "".join(lines).encode("utf-8")
         else:
             raise ValueError(f"Format table write not implemented for {fmt}")

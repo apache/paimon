@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional
+from typing import List
 
 import pyarrow.fs as pafs
 
@@ -41,16 +41,10 @@ def _delete_data_files_in_path(file_io, path: str) -> None:
 
 
 class FormatTableCommit:
+    """Commit for format table. Overwrite is applied in FormatTableWrite at write time."""
 
-    def __init__(
-        self,
-        table: FormatTable,
-        overwrite: bool = False,
-        static_partitions: Optional[dict] = None,
-    ):
+    def __init__(self, table: FormatTable):
         self.table = table
-        self.overwrite = overwrite
-        self.static_partitions = static_partitions or {}
         self._committed = False
 
     def commit(self, commit_messages: List[FormatTableCommitMessage]) -> None:
