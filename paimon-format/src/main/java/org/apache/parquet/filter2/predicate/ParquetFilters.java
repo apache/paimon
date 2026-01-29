@@ -48,6 +48,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.io.api.Binary;
@@ -388,6 +389,11 @@ public class ParquetFilters {
 
         @Override
         public Operators.Column<?> visit(ArrayType arrayType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Operators.Column<?> visit(VectorType vectorType) {
             throw new UnsupportedOperationException();
         }
 

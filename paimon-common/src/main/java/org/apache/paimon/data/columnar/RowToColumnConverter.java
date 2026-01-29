@@ -62,6 +62,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import java.io.Serializable;
 import java.util.List;
@@ -279,6 +280,11 @@ public class RowToColumnConverter {
                                 elementConverter.append(values, i, arrData);
                             }
                         });
+            }
+
+            @Override
+            public TypeConverter visit(VectorType vectorType) {
+                throw new UnsupportedOperationException();
             }
 
             @Override
