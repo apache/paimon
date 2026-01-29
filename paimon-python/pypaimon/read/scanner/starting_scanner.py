@@ -26,3 +26,7 @@ class StartingScanner(ABC):
     @abstractmethod
     def scan(self) -> Plan:
         """Plan the files to read."""
+
+
+    def with_no_slice_split(self):
+        return self
