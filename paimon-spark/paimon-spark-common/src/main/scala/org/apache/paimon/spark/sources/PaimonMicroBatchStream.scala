@@ -40,6 +40,7 @@ class PaimonMicroBatchStream(
   with Logging {
 
   private val options = Options.fromMap(table.options())
+  private val coreOptions = new CoreOptions(options)
 
   lazy val initOffset: PaimonSourceOffset = {
     val initSnapshotId = Math.max(
@@ -91,8 +92,6 @@ class PaimonMicroBatchStream(
       .getOrElse(ReadLimit.allAvailable())
   }
 
-  private lazy val blobAsDescriptor: Boolean = options.get(CoreOptions.BLOB_AS_DESCRIPTOR)
-
   override def getDefaultReadLimit: ReadLimit = defaultReadLimit
 
   override def prepareForTriggerAvailableNow(): Unit = {
@@ -130,7 +129,7 @@ class PaimonMicroBatchStream(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    PaimonPartitionReaderFactory(readBuilder, blobAsDescriptor = blobAsDescriptor)
+    PaimonPartitionReaderFactory(readBuilder, blobAsDescriptor = coreOptions.readBlobAsDescriptor())
   }
 
   override def initialOffset(): Offset = {
