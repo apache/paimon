@@ -53,16 +53,19 @@ class TableUpdate:
         self.projection = projection
 
     def new_shard_updator(self, total_shard_count: int, shard_num: int):
-        return ShardTableUpdator(self.table, self.projection, self.update_cols, self.commit_user, total_shard_count, shard_num)
+        return ShardTableUpdator(self.table, self.projection, self.update_cols, self.commit_user, total_shard_count,
+                                 shard_num)
 
     def update_by_arrow_with_row_id(self, table: pa.Table) -> List[CommitMessage]:
         update_by_row_id = TableUpdateByRowId(self.table, self.commit_user)
         update_by_row_id.update_columns(table, self.update_cols)
         return update_by_row_id.commit_messages
 
+
 class ShardTableUpdator:
 
-    def __init__(self, table, projection: Optional[List[str]], write_cols: List[str], commit_user, shard_num: int, total_shard_count: int, ):
+    def __init__(self, table, projection: Optional[List[str]], write_cols: List[str], commit_user, shard_num: int,
+                 total_shard_count: int, ):
         from pypaimon.table.file_store_table import FileStoreTable
         self.table: FileStoreTable = table
         self.projection = projection
@@ -76,7 +79,8 @@ class ShardTableUpdator:
         self.writer: Optional[SingleWriter] = None
         self.dict = defaultdict(list)
 
-        scanner = self.table.new_read_builder().new_scan().with_shard(shard_num, total_shard_count).with_no_slice_split()
+        scanner = self.table.new_read_builder().new_scan().with_shard(shard_num,
+                                                                      total_shard_count).with_no_slice_split()
         self.splits = scanner.plan().splits()
 
         self.row_ranges: List[(Tuple, Range)] = []
@@ -94,7 +98,7 @@ class ShardTableUpdator:
         for file in files:
             ranges.append(Range(file.first_row_id, file.first_row_id + file.row_count - 1))
 
-        return Range.merge_sorted_as_possible(ranges)
+        return Range.sort_and_merge_overlap(ranges, True, False)
 
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:
         read_builder = self.table.new_read_builder()
@@ -122,7 +126,6 @@ class ShardTableUpdator:
         if (data_in_next_writer is not None):
             self.update_by_arrow_batch(data_in_next_writer)
 
-
     def _init_writer(self):
         if self.writer is None:
             item = self.row_ranges[self.write_pos]
@@ -142,7 +145,6 @@ class SingleWriter:
         self.first_row_id = first_row_id
         self.row_count = row_count
         self.written_records_count = 0
-
 
     def capacity(self) -> int:
         return self.row_count - self.written_records_count
