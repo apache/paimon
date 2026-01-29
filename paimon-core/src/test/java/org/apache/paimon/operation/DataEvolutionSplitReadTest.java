@@ -115,6 +115,24 @@ class DataEvolutionSplitReadTest {
         assertEquals(Arrays.asList(file4, file5, file6), result.get(1));
     }
 
+    @Test
+    public void testSplitWithMultipleVectorStoreFilesPerGroup() {
+        DataFileMeta file1 = createFile("file1.parquet", 1L, 10, 1);
+        DataFileMeta file2 = createFile("file2.vector-store.json", 1L, 1, 1);
+        DataFileMeta file3 = createFile("file3.vector-store.json", 2L, 9, 1);
+        DataFileMeta file4 = createFile("file4.parquet", 20L, 10, 2);
+        DataFileMeta file5 = createFile("file5.vector-store.json", 20L, 5, 2);
+        DataFileMeta file6 = createFile("file6.vector-store.json", 25L, 5, 2);
+        DataFileMeta file7 = createFile("file7.parquet", 1L, 10, 3);
+
+        List<DataFileMeta> files = Arrays.asList(file1, file2, file3, file4, file5, file6, file7);
+        List<List<DataFileMeta>> result = DataEvolutionSplitRead.mergeRangesAndSort(files);
+
+        assertEquals(2, result.size());
+        assertEquals(Arrays.asList(file7, file1, file2, file3), result.get(0));
+        assertEquals(Arrays.asList(file4, file5, file6), result.get(1));
+    }
+
     private static DataFileMeta createFile(
             String name, long firstRowId, long rowCount, long maxSequence) {
         return DataFileMeta.create(

@@ -43,10 +43,12 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.VectorStoreUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -156,7 +158,17 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(BlobType.splitBlob(new RowType(schema.fields())).getLeft());
+        if (VectorStoreUtils.isDifferentFormat(
+                FileFormat.vectorStoreFileFormat(options), fileFormat)) {
+            fileFormat.validateDataFields(
+                    VectorStoreUtils.splitVectorStore(
+                                    BlobType.splitBlob(new RowType(schema.fields())).getLeft(),
+                                    options.vectorStoreFieldNames())
+                            .getLeft());
+        } else {
+            fileFormat.validateDataFields(
+                    BlobType.splitBlob(new RowType(schema.fields())).getLeft());
+        }
 
         // Check column names in schema
         schema.fieldNames()
@@ -616,6 +628,36 @@ public class SchemaValidation {
             checkArgument(
                     !schema.partitionKeys().contains(blobNames.get(0)),
                     "The BLOB type column can not be part of partition keys.");
+        }
+
+        FileFormat vectorStoreFileFormat = FileFormat.vectorStoreFileFormat(options);
+        if (VectorStoreUtils.isDifferentFormat(
+                vectorStoreFileFormat, FileFormat.fileFormat(options))) {
+            List<String> vectorStoreNames = options.vectorStoreFieldNames();
+            List<String> nonBlobNames =
+                    BlobType.splitBlob(schema.logicalRowType()).getLeft().getFieldNames();
+            checkArgument(
+                    blobNames.stream().noneMatch(vectorStoreNames::contains),
+                    "The vector-store columns can not be blob type.");
+            checkArgument(
+                    new HashSet<>(nonBlobNames).containsAll(vectorStoreNames),
+                    "Some of the columns specified as vector-store are unknown.");
+            checkArgument(
+                    schema.partitionKeys().stream().noneMatch(vectorStoreNames::contains),
+                    "The vector-store columns can not be part of partition keys.");
+            checkArgument(
+                    nonBlobNames.size() > vectorStoreNames.size(),
+                    "Table with vector-store must have other normal columns.");
+            checkArgument(
+                    options.dataEvolutionEnabled(),
+                    "Data evolution config must enabled for table with vector-store file format.");
+
+            RowType vectorStoreRowType =
+                    VectorStoreUtils.splitVectorStore(
+                                    BlobType.splitBlob(schema.logicalRowType()).getLeft(),
+                                    vectorStoreNames)
+                            .getRight();
+            vectorStoreFileFormat.validateDataFields(vectorStoreRowType);
         }
     }
 

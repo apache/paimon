@@ -52,6 +52,7 @@ import org.apache.paimon.utils.SinkWriter;
 import org.apache.paimon.utils.SinkWriter.BufferedSinkWriter;
 import org.apache.paimon.utils.SinkWriter.DirectSinkWriter;
 import org.apache.paimon.utils.StatsCollectorFactories;
+import org.apache.paimon.utils.VectorStoreUtils;
 
 import javax.annotation.Nullable;
 
@@ -73,8 +74,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileIO fileIO;
     private final long schemaId;
     private final FileFormat fileFormat;
+    private final FileFormat vectorStoreFileFormat;
+    private final List<String> vectorStoreFieldNames;
     private final long targetFileSize;
     private final long blobTargetFileSize;
+    private final long vectorStoreTargetFileSize;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -105,8 +109,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             @Nullable IOManager ioManager,
             long schemaId,
             FileFormat fileFormat,
+            FileFormat vectorStoreFileFormat,
+            List<String> vectorStoreFieldNames,
             long targetFileSize,
             long blobTargetFileSize,
+            long vectorStoreTargetFileSize,
             RowType writeSchema,
             @Nullable List<String> writeCols,
             long maxSequenceNumber,
@@ -129,8 +136,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
+        this.vectorStoreFileFormat = vectorStoreFileFormat;
+        this.vectorStoreFieldNames = vectorStoreFieldNames;
         this.targetFileSize = targetFileSize;
         this.blobTargetFileSize = blobTargetFileSize;
+        this.vectorStoreTargetFileSize = vectorStoreTargetFileSize;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -304,13 +314,25 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (writeSchema.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
-            return new RollingBlobFileWriter(
+        boolean hasNormal =
+                writeSchema.getFields().stream()
+                        .anyMatch(
+                                f ->
+                                        !f.type().is(BLOB)
+                                                && !vectorStoreFieldNames.contains(f.name()));
+        boolean hasBlob = writeSchema.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
+        boolean hasSeparatedVectorStore =
+                VectorStoreUtils.isDifferentFormat(vectorStoreFileFormat, fileFormat);
+        if (hasBlob || (hasNormal && hasSeparatedVectorStore)) {
+            return new DataEvolutionRollingFileWriter(
                     fileIO,
                     schemaId,
                     fileFormat,
+                    vectorStoreFileFormat,
+                    vectorStoreFieldNames,
                     targetFileSize,
                     blobTargetFileSize,
+                    vectorStoreTargetFileSize,
                     writeSchema,
                     pathFactory,
                     seqNumCounterProvider,
@@ -322,13 +344,20 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     statsDenseStore,
                     blobConsumer);
         }
+        FileFormat realFileFormat = hasNormal ? fileFormat : vectorStoreFileFormat;
+        long realTargetFileSize = hasNormal ? targetFileSize : vectorStoreTargetFileSize;
+        DataFilePathFactory realPathFactory =
+                hasNormal
+                        ? pathFactory
+                        : pathFactory.vectorStorePathFactory(
+                                vectorStoreFileFormat.getFormatIdentifier());
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
-                fileFormat,
-                targetFileSize,
+                realFileFormat,
+                realTargetFileSize,
                 writeSchema,
-                pathFactory,
+                realPathFactory,
                 seqNumCounterProvider,
                 fileCompression,
                 statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
