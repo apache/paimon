@@ -334,7 +334,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 split_by_row_id.append([file])
                 continue
 
-            if not DataEvolutionSplitGenerator._is_blob_file(file.file_name) and first_row_id != last_row_id:
+            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
                 if current_split:
                     split_by_row_id.append(current_split)
 
