@@ -22,6 +22,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.BooleanColumnVector;
@@ -31,6 +32,7 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.ColumnarVec;
 import org.apache.paimon.data.columnar.DecimalColumnVector;
 import org.apache.paimon.data.columnar.DoubleColumnVector;
 import org.apache.paimon.data.columnar.FloatColumnVector;
@@ -40,6 +42,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -83,6 +86,7 @@ import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 
@@ -485,7 +489,49 @@ public interface Arrow2PaimonVectorConverter {
 
         @Override
         public Arrow2PaimonVectorConverter visit(VectorType vectorType) {
-            throw new UnsupportedOperationException("Doesn't support VectorType.");
+            final Arrow2PaimonVectorConverter arrowVectorConvertor =
+                    vectorType.getElementType().accept(this);
+
+            return vector ->
+                    new VecColumnVector() {
+
+                        private boolean inited = false;
+                        private ColumnVector columnVector;
+
+                        private void init() {
+                            if (!inited) {
+                                FieldVector child = ((FixedSizeListVector) vector).getDataVector();
+                                this.columnVector = arrowVectorConvertor.convertVector(child);
+                                inited = true;
+                            }
+                        }
+
+                        @Override
+                        public boolean isNullAt(int index) {
+                            return vector.isNull(index);
+                        }
+
+                        @Override
+                        public InternalVector getVector(int index) {
+                            init();
+                            FixedSizeListVector listVector = (FixedSizeListVector) vector;
+                            int start = listVector.getElementStartIndex(index);
+                            int end = listVector.getElementEndIndex(index);
+                            return new ColumnarVec(columnVector, start, end - start);
+                        }
+
+                        @Override
+                        public ColumnVector getColumnVector() {
+                            init();
+                            return columnVector;
+                        }
+
+                        @Override
+                        public int getVectorSize() {
+                            FixedSizeListVector listVector = (FixedSizeListVector) vector;
+                            return listVector.getListSize();
+                        }
+                    };
         }
 
         @Override
