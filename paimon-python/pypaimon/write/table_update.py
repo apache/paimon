@@ -166,5 +166,7 @@ class SingleWriter:
         if len(files) != 1:
             raise Exception("Should have one file.")
         file = files[0]
+        if file.row_count != self.row_count:
+            raise Exception("File row count mismatch.")
         file = file.assign_first_row_id(self.first_row_id)
         return file
