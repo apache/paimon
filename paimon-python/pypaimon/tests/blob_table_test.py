@@ -2345,10 +2345,10 @@ class DataBlobWriterTest(unittest.TestCase):
             write_builder = table.new_batch_write_builder()
             writer = write_builder.new_write()
             expected = pa.Table.from_pydict({
-             'id': [1] * num_row,
-             'batch_id': [11] * num_row,
-               'metadata': [f'Large blob batch {11}'] * num_row,
-             'large_blob': [i.to_bytes(2, byteorder='little') + large_blob_data for i in range(num_row)]
+                'id': [1] * num_row,
+                'batch_id': [11] * num_row,
+                'metadata': [f'Large blob batch {11}'] * num_row,
+                'large_blob': [i.to_bytes(2, byteorder='little') + large_blob_data for i in range(num_row)]
             }, schema=pa_schema)
             writer.write_arrow(expected)
 
