@@ -154,7 +154,7 @@ class Range:
         return result
 
     @staticmethod
-    def sort_and_merge_overlap(ranges: List['Range'], merge: bool = True) -> List['Range']:
+    def sort_and_merge_overlap(ranges: List['Range'], merge: bool = True, adjacent: bool = True) -> List['Range']:
         """
         Sort ranges and optionally merge overlapping ones.
         """
@@ -166,10 +166,11 @@ class Range:
         if not merge:
             return sorted_ranges
 
+        adjacent_value = 1 if adjacent else 0
         result = [sorted_ranges[0]]
         for r in sorted_ranges[1:]:
             last = result[-1]
-            if r.from_ <= last.to + 1:
+            if r.from_ <= last.to + adjacent_value:
                 # Merge with last range
                 result[-1] = Range(last.from_, max(last.to, r.to))
             else:
