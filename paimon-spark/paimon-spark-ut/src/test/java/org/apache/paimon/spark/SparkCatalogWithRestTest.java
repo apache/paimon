@@ -465,6 +465,75 @@ public class SparkCatalogWithRestTest {
         assertThat(joinResult.get(0).toString()).isEqualTo("[2,Bob,30,60000.0]");
         assertThat(joinResult.get(1).toString()).isEqualTo("[3,Charlie,35,70000.0]");
 
+        // Test column pruning with row filter
+        Predicate ageGe28Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(28));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"),
+                Collections.singletonList(ageGe28Predicate));
+
+        // Query only id and name, but age column should be automatically included for filtering
+        List<Row> pruneResult =
+                spark.sql("SELECT id, name FROM t_row_filter ORDER BY id").collectAsList();
+        assertThat(pruneResult.size()).isEqualTo(3);
+        assertThat(pruneResult.get(0).getInt(0)).isEqualTo(2);
+        assertThat(pruneResult.get(0).getString(1)).isEqualTo("Bob");
+        assertThat(pruneResult.get(1).getInt(0)).isEqualTo(3);
+        assertThat(pruneResult.get(1).getString(1)).isEqualTo("Charlie");
+        assertThat(pruneResult.get(2).getInt(0)).isEqualTo(4);
+        assertThat(pruneResult.get(2).getString(1)).isEqualTo("David");
+
+        // Test with complex AND predicate
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"),
+                Collections.singletonList(combinedPredicate));
+
+        // Query only id
+        pruneResult = spark.sql("SELECT id FROM t_row_filter ORDER BY id").collectAsList();
+        assertThat(pruneResult.size()).isEqualTo(1);
+        assertThat(pruneResult.get(0).getInt(0)).isEqualTo(3);
+
+        // Test aggregate functions with row filter
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_row_filter"),
+                Collections.singletonList(ageGe30Predicate));
+
+        // Test COUNT(*) with row filter
+        assertThat(spark.sql("SELECT COUNT(*) FROM t_row_filter").collectAsList().toString())
+                .isEqualTo("[[2]]");
+
+        // Test COUNT(column) with row filter
+        assertThat(spark.sql("SELECT COUNT(name) FROM t_row_filter").collectAsList().toString())
+                .isEqualTo("[[2]]");
+
+        // Test GROUP BY with row filter
+        List<Row> groupByResult =
+                spark.sql(
+                                "SELECT department, COUNT(*) FROM t_row_filter GROUP BY department ORDER BY department")
+                        .collectAsList();
+        assertThat(groupByResult.size()).isEqualTo(2);
+        assertThat(groupByResult.get(0).getString(0)).isEqualTo("HR");
+        assertThat(groupByResult.get(0).getLong(1)).isEqualTo(1);
+        assertThat(groupByResult.get(1).getString(0)).isEqualTo("IT");
+        assertThat(groupByResult.get(1).getLong(1)).isEqualTo(1);
+
+        // Test HAVING clause with row filter
+        List<Row> havingResult =
+                spark.sql(
+                                "SELECT department, COUNT(*) as cnt FROM t_row_filter GROUP BY department HAVING cnt >= 1 ORDER BY department")
+                        .collectAsList();
+        assertThat(havingResult.size()).isEqualTo(2);
+
+        // Test COUNT DISTINCT with row filter
+        assertThat(
+                        spark.sql("SELECT COUNT(DISTINCT department) FROM t_row_filter")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[2]]");
+
         // Clear row filter and verify original data
         restCatalogServer.setRowFilterAuth(Identifier.create("db2", "t_row_filter"), null);
 
@@ -512,14 +581,6 @@ public class SparkCatalogWithRestTest {
         assertThat(combinedResult.get(0).getInt(3)).isEqualTo(25); // age not masked
         assertThat(combinedResult.get(0).getString(4)).isEqualTo("IT"); // department not masked
 
-        // Test must read with row filter columns
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                                "SELECT id, name FROM t_combined WHERE age > 30 ORDER BY id")
-                                        .collectAsList())
-                .hasMessageContaining("Unable to read data without column department");
-
         // Test WHERE clause with both features
         assertThat(
                         spark.sql(
@@ -527,6 +588,62 @@ public class SparkCatalogWithRestTest {
                                 .collectAsList()
                                 .toString())
                 .isEqualTo("[[3,***,IT]]");
+
+        // Test column pruning with both column masking and row filter
+        columnMasking.clear();
+        columnMasking.put("salary", salaryMaskTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create("db2", "t_combined"), columnMasking);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_combined"),
+                Collections.singletonList(ageGe30Predicate));
+
+        // Query only id, name and salary (masked)
+        List<Row> pruneResult =
+                spark.sql("SELECT id, name, salary FROM t_combined ORDER BY id").collectAsList();
+        assertThat(pruneResult.size()).isEqualTo(2);
+        assertThat(pruneResult.get(0).getInt(0)).isEqualTo(2);
+        assertThat(pruneResult.get(0).getString(1)).isEqualTo("Bob");
+        assertThat(pruneResult.get(0).getString(2)).isEqualTo("***"); // salary is masked
+        assertThat(pruneResult.get(1).getInt(0)).isEqualTo(3);
+        assertThat(pruneResult.get(1).getString(1)).isEqualTo("Charlie");
+        assertThat(pruneResult.get(1).getString(2)).isEqualTo("***"); // salary is masked
+
+        // Test aggregate functions with column masking and row filter
+        assertThat(spark.sql("SELECT COUNT(*) FROM t_combined").collectAsList().toString())
+                .isEqualTo("[[2]]");
+        assertThat(spark.sql("SELECT COUNT(name) FROM t_combined").collectAsList().toString())
+                .isEqualTo("[[2]]");
+
+        // Test aggregation on non-masked columns with row filter
+        List<Row> deptAggResult =
+                spark.sql(
+                                "SELECT department, COUNT(*) FROM t_combined GROUP BY department ORDER BY department")
+                        .collectAsList();
+        assertThat(deptAggResult.size()).isEqualTo(2);
+        assertThat(deptAggResult.get(0).getString(0)).isEqualTo("HR");
+        assertThat(deptAggResult.get(0).getLong(1)).isEqualTo(1);
+        assertThat(deptAggResult.get(1).getString(0)).isEqualTo("IT");
+        assertThat(deptAggResult.get(1).getLong(1)).isEqualTo(1);
+
+        // Test with non-existent column as row filter
+        Predicate nonExistentPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(
+                                new FieldRef(10, "non_existent_column", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("value")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create("db2", "t_combined"),
+                Collections.singletonList(nonExistentPredicate));
+
+        // Test must read with row filter columns
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                                "SELECT id, name FROM t_combined WHERE age > 30 ORDER BY id")
+                                        .collectAsList())
+                .hasMessageContaining("Unable to read data without column non_existent_column");
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(

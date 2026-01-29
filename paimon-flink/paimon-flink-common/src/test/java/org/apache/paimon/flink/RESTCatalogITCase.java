@@ -500,6 +500,90 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         assertThat(joinResult.get(0)).isEqualTo(Row.of(2, "Bob", 30, 60000.0));
         assertThat(joinResult.get(1)).isEqualTo(Row.of(3, "Charlie", 35, 70000.0));
 
+        // Test column pruning with row filter
+        Predicate ageGe28Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(2, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(28));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(ageGe28Predicate));
+
+        // Query only id and name, but age column should be automatically included for filtering
+        List<Row> pruneResult =
+                batchSql(
+                        String.format(
+                                "SELECT id, name FROM %s.%s ORDER BY id",
+                                DATABASE_NAME, filterTable));
+        assertThat(pruneResult.size()).isEqualTo(3);
+        assertThat(pruneResult.get(0).getField(0)).isEqualTo(2);
+        assertThat(pruneResult.get(0).getField(1)).isEqualTo("Bob");
+        assertThat(pruneResult.get(1).getField(0)).isEqualTo(3);
+        assertThat(pruneResult.get(1).getField(1)).isEqualTo("Charlie");
+        assertThat(pruneResult.get(2).getField(0)).isEqualTo(4);
+        assertThat(pruneResult.get(2).getField(1)).isEqualTo("David");
+
+        // Test with complex AND predicate - query only id
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(combinedPredicate));
+
+        pruneResult =
+                batchSql(
+                        String.format(
+                                "SELECT id FROM %s.%s ORDER BY id", DATABASE_NAME, filterTable));
+        assertThat(pruneResult.size()).isEqualTo(1);
+        assertThat(pruneResult.get(0).getField(0)).isEqualTo(3);
+
+        // Test aggregate functions with row filter
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, filterTable),
+                Collections.singletonList(ageGe30Predicate));
+
+        // Test COUNT(*) with row filter
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(*) FROM %s.%s", DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(Row.of(2L));
+
+        // Test COUNT(column) with row filter
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(name) FROM %s.%s",
+                                        DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(Row.of(2L));
+
+        // Test GROUP BY with row filter
+        List<Row> groupByResult =
+                batchSql(
+                        String.format(
+                                "SELECT department, COUNT(*) FROM %s.%s GROUP BY department ORDER BY department",
+                                DATABASE_NAME, filterTable));
+        assertThat(groupByResult.size()).isEqualTo(2);
+        assertThat(groupByResult.get(0).getField(0)).isEqualTo("HR");
+        assertThat(groupByResult.get(0).getField(1)).isEqualTo(1L);
+        assertThat(groupByResult.get(1).getField(0)).isEqualTo("IT");
+        assertThat(groupByResult.get(1).getField(1)).isEqualTo(1L);
+
+        // Test HAVING clause with row filter
+        List<Row> havingResult =
+                batchSql(
+                        String.format(
+                                "SELECT department, COUNT(*) as cnt FROM %s.%s GROUP BY department HAVING COUNT(*) >= 1 ORDER BY department",
+                                DATABASE_NAME, filterTable));
+        assertThat(havingResult.size()).isEqualTo(2);
+
+        // Test COUNT DISTINCT with row filter
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(DISTINCT department) FROM %s.%s",
+                                        DATABASE_NAME, filterTable)))
+                .containsExactlyInAnyOrder(Row.of(2L));
+
         // Clear row filter and verify original data
         restCatalogServer.setRowFilterAuth(Identifier.create(DATABASE_NAME, filterTable), null);
 
@@ -551,16 +635,6 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
         assertThat(combinedResult.get(0).getField(3)).isEqualTo(25); // age not masked
         assertThat(combinedResult.get(0).getField(4)).isEqualTo("IT"); // department not masked
 
-        // Test must read with row filter columns
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        String.format(
-                                                "SELECT id, name FROM %s.%s WHERE age > 30 ORDER BY id",
-                                                DATABASE_NAME, combinedTable)))
-                .rootCause()
-                .hasMessageContaining("Unable to read data without column department");
-
         // Test WHERE clause with both features
         assertThat(
                         batchSql(
@@ -568,6 +642,80 @@ class RESTCatalogITCase extends RESTCatalogITCaseBase {
                                         "SELECT id, name, department FROM %s.%s WHERE age > 30 ORDER BY id",
                                         DATABASE_NAME, combinedTable)))
                 .containsExactlyInAnyOrder(Row.of(3, "***", "IT"));
+
+        // Test column pruning with both column masking and row filter
+        Predicate ageGe30Predicate =
+                LeafPredicate.of(
+                        new FieldTransform(new FieldRef(3, "age", DataTypes.INT())),
+                        GreaterOrEqual.INSTANCE,
+                        Collections.singletonList(30));
+        columnMasking.clear();
+        columnMasking.put("salary", salaryMaskTransform);
+        restCatalogServer.setColumnMaskingAuth(
+                Identifier.create(DATABASE_NAME, combinedTable), columnMasking);
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, combinedTable),
+                Collections.singletonList(ageGe30Predicate));
+
+        // Query only id, name and salary (masked)
+        List<Row> pruneResult =
+                batchSql(
+                        String.format(
+                                "SELECT id, name, salary FROM %s.%s ORDER BY id",
+                                DATABASE_NAME, combinedTable));
+        assertThat(pruneResult.size()).isEqualTo(2);
+        assertThat(pruneResult.get(0).getField(0)).isEqualTo(2);
+        assertThat(pruneResult.get(0).getField(1)).isEqualTo("Bob");
+        assertThat(pruneResult.get(0).getField(2)).isEqualTo("***"); // salary is masked
+        assertThat(pruneResult.get(1).getField(0)).isEqualTo(3);
+        assertThat(pruneResult.get(1).getField(1)).isEqualTo("Charlie");
+        assertThat(pruneResult.get(1).getField(2)).isEqualTo("***"); // salary is masked
+
+        // Test aggregate functions with column masking and row filter
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(*) FROM %s.%s",
+                                        DATABASE_NAME, combinedTable)))
+                .containsExactlyInAnyOrder(Row.of(2L));
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT COUNT(name) FROM %s.%s",
+                                        DATABASE_NAME, combinedTable)))
+                .containsExactlyInAnyOrder(Row.of(2L));
+
+        // Test aggregation on non-masked columns with row filter
+        List<Row> deptAggResult =
+                batchSql(
+                        String.format(
+                                "SELECT department, COUNT(*) FROM %s.%s GROUP BY department ORDER BY department",
+                                DATABASE_NAME, combinedTable));
+        assertThat(deptAggResult.size()).isEqualTo(2);
+        assertThat(deptAggResult.get(0).getField(0)).isEqualTo("HR");
+        assertThat(deptAggResult.get(0).getField(1)).isEqualTo(1L);
+        assertThat(deptAggResult.get(1).getField(0)).isEqualTo("IT");
+        assertThat(deptAggResult.get(1).getField(1)).isEqualTo(1L);
+
+        // Test with non-existent column as row filter
+        Predicate nonExistentPredicate =
+                LeafPredicate.of(
+                        new FieldTransform(
+                                new FieldRef(10, "non_existent_column", DataTypes.STRING())),
+                        Equal.INSTANCE,
+                        Collections.singletonList(BinaryString.fromString("value")));
+        restCatalogServer.setRowFilterAuth(
+                Identifier.create(DATABASE_NAME, combinedTable),
+                Collections.singletonList(nonExistentPredicate));
+
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        String.format(
+                                                "SELECT id, name FROM %s.%s WHERE age > 30 ORDER BY id",
+                                                DATABASE_NAME, combinedTable)))
+                .rootCause()
+                .hasMessageContaining("Unable to read data without column non_existent_column");
 
         // Clear both column masking and row filter
         restCatalogServer.setColumnMaskingAuth(
