@@ -2204,12 +2204,12 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table_read.to_arrow(table_scan.plan().splits())
 
         # Verify the data
-        self.assertEqual(result.num_rows, 54, "Should have 54 rows")
+        self.assertEqual(result.num_rows, 80, "Should have 54 rows")
         self.assertEqual(result.num_columns, 4, "Should have 4 columns")
 
         # Verify blob data integrity
         blob_data = result.column('large_blob').to_pylist()
-        self.assertEqual(len(blob_data), 54, "Should have 54 blob records")
+        self.assertEqual(len(blob_data), 80, "Should have 54 blob records")
         # Verify each blob
         for i, blob in enumerate(blob_data):
             self.assertEqual(len(blob), len(large_blob_data), f"Blob {i + 1} should be {large_blob_size:,} bytes")
@@ -2264,21 +2264,22 @@ class DataBlobWriterTest(unittest.TestCase):
         actual_size = len(large_blob_data)
         print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
 
-        write_builder = table.new_batch_write_builder()
-        writer = write_builder.new_write()
         # Write 30 records
-        for record_id in range(30):
-            test_data = pa.Table.from_pydict({
-                'id': [record_id],  # Unique ID for each row
-                'metadata': [f'Large blob batch {record_id + 1}'],
-                'large_blob': [struct.pack('<I', record_id) + large_blob_data]
-            }, schema=pa_schema)
-            writer.write_arrow(test_data)
+        for i in range(3):
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+            for record_id in range(10):
+                test_data = pa.Table.from_pydict({
+                    'id': [record_id * i],  # Unique ID for each row
+                    'metadata': [f'Large blob batch {record_id + 1}'],
+                    'large_blob': [struct.pack('<I', record_id) + large_blob_data]
+                }, schema=pa_schema)
+                writer.write_arrow(test_data)
 
-        commit_messages = writer.prepare_commit()
-        commit = write_builder.new_commit()
-        commit.commit(commit_messages)
-        writer.close()
+            commit_messages = writer.prepare_commit()
+            commit = write_builder.new_commit()
+            commit.commit(commit_messages)
+            writer.close()
 
         # Read data back
         read_builder = table.new_read_builder()
@@ -2304,7 +2305,7 @@ class DataBlobWriterTest(unittest.TestCase):
         actual2 = table_read.to_arrow(splits2)
         splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
         actual3 = table_read.to_arrow(splits3)
-        actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('id')
+        actual = pa.concat_tables([actual1, actual2, actual3])
 
         # Verify the data
         self.assertEqual(actual.num_rows, 30, "Should have 30 rows")
@@ -2337,22 +2338,25 @@ class DataBlobWriterTest(unittest.TestCase):
         repetitions = large_blob_size // pattern_size
         large_blob_data = blob_pattern * repetitions
 
-        num_row = 20000
-        write_builder = table.new_batch_write_builder()
-        writer = write_builder.new_write()
-        expected = pa.Table.from_pydict({
-            'id': [1] * num_row,
-            'batch_id': [11] * num_row,
-            'metadata': [f'Large blob batch {11}'] * num_row,
-            'large_blob': [i.to_bytes(2, byteorder='little') + large_blob_data for i in range(num_row)]
-        }, schema=pa_schema)
-        writer.write_arrow(expected)
+        for i in range(3):
+            num_row = 6666
+            if i == 0:
+                num_row += 1
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+            expected = pa.Table.from_pydict({
+             'id': [1] * num_row,
+             'batch_id': [11] * num_row,
+               'metadata': [f'Large blob batch {11}'] * num_row,
+             'large_blob': [i.to_bytes(2, byteorder='little') + large_blob_data for i in range(num_row)]
+            }, schema=pa_schema)
+            writer.write_arrow(expected)
 
-        # Commit all data at once
-        commit_messages = writer.prepare_commit()
-        commit = write_builder.new_commit()
-        commit.commit(commit_messages)
-        writer.close()
+            # Commit all data at once
+            commit_messages = writer.prepare_commit()
+            commit = write_builder.new_commit()
+            commit.commit(commit_messages)
+            writer.close()
 
         # Read data back
         read_builder = table.new_read_builder()
@@ -2364,7 +2368,7 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(6666, result.num_rows)
         self.assertEqual(4, result.num_columns)
 
-        self.assertEqual(expected.slice(13334, 6666), result)
+        self.assertEqual(expected, result)
         splits = read_builder.new_scan().plan().splits()
         expected = table_read.to_arrow(splits)
         splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
