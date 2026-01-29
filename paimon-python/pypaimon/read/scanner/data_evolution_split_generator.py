@@ -259,14 +259,15 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return self._filter_by_row_range(partitioned_files, start_pos, end_pos)
 
-    def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
+    @staticmethod
+    def _split_by_row_id(files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """
         Split files by row ID for data evolution tables.
         """
         split_by_row_id = []
 
         # Filter blob files to only include those within the row ID range of non-blob files
-        sorted_files = self._filter_blob(files)
+        sorted_files = DataEvolutionSplitGenerator._filter_blob(files)
 
         # Split files by firstRowId
         last_row_id = -1
@@ -280,7 +281,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 split_by_row_id.append([file])
                 continue
 
-            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
+            if not DataEvolutionSplitGenerator._is_blob_file(file.file_name) and first_row_id != last_row_id:
                 if current_split:
                     split_by_row_id.append(current_split)
 
