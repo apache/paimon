@@ -344,21 +344,20 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 blob_first_row_id = file.first_row_id if file.first_row_id is not None else 0
                 data_file = None
                 data_file_range = None
+                data_file_first_row_id = None
                 for df, fr in data_file_infos:
                     df_first = df.first_row_id if df.first_row_id is not None else 0
                     if df_first <= blob_first_row_id < df_first + df.row_count:
                         data_file = df
                         data_file_range = fr
+                        data_file_first_row_id = df_first
                         break
-                if data_file is None or data_file_range is None:
+                if data_file is None or data_file_range is None or data_file_first_row_id is None:
                     continue
                 if data_file_range == (-1, -1):
                     # Data file is completely outside shard, blob files should be skipped
                     shard_file_idx_map[file.file_name] = (-1, -1)
                     continue
-                data_file_first_row_id = (
-                    data_file.first_row_id if data_file.first_row_id is not None else 0
-                )
                 # Blob's position relative to data file start
                 blob_rel_start = blob_first_row_id - data_file_first_row_id
                 blob_rel_end = blob_rel_start + file.row_count
