@@ -20,9 +20,10 @@ Module to write a Paimon table from a Ray Dataset, by using the Ray Datasink API
 """
 
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional
 
-from ray.data.datasource.datasink import Datasink, WriteResult
+from ray.data.datasource.datasink import Datasink
+
 from ray.util.annotations import DeveloperAPI
 from ray.data.block import BlockAccessor, Block
 from ray.data._internal.execution.interfaces import TaskContext
@@ -35,9 +36,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Python 3.8 / Ray 2.10: Datasink is not subscriptable at runtime
+try:
+    _DatasinkBase = Datasink[List["CommitMessage"]]
+except TypeError:
+    _DatasinkBase = Datasink
+
 
 @DeveloperAPI
-class PaimonDatasink(Datasink[List["CommitMessage"]]):
+class PaimonDatasink(_DatasinkBase):
     def __init__(
         self,
         table: "Table",
@@ -100,14 +107,25 @@ class PaimonDatasink(Datasink[List["CommitMessage"]]):
         return commit_messages_list
 
     def on_write_complete(
-        self, write_result: WriteResult[List["CommitMessage"]]
+        self, write_result: Any
     ):
         table_commit = None
         commit_messages_to_abort = []
         try:
+            # WriteResult.write_returns (Ray 2.44+); older Ray may pass list of returns
+            if hasattr(write_result, "write_returns"):
+                write_returns = write_result.write_returns
+            elif isinstance(write_result, list):
+                write_returns = write_result
+            else:
+                raise TypeError(
+                    f"Unexpected write_result type {type(write_result).__name__}: "
+                    "expected object with .write_returns or list of commit message lists. "
+                    "Refusing to proceed to avoid silent data loss."
+                )
             all_commit_messages = [
                 commit_message
-                for commit_messages in write_result.write_returns
+                for commit_messages in write_returns
                 for commit_message in commit_messages
             ]
 
