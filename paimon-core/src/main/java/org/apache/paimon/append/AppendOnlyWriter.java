@@ -53,12 +53,14 @@ import org.apache.paimon.utils.SinkWriter;
 import org.apache.paimon.utils.SinkWriter.BufferedSinkWriter;
 import org.apache.paimon.utils.SinkWriter.DirectSinkWriter;
 import org.apache.paimon.utils.StatsCollectorFactories;
+import org.apache.paimon.utils.VectorStoreUtils;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
@@ -73,8 +75,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileIO fileIO;
     private final long schemaId;
     private final FileFormat fileFormat;
+    private final FileFormat vectorStoreFileFormat;
+    private final List<String> vectorStoreFieldNames;
     private final long targetFileSize;
     private final long blobTargetFileSize;
+    private final long vectorStoreTargetFileSize;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -106,8 +111,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             @Nullable IOManager ioManager,
             long schemaId,
             FileFormat fileFormat,
+            FileFormat vectorStoreFileFormat,
+            List<String> vectorStoreFieldNames,
             long targetFileSize,
             long blobTargetFileSize,
+            long vectorStoreTargetFileSize,
             RowType writeSchema,
             @Nullable List<String> writeCols,
             long maxSequenceNumber,
@@ -131,8 +139,11 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
+        this.vectorStoreFileFormat = vectorStoreFileFormat;
+        this.vectorStoreFieldNames = vectorStoreFieldNames;
         this.targetFileSize = targetFileSize;
         this.blobTargetFileSize = blobTargetFileSize;
+        this.vectorStoreTargetFileSize = vectorStoreTargetFileSize;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -307,13 +318,32 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (BlobType.splitBlob(writeSchema, blobDescriptorFields).getRight().getFieldCount() > 0) {
-            return new RollingBlobFileWriter(
+        Set<String> blobFieldNames =
+                new HashSet<>(
+                        BlobType.splitBlob(writeSchema, blobDescriptorFields)
+                                .getRight()
+                                .getFieldNames());
+        boolean hasBlob = !blobFieldNames.isEmpty();
+        boolean hasVectorStore = !vectorStoreFieldNames.isEmpty();
+        boolean hasNormal =
+                writeSchema.getFields().stream()
+                        .anyMatch(
+                                f ->
+                                        !blobFieldNames.contains(f.name())
+                                                && !vectorStoreFieldNames.contains(f.name()));
+        boolean hasSeparatedVectorStore =
+                VectorStoreUtils.isDifferentFormat(vectorStoreFileFormat, fileFormat);
+
+        if (hasBlob || (hasNormal && hasVectorStore && hasSeparatedVectorStore)) {
+            return new DataEvolutionRollingFileWriter(
                     fileIO,
                     schemaId,
                     fileFormat,
+                    vectorStoreFileFormat,
+                    vectorStoreFieldNames,
                     targetFileSize,
                     blobTargetFileSize,
+                    vectorStoreTargetFileSize,
                     writeSchema,
                     pathFactory,
                     seqNumCounterProvider,
@@ -330,13 +360,20 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     blobConsumer,
                     blobDescriptorFields);
         }
+        FileFormat realFileFormat = hasNormal ? fileFormat : vectorStoreFileFormat;
+        long realTargetFileSize = hasNormal ? targetFileSize : vectorStoreTargetFileSize;
+        DataFilePathFactory realPathFactory =
+                hasNormal
+                        ? pathFactory
+                        : pathFactory.vectorStorePathFactory(
+                                vectorStoreFileFormat.getFormatIdentifier());
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
-                fileFormat,
-                targetFileSize,
+                realFileFormat,
+                realTargetFileSize,
                 writeSchema,
-                pathFactory,
+                realPathFactory,
                 seqNumCounterProvider,
                 fileCompression,
                 statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
