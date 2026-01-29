@@ -78,7 +78,6 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 )
         elif self.idx_of_this_subtask is not None:
             if self.no_slice_split:
-                no_slice_for_split = True
                 partitioned_files = self._filter_by_shard_no_slice(partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks)
             else:
                 # shard data range: [plan_start_pos, plan_end_pos)
@@ -265,7 +264,6 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
     def _filter_by_shard_no_slice(self, partitioned_files: defaultdict, sub_task_id: int, total_tasks: int) -> defaultdict:
         list_ranges = []
-
         for file_entries in partitioned_files.values():
             for entry in file_entries:
                 first_row_id = entry.file.first_row_id
@@ -274,15 +272,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 # Range is inclusive [from_, to], so use row_count - 1
                 list_ranges.append(Range(first_row_id, first_row_id + entry.file.row_count - 1))
 
-        if not list_ranges:
-            return defaultdict(list)
-
-        sorted_ranges = Range.sort_and_merge_overlap(list_ranges)
+        sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
 
         start_range, end_range = self._divide_ranges(sorted_ranges, sub_task_id, total_tasks)
-
-        if start_range is None or end_range is None:
-            return defaultdict(list)
 
         # Filter files that overlap with this subtask's range
         # Range is inclusive [from_, to], but _filter_by_row_range expects exclusive end
@@ -318,12 +310,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 remainder * (base_ranges_per_task + 1) +
                 (sub_task_id - remainder) * base_ranges_per_task
             )
-
-        if num_ranges_for_task == 0:
-            return None, None
-
         end_idx = start_idx + num_ranges_for_task - 1
-
         return sorted_ranges[start_idx], sorted_ranges[end_idx]
 
     @staticmethod
