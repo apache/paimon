@@ -30,3 +30,4 @@ class StartingScanner(ABC):
 
     def with_no_slice_split(self):
         return self
+    
