@@ -37,13 +37,28 @@ def _read_file_to_arrow(
         opts = {"max_read_options": {"block_size": 1 << 20}}
     try:
         with file_io.new_input_stream(path) as stream:
-            data = stream.read()
+            chunks = []
+            while True:
+                chunk = stream.read()
+                if not chunk:
+                    break
+                chunks.append(chunk if isinstance(chunk, bytes) else bytes(chunk))
+            data = b"".join(chunks)
     except Exception as e:
         raise RuntimeError(f"Failed to read {path}") from e
 
+    if not data or len(data) == 0:
+        return pyarrow.table({})
+
     if fmt == Format.PARQUET:
         import io
-        tbl = pyarrow.parquet.read_table(io.BytesIO(data))
+        data = bytes(data) if not isinstance(data, bytes) else data
+        if len(data) < 4 or data[:4] != b"PAR1":
+            return pyarrow.table({})
+        try:
+            tbl = pyarrow.parquet.read_table(io.BytesIO(data))
+        except pyarrow.ArrowInvalid:
+            return pyarrow.table({})
     elif fmt == Format.CSV:
         tbl = pyarrow.csv.read_csv(pyarrow.BufferReader(data), **opts)
     elif fmt == Format.JSON:

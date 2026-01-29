@@ -45,8 +45,12 @@ def _list_data_files_recursive(
         return splits
     if not infos:
         return splits
+    path_rstrip = path.rstrip("/")
     for info in infos:
         name = info.path.split("/")[-1] if "/" in info.path else info.path
+        full_path = f"{path_rstrip}/{name}" if path_rstrip else name
+        if info.path.startswith("/") or info.path.startswith("file:"):
+            full_path = info.path
         if info.type == pafs.FileType.Directory:
             part_value = name
             if not partition_only_value and "=" in name:
@@ -55,7 +59,7 @@ def _list_data_files_recursive(
             if len(child_parts) <= len(partition_keys):
                 sub_splits = _list_data_files_recursive(
                     file_io,
-                    info.path,
+                    full_path,
                     base_path,
                     partition_keys,
                     partition_only_value,
@@ -69,7 +73,7 @@ def _list_data_files_recursive(
                 part_spec = dict(zip(partition_keys, rel_path_parts[: len(partition_keys)]))
             splits.append(
                 FormatDataSplit(
-                    file_path=info.path,
+                    file_path=full_path,
                     file_size=size if size is not None else 0,
                     partition=part_spec,
                 )

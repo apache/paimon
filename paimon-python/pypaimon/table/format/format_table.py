@@ -26,8 +26,6 @@ PARTITION_DEFAULT_NAME_KEY = "partition.default-name"
 PARTITION_DEFAULT_NAME_DEFAULT = "__DEFAULT_PARTITION__"
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.table import Table
-from pypaimon.table.format.format_read_builder import FormatReadBuilder
-from pypaimon.table.format.format_batch_write_builder import FormatBatchWriteBuilder
 
 
 class Format(str, Enum):
@@ -99,10 +97,12 @@ class FormatTable(Table):
     def default_part_name(self) -> str:
         return self.options.get(PARTITION_DEFAULT_NAME_KEY, PARTITION_DEFAULT_NAME_DEFAULT)
 
-    def new_read_builder(self) -> FormatReadBuilder:
+    def new_read_builder(self):
+        from pypaimon.table.format.format_read_builder import FormatReadBuilder
         return FormatReadBuilder(self)
 
-    def new_batch_write_builder(self) -> FormatBatchWriteBuilder:
+    def new_batch_write_builder(self):
+        from pypaimon.table.format.format_batch_write_builder import FormatBatchWriteBuilder
         return FormatBatchWriteBuilder(self)
 
     def new_stream_write_builder(self):

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Any
 
 
-@dataclass(frozen=True)xi
+@dataclass(frozen=True)
 class FormatDataSplit:
     file_path: str
     file_size: int
