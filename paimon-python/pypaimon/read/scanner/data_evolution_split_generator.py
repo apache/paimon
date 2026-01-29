@@ -275,13 +275,18 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
 
         start_range, end_range = self._divide_ranges(sorted_ranges, sub_task_id, total_tasks)
+        if start_range is None or end_range is None:
+            return defaultdict(list)
+        start_first_row_id = start_range.from_
+        end_first_row_id = end_range.to
 
-        # Filter files that overlap with this subtask's range
-        # Range is inclusive [from_, to], but _filter_by_row_range expects exclusive end
-        filtered_partitioned_files, _, _ = self._filter_by_row_range(
-            partitioned_files, start_range.from_, end_range.to + 1
-        )
-        return filtered_partitioned_files
+        filtered_partitioned_files = {
+            k: [x for x in v if x.file.first_row_id >= start_first_row_id and x.file.first_row_id <= end_first_row_id]
+            for k, v in partitioned_files.items()
+        }
+
+        filtered_partitioned_files = {k: v for k, v in filtered_partitioned_files.items() if v}
+        return defaultdict(list, filtered_partitioned_files)
 
     @staticmethod
     def _divide_ranges(
