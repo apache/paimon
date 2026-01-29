@@ -329,6 +329,35 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>data_evolution_merge_into</td>
+      <td>
+         -- Use indexed argument<br/>
+         CALL [catalog].sys.data_evolution_merge_into('targetTable','targetAlias',<br/>
+            'sourceSqls','sourceTable','mergeCondition','matchedUpdateSet',sinkParallelism)<br/><br/>
+         -- Use named argument<br/>
+         CALL [catalog].sys.data_evolution_merge_into(<br/>
+            target_table => 'identifier',<br/>
+            target_alias => 'targetAlias',<br/>
+            source_sqls => 'sourceSqls',<br/>
+            source_table => 'sourceTable',<br/>
+            merge_condition => 'mergeCondition',<br/>
+            matched_update_set => 'matchedUpdateSet',<br/>
+            sink_parallelism => sinkParallelism) <br/><br/>
+      </td>
+      <td>To perform "MERGE INTO" syntax specially implemented for data-evolution tables. Please see <a href="/docs/master/append-table/data-evolution/">data evolution</a> for more information. </td>
+      <td>
+         -- for Flink 1.18<br/>
+         CALL [catalog].sys.data_evolution_merge_into('default.T', '', '', 'S', 'T.id=S.id', 'name=S.name', 2) <br/><br/>
+         -- for Flink 1.19 and later <br/>
+         CALL [catalog].sys.data_evolution_merge_into(<br/>
+            target_table => 'default.T',<br/>
+            source_table => 'S',<br/>
+            merge_condition => 'T.id=S.id',<br/>
+            matched_update_set => 'name=S.name',<br/>
+            sink_parallelism => 2)
+      </td>
+   </tr>
+   <tr>
       <td>remove_orphan_files</td>
       <td>
          -- Use named argument<br/>
