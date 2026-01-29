@@ -20,7 +20,6 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
@@ -28,14 +27,12 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 
 import java.io.Serializable;
-import java.util.Arrays;
 
-/** Columnar array to support access to vector column data. */
-public final class ColumnarArray implements InternalArray, DataSetters, Serializable {
+/** Columnar VectorType to support access to vector column data. */
+public final class ColumnarVec implements InternalVector, DataSetters, Serializable {
 
     private static final long serialVersionUID = 1L;
 
@@ -43,7 +40,7 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
     private final int offset;
     private final int numElements;
 
-    public ColumnarArray(ColumnVector data, int offset, int numElements) {
+    public ColumnarVec(ColumnVector data, int offset, int numElements) {
         this.data = data;
         this.offset = offset;
         this.numElements = numElements;
@@ -101,47 +98,37 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public BinaryString getString(int pos) {
-        BytesColumnVector.Bytes byteArray = getByteArray(pos);
-        return BinaryString.fromBytes(byteArray.data, byteArray.offset, byteArray.len);
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
     public Decimal getDecimal(int pos, int precision, int scale) {
-        return ((DecimalColumnVector) data).getDecimal(offset + pos, precision, scale);
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
     public Timestamp getTimestamp(int pos, int precision) {
-        return ((TimestampColumnVector) data).getTimestamp(offset + pos, precision);
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
     public byte[] getBinary(int pos) {
-        BytesColumnVector.Bytes byteArray = getByteArray(pos);
-        if (byteArray.len == byteArray.data.length) {
-            return byteArray.data;
-        } else {
-            return Arrays.copyOfRange(
-                    byteArray.data, byteArray.offset, byteArray.offset + byteArray.len);
-        }
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
     public Variant getVariant(int pos) {
-        InternalRow row = getRow(pos, 2);
-        byte[] value = row.getBinary(0);
-        byte[] metadata = row.getBinary(1);
-        return new GenericVariant(value, metadata);
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
     public InternalArray getArray(int pos) {
-        return ((ArrayColumnVector) data).getArray(offset + pos);
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
@@ -151,12 +138,12 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public InternalMap getMap(int pos) {
-        return ((MapColumnVector) data).getMap(offset + pos);
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
     public InternalRow getRow(int pos, int numFields) {
-        return ((RowColumnVector) data).getRow(offset + pos);
+        throw new UnsupportedOperationException("Not support the operation!");
     }
 
     @Override
@@ -267,13 +254,9 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
         return res;
     }
 
-    private BytesColumnVector.Bytes getByteArray(int pos) {
-        return ((BytesColumnVector) data).getBytes(offset + pos);
-    }
-
     @Override
     public boolean equals(Object o) {
         throw new UnsupportedOperationException(
-                "ColumnarArray do not support equals, please compare fields one by one!");
+                "ColumnarVector do not support equals, please compare fields one by one!");
     }
 }
