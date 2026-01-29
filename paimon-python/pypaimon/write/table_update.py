@@ -28,6 +28,7 @@ from pypaimon.read.split import DataSplit
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
 from pypaimon.write.writer.data_writer import DataWriter
+from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
 class TableUpdate:
@@ -48,7 +49,7 @@ class TableUpdate:
         self.update_cols = update_cols
         return self
 
-    def with_projection(self, projection: List[str]):
+    def with_read_projection(self, projection: List[str]):
         self.projection = projection
 
     def new_shard_updator(self, total_shard_count: int, shard_num: int):
@@ -61,7 +62,7 @@ class TableUpdate:
 
 class ShardTableUpdator:
 
-    def __init__(self, table, projection: Optional[List[str]], write_cols: List[str], commit_user, total_shard_count: int, shard_num: int):
+    def __init__(self, table, projection: Optional[List[str]], write_cols: List[str], commit_user, shard_num: int, total_shard_count: int, ):
         from pypaimon.table.file_store_table import FileStoreTable
         self.table: FileStoreTable = table
         self.projection = projection
@@ -75,9 +76,7 @@ class ShardTableUpdator:
         self.writer: Optional[SingleWriter] = None
         self.dict = defaultdict(list)
 
-        scanner = self.table.new_read_builder().new_scan()
-        if total_shard_count != 0:
-            scanner.with_shard(total_shard_count, shard_num)
+        scanner = self.table.new_read_builder().new_scan().with_shard(shard_num, total_shard_count).with_no_slice_split()
         self.splits = scanner.plan().splits()
 
         self.row_ranges: List[(Tuple, Range)] = []
@@ -86,8 +85,8 @@ class ShardTableUpdator:
                 raise ValueError(f"Split {split} is not DataSplit.")
             files = split.files
             ranges = self.compute_from_files(files)
-            for range in ranges:
-                self.row_ranges.extend((split.partition, range))
+            for row_range in ranges:
+                self.row_ranges.append((tuple(split.partition.values), row_range))
 
     @staticmethod
     def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
@@ -126,18 +125,18 @@ class ShardTableUpdator:
 
     def _init_writer(self):
         if self.writer is None:
-            tuple: (Tuple, Range) = self.row_ranges[self.write_pos]
-            partition = tuple(0)
-            range = tuple(1)
-            writer = DataWriter(self.table, partition, 0, 0, self.table.options, self.write_cols)
-            writer.target_file_size = MemorySize.of_mebi_bytes(999999999)
-            self.writer = SingleWriter(writer, partition, range.from_, range.to - range.from_ + 1)
-
+            item = self.row_ranges[self.write_pos]
+            self.write_pos += 1
+            partition = item[0]
+            row_range = item[1]
+            writer = AppendOnlyDataWriter(self.table, partition, 0, 0, self.table.options, self.write_cols)
+            writer.target_file_size = MemorySize.of_mebi_bytes(999999999).get_bytes()
+            self.writer = SingleWriter(writer, partition, row_range.from_, row_range.to - row_range.from_ + 1)
 
 
 class SingleWriter:
 
-    def __init__(self, writer: DataWriter, partition: Tuple, first_row_id: int, row_count: int):
+    def __init__(self, writer: DataWriter, partition, first_row_id: int, row_count: int):
         self.writer: DataWriter = writer
         self._partition = partition
         self.first_row_id = first_row_id
@@ -159,6 +158,8 @@ class SingleWriter:
         return self._partition
 
     def end(self) -> DataFileMeta:
+        if self.capacity() != 0:
+            raise Exception("There still capacity left in the writer.")
         files = self.writer.prepare_commit()
         if len(files) != 1:
             raise Exception("Should have one file.")

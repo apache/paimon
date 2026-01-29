@@ -75,6 +75,7 @@ class FullStartingScanner(StartingScanner):
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
+        self.no_slice_split = None
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -130,6 +131,9 @@ class FullStartingScanner(StartingScanner):
                 self.open_file_cost,
                 deletion_files_map
             )
+
+        if self.no_slice_split:
+            split_generator.with_no_slice_split()
 
         # Configure sharding if needed
         if self.idx_of_this_subtask is not None:
@@ -221,6 +225,10 @@ class FullStartingScanner(StartingScanner):
             self._filter_manifest_entry,
             max_workers=max_workers
         )
+
+    def with_no_slice_split(self):
+        self.no_slice_split = True
+        return self
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FullStartingScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
