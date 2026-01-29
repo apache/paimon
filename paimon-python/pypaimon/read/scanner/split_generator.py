@@ -52,7 +52,6 @@ class AbstractSplitGenerator(ABC):
         self.start_pos_of_this_subtask = None
         self.end_pos_of_this_subtask = None
 
-
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int):
         """Configure sharding for parallel processing."""
         if idx_of_this_subtask >= number_of_para_subtasks:
