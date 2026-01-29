@@ -75,7 +75,8 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
     }
 
     @Override
-    protected ManifestEntrySegments createSegments(Path path, @Nullable Long fileSize) {
+    protected ManifestEntrySegments createSegments(
+            Path path, @Nullable Long fileSize, Filter<InternalRow> loadFilter) {
         Map<Triple<BinaryRow, Integer, Integer>, DataPagedOutputSerializer> segments =
                 new HashMap<>();
         Function<InternalRow, BinaryRow> partitionGetter = partitionGetter();
@@ -88,6 +89,9 @@ public class ManifestEntryCache extends ObjectsCache<Path, ManifestEntry, Manife
         try (CloseableIterator<InternalRow> iterator = reader.apply(path, fileSize)) {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
+                if (!loadFilter.test(row)) {
+                    continue;
+                }
                 BinaryRow partition = partitionGetter.apply(row);
                 int bucket = bucketGetter.apply(row);
                 int totalBucket = totalBucketGetter.apply(row);

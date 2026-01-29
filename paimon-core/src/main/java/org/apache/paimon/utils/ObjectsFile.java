@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.FileUtils.checkExists;
 
@@ -100,16 +101,27 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
     }
 
     public List<T> read(String fileName, @Nullable Long fileSize) {
-        return read(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
+        return read(
+                fileName,
+                fileSize,
+                Filter.alwaysTrue(),
+                Filter.alwaysTrue(),
+                Filter.alwaysTrue(),
+                Function.identity());
     }
 
     public List<T> readWithIOException(String fileName) throws IOException {
         return readWithIOException(fileName, null);
     }
 
-    public List<T> readWithIOException(String fileName, @Nullable Long fileSize)
-            throws IOException {
-        return readWithIOException(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
+    public List<T> readWithIOException(String fileName, @Nullable Long fileSize) throws IOException {
+        return readWithIOException(
+                fileName,
+                fileSize,
+                Filter.alwaysTrue(),
+                Filter.alwaysTrue(),
+                Filter.alwaysTrue(),
+                Function.identity());
     }
 
     public boolean exists(String fileName) {
@@ -120,31 +132,50 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
         }
     }
 
-    public List<T> read(
+    public <R> List<R> read(
             String fileName,
             @Nullable Long fileSize,
+            Filter<InternalRow> loadFilter,
             Filter<InternalRow> readFilter,
-            Filter<T> readTFilter) {
+            Filter<T> readTFilter,
+            Function<T, R> convertor) {
         try {
-            return readWithIOException(fileName, fileSize, readFilter, readTFilter);
+            return readWithIOException(
+                    fileName, fileSize, loadFilter, readFilter, readTFilter, convertor);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read " + fileName, e);
         }
     }
 
-    private List<T> readWithIOException(
+    public List<T> read(
             String fileName,
             @Nullable Long fileSize,
             Filter<InternalRow> readFilter,
-            Filter<T> readTFilter)
+            Filter<T> readTFilter) {
+        return read(
+                fileName,
+                fileSize,
+                Filter.alwaysTrue(),
+                readFilter,
+                readTFilter,
+                Function.identity());
+    }
+
+    private <R> List<R> readWithIOException(
+            String fileName,
+            @Nullable Long fileSize,
+            Filter<InternalRow> loadFilter,
+            Filter<InternalRow> readFilter,
+            Filter<T> readTFilter,
+            Function<T, R> convertor)
             throws IOException {
         Path path = pathFactory.toPath(fileName);
         if (cache != null) {
-            return cache.read(path, fileSize, new ObjectsCache.Filters<>(readFilter, readTFilter));
+            return cache.read(path, fileSize, loadFilter, readFilter, readTFilter, convertor);
         }
 
         return readFromIterator(
-                createIterator(path, fileSize), serializer, readFilter, readTFilter);
+                createIterator(path, fileSize), serializer, readFilter, readTFilter, convertor);
     }
 
     public String writeWithoutRolling(Collection<T> records) {
@@ -208,14 +239,24 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
             ObjectSerializer<V> serializer,
             Filter<InternalRow> readFilter,
             Filter<V> readVFilter) {
+        return readFromIterator(
+                inputIterator, serializer, readFilter, readVFilter, Function.identity());
+    }
+
+    public static <V, R> List<R> readFromIterator(
+            CloseableIterator<InternalRow> inputIterator,
+            ObjectSerializer<V> serializer,
+            Filter<InternalRow> readFilter,
+            Filter<V> readVFilter,
+            Function<V, R> convertor) {
         try (CloseableIterator<InternalRow> iterator = inputIterator) {
-            List<V> result = new ArrayList<>();
+            List<R> result = new ArrayList<>();
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
                 if (readFilter.test(row)) {
                     V v = serializer.fromRow(row);
                     if (readVFilter.test(v)) {
-                        result.add(v);
+                        result.add(convertor.apply(v));
                     }
                 }
             }
