@@ -2494,13 +2494,14 @@ class DataBlobWriterTest(unittest.TestCase):
 
         # Read data back using table API
         read_builder = table.new_read_builder()
-        table_scan = read_builder.new_scan().with_shard(1, 2)
+        table_scan = read_builder.new_scan().with_shard(0, 2)
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
 
         # Verify the data was read back correctly
-        self.assertEqual(result.num_rows, 2, "Should have 2 rows")
+        # Just one file, so split 0 occupied the whole records
+        self.assertEqual(result.num_rows, 5, "Should have 2 rows")
         self.assertEqual(result.num_columns, 3, "Should have 3 columns")
 
     def test_blob_write_read_large_data_volume_rolling_with_shard(self):
