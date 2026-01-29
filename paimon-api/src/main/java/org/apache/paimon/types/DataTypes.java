@@ -59,6 +59,10 @@ public class DataTypes {
         return new ArrayType(element);
     }
 
+    public static VectorType VECTOR(int length, DataType element) {
+        return new VectorType(length, element);
+    }
+
     public static CharType CHAR(int length) {
         return new CharType(length);
     }
@@ -219,6 +223,11 @@ public class DataTypes {
         @Override
         public OptionalInt visit(VarBinaryType varBinaryType) {
             return OptionalInt.of(varBinaryType.getLength());
+        }
+
+        @Override
+        public OptionalInt visit(VectorType vectorType) {
+            return OptionalInt.of(vectorType.getLength());
         }
 
         @Override
