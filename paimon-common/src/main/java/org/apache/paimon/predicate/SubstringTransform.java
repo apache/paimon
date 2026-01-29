@@ -85,7 +85,8 @@ public class SubstringTransform implements Transform {
                 endIndex = Integer.parseInt(inputs.get(2).toString());
             }
         }
-        return sourceString == null ? null : sourceString.substring(beginIndex, endIndex);
+
+        return BinaryString.fromString(sourceString.toString().substring(beginIndex, endIndex));
     }
 
     @Override
