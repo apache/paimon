@@ -79,8 +79,7 @@ class ShardTableUpdator:
         self.writer: Optional[SingleWriter] = None
         self.dict = defaultdict(list)
 
-        scanner = self.table.new_read_builder().new_scan().with_shard(shard_num,
-                                                                      total_shard_count).with_no_slice_split()
+        scanner = self.table.new_read_builder().new_scan().with_shard(shard_num, total_shard_count)
         self.splits = scanner.plan().splits()
 
         self.row_ranges: List[(Tuple, Range)] = []

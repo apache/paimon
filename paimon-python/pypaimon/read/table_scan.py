@@ -83,10 +83,6 @@ class TableScan:
             vector_search=self.vector_search
         )
 
-    def with_no_slice_split(self):
-        self.starting_scanner.with_no_slice_split()
-        return self
-
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
         self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         return self

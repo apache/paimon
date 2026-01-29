@@ -77,11 +77,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     self.end_pos_of_this_subtask
                 )
         elif self.idx_of_this_subtask is not None:
-            if self.no_slice_split:
-                partitioned_files = self._filter_by_shard_no_slice(partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks)
-            else:
-                # shard data range: [plan_start_pos, plan_end_pos)
-                partitioned_files, plan_start_pos, plan_end_pos = self._filter_by_shard(partitioned_files)
+            partitioned_files = self._filter_by_shard(partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks)
 
         def weight_func(file_list: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
@@ -111,12 +107,11 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 flatten_packed_files, packed_files, sorted_entries_list
             )
 
-        if not self.no_slice_split:
-            if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
-                splits = self._wrap_to_sliced_splits(splits, plan_start_pos, plan_end_pos)
-            # Wrap splits with IndexedSplit if row_ranges is provided
-            if self.row_ranges:
-                splits = self._wrap_to_indexed_splits(splits)
+        if self.start_pos_of_this_subtask is not None:
+            splits = self._wrap_to_sliced_splits(splits, plan_start_pos, plan_end_pos)
+        # Wrap splits with IndexedSplit if row_ranges is provided
+        if self.row_ranges:
+            splits = self._wrap_to_indexed_splits(splits)
 
         return splits
 
@@ -245,24 +240,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return filtered_partitioned_files, plan_start_pos, plan_end_pos
 
-    def _filter_by_shard(self, partitioned_files: defaultdict) -> tuple:
-        """
-        Filter file entries by shard for data evolution tables.
-        """
-        # Calculate total rows (excluding blob files)
-        total_row = sum(
-            entry.file.row_count
-            for file_entries in partitioned_files.values()
-            for entry in file_entries
-            if not self._is_blob_file(entry.file.file_name)
-        )
-
-        # Calculate shard range using shared helper
-        start_pos, end_pos = self._compute_shard_range(total_row)
-
-        return self._filter_by_row_range(partitioned_files, start_pos, end_pos)
-
-    def _filter_by_shard_no_slice(self, partitioned_files: defaultdict, sub_task_id: int, total_tasks: int) -> defaultdict:
+    def _filter_by_shard(self, partitioned_files: defaultdict, sub_task_id: int, total_tasks: int) -> defaultdict:
         list_ranges = []
         for file_entries in partitioned_files.values():
             for entry in file_entries:
