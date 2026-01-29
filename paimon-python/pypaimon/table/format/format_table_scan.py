@@ -32,7 +32,6 @@ def _is_data_file_name(name: str) -> bool:
 def _list_data_files_recursive(
     file_io: FileIO,
     path: str,
-    base_path: str,
     partition_keys: List[str],
     partition_only_value: bool,
     rel_path_parts: Optional[List[str]] = None,
@@ -60,7 +59,6 @@ def _list_data_files_recursive(
                 sub_splits = _list_data_files_recursive(
                     file_io,
                     full_path,
-                    base_path,
                     partition_keys,
                     partition_only_value,
                     child_parts,
@@ -99,7 +97,6 @@ class FormatTableScan:
         ).lower() == "true"
         splits = _list_data_files_recursive(
             self.table.file_io,
-            self.table.location(),
             self.table.location(),
             self.table.partition_keys,
             partition_only_value,
