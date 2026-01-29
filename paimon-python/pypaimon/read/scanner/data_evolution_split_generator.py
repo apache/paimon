@@ -316,7 +316,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         For blob files (which may be rolled), the range is calculated based on each file's first_row_id.
         """
         shard_file_idx_map = {}
-
+        
         # Find the first non-blob file to determine the row range for this split
         current_pos = file_end_pos
         data_file_infos = []
