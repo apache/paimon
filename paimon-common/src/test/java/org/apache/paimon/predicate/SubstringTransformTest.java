@@ -63,7 +63,7 @@ class SubstringTransformTest {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));
         inputs.add(new FieldRef(3, "f3", DataTypes.INT()));
-        inputs.add(new FieldRef(4, "f4", DataTypes.STRING()));
+        inputs.add(new FieldRef(4, "f4", DataTypes.INT()));
         SubstringTransform transform = new SubstringTransform(inputs);
         Object result =
                 transform.transform(

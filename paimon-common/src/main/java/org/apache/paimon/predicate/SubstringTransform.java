@@ -26,6 +26,8 @@ import org.apache.paimon.types.DataTypes;
 import java.util.List;
 import java.util.Objects;
 
+import static org.apache.paimon.types.DataTypeFamily.CHARACTER_STRING;
+import static org.apache.paimon.types.DataTypeFamily.INTEGER_NUMERIC;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Substring {@link Transform}. */
@@ -53,6 +55,7 @@ public class SubstringTransform implements Transform {
         BinaryString sourceString = null;
         if (source instanceof FieldRef) {
             FieldRef sourceFieldRef = (FieldRef) source;
+            checkArgument(sourceFieldRef.type().is(CHARACTER_STRING));
             sourceString = row.isNullAt(0) ? null : row.getString(sourceFieldRef.index());
         } else {
             sourceString = (BinaryString) inputs.get(0);
@@ -65,6 +68,7 @@ public class SubstringTransform implements Transform {
         int beginIndex;
         if (begin instanceof FieldRef) {
             FieldRef beginRef = (FieldRef) begin;
+            checkArgument(beginRef.type().is(INTEGER_NUMERIC));
             beginIndex = row.getInt(beginRef.index());
         } else {
             beginIndex = Integer.parseInt(inputs.get(1).toString());
@@ -75,6 +79,7 @@ public class SubstringTransform implements Transform {
             Object end = inputs.get(2);
             if (end instanceof FieldRef) {
                 FieldRef endRef = (FieldRef) inputs.get(2);
+                checkArgument(endRef.type().is(INTEGER_NUMERIC));
                 endIndex = row.getInt(endRef.index());
             } else {
                 endIndex = Integer.parseInt(inputs.get(2).toString());
