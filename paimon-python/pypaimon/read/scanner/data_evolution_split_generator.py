@@ -77,7 +77,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     self.end_pos_of_this_subtask
                 )
         elif self.idx_of_this_subtask is not None:
-            partitioned_files = self._filter_by_shard(partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks)
+            partitioned_files = self._filter_by_shard(
+                partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks
+            )
 
         def weight_func(file_list: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in file_list), self.open_file_cost)

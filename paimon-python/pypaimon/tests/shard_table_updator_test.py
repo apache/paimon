@@ -227,7 +227,6 @@ class ShardTableUpdatorTest(unittest.TestCase):
             'd': [109, 218, 327, 436, 545] * 1000,
         }, schema=table_schema)
 
-
         print("\n=== Actual Data ===")
         print(actual.to_pandas())
         print("\n=== Expected Data ===")
@@ -307,7 +306,6 @@ class ShardTableUpdatorTest(unittest.TestCase):
             'b': [10, 20, 30, 40, 50] * 1000,
             'c': [9, 18, 27, 36, 45] * 1000,
         }, schema=table_schema)
-
 
         print("\n=== Actual Data ===")
         print(actual.to_pandas())
