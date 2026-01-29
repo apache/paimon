@@ -155,6 +155,7 @@ import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_I
 import static org.apache.paimon.flink.LogicalTypeConversion.toBlobType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.LogicalTypeConversion.toVectorType;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.SCHEMA;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
@@ -1041,12 +1042,30 @@ public class FlinkCatalog extends AbstractCatalog {
                         field ->
                                 schemaBuilder.column(
                                         field.getName(),
-                                        blobFields.contains(field.getName())
-                                                ? toBlobType(field.getType())
-                                                : toDataType(field.getType()),
+                                        resolveDataType(field.getName(), field.getType(), options),
                                         columnComments.get(field.getName())));
 
         return schemaBuilder.build();
+    }
+
+    private static org.apache.paimon.types.DataType resolveDataType(
+            String fieldName,
+            org.apache.flink.table.types.logical.LogicalType logicalType,
+            Map<String, String> options) {
+        List<String> blobFields = CoreOptions.blobField(options);
+        if (blobFields.contains(fieldName)) {
+            return toBlobType(logicalType);
+        }
+        if (logicalType instanceof org.apache.flink.table.types.logical.ArrayType) {
+            String vectorDim = options.get(String.format("field.%s.vector-dim", fieldName));
+            if (vectorDim != null) {
+                org.apache.flink.table.types.logical.LogicalType elementType =
+                        ((org.apache.flink.table.types.logical.ArrayType) logicalType)
+                                .getElementType();
+                return toVectorType(elementType, vectorDim);
+            }
+        }
+        return toDataType(logicalType);
     }
 
     private static Map<String, String> getColumnComments(CatalogBaseTable catalogTable) {

@@ -53,6 +53,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.VectorStoreUtils.isVectorStoreFile;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
 public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
@@ -158,10 +159,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas) {
-        // exclude blob files, useless for predicate eval
+        // exclude blob and vector-store files, useless for predicate eval
         metas =
                 metas.stream()
                         .filter(entry -> !isBlobFile(entry.file().fileName()))
+                        .filter(entry -> !isVectorStoreFile(entry.file().fileName()))
                         .collect(Collectors.toList());
 
         ToLongFunction<ManifestEntry> maxSeqFunc = e -> e.file().maxSequenceNumber();

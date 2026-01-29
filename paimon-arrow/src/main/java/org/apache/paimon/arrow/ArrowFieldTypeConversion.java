@@ -42,6 +42,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.vector.types.TimeUnit;
 import org.apache.arrow.vector.types.Types;
@@ -177,6 +178,12 @@ public class ArrowFieldTypeConversion {
         @Override
         public FieldType visit(ArrayType arrayType) {
             return new FieldType(arrayType.isNullable(), Types.MinorType.LIST.getType(), null);
+        }
+
+        @Override
+        public FieldType visit(VectorType vectorType) {
+            ArrowType arrowType = new ArrowType.FixedSizeList(vectorType.getLength());
+            return new FieldType(vectorType.isNullable(), arrowType, null);
         }
 
         @Override

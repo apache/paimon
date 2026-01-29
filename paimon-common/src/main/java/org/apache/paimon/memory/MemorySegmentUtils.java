@@ -22,16 +22,19 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryMap;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.NestedRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.utils.MurmurHashUtils;
+import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 
@@ -1151,6 +1154,23 @@ public class MemorySegmentUtils {
         BinaryArray array = new BinaryArray();
         array.pointTo(segments, offset + baseOffset, size);
         return array;
+    }
+
+    public static InternalVector readVectorData(
+            MemorySegment[] segments, int baseOffset, long offsetAndSize) {
+        final int numElementsWidth = 4;
+        final int size = ((int) offsetAndSize);
+        int offset = (int) (offsetAndSize >> 32);
+        Preconditions.checkArgument(
+                size >= numElementsWidth,
+                "size (" + size + ") should >= numElementsWidth (" + numElementsWidth + ")");
+
+        int vectorSize = MemorySegmentUtils.getInt(segments, offset + baseOffset);
+        Preconditions.checkArgument(vectorSize >= 0, "Invalid vector size: %s", vectorSize);
+
+        BinaryVector vector = new BinaryVector(vectorSize);
+        vector.pointTo(segments, offset + baseOffset + numElementsWidth, size - numElementsWidth);
+        return vector;
     }
 
     /** Gets an instance of {@link InternalRow} from underlying {@link MemorySegment}. */

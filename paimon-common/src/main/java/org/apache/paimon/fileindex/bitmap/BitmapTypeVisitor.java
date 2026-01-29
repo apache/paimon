@@ -41,6 +41,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 /** Simplified visitor for bitmap index. */
 public abstract class BitmapTypeVisitor<R> implements DataTypeVisitor<R> {
@@ -144,6 +145,11 @@ public abstract class BitmapTypeVisitor<R> implements DataTypeVisitor<R> {
     @Override
     public final R visit(ArrayType arrayType) {
         throw new UnsupportedOperationException("Does not support type array");
+    }
+
+    @Override
+    public final R visit(VectorType vectorType) {
+        throw new UnsupportedOperationException("Does not support type vector");
     }
 
     @Override

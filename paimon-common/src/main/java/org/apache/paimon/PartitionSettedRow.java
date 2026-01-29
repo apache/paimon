@@ -25,6 +25,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
@@ -174,6 +175,13 @@ public class PartitionSettedRow implements InternalRow {
         return partitionInfo.inPartitionRow(pos)
                 ? partition.getArray(partitionInfo.getRealIndex(pos))
                 : row.getArray(partitionInfo.getRealIndex(pos));
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return partitionInfo.inPartitionRow(pos)
+                ? partition.getVector(partitionInfo.getRealIndex(pos))
+                : row.getVector(partitionInfo.getRealIndex(pos));
     }
 
     @Override
