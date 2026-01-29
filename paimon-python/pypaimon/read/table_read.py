@@ -84,14 +84,7 @@ class TableRead:
         for batch in iter(batch_reader.read_next_batch, None):
             if batch.num_rows == 0:
                 continue
-            i+=1
-            if i == 381:
-                i = 381
-            if i == 382:
-                i = 382
             table_list.append(self._try_to_pad_batch_by_schema(batch, schema))
-            print("sdfasdf:" + str(i))
-            pyarrow.Table.from_batches(table_list)
 
         if not table_list:
             return pyarrow.Table.from_arrays([pyarrow.array([], type=field.type) for field in schema], schema=schema)
