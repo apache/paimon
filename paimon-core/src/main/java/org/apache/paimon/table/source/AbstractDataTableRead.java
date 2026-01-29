@@ -31,6 +31,7 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -119,8 +120,9 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
             Set<String> authFields = collectFieldNames(authPredicate);
             List<String> readFields = readType.getFieldNames();
             List<String> authAddNames = new ArrayList<>();
+            Set<String> readFieldSet = new HashSet<>(readFields);
             for (String field : tableType.getFieldNames()) {
-                if (authFields.contains(field) && !readFields.contains(field)) {
+                if (authFields.contains(field) && !readFieldSet.contains(field)) {
                     authAddNames.add(field);
                 }
             }
