@@ -26,9 +26,16 @@ import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ListUtils;
+import org.apache.paimon.utils.ProjectedRow;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
@@ -82,21 +89,51 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
 
     @Override
     public final RecordReader<InternalRow> createReader(Split split) throws IOException {
-        TableQueryAuthResult queryAuthResult = null;
+        TableQueryAuthResult authResult = null;
         if (split instanceof QueryAuthSplit) {
             QueryAuthSplit authSplit = (QueryAuthSplit) split;
             split = authSplit.split();
-            queryAuthResult = authSplit.authResult();
+            authResult = authSplit.authResult();
         }
-        RecordReader<InternalRow> reader = reader(split);
-        if (queryAuthResult != null) {
-            RowType type = readType == null ? schema.logicalRowType() : readType;
-            reader = queryAuthResult.doAuth(reader, type);
+        RecordReader<InternalRow> reader;
+        if (authResult == null) {
+            reader = reader(split);
+        } else {
+            reader = authedReader(split, authResult);
         }
         if (executeFilter) {
             reader = executeFilter(reader);
         }
 
+        return reader;
+    }
+
+    private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
+            throws IOException {
+        RecordReader<InternalRow> reader;
+        RowType tableType = schema.logicalRowType();
+        RowType readType = this.readType == null ? tableType : this.readType;
+        Predicate authPredicate = authResult.extractPredicate();
+        ProjectedRow backRow = null;
+        if (authPredicate != null) {
+            Set<String> authFields = collectFieldNames(authPredicate);
+            List<String> readFields = readType.getFieldNames();
+            List<String> authAddNames = new ArrayList<>();
+            for (String field : tableType.getFieldNames()) {
+                if (authFields.contains(field) && !readFields.contains(field)) {
+                    authAddNames.add(field);
+                }
+            }
+            if (!authAddNames.isEmpty()) {
+                readType = tableType.project(ListUtils.union(readFields, authAddNames));
+                withReadType(readType);
+                backRow = ProjectedRow.from(readType.projectIndexes(readFields));
+            }
+        }
+        reader = authResult.doAuth(reader(split), readType);
+        if (backRow != null) {
+            reader = reader.transform(backRow::replaceRow);
+        }
         return reader;
     }
 

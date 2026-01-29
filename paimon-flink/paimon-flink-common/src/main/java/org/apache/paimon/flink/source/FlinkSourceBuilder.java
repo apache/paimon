@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.Projection;
@@ -34,10 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.format.predicate.PredicateUtils;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableQueryAuth;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -61,11 +57,8 @@ import org.apache.flink.types.Row;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_OPERATOR_UID_SUFFIX;
@@ -196,7 +189,7 @@ public class FlinkSourceBuilder {
     private ReadBuilder createReadBuilder(@Nullable org.apache.paimon.types.RowType readType) {
         ReadBuilder readBuilder = table.newReadBuilder();
         if (readType != null) {
-            readBuilder.withReadType(readTypeWithAuth(readType));
+            readBuilder.withReadType(readType);
         }
         if (predicate != null) {
             readBuilder.withFilter(predicate);
@@ -396,50 +389,5 @@ public class FlinkSourceBuilder {
                 env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
                 "The align mode of paimon source currently only supports EXACTLY_ONCE checkpoint mode. Please set "
                         + "execution.checkpointing.mode to exactly-once");
-    }
-
-    private org.apache.paimon.types.RowType readTypeWithAuth(
-            org.apache.paimon.types.RowType readType) {
-        if (!(table instanceof FileStoreTable)) {
-            return readType;
-        }
-
-        FileStoreTable fileStoreTable = (FileStoreTable) table;
-        TableQueryAuth auth =
-                fileStoreTable.catalogEnvironment().tableQueryAuth(new CoreOptions(conf.toMap()));
-        if (auth == null) {
-            return readType;
-        }
-
-        List<String> requiredFieldNames = readType.getFieldNames();
-        TableQueryAuthResult result = auth.auth(requiredFieldNames);
-        if (result == null) {
-            return readType;
-        }
-
-        Predicate authPredicate = result.extractPredicate();
-        if (authPredicate == null) {
-            return readType;
-        }
-
-        Set<String> authFieldNames = PredicateUtils.collectFieldNames(authPredicate);
-        Set<String> requiredFieldNameSet = new HashSet<>(requiredFieldNames);
-
-        List<DataField> additionalFields = new ArrayList<>();
-        for (DataField field : table.rowType().getFields()) {
-            if (authFieldNames.contains(field.name())
-                    && !requiredFieldNameSet.contains(field.name())) {
-                additionalFields.add(field);
-            }
-        }
-
-        if (additionalFields.isEmpty()) {
-            return readType;
-        }
-
-        // Create new read type with additional fields
-        List<DataField> newFields = new ArrayList<>(readType.getFields());
-        newFields.addAll(additionalFields);
-        return new org.apache.paimon.types.RowType(newFields);
     }
 }

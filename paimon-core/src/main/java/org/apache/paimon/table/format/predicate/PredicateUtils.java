@@ -18,12 +18,8 @@
 
 package org.apache.paimon.table.format.predicate;
 
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.RowType;
 
 import java.util.Arrays;
@@ -35,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 
 /** Utility methods for working with {@link Predicate}s. */
 public class PredicateUtils {
@@ -68,33 +65,5 @@ public class PredicateUtils {
         }
 
         return result;
-    }
-
-    public static Set<String> collectFieldNames(Predicate predicate) {
-        return predicate.visit(new FieldNameCollector());
-    }
-
-    /** A visitor that collects all field names referenced by a predicate. */
-    private static class FieldNameCollector implements PredicateVisitor<Set<String>> {
-
-        @Override
-        public Set<String> visit(LeafPredicate predicate) {
-            Set<String> fieldNames = new HashSet<>();
-            for (Object input : predicate.transform().inputs()) {
-                if (input instanceof FieldRef) {
-                    fieldNames.add(((FieldRef) input).name());
-                }
-            }
-            return fieldNames;
-        }
-
-        @Override
-        public Set<String> visit(CompoundPredicate predicate) {
-            Set<String> fieldNames = new HashSet<>();
-            for (Predicate child : predicate.children()) {
-                fieldNames.addAll(child.visit(this));
-            }
-            return fieldNames;
-        }
     }
 }
