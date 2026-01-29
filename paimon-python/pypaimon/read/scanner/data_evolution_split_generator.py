@@ -329,7 +329,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 plan_start_pos, plan_end_pos, file_begin_pos, file.row_count
             )
             data_file_infos.append((file, data_file_range))
-            shard_file_idx_map[file.file_name] = data_file_range
+            if data_file_range is not None:
+                shard_file_idx_map[file.file_name] = data_file_range
 
         if not data_file_infos:
             # No data file, skip this split
@@ -343,17 +344,15 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             if not self._is_blob_file(file.file_name):
                 continue
             blob_first_row_id = file.first_row_id if file.first_row_id is not None else 0
-            data_file = None
             data_file_range = None
             data_file_first_row_id = None
             for df, fr in data_file_infos:
                 df_first = df.first_row_id if df.first_row_id is not None else 0
                 if df_first <= blob_first_row_id < df_first + df.row_count:
-                    data_file = df
                     data_file_range = fr
                     data_file_first_row_id = df_first
                     break
-            if data_file is None or data_file_range is None or data_file_first_row_id is None:
+            if data_file_range is None or data_file_first_row_id is None:
                 continue
             if data_file_range == (-1, -1):
                 shard_file_idx_map[file.file_name] = (-1, -1)
