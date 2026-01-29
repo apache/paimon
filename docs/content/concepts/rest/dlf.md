@@ -170,4 +170,7 @@ WITH (
 - `dlf-openapi`: ROA v2 style signer for DlfNext/2026-01-18 OpenAPI, implements HMAC-SHA1
   signature with ROA style canonicalization
 
-**Note:** When `dlf.signing-algorithm` is explicitly configured, it takes precedence over automatic detection.
+**Note:**
+- The `dlf-openapi` signer currently supports only alphanumeric characters (A-Z, a-z, 0-9) and specific
+  symbols in database and table names.
+- When `dlf.signing-algorithm` is explicitly configured, it takes precedence over automatic detection.
