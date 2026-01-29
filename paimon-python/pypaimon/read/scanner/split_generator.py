@@ -51,7 +51,6 @@ class AbstractSplitGenerator(ABC):
         self.number_of_para_subtasks = None
         self.start_pos_of_this_subtask = None
         self.end_pos_of_this_subtask = None
-        self.no_slice_split = None
 
 
     def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int):
