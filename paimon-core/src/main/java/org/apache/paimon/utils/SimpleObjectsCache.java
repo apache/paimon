@@ -63,7 +63,8 @@ public class SimpleObjectsCache<K, V> extends ObjectsCache<K, V, Segments> {
     }
 
     @Override
-    protected Segments createSegments(K key, @Nullable Long fileSize) {
+    protected Segments createSegments(
+            K key, @Nullable Long fileSize, Filter<InternalRow> loadFilter) {
         InternalRowSerializer formatSerializer = this.formatSerializer.get();
         try (CloseableIterator<InternalRow> iterator = reader.apply(key, fileSize)) {
             ArrayList<MemorySegment> segments = new ArrayList<>();
@@ -73,7 +74,9 @@ public class SimpleObjectsCache<K, V> extends ObjectsCache<K, V, Segments> {
                     new SimpleCollectingOutputView(segments, segmentSource, cache.pageSize());
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
-                formatSerializer.serializeToPages(row, output);
+                if (loadFilter.test(row)) {
+                    formatSerializer.serializeToPages(row, output);
+                }
             }
             return Segments.create(segments, output.getCurrentPositionInSegment());
         } catch (Exception e) {
