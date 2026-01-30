@@ -103,11 +103,9 @@ class FormatTableScan:
         self,
         table: FormatTable,
         partition_filter: Optional[Dict[str, str]] = None,
-        limit: Optional[int] = None,
     ):
         self.table = table
         self.partition_filter = partition_filter  # optional equality filter
-        self.limit = limit
 
     def plan(self) -> Plan:
         partition_only_value = self.table.options().get(
@@ -129,8 +127,4 @@ class FormatTableScan:
                 if match:
                     filtered.append(s)
             splits = filtered
-        if self.limit is not None and self.limit <= 0:
-            splits = []
-        elif self.limit is not None and len(splits) > self.limit:
-            splits = splits[: self.limit]
         return Plan(_splits=splits)

@@ -46,6 +46,7 @@ def _read_file_to_arrow(
     read_fields: Optional[List[str]],
     partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
     text_column_name: Optional[str] = None,
+    text_line_delimiter: str = "\n",
 ) -> pyarrow.Table:
     path = split.data_path()
     csv_read_options = None
@@ -115,17 +116,20 @@ def _read_file_to_arrow(
             )
     elif fmt == Format.TEXT:
         text = data.decode("utf-8") if isinstance(data, bytes) else data
-        line_delimiter = "\n"
         lines = (
-            text.rstrip(line_delimiter).split(line_delimiter) if text else []
+            text.rstrip(text_line_delimiter).split(text_line_delimiter)
+            if text
+            else []
         )
         if not lines:
             return pyarrow.table({})
-        col_name = (
-            read_fields[0]
-            if read_fields
-            else (text_column_name if text_column_name else "value")
-        )
+        part_keys = set(partition_spec.keys()) if partition_spec else set()
+        col_name = text_column_name if text_column_name else "value"
+        if read_fields:
+            for f in read_fields:
+                if f not in part_keys:
+                    col_name = f
+                    break
         tbl = pyarrow.table({col_name: lines})
     else:
         raise ValueError(f"Format {fmt} read not implemented in Python")
@@ -189,6 +193,11 @@ class FormatTableRead:
             if fmt == Format.TEXT
             else None
         )
+        text_delim = (
+            self.table.options().get("text.line-delimiter", "\n")
+            if fmt == Format.TEXT
+            else "\n"
+        )
         tables = []
         nrows = 0
         for split in splits:
@@ -200,6 +209,7 @@ class FormatTableRead:
                 read_fields,
                 partition_key_types,
                 text_column_name=text_col,
+                text_line_delimiter=text_delim,
             )
             if t.num_rows > 0:
                 tables.append(t)
@@ -240,6 +250,11 @@ class FormatTableRead:
             if fmt == Format.TEXT
             else None
         )
+        text_delim = (
+            self.table.options().get("text.line-delimiter", "\n")
+            if fmt == Format.TEXT
+            else "\n"
+        )
         n_yielded = 0
         for split in splits:
             if self.limit is not None and n_yielded >= self.limit:
@@ -252,6 +267,7 @@ class FormatTableRead:
                 self.projection,
                 partition_key_types,
                 text_column_name=text_col,
+                text_line_delimiter=text_delim,
             )
             for batch in t.to_batches():
                 for i in range(batch.num_rows):
