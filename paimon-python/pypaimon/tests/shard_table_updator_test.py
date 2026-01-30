@@ -87,7 +87,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
 
         # Read data using arrow_reader
         reader = shard_updator.arrow_reader()
-        
+
         for batch in iter(reader.read_next_batch, None):
             # Compute d = c + b - a
             a_values = batch.column('a').to_pylist()
@@ -181,6 +181,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
         table_update.with_update_type(['d'])
 
         for i in range(10):
+            d_all_values = []
             shard_updator = table_update.new_shard_updator(i, 10)
 
             # Read data using arrow_reader
@@ -193,14 +194,14 @@ class ShardTableUpdatorTest(unittest.TestCase):
                 c_values = batch.column('c').to_pylist()
 
                 d_values = [c + b - a for a, b, c in zip(a_values, b_values, c_values)]
+                d_all_values.extend(d_values)
 
-                # Create batch with d column
-                new_batch = pa.RecordBatch.from_pydict({
-                    'd': d_values,
-                }, schema=pa.schema([('d', pa.int32())]))
-
-                # Write d column
-                shard_updator.update_by_arrow_batch(new_batch)
+            # Concatenate all computed values and update once for this shard
+            new_batch = pa.RecordBatch.from_pydict(
+                {'d': d_all_values},
+                schema=pa.schema([('d', pa.int32())]),
+            )
+            shard_updator.update_by_arrow_batch(new_batch)
 
             # Prepare and commit
             commit_messages = shard_updator.prepare_commit()
