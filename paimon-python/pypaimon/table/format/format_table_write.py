@@ -22,11 +22,18 @@ from typing import Dict, List, Optional
 import pyarrow
 
 from pypaimon.schema.data_types import PyarrowFieldParser
-from pypaimon.table.format.format_commit_message import FormatTableCommitMessage
-from pypaimon.table.format.format_table import FormatTable, Format
+from pypaimon.table.format.format_commit_message import (
+    FormatTableCommitMessage,
+)
+from pypaimon.table.format.format_table import (
+    Format,
+    FormatTable,
+)
 
 
-def _partition_path(partition_spec: dict, partition_keys: List[str], only_value: bool) -> str:
+def _partition_path(
+    partition_spec: dict, partition_keys: List[str], only_value: bool
+) -> str:
     parts = []
     for k in partition_keys:
         v = partition_spec.get(k)
@@ -34,6 +41,21 @@ def _partition_path(partition_spec: dict, partition_keys: List[str], only_value:
             break
         parts.append(str(v) if only_value else f"{k}={v}")
     return "/".join(parts)
+
+
+def _validate_partition_columns(
+    partition_keys: List[str],
+    data: pyarrow.RecordBatch,
+) -> None:
+    """Raise if partition key missing from data (wrong column indexing)."""
+    names = set(data.schema.names) if data.schema else set()
+    missing = [k for k in partition_keys if k not in names]
+    if missing:
+        raise ValueError(
+            f"Partition column(s) missing from input data: {missing}. "
+            f"Data columns: {list(names)}. "
+            "Ensure partition keys exist in the Arrow schema."
+        )
 
 
 def _partition_from_row(
@@ -45,7 +67,10 @@ def _partition_from_row(
     for k in partition_keys:
         col = row.column(row.schema.get_field_index(k))
         val = col[row_index]
-        if val is None or (hasattr(val, "as_py") and val.as_py() is None):
+        is_none = val is None or (
+            hasattr(val, "as_py") and val.as_py() is None
+        )
+        if is_none:
             out.append(None)
         else:
             out.append(val.as_py() if hasattr(val, "as_py") else val)
@@ -53,7 +78,7 @@ def _partition_from_row(
 
 
 class FormatTableWrite:
-    """Batch write for format table: writes Arrow/Pandas to partition dirs as files."""
+    """Batch write for format table: Arrow/Pandas to partition dirs."""
 
     def __init__(
         self,
@@ -63,12 +88,15 @@ class FormatTableWrite:
     ):
         self.table = table
         self._overwrite = overwrite
-        self._static_partitions = static_partitions if static_partitions is not None else {}
+        self._static_partitions = (
+            static_partitions if static_partitions is not None else {}
+        )
         self._written_paths: List[str] = []
         self._overwritten_dirs: set = set()
-        self._partition_only_value = (
-            table.options().get("format-table.partition-path-only-value", "false").lower() == "true"
+        opt = table.options().get(
+            "format-table.partition-path-only-value", "false"
         )
+        self._partition_only_value = opt.lower() == "true"
         self._file_format = table.format()
         self._data_file_prefix = "data-"
         self._suffix = {
@@ -89,6 +117,7 @@ class FormatTableWrite:
             part_spec = {}
             self._write_single_batch(data, part_spec)
             return
+        _validate_partition_columns(partition_keys, data)
         # Group rows by partition
         parts_to_indices = defaultdict(list)
         for i in range(data.num_rows):
@@ -122,8 +151,13 @@ class FormatTableWrite:
             dir_path = f"{location}/{part_path}"
         else:
             dir_path = location
-        # When overwrite: clear each partition dir only once per write session (first write to it)
-        if self._overwrite and dir_path not in self._overwritten_dirs and self.table.file_io.exists(dir_path):
+        # When overwrite: clear partition dir only once per write session
+        overwrite_this = (
+            self._overwrite
+            and dir_path not in self._overwritten_dirs
+            and self.table.file_io.exists(dir_path)
+        )
+        if overwrite_this:
             should_delete = (
                 not self._static_partitions
                 or all(
@@ -132,7 +166,9 @@ class FormatTableWrite:
                 )
             )
             if should_delete:
-                from pypaimon.table.format.format_table_commit import _delete_data_files_in_path
+                from pypaimon.table.format.format_table_commit import (
+                    _delete_data_files_in_path,
+                )
                 _delete_data_files_in_path(self.table.file_io, dir_path)
                 self._overwritten_dirs.add(dir_path)
         self.table.file_io.check_or_mkdirs(dir_path)
@@ -163,7 +199,10 @@ class FormatTableWrite:
             import json
             lines = []
             for i in range(tbl.num_rows):
-                row = {tbl.column_names[j]: tbl.column(j)[i].as_py() for j in range(tbl.num_columns)}
+                row = {
+                    tbl.column_names[j]: tbl.column(j)[i].as_py()
+                    for j in range(tbl.num_columns)
+                }
                 lines.append(json.dumps(row) + "\n")
             raw = "".join(lines).encode("utf-8")
         elif fmt == Format.ORC:
@@ -174,26 +213,33 @@ class FormatTableWrite:
                 raw = buf.getvalue()
             else:
                 raise ValueError(
-                    "Format table write for ORC requires PyArrow with ORC support (pyarrow.orc)"
+                    "Format table write for ORC requires PyArrow with ORC "
+                    "support (pyarrow.orc)"
                 )
         elif fmt == Format.TEXT:
             tbl = pyarrow.Table.from_batches([data])
             partition_keys = self.table.partition_keys
             if partition_keys:
-                data_cols = [c for c in tbl.column_names if c not in partition_keys]
+                data_cols = [
+                    c for c in tbl.column_names if c not in partition_keys
+                ]
                 tbl = tbl.select(data_cols)
-            if tbl.num_columns != 1 or not pyarrow.types.is_string(tbl.schema.field(0).type):
+            pa_f0 = tbl.schema.field(0).type
+            if tbl.num_columns != 1 or not pyarrow.types.is_string(pa_f0):
                 raise ValueError(
                     "TEXT format only supports a single string column, "
                     f"got {tbl.num_columns} columns"
                 )
-            line_delimiter = self.table.options().get("text.line-delimiter", "\n")
+            line_delimiter = self.table.options().get(
+                "text.line-delimiter", "\n"
+            )
             lines = []
             col = tbl.column(0)
             for i in range(tbl.num_rows):
                 val = col[i]
                 py_val = val.as_py() if hasattr(val, "as_py") else val
-                lines.append(("" if py_val is None else str(py_val)) + line_delimiter)
+                line = "" if py_val is None else str(py_val)
+                lines.append(line + line_delimiter)
             raw = "".join(lines).encode("utf-8")
         else:
             raise ValueError(f"Format table write not implemented for {fmt}")
@@ -204,7 +250,11 @@ class FormatTableWrite:
         self._written_paths.append(path)
 
     def prepare_commit(self) -> List[FormatTableCommitMessage]:
-        return [FormatTableCommitMessage(written_paths=list(self._written_paths))]
+        return [
+            FormatTableCommitMessage(
+                written_paths=list(self._written_paths)
+            )
+        ]
 
     def close(self) -> None:
         pass

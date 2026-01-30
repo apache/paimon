@@ -25,8 +25,21 @@ from pypaimon.table.format.format_table import FormatTable
 
 
 def _is_data_file_name(name: str) -> bool:
-    """Match Java FormatTableScan.isDataFileName: exclude hidden and metadata."""
-    return name is not None and not name.startswith(".") and not name.startswith("_")
+    """Match Java FormatTableScan.isDataFileName: exclude hidden/metadata."""
+    if name is None:
+        return False
+    return not name.startswith(".") and not name.startswith("_")
+
+
+def _is_reserved_dir_name(name: str) -> bool:
+    """Skip metadata/reserved dirs (not treated as partition levels)."""
+    if not name:
+        return True
+    if name.startswith(".") or name.startswith("_"):
+        return True
+    if name.lower() in ("schema", "_schema"):
+        return True
+    return False
 
 
 def _list_data_files_recursive(
@@ -36,6 +49,7 @@ def _list_data_files_recursive(
     partition_only_value: bool,
     rel_path_parts: Optional[List[str]] = None,
 ) -> List[FormatDataSplit]:
+    """List data files under path, building partition spec from dir names."""
     splits: List[FormatDataSplit] = []
     rel_path_parts = rel_path_parts or []
     try:
@@ -51,6 +65,8 @@ def _list_data_files_recursive(
         if info.path.startswith("/") or info.path.startswith("file:"):
             full_path = info.path
         if info.type == pafs.FileType.Directory:
+            if _is_reserved_dir_name(name):
+                continue
             part_value = name
             if not partition_only_value and "=" in name:
                 part_value = name.split("=", 1)[1]
@@ -68,7 +84,12 @@ def _list_data_files_recursive(
             size = getattr(info, "size", None) or 0
             part_spec: Optional[Dict[str, str]] = None
             if partition_keys and len(rel_path_parts) >= len(partition_keys):
-                part_spec = dict(zip(partition_keys, rel_path_parts[: len(partition_keys)]))
+                part_spec = dict(
+                    zip(
+                        partition_keys,
+                        rel_path_parts[: len(partition_keys)],
+                    )
+                )
             splits.append(
                 FormatDataSplit(
                     file_path=full_path,
@@ -104,9 +125,11 @@ class FormatTableScan:
         if self.partition_filter:
             filtered = []
             for s in splits:
-                if s.partition and all(
-                    s.partition.get(k) == v for k, v in self.partition_filter.items()
-                ):
+                match = s.partition and all(
+                    s.partition.get(k) == v
+                    for k, v in self.partition_filter.items()
+                )
+                if match:
                     filtered.append(s)
             splits = filtered
         if self.limit is not None and self.limit <= 0:

@@ -30,6 +30,7 @@ def _read_file_to_arrow(
     fmt: Format,
     partition_spec: Optional[Dict[str, str]],
     read_fields: Optional[List[str]],
+    partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
 ) -> pyarrow.Table:
     path = split.data_path()
     csv_read_options = None
@@ -42,7 +43,9 @@ def _read_file_to_arrow(
                 chunk = stream.read()
                 if not chunk:
                     break
-                chunks.append(chunk if isinstance(chunk, bytes) else bytes(chunk))
+                chunks.append(
+                    chunk if isinstance(chunk, bytes) else bytes(chunk)
+                )
             data = b"".join(chunks)
     except Exception as e:
         raise RuntimeError(f"Failed to read {path}") from e
@@ -52,7 +55,9 @@ def _read_file_to_arrow(
 
     if fmt == Format.PARQUET:
         import io
-        data = bytes(data) if not isinstance(data, bytes) else data
+        data = (
+            bytes(data) if not isinstance(data, bytes) else data
+        )
         if len(data) < 4 or data[:4] != b"PAR1":
             return pyarrow.table({})
         try:
@@ -90,12 +95,15 @@ def _read_file_to_arrow(
                 return pyarrow.table({})
         else:
             raise ValueError(
-                "Format table read for ORC requires PyArrow with ORC support (pyarrow.orc)"
+                "Format table read for ORC requires PyArrow with ORC support "
+                "(pyarrow.orc)"
             )
     elif fmt == Format.TEXT:
         text = data.decode("utf-8") if isinstance(data, bytes) else data
         line_delimiter = "\n"
-        lines = text.rstrip(line_delimiter).split(line_delimiter) if text else []
+        lines = (
+            text.rstrip(line_delimiter).split(line_delimiter) if text else []
+        )
         if not lines:
             return pyarrow.table({})
         col_name = "value" if not read_fields else read_fields[0]
@@ -105,20 +113,37 @@ def _read_file_to_arrow(
 
     if partition_spec:
         for k, v in partition_spec.items():
-            tbl = tbl.append_column(
-                k,
-                pyarrow.array([v] * tbl.num_rows, type=pyarrow.string()),
+            if k in tbl.column_names:
+                continue
+            pa_type = (
+                partition_key_types.get(k, pyarrow.string())
+                if partition_key_types
+                else pyarrow.string()
             )
-        if read_fields:
-            col_order = [c for c in read_fields if c in tbl.column_names]
-            if col_order:
-                tbl = tbl.select(col_order)
+            arr = pyarrow.array([v] * tbl.num_rows, type=pyarrow.string())
+            if pa_type != pyarrow.string():
+                arr = arr.cast(pa_type)
+            tbl = tbl.append_column(k, arr)
 
     if read_fields and tbl.num_columns > 0:
         existing = [c for c in read_fields if c in tbl.column_names]
         if existing:
             tbl = tbl.select(existing)
     return tbl
+
+
+def _partition_key_types(
+    table: FormatTable,
+) -> Optional[Dict[str, pyarrow.DataType]]:
+    """Build partition column name -> PyArrow type from table schema."""
+    if not table.partition_keys:
+        return None
+    result = {}
+    for f in table.fields:
+        if f.name in table.partition_keys:
+            pa_field = PyarrowFieldParser.from_paimon_field(f)
+            result[f.name] = pa_field.type
+    return result if result else None
 
 
 class FormatTableRead:
@@ -139,6 +164,7 @@ class FormatTableRead:
     ) -> pyarrow.Table:
         read_fields = self.projection
         fmt = self.table.format()
+        partition_key_types = _partition_key_types(self.table)
         tables = []
         nrows = 0
         for split in splits:
@@ -148,6 +174,7 @@ class FormatTableRead:
                 fmt,
                 split.partition,
                 read_fields,
+                partition_key_types,
             )
             if t.num_rows > 0:
                 tables.append(t)
@@ -161,7 +188,9 @@ class FormatTableRead:
         if not tables:
             fields = self.table.fields
             if read_fields:
-                fields = [f for f in self.table.fields if f.name in read_fields]
+                fields = [
+                    f for f in self.table.fields if f.name in read_fields
+                ]
             schema = PyarrowFieldParser.from_paimon_schema(fields)
             return pyarrow.Table.from_pydict(
                 {n: [] for n in schema.names},
@@ -179,6 +208,7 @@ class FormatTableRead:
         self,
         splits: List[FormatDataSplit],
     ) -> Iterator[Any]:
+        partition_key_types = _partition_key_types(self.table)
         n_yielded = 0
         for split in splits:
             if self.limit is not None and n_yielded >= self.limit:
@@ -189,6 +219,7 @@ class FormatTableRead:
                 self.table.format(),
                 split.partition,
                 self.projection,
+                partition_key_types,
             )
             for batch in t.to_batches():
                 for i in range(batch.num_rows):

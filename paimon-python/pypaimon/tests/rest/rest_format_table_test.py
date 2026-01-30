@@ -395,6 +395,49 @@ class RESTFormatTableTest(RESTBaseTest):
         actual_dt10 = rb_dt10.new_read().to_pandas(splits_dt10).sort_values(by="b")
         self.assertEqual(len(actual_dt10), 2)
         self.assertEqual(actual_dt10["b"].tolist(), [10, 20])
+        # Partition column must match schema type (int32), not string
+        self.assertEqual(actual_dt10["dt"].tolist(), [10, 10])
+        self.assertEqual(actual_all["dt"].tolist(), [10, 10, 11, 11])
+
+    def test_format_table_partition_column_returns_schema_type(self):
+        """Partition columns must be returned with schema type (e.g. int32), not always string."""
+        pa_schema = pa.schema([
+            ("a", pa.int32()),
+            ("b", pa.int32()),
+            ("dt", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["dt"],
+            options={"type": "format-table", "file.format": "parquet"},
+        )
+        table_name = "default.format_table_partition_schema_type"
+        try:
+            self.rest_catalog.drop_table(table_name, True)
+        except Exception:
+            pass
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_pandas(pd.DataFrame({"a": [1, 2], "b": [10, 20], "dt": [1, 1]}))
+        tw.write_pandas(pd.DataFrame({"a": [3, 4], "b": [30, 40], "dt": [2, 2]}))
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        rb = table.new_read_builder().with_partition_filter({"dt": "1"})
+        splits = rb.new_scan().plan().splits()
+        actual = rb.new_read().to_pandas(splits).sort_values(by="b")
+        self.assertEqual(len(actual), 2)
+        self.assertEqual(actual["b"].tolist(), [10, 20])
+        # Must be int list, not string list; fails if partition column is hardcoded as string
+        self.assertEqual(actual["dt"].tolist(), [1, 1])
+        self.assertTrue(
+            actual["dt"].dtype in (pd.Int32Dtype(), "int32", "int64"),
+            "dt must be int type per schema, not string",
+        )
 
     def test_format_table_with_filter_extracts_partition_like_java(self):
         """with_filter(partition equality) extracts partition like Java; does not overwrite partition filter."""
