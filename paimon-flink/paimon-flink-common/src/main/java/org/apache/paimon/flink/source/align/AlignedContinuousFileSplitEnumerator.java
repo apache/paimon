@@ -23,6 +23,7 @@ import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
 import org.apache.paimon.flink.source.assigners.AlignedSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceEnumeratorMetrics;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
@@ -95,7 +96,8 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             long alignTimeout,
             int splitPerTaskMax,
             boolean shuffleBucketWithPartition,
-            int maxSnapshotCount) {
+            int maxSnapshotCount,
+            @Nullable FileStoreSourceEnumeratorMetrics enumeratorMetrics) {
         super(
                 context,
                 remainSplits,
@@ -105,7 +107,8 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
                 unawareBucket,
                 splitPerTaskMax,
                 shuffleBucketWithPartition,
-                maxSnapshotCount);
+                maxSnapshotCount,
+                enumeratorMetrics);
         this.pendingPlans = new ArrayBlockingQueue<>(MAX_PENDING_PLAN);
         this.alignedAssigner = (AlignedSplitAssigner) super.splitAssigner;
         this.nextSnapshotId = nextSnapshotId;

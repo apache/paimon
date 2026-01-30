@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceEnumeratorMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -84,12 +85,14 @@ public class ContinuousFileStoreSource extends FlinkSource {
             splits = checkpoint.splits();
         }
         StreamTableScan scan = readBuilder.newStreamScan();
+        FileStoreSourceEnumeratorMetrics enumeratorMetrics = null;
         if (metricGroup(context) != null) {
+            enumeratorMetrics = new FileStoreSourceEnumeratorMetrics(context, options);
             ((StreamDataTableScan) scan)
                     .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
         scan.restore(nextSnapshotId);
-        return buildEnumerator(context, splits, nextSnapshotId, scan);
+        return buildEnumerator(context, splits, nextSnapshotId, scan, enumeratorMetrics);
     }
 
     @Nullable
@@ -106,7 +109,8 @@ public class ContinuousFileStoreSource extends FlinkSource {
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> splits,
             @Nullable Long nextSnapshotId,
-            StreamTableScan scan) {
+            StreamTableScan scan,
+            @Nullable FileStoreSourceEnumeratorMetrics enumeratorMetrics) {
         Options options = Options.fromMap(this.options);
         return new ContinuousFileSplitEnumerator(
                 context,
@@ -117,6 +121,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 unordered,
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));
+                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT),
+                enumeratorMetrics);
     }
 }

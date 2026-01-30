@@ -25,6 +25,7 @@ import org.apache.paimon.flink.NestedProjectedRowData;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceEnumeratorMetrics;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -80,7 +81,8 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> splits,
             @Nullable Long nextSnapshotId,
-            StreamTableScan scan) {
+            StreamTableScan scan,
+            @Nullable FileStoreSourceEnumeratorMetrics enumeratorMetrics) {
         Options options = Options.fromMap(this.options);
         return new AlignedContinuousFileSplitEnumerator(
                 context,
@@ -92,6 +94,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis(),
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));
+                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT),
+                enumeratorMetrics);
     }
 }

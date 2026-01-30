@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceEnumeratorMetrics;
 import org.apache.paimon.postpone.PostponeBucketFileStoreWrite;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
@@ -92,6 +93,9 @@ public class ContinuousFileSplitEnumerator
 
     private final int maxSnapshotCount;
 
+    // Currently unused, serves as a placeholder for future metric extensions or updates.
+    @Nullable private final FileStoreSourceEnumeratorMetrics enumeratorMetrics;
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
@@ -101,7 +105,8 @@ public class ContinuousFileSplitEnumerator
             boolean unordered,
             int splitMaxPerTask,
             boolean shuffleBucketWithPartition,
-            int maxSnapshotCount) {
+            int maxSnapshotCount,
+            @Nullable FileStoreSourceEnumeratorMetrics enumeratorMetrics) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -118,6 +123,7 @@ public class ContinuousFileSplitEnumerator
         this.consumerProgressCalculator =
                 new ConsumerProgressCalculator(context.currentParallelism());
         this.maxSnapshotCount = maxSnapshotCount;
+        this.enumeratorMetrics = enumeratorMetrics;
     }
 
     @VisibleForTesting
