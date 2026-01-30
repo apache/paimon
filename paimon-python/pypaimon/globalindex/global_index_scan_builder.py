@@ -180,6 +180,17 @@ class RowRangeGlobalIndexScanner:
                         options=options
                     )
                     readers.append(reader)
+                if index_type == 'btree':
+                    from pypaimon.globalindex.btree import (BTreeIndexReader)
+                    from pypaimon.globalindex.btree.key_serializer import (StringSerializer)
+                    for metadata in io_metas:
+                        reader = BTreeIndexReader(
+                            key_serializer=StringSerializer(),  # TODO create serializer from type
+                            file_io=file_io,
+                            index_path=index_path,
+                            io_meta=metadata
+                        )
+                        readers.append(reader)
             
             return readers
         
