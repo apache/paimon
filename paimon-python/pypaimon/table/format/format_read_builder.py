@@ -33,12 +33,6 @@ class FormatReadBuilder:
         self._partition_filter: Optional[dict] = None
 
     def with_filter(self, predicate: Predicate) -> "FormatReadBuilder":
-        """
-        Store predicate and, when table has partition keys and no partition filter is set,
-        try to extract partition spec from predicate (AND of equality on partition columns)
-        and set partition filter for scan, aligned with Java FormatReadBuilder.withFilter.
-        Data predicate is not yet applied in read (FormatTableRead does not support filter).
-        """
         if self._partition_filter is None and self.table.partition_keys and predicate:
             spec = extract_partition_spec_from_predicate(predicate, self.table.partition_keys)
             if spec is not None:

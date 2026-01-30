@@ -45,7 +45,6 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
 
 
-# Table type value from Java TableType.FORMAT_TABLE
 FORMAT_TABLE_TYPE = "format-table"
 
 

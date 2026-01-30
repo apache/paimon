@@ -122,7 +122,6 @@ class RESTFormatTableTest(RESTBaseTest):
         pd.testing.assert_frame_equal(actual, expected)
 
     def test_format_table_text_read_write_with_nulls(self):
-        """TEXT format: null string values are written as empty string and read back as empty."""
         pa_schema = pa.schema([("value", pa.string())])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
@@ -154,7 +153,6 @@ class RESTFormatTableTest(RESTBaseTest):
         self.assertIn("", actual["value"].values)
 
     def test_format_table_text_partitioned_read_write(self):
-        """Partitioned TEXT table: partition columns are stripped before write; read back with partition."""
         pa_schema = pa.schema([
             ("value", pa.string()),
             ("dt", pa.int32()),
@@ -191,7 +189,6 @@ class RESTFormatTableTest(RESTBaseTest):
         self.assertEqual(actual["dt"].tolist(), [1, 1, 2])
 
     def test_format_table_read_with_limit_to_iterator(self):
-        """with_limit(N) must be respected by to_iterator (same as to_arrow/to_pandas)."""
         pa_schema = pa.schema([
             ("a", pa.int32()),
             ("b", pa.int32()),
@@ -265,7 +262,6 @@ class RESTFormatTableTest(RESTBaseTest):
         self.assertEqual(actual["b"].tolist(), [100, 200])
 
     def test_format_table_overwrite_only_specified_partition(self):
-        """overwrite(static_partition) must only clear that partition; other partitions unchanged."""
         pa_schema = pa.schema([
             ("a", pa.int32()),
             ("b", pa.int32()),
@@ -312,7 +308,6 @@ class RESTFormatTableTest(RESTBaseTest):
         self.assertEqual(c2, [30, 40], "partition c=2 must be unchanged")
 
     def test_format_table_overwrite_multiple_batches_same_partition(self):
-        """Overwrite mode must clear partition dir only once; multiple batches same partition keep all data."""
         pa_schema = pa.schema([
             ("a", pa.int32()),
             ("b", pa.int32()),
@@ -440,7 +435,6 @@ class RESTFormatTableTest(RESTBaseTest):
         )
 
     def test_format_table_with_filter_extracts_partition_like_java(self):
-        """with_filter(partition equality) extracts partition like Java; does not overwrite partition filter."""
         pa_schema = pa.schema([
             ("a", pa.int32()),
             ("b", pa.int32()),

@@ -25,14 +25,12 @@ from pypaimon.table.format.format_table import FormatTable
 
 
 def _is_data_file_name(name: str) -> bool:
-    """Match Java FormatTableScan.isDataFileName: exclude hidden/metadata."""
     if name is None:
         return False
     return not name.startswith(".") and not name.startswith("_")
 
 
 def _is_reserved_dir_name(name: str) -> bool:
-    """Skip metadata/reserved dirs (not treated as partition levels)."""
     if not name:
         return True
     if name.startswith(".") or name.startswith("_"):
@@ -49,7 +47,6 @@ def _list_data_files_recursive(
     partition_only_value: bool,
     rel_path_parts: Optional[List[str]] = None,
 ) -> List[FormatDataSplit]:
-    """List data files under path, building partition spec from dir names."""
     splits: List[FormatDataSplit] = []
     rel_path_parts = rel_path_parts or []
     try:
