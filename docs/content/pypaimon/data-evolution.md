@@ -43,7 +43,7 @@ You can create `TableUpdate.update_by_arrow_with_row_id` to update columns to da
 The input data should include the `_ROW_ID` column, update operation will automatically sort and match each `_ROW_ID` to
 its corresponding `first_row_id`, then groups rows with the same `first_row_id` and writes them to a separate file.
 
-### Requirements for `_ROW_ID` updates
+**Requirements for `_ROW_ID` updates**
 
 - **All rows required**: the input table must contain **exactly the full table row count** (one row per existing row).
 - **Row id coverage**: after sorting by `_ROW_ID`, it must be **0..N-1** (no duplicates, no gaps).
@@ -98,7 +98,7 @@ table_commit.close()
 #   'f1': [-1001, 1002]
 ```
 
-## Compute a New Column (scan + rewrite with shards)
+## Update Columns By Shards
 
 If you want to **compute a derived column** (or **update an existing column based on other columns**) without providing
 `_ROW_ID`, you can use the shard scan + rewrite workflow:
@@ -110,7 +110,7 @@ If you want to **compute a derived column** (or **update an existing column base
 
 This is useful for backfilling a newly added column, or recomputing a column from other columns.
 
-### Example: compute `d = c + b - a`
+**Example: compute `d = c + b - a`**
 
 ```python
 import pyarrow as pa
@@ -168,7 +168,7 @@ commit.commit(commit_messages)
 commit.close()
 ```
 
-### Example: update an existing column `c = b - a`
+**Example: update an existing column `c = b - a`**
 
 ```python
 update = write_builder.new_update()
@@ -191,7 +191,7 @@ commit.commit(commit_messages)
 commit.close()
 ```
 
-### Notes
+**Notes**
 
 - **Row order matters**: the batches you write must have the **same number of rows** as the batches you read, in the
   same order for that shard.
