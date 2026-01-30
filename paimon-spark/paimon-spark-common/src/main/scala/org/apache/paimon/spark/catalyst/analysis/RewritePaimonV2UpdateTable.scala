@@ -16,18 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.spark.SparkConf
+import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.catalyst.rules.Rule
 
-class UpdateTableTest extends UpdateTableTestBase {
-  override protected def sparkConf: SparkConf = {
-    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
-  }
-}
+object RewritePaimonV2UpdateTable extends Rule[LogicalPlan] with AssignmentAlignmentHelper {
 
-class V2UpdateTableTest extends UpdateTableTestBase {
-  override protected def sparkConf: SparkConf = {
-    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+  override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
+    case u @ UpdateTable(aliasedTable, assignments, _) if u.resolved =>
+      u.copy(assignments = alignAssignments(aliasedTable.output, assignments))
   }
 }

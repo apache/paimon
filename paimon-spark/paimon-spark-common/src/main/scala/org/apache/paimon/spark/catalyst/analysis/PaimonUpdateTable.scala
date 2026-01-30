@@ -36,7 +36,8 @@ object PaimonUpdateTable
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
-      case u @ UpdateTable(PaimonRelation(table), assignments, condition) if u.resolved =>
+      case u @ UpdateTable(PaimonRelation(table), assignments, condition)
+          if u.resolved && shouldFallbackToV1Update(table, u) =>
         checkPaimonTable(table.getTable)
 
         table.getTable match {
