@@ -60,15 +60,14 @@ class TableRead:
 
     @staticmethod
     def _try_to_pad_batch_by_schema(batch: pyarrow.RecordBatch, target_schema):
-        if batch.schema.names == target_schema.names:
-            return batch
-
-        columns = []
         num_rows = batch.num_rows
+        columns = []
 
         for field in target_schema:
             if field.name in batch.column_names:
                 col = batch.column(field.name)
+                if col.type != field.type:
+                    col = pyarrow.nulls(num_rows, type=field.type)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)
