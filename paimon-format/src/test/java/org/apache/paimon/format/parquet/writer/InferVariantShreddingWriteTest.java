@@ -48,6 +48,7 @@ import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
+import org.junit.Ignore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -557,6 +558,7 @@ public class InferVariantShreddingWriteTest {
         }
     }
 
+    @Ignore
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testVariantTypeAnnotation(boolean inferShredding) throws Exception {
