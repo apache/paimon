@@ -479,26 +479,6 @@ public class JavaPyE2ETest {
         assertThat(result).containsOnly("k2:v2");
     }
 
-    @Test
-    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testTmpxxxxxxxxx() throws Exception {
-        Path tablePath = new Path("file:/tmp/warehouse/default.db/test_btree_index");
-        FileStoreTable table =
-                FileStoreTableFactory.create(FileIOFinder.find(tablePath), tablePath);
-
-        // read index
-        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
-        ReadBuilder readBuilder =
-                table.newReadBuilder()
-                        .withFilter(predicateBuilder.equal(0, BinaryString.fromString("k2")));
-        List<String> result = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(readBuilder.newScan().plan())
-                .forEachRemaining(r -> result.add(r.getString(0) + ":" + r.getString(1)));
-        assertThat(result).containsOnly("k2:v2");
-    }
-
     // Helper method from TableTestBase
     protected Identifier identifier(String tableName) {
         return new Identifier(database, tableName);
