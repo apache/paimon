@@ -85,6 +85,68 @@ class DataEvolutionTest(unittest.TestCase):
         ]))
         self.assertEqual(actual_data, expect_data)
 
+    def test_with_slice(self):
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("b", pa.int32()),
+            ("c", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+                "source.split.target-size": "512m",
+            },
+        )
+        table_name = "default.test_with_slice_data_evolution"
+        self.catalog.create_table(table_name, schema, ignore_if_exists=True)
+        table = self.catalog.get_table(table_name)
+
+        for batch in [
+            {"id": [1, 2], "b": [10, 20], "c": [100, 200]},
+            {"id": [1001, 2001], "b": [1011, 2011], "c": [1001, 2001]},
+            {"id": [-1, -2], "b": [-10, -20], "c": [-100, -200]},
+        ]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write()
+            tc = wb.new_commit()
+            tw.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        rb = table.new_read_builder()
+        full_splits = rb.new_scan().plan().splits()
+        full_result = rb.new_read().to_pandas(full_splits)
+        self.assertEqual(
+            len(full_result),
+            6,
+            "Full scan should return 6 rows",
+        )
+        self.assertEqual(
+            sorted(full_result["id"].tolist()),
+            [-2, -1, 1, 2, 1001, 2001],
+            "Full set ids mismatch",
+        )
+
+        # with_slice(1, 4) -> row indices [1, 2, 3] -> 3 rows with id in (2, 1001, 2001)
+        scan = rb.new_scan().with_slice(1, 4)
+        splits = scan.plan().splits()
+        result = rb.new_read().to_pandas(splits)
+        self.assertEqual(
+            len(result),
+            3,
+            "with_slice(1, 4) should return 3 rows (indices 1,2,3). "
+            "Bug: DataEvolutionSplitGenerator returns 2 when split has multiple data files.",
+        )
+        ids = result["id"].tolist()
+        self.assertEqual(
+            sorted(ids),
+            [2, 1001, 2001],
+            "with_slice(1, 4) should return id in (2, 1001, 2001). Got ids=%s" % ids,
+        )
+
     def test_multiple_appends(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
