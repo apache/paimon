@@ -307,6 +307,11 @@ public final class NestedRow extends BinarySection implements InternalRow, DataS
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        throw new IllegalArgumentException("Unsupported type: VectorType");
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readMapData(segments, offset, getLong(pos));

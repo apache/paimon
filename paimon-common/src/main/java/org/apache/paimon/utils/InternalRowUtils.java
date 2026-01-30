@@ -318,6 +318,8 @@ public class InternalRowUtils {
                         pos, decimalType.getPrecision(), decimalType.getScale());
             case ARRAY:
                 return dataGetters.getArray(pos);
+            case VECTOR:
+                return dataGetters.getVector(pos);
             case MAP:
             case MULTISET:
                 return dataGetters.getMap(pos);

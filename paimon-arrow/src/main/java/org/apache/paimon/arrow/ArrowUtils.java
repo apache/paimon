@@ -30,6 +30,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
@@ -137,14 +138,16 @@ public class ArrowUtils {
                         fieldType.getDictionary(),
                         Collections.singletonMap(PARQUET_FIELD_ID, String.valueOf(fieldId)));
         List<Field> children = null;
-        if (dataType instanceof ArrayType) {
+        if (dataType instanceof ArrayType || dataType instanceof VectorType) {
+            final DataType elementType;
+            if (dataType instanceof VectorType) {
+                elementType = ((VectorType) dataType).getElementType();
+            } else {
+                elementType = ((ArrayType) dataType).getElementType();
+            }
             Field field =
                     toArrowField(
-                            ListVector.DATA_VECTOR_NAME,
-                            fieldId,
-                            ((ArrayType) dataType).getElementType(),
-                            depth + 1,
-                            visitor);
+                            ListVector.DATA_VECTOR_NAME, fieldId, elementType, depth + 1, visitor);
             FieldType typeInner = field.getFieldType();
             field =
                     new Field(
