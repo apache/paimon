@@ -18,6 +18,9 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.compact.CompactMetricMeta;
+import org.apache.paimon.compact.CompactMetricMetaV1Deserializer;
+import org.apache.paimon.compact.CompactMetricSerializer;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMeta;
@@ -26,6 +29,7 @@ import org.apache.paimon.index.IndexFileMetaV1Deserializer;
 import org.apache.paimon.index.IndexFileMetaV2Deserializer;
 import org.apache.paimon.index.IndexFileMetaV3Deserializer;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMeta08Serializer;
 import org.apache.paimon.io.DataFileMeta09Serializer;
@@ -55,6 +59,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
 
     private final DataFileMetaSerializer dataFileSerializer;
     private final IndexFileMetaSerializer indexEntrySerializer;
+    private final CompactMetricSerializer compactMetricSerializer;
 
     private DataFileMetaFirstRowIdLegacySerializer dataFileMetaFirstRowIdLegacySerializer;
     private DataFileMeta12LegacySerializer dataFileMeta12LegacySerializer;
@@ -64,10 +69,12 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     private IndexFileMetaV1Deserializer indexEntryV1Deserializer;
     private IndexFileMetaV2Deserializer indexEntryV2Deserializer;
     private IndexFileMetaV3Deserializer indexEntryV3Deserializer;
+    private CompactMetricMetaV1Deserializer compactMetricMetaV1Deserializer;
 
     public CommitMessageSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
         this.indexEntrySerializer = new IndexFileMetaSerializer();
+        this.compactMetricSerializer = new CompactMetricSerializer();
     }
 
     @Override
@@ -117,6 +124,12 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
         indexEntrySerializer.serializeList(message.compactIncrement().newIndexFiles(), view);
         indexEntrySerializer.serializeList(message.compactIncrement().deletedIndexFiles(), view);
+
+        // compact metric increment
+        if (message.compactMetricIncrement() != null
+                && message.compactMetricIncrement().metric() != null) {
+            compactMetricSerializer.serialize(message.compactMetricIncrement().metric(), view);
+        }
     }
 
     @Override
@@ -138,6 +151,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         IOExceptionSupplier<List<DataFileMeta>> fileDeserializer = fileDeserializer(version, view);
         IOExceptionSupplier<List<IndexFileMeta>> indexEntryDeserializer =
                 indexEntryDeserializer(version, view);
+        IOExceptionSupplier<CompactMetricMeta> compactMetricDeserializer =
+                compactMetricDeserializer(version, view);
         if (version >= 10) {
             return new CommitMessageImpl(
                     deserializeBinaryRow(view),
@@ -154,7 +169,8 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                             fileDeserializer.get(),
                             fileDeserializer.get(),
                             indexEntryDeserializer.get(),
-                            indexEntryDeserializer.get()));
+                            indexEntryDeserializer.get()),
+                    new CompactMetricIncrement(compactMetricDeserializer.get()));
         } else {
             BinaryRow partition = deserializeBinaryRow(view);
             int bucket = view.readInt();
@@ -178,7 +194,12 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                 }
             }
             return new CommitMessageImpl(
-                    partition, bucket, totalBuckets, dataIncrement, compactIncrement);
+                    partition,
+                    bucket,
+                    totalBuckets,
+                    dataIncrement,
+                    compactIncrement,
+                    new CompactMetricIncrement(compactMetricDeserializer.get()));
         }
     }
 
@@ -235,5 +256,10 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
             }
             return () -> indexEntryV1Deserializer.deserializeList(view);
         }
+    }
+
+    private IOExceptionSupplier<CompactMetricMeta> compactMetricDeserializer(
+            int version, DataInputView view) {
+        return () -> new CompactMetricMetaV1Deserializer().deserialize(view);
     }
 }

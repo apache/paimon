@@ -37,8 +37,16 @@ public abstract class CompactTask implements Callable<CompactResult> {
 
     @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
+    @Nullable private String type;
+
     public CompactTask(@Nullable CompactionMetrics.Reporter metricsReporter) {
+        this(metricsReporter, null);
+    }
+
+    public CompactTask(
+            @Nullable CompactionMetrics.Reporter metricsReporter, @Nullable String type) {
         this.metricsReporter = metricsReporter;
+        this.type = type;
     }
 
     @Override
@@ -47,12 +55,14 @@ public abstract class CompactTask implements Callable<CompactResult> {
         try {
             long startMillis = System.currentTimeMillis();
             CompactResult result = doCompact();
+            long compactionTime = System.currentTimeMillis() - startMillis;
+            result.setCompactTimeMillis(compactionTime);
+            result.setCompactType(type);
 
             MetricUtils.safeCall(
                     () -> {
                         if (metricsReporter != null) {
-                            metricsReporter.reportCompactionTime(
-                                    System.currentTimeMillis() - startMillis);
+                            metricsReporter.reportCompactionTime(compactionTime);
                             metricsReporter.increaseCompactionsCompletedCount();
                             metricsReporter.reportCompactionInputSize(
                                     result.before().stream()

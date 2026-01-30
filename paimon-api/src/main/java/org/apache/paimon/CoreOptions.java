@@ -856,6 +856,20 @@ public class CoreOptions implements Serializable {
                             "Ratio of the deleted rows in a data file to be forced compacted for "
                                     + "append-only table.");
 
+    public static final ConfigOption<Boolean> COMPACTION_METRICS_ENABLED =
+            key("compaction.metrics.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If enabled, compaction metric data will be recorded for each instance.");
+
+    public static final ConfigOption<Integer> COMPACTION_METRIC_RETAINED_NUM =
+            key("compaction.metrics.retained_num")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "Set the maximum number of times a record metric can be retained.");
+
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
                     .enumType(ChangelogProducer.class)
@@ -2766,6 +2780,14 @@ public class CoreOptions implements Serializable {
 
     public double compactionDeleteRatioThreshold() {
         return options.get(COMPACTION_DELETE_RATIO_THRESHOLD);
+    }
+
+    public boolean compactMetricsEnabled() {
+        return options.get(COMPACTION_METRICS_ENABLED);
+    }
+
+    public int compactMetricsRetainedNum() {
+        return options.get(COMPACTION_METRIC_RETAINED_NUM);
     }
 
     public long dynamicBucketTargetRowNum() {
