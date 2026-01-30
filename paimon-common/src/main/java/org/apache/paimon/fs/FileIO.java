@@ -342,6 +342,35 @@ public interface FileIO extends Serializable, Closeable {
         return success;
     }
 
+    /**
+     * Write content atomically, failing if target file already exists. Uses native conditional
+     * writes on supported object stores. Falls back to {@link #tryToWriteAtomic} on filesystems
+     * without native conditional write support.
+     *
+     * @param path the target file path
+     * @param content the content to write
+     * @return true if write succeeded, false if file already exists
+     * @throws IOException on I/O errors (not including "file exists" condition)
+     */
+    default boolean tryToWriteAtomicIfAbsent(Path path, String content) throws IOException {
+        // Default implementation uses tryToWriteAtomic which is safe for HDFS
+        // but requires external locking for object stores without native conditional writes
+        return tryToWriteAtomic(path, content);
+    }
+
+    /**
+     * Returns whether this FileIO supports native conditional writes (write-if-absent semantics).
+     *
+     * <p>When true, {@link #tryToWriteAtomicIfAbsent} uses native conditional write operations that
+     * atomically fail if the target file exists. This eliminates the need for external locking on
+     * object stores.
+     *
+     * @return true if native conditional writes are supported
+     */
+    default boolean supportsConditionalWrite() {
+        return false;
+    }
+
     default void writeFile(Path path, String content, boolean overwrite) throws IOException {
         try (PositionOutputStream out = newOutputStream(path, overwrite)) {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
