@@ -208,7 +208,7 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
         val q =
           """
             |SELECT * FROM t
-            |WHERE SUBSTRING(dt, 1) = 'hello'
+            |WHERE SUBSTRING(dt, 2) = 'hello'
             |""".stripMargin
         assert(!checkFilterExists(q))
 
@@ -220,12 +220,12 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
         val q1 =
           """
             |SELECT * FROM t
-            |WHERE SUBSTRING(dt, 1, 3) = 'he'
+            |WHERE SUBSTRING(dt, 2, 2) = 'he'
             |""".stripMargin
         assert(!checkFilterExists(q1))
 
         checkAnswer(
-          spark.sql(q),
+          spark.sql(q1),
           Seq(Row(1, 100, "_hello"))
         )
       }

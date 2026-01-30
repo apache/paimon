@@ -64,6 +64,7 @@ public class SubstringTransform implements Transform {
             return sourceString;
         }
 
+        String sourceJavaString = sourceString.toString();
         Object begin = inputs.get(1);
         int beginIndex;
         if (begin instanceof FieldRef) {
@@ -73,20 +74,26 @@ public class SubstringTransform implements Transform {
         } else {
             beginIndex = Integer.parseInt(inputs.get(1).toString());
         }
+        if (beginIndex > sourceJavaString.length()) {
+            return BinaryString.EMPTY_UTF8;
+        }
 
-        int endIndex = sourceString.getSizeInBytes();
+        int endIndex = sourceJavaString.length();
         if (inputs.size() == 3) {
             Object end = inputs.get(2);
             if (end instanceof FieldRef) {
                 FieldRef endRef = (FieldRef) inputs.get(2);
                 checkArgument(endRef.type().is(INTEGER_NUMERIC));
-                endIndex = row.getInt(endRef.index());
+                endIndex = beginIndex + row.getInt(endRef.index()) - 1;
             } else {
-                endIndex = Integer.parseInt(inputs.get(2).toString());
+                endIndex = beginIndex + Integer.parseInt(inputs.get(2).toString()) - 1;
             }
         }
+        endIndex = Math.min(endIndex, sourceJavaString.length());
+        beginIndex--;
+        checkArgument(beginIndex < endIndex);
 
-        return BinaryString.fromString(sourceString.toString().substring(beginIndex, endIndex));
+        return BinaryString.fromString(sourceJavaString.substring(beginIndex, endIndex));
     }
 
     @Override

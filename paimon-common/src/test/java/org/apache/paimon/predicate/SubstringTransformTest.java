@@ -46,7 +46,7 @@ class SubstringTransformTest {
         // test substring('hello', 1)
         List<Object> inputs = new ArrayList<>();
         inputs.add(BinaryString.fromString("hello"));
-        inputs.add(1);
+        inputs.add(2);
         SubstringTransform transform = new SubstringTransform(inputs);
         Object result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("ello"));
@@ -55,7 +55,31 @@ class SubstringTransformTest {
         inputs.add(3);
         transform = new SubstringTransform(inputs);
         result = transform.transform(GenericRow.of());
-        assertThat(result).isEqualTo(BinaryString.fromString("el"));
+        assertThat(result).isEqualTo(BinaryString.fromString("ell"));
+
+        // test substring('hello', 1, 100)
+        inputs.remove(2);
+        inputs.add(100);
+        transform = new SubstringTransform(inputs);
+        result = transform.transform(GenericRow.of());
+        assertThat(result).isEqualTo(BinaryString.fromString("ello"));
+
+        // test substring('hello', 5, 1)
+        inputs.clear();
+        inputs.add(BinaryString.fromString("hello"));
+        inputs.add(5);
+        inputs.add(1);
+        transform = new SubstringTransform(inputs);
+        result = transform.transform(GenericRow.of());
+        assertThat(result).isEqualTo(BinaryString.fromString("o"));
+
+        // test substring('hello', 10)
+        inputs.clear();
+        inputs.add(BinaryString.fromString("hello"));
+        inputs.add(10);
+        transform = new SubstringTransform(inputs);
+        result = transform.transform(GenericRow.of());
+        assertThat(result).isEqualTo(BinaryString.fromString(""));
     }
 
     @Test
@@ -71,8 +95,8 @@ class SubstringTransformTest {
                                 BinaryString.fromString(""),
                                 BinaryString.fromString("hello"),
                                 BinaryString.fromString(""),
-                                1,
+                                2,
                                 3));
-        assertThat(result).isEqualTo(BinaryString.fromString("el"));
+        assertThat(result).isEqualTo(BinaryString.fromString("ell"));
     }
 }
