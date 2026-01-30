@@ -577,7 +577,13 @@ The following shows the supported features of Python Paimon compared to Java Pai
       - only support deduplicate
       - `bucket = -2` (postpone)
       - `bucket > 0` (fixed)
-      - read with deletion vectors enabled
+      - read with deletion vectors enabled 
+  - Format Tables
+      - PARQUET
+      - CSV
+      - JSON
+      - ORC
+      - TEXT
   - Read/Write Operations
       - Batch read and write for append tables and primary key tables
       - Predicate filtering
