@@ -52,9 +52,21 @@ class TableUpdate:
     def with_read_projection(self, projection: List[str]):
         self.projection = projection
 
-    def new_shard_updator(self, total_shard_count: int, shard_num: int):
-        return ShardTableUpdator(self.table, self.projection, self.update_cols, self.commit_user, total_shard_count,
-                                 shard_num)
+    def new_shard_updator(self, shard_num: int, total_shard_count: int):
+        """Create a shard updater for scan+rewrite style updates.
+
+        Args:
+            shard_num: Index of this shard/subtask.
+            total_shard_count: Total number of shards/subtasks.
+        """
+        return ShardTableUpdator(
+            self.table,
+            self.projection,
+            self.update_cols,
+            self.commit_user,
+            shard_num,
+            total_shard_count,
+        )
 
     def update_by_arrow_with_row_id(self, table: pa.Table) -> List[CommitMessage]:
         update_by_row_id = TableUpdateByRowId(self.table, self.commit_user)
@@ -64,14 +76,20 @@ class TableUpdate:
 
 class ShardTableUpdator:
 
-    def __init__(self, table, projection: Optional[List[str]], write_cols: List[str], commit_user, shard_num: int,
-                 total_shard_count: int, ):
+    def __init__(
+            self,
+            table,
+            projection: Optional[List[str]],
+            write_cols: List[str],
+            commit_user,
+            shard_num: int,
+            total_shard_count: int,
+    ):
         from pypaimon.table.file_store_table import FileStoreTable
         self.table: FileStoreTable = table
         self.projection = projection
         self.write_cols = write_cols
         self.commit_user = commit_user
-        self.update_cols = None
         self.total_shard_count = total_shard_count
         self.shard_num = shard_num
 
@@ -114,19 +132,29 @@ class ShardTableUpdator:
         self._init_writer()
 
         capacity = self.writer.capacity()
-        data_in_this_writer = data if capacity >= data.num_rows else data.slice(0, capacity - 1)
-        data_in_next_writer = None if capacity >= data.num_rows else data.slice(data.num_rows - 1, capacity)
+        if capacity <= 0:
+            raise RuntimeError("Writer has no remaining capacity.")
 
-        self.writer.write(data_in_this_writer)
+        # Split the batch across writers.
+        first, rest = (data, None) if capacity >= data.num_rows else (data.slice(0, capacity), data.slice(capacity))
+
+        self.writer.write(first)
         if self.writer.capacity() == 0:
             self.dict[self.writer.partition()].append(self.writer.end())
             self.writer = None
 
-        if (data_in_next_writer is not None):
-            self.update_by_arrow_batch(data_in_next_writer)
+        if rest is not None:
+            if self.writer is not None:
+                raise RuntimeError("Should not get here, rest and current writer exist in the same time.")
+            self.update_by_arrow_batch(rest)
 
     def _init_writer(self):
         if self.writer is None:
+            if self.write_pos >= len(self.row_ranges):
+                raise RuntimeError(
+                    "No more row ranges to write. "
+                    "Ensure you write exactly the same number of rows as read from this shard."
+                )
             item = self.row_ranges[self.write_pos]
             self.write_pos += 1
             partition = item[0]
