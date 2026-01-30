@@ -36,9 +36,8 @@ class PrimaryKeyTableSplitGenerator(AbstractSplitGenerator):
             table,
             target_split_size: int,
             open_file_cost: int,
-            deletion_files_map=None
     ):
-        super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
+        super().__init__(table, target_split_size, open_file_cost)
         self.deletion_vectors_enabled = table.options.deletion_vectors_enabled()
         self.merge_engine = table.options.merge_engine()
 

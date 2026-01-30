@@ -2570,6 +2570,207 @@ class DataBlobWriterTest(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def test_data_blob_writer_with_sample(self):
+        """Test DataBlobWriter with mixed data types in blob column."""
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('type', pa.string()),
+            ('data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true'
+            }
+        )
+        self.catalog.create_table('test_db.with_sample', schema, False)
+        table = self.catalog.get_table('test_db.with_sample')
+
+        # Use proper table API to create writer
+        write_builder = table.new_batch_write_builder()
+        blob_writer = write_builder.new_write()
+
+        # Test data with different types of blob content
+        test_data = pa.Table.from_pydict({
+            'id': [1, 2, 3, 4, 5],
+            'type': ['text', 'json', 'binary', 'image', 'pdf'],
+            'data': [
+                b'This is text content',
+                b'{"key": "value", "number": 42}',
+                b'\x00\x01\x02\x03\xff\xfe\xfd',
+                b'PNG_IMAGE_DATA_PLACEHOLDER',
+                b'%PDF-1.4\nPDF_CONTENT_PLACEHOLDER'
+            ]
+        }, schema=pa_schema)
+
+        # Write mixed data
+        total_rows = 0
+        for batch in test_data.to_batches():
+            blob_writer.write_arrow_batch(batch)
+            total_rows += batch.num_rows
+
+        # Test prepare commit
+        commit_messages = blob_writer.prepare_commit()
+        # Create commit and commit the data
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        blob_writer.close()
+
+        # Read data back using table API
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_sample(2)
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        actual = table_read.to_arrow(splits)
+        expected_ids = set(test_data['id'].to_pylist())
+        actual_ids = set(actual['id'].to_pylist())
+        self.assertEqual(2, actual.num_rows, "Should have 2 rows")
+        self.assertTrue(actual_ids.issubset(expected_ids),
+                        f"Actual user_ids {actual_ids} should be subset of written ids {expected_ids}")
+
+    def test_blob_write_read_large_data_with_rolling_with_sample(self):
+        """
+        Test writing and reading large blob data with file rolling and sample.
+
+        Test workflow:
+        - Creates a table with blob column and 10MB target file size
+        - Writes 4 batches of 40 records each (160 total records)
+        - Each record contains a 3MB blob
+        - Random sample 12 records
+        - Verifies blob data integrity and size
+        """
+
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('record_id_of_batch', pa.int32()),
+            ('metadata', pa.string()),
+            ('large_blob', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '10MB'
+            }
+        )
+        self.catalog.create_table('test_db.with_rolling_with_sample', schema, False)
+        table = self.catalog.get_table('test_db.with_rolling_with_sample')
+
+        # Create large blob data
+        large_blob_size = 3 * 1024 * 1024
+        blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
+        pattern_size = len(blob_pattern)
+        repetitions = large_blob_size // pattern_size
+        large_blob_data = blob_pattern * repetitions
+
+        actual_size = len(large_blob_data)
+        print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
+        # Write 4 batches of 40 records
+        for i in range(4):
+            write_builder = table.new_batch_write_builder()
+            writer = write_builder.new_write()
+            # Write 40 records
+            for record_id in range(40):
+                test_data = pa.Table.from_pydict({
+                    'id': [i * 40 + record_id + 1],  # Unique ID for each row
+                    'record_id_of_batch': [record_id],
+                    'metadata': [f'Large blob batch {record_id + 1}'],
+                    'large_blob': [large_blob_data]
+                }, schema=pa_schema)
+                writer.write_arrow(test_data)
+
+            commit_messages = writer.prepare_commit()
+            commit = write_builder.new_commit()
+            commit.commit(commit_messages)
+            writer.close()
+
+        # Read data back
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_sample(12)
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+
+        # Verify the data
+        self.assertEqual(result.num_rows, 12, "Should have 12 rows")
+        self.assertEqual(result.num_columns, 4, "Should have 4 columns")
+
+        # Verify blob data integrity
+        blob_data = result.column('large_blob').to_pylist()
+        self.assertEqual(len(blob_data), 12, "Should have 54 blob records")
+
+    def test_blob_write_read_large_data_volums_with_rolling_with_sample(self):
+        """
+        Test writing and reading large blob data with file rolling and sample.
+        Test workflow:
+        - Creates a table with blob column and 10MB target file size
+        - Writes 10000 records of 5KB blob data each
+        - Random sample 1000 records
+        - Verifies data size
+        """
+        # Create schema with blob column
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('batch_id', pa.int32()),
+            ('metadata', pa.string()),
+            ('large_blob', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '10MB'
+            }
+        )
+        self.catalog.create_table('test_db.large_rolling_with_sample', schema, False)
+        table = self.catalog.get_table('test_db.large_rolling_with_sample')
+
+        # Create large blob data
+        large_blob_size = 5 * 1024  #
+        blob_pattern = b'LARGE_BLOB_PATTERN_' + b'X' * 1024  # ~1KB pattern
+        pattern_size = len(blob_pattern)
+        repetitions = large_blob_size // pattern_size
+        large_blob_data = blob_pattern * repetitions
+
+        actual_size = len(large_blob_data)
+        print(f"Created blob data: {actual_size:,} bytes ({actual_size / (1024 * 1024):.2f} MB)")
+        # Write 10000 records of data
+        num_row = 10000
+        expected = pa.Table.from_pydict({
+            'id': [i for i in range(1, num_row + 1)],
+            'batch_id': [11] * num_row,
+            'metadata': [f'Large blob batch {11}'] * num_row,
+            'large_blob': [i.to_bytes(2, byteorder='little') + large_blob_data for i in range(num_row)]
+        }, schema=pa_schema)
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(expected)
+
+        commit_messages = writer.prepare_commit()
+        commit = write_builder.new_commit()
+        commit.commit(commit_messages)
+        writer.close()
+
+        # Read data back
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_sample(1000)
+        table_read = read_builder.new_read()
+        actual = table_read.to_arrow(table_scan.plan().splits())
+
+        # Verify the data
+        actual_ids = set(actual['id'].to_pylist())
+        expected_ids = set(list(range(1, num_row + 1)))
+        self.assertEqual(1000, actual.num_rows, "Should have 1000 rows")
+        self.assertTrue(actual_ids.issubset(expected_ids))
+
     def test_concurrent_blob_writes_with_retry(self):
         """Test concurrent blob writes to verify retry mechanism works correctly."""
         import threading
