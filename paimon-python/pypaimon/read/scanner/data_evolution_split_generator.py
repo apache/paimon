@@ -77,8 +77,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     self.end_pos_of_this_subtask
                 )
         elif self.idx_of_this_subtask is not None:
-            # shard data range: [plan_start_pos, plan_end_pos)
-            partitioned_files, plan_start_pos, plan_end_pos = self._filter_by_shard(partitioned_files)
+            partitioned_files = self._filter_by_shard(
+                partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks
+            )
 
         def weight_func(file_list: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
@@ -108,9 +109,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 flatten_packed_files, packed_files, sorted_entries_list
             )
 
-        if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
+        if self.start_pos_of_this_subtask is not None:
             splits = self._wrap_to_sliced_splits(splits, plan_start_pos, plan_end_pos)
-
         # Wrap splits with IndexedSplit if row_ranges is provided
         if self.row_ranges:
             splits = self._wrap_to_indexed_splits(splits)
@@ -242,22 +242,61 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return filtered_partitioned_files, plan_start_pos, plan_end_pos
 
-    def _filter_by_shard(self, partitioned_files: defaultdict) -> tuple:
-        """
-        Filter file entries by shard for data evolution tables.
-        """
-        # Calculate total rows (excluding blob files)
-        total_row = sum(
-            entry.file.row_count
-            for file_entries in partitioned_files.values()
-            for entry in file_entries
-            if not self._is_blob_file(entry.file.file_name)
-        )
+    def _filter_by_shard(self, partitioned_files: defaultdict, sub_task_id: int, total_tasks: int) -> defaultdict:
+        list_ranges = []
+        for file_entries in partitioned_files.values():
+            for entry in file_entries:
+                first_row_id = entry.file.first_row_id
+                if first_row_id is None:
+                    raise ValueError("Found None first row id in files")
+                # Range is inclusive [from_, to], so use row_count - 1
+                list_ranges.append(Range(first_row_id, first_row_id + entry.file.row_count - 1))
 
-        # Calculate shard range using shared helper
-        start_pos, end_pos = self._compute_shard_range(total_row)
+        sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
 
-        return self._filter_by_row_range(partitioned_files, start_pos, end_pos)
+        start_range, end_range = self._divide_ranges(sorted_ranges, sub_task_id, total_tasks)
+        if start_range is None or end_range is None:
+            return defaultdict(list)
+        start_first_row_id = start_range.from_
+        end_first_row_id = end_range.to
+
+        filtered_partitioned_files = {
+            k: [x for x in v if x.file.first_row_id >= start_first_row_id and x.file.first_row_id <= end_first_row_id]
+            for k, v in partitioned_files.items()
+        }
+
+        filtered_partitioned_files = {k: v for k, v in filtered_partitioned_files.items() if v}
+        return defaultdict(list, filtered_partitioned_files)
+
+    @staticmethod
+    def _divide_ranges(
+        sorted_ranges: List[Range], sub_task_id: int, total_tasks: int
+    ) -> Tuple[Optional[Range], Optional[Range]]:
+        if not sorted_ranges:
+            return None, None
+
+        num_ranges = len(sorted_ranges)
+
+        # If more tasks than ranges, some tasks get nothing
+        if sub_task_id >= num_ranges:
+            return None, None
+
+        # Calculate balanced distribution of ranges across tasks
+        base_ranges_per_task = num_ranges // total_tasks
+        remainder = num_ranges % total_tasks
+
+        # Each of the first 'remainder' tasks gets one extra range
+        if sub_task_id < remainder:
+            num_ranges_for_task = base_ranges_per_task + 1
+            start_idx = sub_task_id * (base_ranges_per_task + 1)
+        else:
+            num_ranges_for_task = base_ranges_per_task
+            start_idx = (
+                remainder * (base_ranges_per_task + 1) +
+                (sub_task_id - remainder) * base_ranges_per_task
+            )
+        end_idx = start_idx + num_ranges_for_task - 1
+        return sorted_ranges[start_idx], sorted_ranges[end_idx]
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """
