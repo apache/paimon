@@ -39,8 +39,8 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
 
-import static org.apache.paimon.spark.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
-import static org.apache.paimon.spark.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
 
 /** Default global index builder. */
 public class DefaultGlobalIndexBuilder implements Serializable {
