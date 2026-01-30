@@ -3338,7 +3338,9 @@ public class CoreOptions implements Serializable {
         if (clusteringColumns == null || clusteringColumns.isEmpty()) {
             return Collections.emptyList();
         }
-        return Arrays.asList(clusteringColumns.split(","));
+        return Arrays.stream(clusteringColumns.split(","))
+                .map(String::trim)
+                .collect(Collectors.toList());
     }
 
     public static OrderType clusteringStrategy(String clusteringStrategy, int columnSize) {
