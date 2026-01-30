@@ -53,6 +53,10 @@ public class ReducerMergeFunctionWrapper implements MergeFunctionWrapper<KeyValu
     public void add(KeyValue kv) {
         if (initialKv == null) {
             initialKv = kv;
+            if (kv.isAdd()) {
+                merge(initialKv);
+                isInitialized = true;
+            }
         } else {
             if (!isInitialized) {
                 merge(initialKv);
