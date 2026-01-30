@@ -90,7 +90,7 @@ def _list_data_files_recursive(
             splits.append(
                 FormatDataSplit(
                     file_path=full_path,
-                    file_size=size if size is not None else 0,
+                    file_size=size,
                     partition=part_spec,
                 )
             )
@@ -123,7 +123,7 @@ class FormatTableScan:
             filtered = []
             for s in splits:
                 match = s.partition and all(
-                    s.partition.get(k) == v
+                    str(s.partition.get(k)) == str(v)
                     for k, v in self.partition_filter.items()
                 )
                 if match:

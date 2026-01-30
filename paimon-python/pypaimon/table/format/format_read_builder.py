@@ -33,8 +33,15 @@ class FormatReadBuilder:
         self._partition_filter: Optional[dict] = None
 
     def with_filter(self, predicate: Predicate) -> "FormatReadBuilder":
-        if self._partition_filter is None and self.table.partition_keys and predicate:
-            spec = extract_partition_spec_from_predicate(predicate, self.table.partition_keys)
+        ok = (
+            self._partition_filter is None
+            and self.table.partition_keys
+            and predicate
+        )
+        if ok:
+            spec = extract_partition_spec_from_predicate(
+                predicate, self.table.partition_keys
+            )
             if spec is not None:
                 self._partition_filter = spec
         return self
@@ -47,7 +54,9 @@ class FormatReadBuilder:
         self._limit = limit
         return self
 
-    def with_partition_filter(self, partition_spec: Optional[dict]) -> "FormatReadBuilder":
+    def with_partition_filter(
+        self, partition_spec: Optional[dict]
+    ) -> "FormatReadBuilder":
         self._partition_filter = partition_spec
         return self
 
@@ -55,7 +64,6 @@ class FormatReadBuilder:
         return FormatTableScan(
             self.table,
             partition_filter=self._partition_filter,
-            limit=self._limit,
         )
 
     def new_read(self) -> FormatTableRead:

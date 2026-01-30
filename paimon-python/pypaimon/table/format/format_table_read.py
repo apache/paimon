@@ -24,6 +24,20 @@ from pypaimon.table.format.format_data_split import FormatDataSplit
 from pypaimon.table.format.format_table import FormatTable, Format
 
 
+def _text_format_schema_column(table: FormatTable) -> Optional[str]:
+    """TEXT format: single data column name from schema (non-partition)."""
+    if table.format() != Format.TEXT or not table.fields:
+        return None
+    data_names = [
+        f.name for f in table.fields if f.name not in table.partition_keys
+    ]
+    return (
+        data_names[0]
+        if data_names
+        else (table.field_names[0] if table.field_names else None)
+    )
+
+
 def _read_file_to_arrow(
     file_io: Any,
     split: FormatDataSplit,
@@ -31,6 +45,7 @@ def _read_file_to_arrow(
     partition_spec: Optional[Dict[str, str]],
     read_fields: Optional[List[str]],
     partition_key_types: Optional[Dict[str, pyarrow.DataType]] = None,
+    text_column_name: Optional[str] = None,
 ) -> pyarrow.Table:
     path = split.data_path()
     csv_read_options = None
@@ -106,7 +121,11 @@ def _read_file_to_arrow(
         )
         if not lines:
             return pyarrow.table({})
-        col_name = "value" if not read_fields else read_fields[0]
+        col_name = (
+            read_fields[0]
+            if read_fields
+            else (text_column_name if text_column_name else "value")
+        )
         tbl = pyarrow.table({col_name: lines})
     else:
         raise ValueError(f"Format {fmt} read not implemented in Python")
@@ -165,6 +184,11 @@ class FormatTableRead:
         read_fields = self.projection
         fmt = self.table.format()
         partition_key_types = _partition_key_types(self.table)
+        text_col = (
+            _text_format_schema_column(self.table)
+            if fmt == Format.TEXT
+            else None
+        )
         tables = []
         nrows = 0
         for split in splits:
@@ -175,6 +199,7 @@ class FormatTableRead:
                 split.partition,
                 read_fields,
                 partition_key_types,
+                text_column_name=text_col,
             )
             if t.num_rows > 0:
                 tables.append(t)
@@ -209,6 +234,12 @@ class FormatTableRead:
         splits: List[FormatDataSplit],
     ) -> Iterator[Any]:
         partition_key_types = _partition_key_types(self.table)
+        fmt = self.table.format()
+        text_col = (
+            _text_format_schema_column(self.table)
+            if fmt == Format.TEXT
+            else None
+        )
         n_yielded = 0
         for split in splits:
             if self.limit is not None and n_yielded >= self.limit:
@@ -216,10 +247,11 @@ class FormatTableRead:
             t = _read_file_to_arrow(
                 self.table.file_io,
                 split,
-                self.table.format(),
+                fmt,
                 split.partition,
                 self.projection,
                 partition_key_types,
+                text_column_name=text_col,
             )
             for batch in t.to_batches():
                 for i in range(batch.num_rows):

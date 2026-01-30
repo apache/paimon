@@ -176,16 +176,12 @@ class FormatTableWrite:
         path = f"{dir_path}/{file_name}"
 
         fmt = self._file_format
+        tbl = pyarrow.Table.from_batches([data])
         if fmt == Format.PARQUET:
             buf = io.BytesIO()
-            pyarrow.parquet.write_table(
-                pyarrow.Table.from_batches([data]),
-                buf,
-                compression="zstd",
-            )
+            pyarrow.parquet.write_table(tbl, buf, compression="zstd")
             raw = buf.getvalue()
         elif fmt == Format.CSV:
-            tbl = pyarrow.Table.from_batches([data])
             if hasattr(pyarrow, "csv"):
                 buf = io.BytesIO()
                 pyarrow.csv.write_csv(tbl, buf)
@@ -195,7 +191,6 @@ class FormatTableWrite:
                 tbl.to_pandas().to_csv(buf, index=False)
                 raw = buf.getvalue().encode("utf-8")
         elif fmt == Format.JSON:
-            tbl = pyarrow.Table.from_batches([data])
             import json
             lines = []
             for i in range(tbl.num_rows):
@@ -206,7 +201,6 @@ class FormatTableWrite:
                 lines.append(json.dumps(row) + "\n")
             raw = "".join(lines).encode("utf-8")
         elif fmt == Format.ORC:
-            tbl = pyarrow.Table.from_batches([data])
             if hasattr(pyarrow, "orc"):
                 buf = io.BytesIO()
                 pyarrow.orc.write_table(tbl, buf)
@@ -217,7 +211,6 @@ class FormatTableWrite:
                     "support (pyarrow.orc)"
                 )
         elif fmt == Format.TEXT:
-            tbl = pyarrow.Table.from_batches([data])
             partition_keys = self.table.partition_keys
             if partition_keys:
                 data_cols = [
