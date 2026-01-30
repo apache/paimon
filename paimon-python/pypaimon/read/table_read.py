@@ -63,8 +63,9 @@ class TableRead:
         num_rows = batch.num_rows
         columns = []
 
+        batch_column_names = batch.schema.names  # pyarrow 0.17+; RecordBatch.column_names not in py36
         for field in target_schema:
-            if field.name in batch.column_names:
+            if field.name in batch_column_names:
                 col = batch.column(field.name)
                 if col.type != field.type:
                     col = pyarrow.nulls(num_rows, type=field.type)
