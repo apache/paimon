@@ -189,15 +189,18 @@ public class PaimonMetadataApplier implements MetadataApplier {
                                                             .getLogicalType()),
                                             column.getComment()));
             List<String> partitionKeys = new ArrayList<>();
-            List<String> primaryKeys = schema.primaryKeys();
+            List<String> primaryKeys = new ArrayList<>(schema.primaryKeys());
             if (partitionMaps.containsKey(event.tableId())) {
                 partitionKeys.addAll(partitionMaps.get(event.tableId()));
             } else if (schema.partitionKeys() != null && !schema.partitionKeys().isEmpty()) {
                 partitionKeys.addAll(schema.partitionKeys());
             }
-            for (String partitionColumn : partitionKeys) {
-                if (!primaryKeys.contains(partitionColumn)) {
-                    primaryKeys.add(partitionColumn);
+            // Only add partition keys to primary keys if primary keys exist
+            if (!primaryKeys.isEmpty()) {
+                for (String partitionColumn : partitionKeys) {
+                    if (!primaryKeys.contains(partitionColumn)) {
+                        primaryKeys.add(partitionColumn);
+                    }
                 }
             }
             builder.primaryKey(primaryKeys)
