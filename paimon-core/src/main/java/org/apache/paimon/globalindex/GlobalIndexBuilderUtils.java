@@ -16,13 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.globalindex;
+package org.apache.paimon.globalindex;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
-import org.apache.paimon.globalindex.GlobalIndexWriter;
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
