@@ -99,7 +99,10 @@ class DataFileBatchReader(RecordBatchReader):
                 ordered_arrays = list(inter_arrays)
                 ordered_names = list(inter_names)
                 for name in self.requested_field_names[len(inter_names):]:
-                    ordered_arrays.append(pa.nulls(num_rows))
+                    field = self.schema_map.get(name)
+                    ordered_arrays.append(
+                        pa.nulls(num_rows, type=field.type) if field is not None else pa.nulls(num_rows)
+                    )
                     ordered_names.append(name)
                 inter_arrays = ordered_arrays
                 inter_names = ordered_names
@@ -111,7 +114,10 @@ class DataFileBatchReader(RecordBatchReader):
                         ordered_arrays.append(inter_arrays[inter_names.index(name)])
                         ordered_names.append(name)
                     else:
-                        ordered_arrays.append(pa.nulls(num_rows))
+                        field = self.schema_map.get(name)
+                        ordered_arrays.append(
+                            pa.nulls(num_rows, type=field.type) if field is not None else pa.nulls(num_rows)
+                        )
                         ordered_names.append(name)
                 inter_arrays = ordered_arrays
                 inter_names = ordered_names
