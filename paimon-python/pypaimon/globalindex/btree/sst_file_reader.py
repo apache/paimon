@@ -124,9 +124,9 @@ class SstFileReader:
     ):
         self.comparator = comparator
         self.input_stream = input_stream
-        self.index_block = self._read_block(index_block_handle, True)
+        self.index_block = self._read_block(index_block_handle)
 
-    def _read_block(self, block_handle: BlockHandle, index: bool) -> BlockReader:
+    def _read_block(self, block_handle: BlockHandle) -> BlockReader:
         self.input_stream.seek(block_handle.offset)
         # Read block data + 5 bytes trailer (1 byte compression type + 4 bytes CRC32)
         block_data = self.input_stream.read(block_handle.size + 5)
@@ -149,19 +149,11 @@ class SstFileReader:
         if actual_crc32 != crc32_value:
             raise ValueError(f"CRC32 mismatch: expected {crc32_value}, got {actual_crc32}")
 
-        return BlockReader.create(block_bytes, self._slice_comparator if index else self.comparator)
+        return BlockReader.create(block_bytes, self.comparator)
 
-    @staticmethod
-    def _slice_comparator(a: bytes, b: bytes) -> int:
-        if a < b:
-            return -1
-        elif a > b:
-            return 1
-        return 0
-    
     def create_iterator(self) -> SstFileIterator:
         def read_block(block: BlockHandle) -> BlockReader:
-            return self._read_block(block, False)
+            return self._read_block(block)
 
         return SstFileIterator(
             read_block,

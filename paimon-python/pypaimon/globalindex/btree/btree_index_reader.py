@@ -53,56 +53,6 @@ def _deserialize_row_ids(data: bytes) -> List[int]:
     return row_ids
 
 
-def _compare_bytes(a: bytes, b: bytes) -> int:
-    """
-    Compare two byte arrays.
-
-    Args:
-        a: First byte array
-        b: Second byte array
-
-    Returns:
-        -1 if a < b, 0 if a == b, 1 if a > b
-    """
-    if a < b:
-        return -1
-    elif a > b:
-        return 1
-    return 0
-
-
-def _is_in_range_bytes(
-        key_bytes: bytes,
-        from_bytes: bytes,
-        to_bytes: bytes,
-        from_inclusive: bool,
-        to_inclusive: bool
-) -> bool:
-    """
-    Check if a key (as bytes) falls within the specified range.
-
-    Args:
-        key_bytes: The key bytes to check
-        from_bytes: Lower bound bytes
-        to_bytes: Upper bound bytes
-        from_inclusive: Whether lower bound is inclusive
-        to_inclusive: Whether upper bound is inclusive
-
-    Returns:
-        True if key is in range, False otherwise
-    """
-    if not from_inclusive and _compare_bytes(key_bytes, from_bytes) == 0:
-        return False
-
-    cmp_to = _compare_bytes(key_bytes, to_bytes)
-    if cmp_to > 0:
-        return False
-    if not to_inclusive and cmp_to == 0:
-        return False
-
-    return True
-
-
 class BTreeIndexReader(GlobalIndexReader):
     """
     The GlobalIndexReader implementation for btree index.
@@ -225,25 +175,21 @@ class BTreeIndexReader(GlobalIndexReader):
     ) -> RoaringBitmap64:
         """
         Range query on underlying SST File.
-        
+
         Args:
             from_key: Lower bound key
             to_key: Upper bound key
             from_inclusive: Whether to include lower bound
             to_inclusive: Whether to include upper bound
-            
+
         Returns:
             RoaringBitmap64 containing all qualified row IDs
         """
         result = RoaringBitmap64()
-        
-        # Use SST reader to efficiently scan the data blocks
-        serialized_from = self.key_serializer.serialize(from_key)
-        serialized_to = self.key_serializer.serialize(to_key)
 
         # Create iterator and seek to start key
         file_iter = self.reader.create_iterator()
-        file_iter.seek_to(serialized_from)
+        file_iter.seek_to(self.key_serializer.serialize(from_key))
 
         # Iterate through data blocks
         while True:
@@ -260,14 +206,21 @@ class BTreeIndexReader(GlobalIndexReader):
                 key_bytes = entry.key
                 value_bytes = entry.value
 
-                # Check if key is within range using byte comparison
-                if _is_in_range_bytes(key_bytes, serialized_from, serialized_to, from_inclusive, to_inclusive):
-                    row_ids = _deserialize_row_ids(value_bytes)
-                    for row_id in row_ids:
-                        result.add(row_id)
-                elif _compare_bytes(key_bytes, serialized_to) > 0:
-                    # Key is beyond the range, stop processing
+                key = self.key_serializer.deserialize(key_bytes)
+
+                # Skip if key equals from_key and from_inclusive is False
+                if not from_inclusive and self.comparator(key, from_key) == 0:
+                    continue
+
+                # Check if key is beyond the range
+                difference = self.comparator(key, to_key)
+                if difference > 0 or (not to_inclusive and difference == 0):
                     return result
+
+                # Add all row IDs for this key
+                row_ids = _deserialize_row_ids(value_bytes)
+                for row_id in row_ids:
+                    result.add(row_id)
 
         return result
 

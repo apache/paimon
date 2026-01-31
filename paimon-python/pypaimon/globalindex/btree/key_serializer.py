@@ -22,6 +22,9 @@ from abc import ABC, abstractmethod
 from typing import Callable
 import struct
 
+from pypaimon.schema.data_types import DataType
+from pypaimon.schema.data_types import AtomicType
+
 
 class KeySerializer(ABC):
     """
@@ -85,11 +88,11 @@ class LongSerializer(KeySerializer):
 
     def serialize(self, key: object) -> bytes:
         """Serialize a long key to bytes."""
-        return struct.pack('>q', int(key))
+        return struct.pack('<q', int(key))
 
     def deserialize(self, data: bytes) -> object:
         """Deserialize bytes to a long key."""
-        return struct.unpack('>q', data)[0]
+        return struct.unpack('<q', data)[0]
 
     def create_comparator(self) -> Callable[[object, object], int]:
         """Create a comparator for long keys."""
@@ -109,11 +112,11 @@ class IntSerializer(KeySerializer):
 
     def serialize(self, key: object) -> bytes:
         """Serialize an int key to bytes."""
-        return struct.pack('>i', int(key))
+        return struct.pack('<i', int(key))
 
     def deserialize(self, data: bytes) -> object:
         """Deserialize bytes to an int key."""
-        return struct.unpack('>i', data)[0]
+        return struct.unpack('<i', data)[0]
 
     def create_comparator(self) -> Callable[[object, object], int]:
         """Create a comparator for int keys."""
@@ -128,104 +131,15 @@ class IntSerializer(KeySerializer):
         return compare
 
 
-class FloatSerializer(KeySerializer):
-    """Serializer for FLOAT type."""
-
-    def serialize(self, key: object) -> bytes:
-        """Serialize a float key to bytes."""
-        return struct.pack('>f', float(key))
-
-    def deserialize(self, data: bytes) -> object:
-        """Deserialize bytes to a float key."""
-        return struct.unpack('>f', data)[0]
-
-    def create_comparator(self) -> Callable[[object, object], int]:
-        """Create a comparator for float keys."""
-        def compare(a: object, b: object) -> int:
-            float_a = float(a)
-            float_b = float(b)
-            if float_a < float_b:
-                return -1
-            elif float_a > float_b:
-                return 1
-            return 0
-        return compare
-
-
-class DoubleSerializer(KeySerializer):
-    """Serializer for DOUBLE type."""
-
-    def serialize(self, key: object) -> bytes:
-        """Serialize a double key to bytes."""
-        return struct.pack('>d', float(key))
-
-    def deserialize(self, data: bytes) -> object:
-        """Deserialize bytes to a double key."""
-        return struct.unpack('>d', data)[0]
-
-    def create_comparator(self) -> Callable[[object, object], int]:
-        """Create a comparator for double keys."""
-        def compare(a: object, b: object) -> int:
-            double_a = float(a)
-            double_b = float(b)
-            if double_a < double_b:
-                return -1
-            elif double_a > double_b:
-                return 1
-            return 0
-        return compare
-
-
-class BooleanSerializer(KeySerializer):
-    """Serializer for BOOLEAN type."""
-
-    def serialize(self, key: object) -> bytes:
-        """Serialize a boolean key to bytes."""
-        return struct.pack('>B', 1 if key else 0)
-
-    def deserialize(self, data: bytes) -> object:
-        """Deserialize bytes to a boolean key."""
-        return struct.unpack('>B', data)[0] == 1
-
-    def create_comparator(self) -> Callable[[object, object], int]:
-        """Create a comparator for boolean keys."""
-        def compare(a: object, b: object) -> int:
-            bool_a = bool(a)
-            bool_b = bool(b)
-            if bool_a < bool_b:
-                return -1
-            elif bool_a > bool_b:
-                return 1
-            return 0
-        return compare
-
-
-def create_serializer(data_type: str) -> KeySerializer:
-    """
-    Factory method to create a KeySerializer based on data type.
-    
-    Args:
-        data_type: String representation of the data type
-        
-    Returns:
-        Appropriate KeySerializer instance
-        
-    Raises:
-        ValueError: If the data type is not supported
-    """
-    data_type_lower = data_type.lower()
-    
-    if data_type_lower in ('string', 'varchar', 'char'):
+def create_serializer(data_type: DataType) -> KeySerializer:
+    if not isinstance(data_type, AtomicType):
+        raise ValueError(f"Key serializer only support AtomicType yet, meet {data_type.__class__}")
+    type_name = data_type.type.upper()
+    if type_name in ('CHAR', 'VARCHAR', 'STRING'):
         return StringSerializer()
-    elif data_type_lower in ('bigint', 'long'):
+    elif type_name == 'BIGINT':
         return LongSerializer()
-    elif data_type_lower in ('int', 'integer'):
+    elif type_name == 'INT':
         return IntSerializer()
-    elif data_type_lower in ('float'):
-        return FloatSerializer()
-    elif data_type_lower in ('double'):
-        return DoubleSerializer()
-    elif data_type_lower in ('boolean', 'bool'):
-        return BooleanSerializer()
     else:
         raise ValueError(f"DataType: {data_type} is not supported by btree index now.")

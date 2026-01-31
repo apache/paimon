@@ -223,7 +223,7 @@ class BlockIterator:
             
             self.input.set_position(self.reader.seek_to(mid))
             mid_entry = self.read_entry()
-            compare = self.reader.comparator(mid_entry.key, target_key) if self.reader.comparator else -1
+            compare = self.reader.comparator(mid_entry.key, target_key)
             
             if compare == 0:
                 self.polled = mid_entry

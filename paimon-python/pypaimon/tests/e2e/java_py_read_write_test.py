@@ -321,28 +321,26 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.assertEqual(expected, actual)
 
     def test_read_btree_index_table(self):
-        table = self.catalog.get_table('default.test_btree_index')
-        read_builder: ReadBuilder = table.new_read_builder()
+        self._test_read_btree_index_generic("test_btree_index_string", "k2", pa.string())
+        self._test_read_btree_index_generic("test_btree_index_int", 200, pa.int32())
+        self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
 
-        # read all
-        table_read = read_builder.new_read()
-        splits = read_builder.new_scan().plan().splits()
-        actual = table_sort_by(table_read.to_arrow(splits), 'k')
-        expected = pa.Table.from_pydict({
-            'k': ["k1", "k2", "k3"],
-            'v': ["v1", "v2", "v3"]
-        })
-        self.assertEqual(expected, actual)
+    def _test_read_btree_index_generic(self, table_name: str, k, k_type):
+        table = self.catalog.get_table('default.' + table_name)
+        read_builder: ReadBuilder = table.new_read_builder()
 
         # read using index
         predicate_builder = read_builder.new_predicate_builder()
-        predicate = predicate_builder.equal('k', 'k2')
+        predicate = predicate_builder.equal('k', k)
         read_builder.with_filter(predicate)
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'k')
         expected = pa.Table.from_pydict({
-            'k': ["k2"],
+            'k': [k],
             'v': ["v2"]
-        })
+        }, schema=pa.schema([
+            ("k", k_type),
+            ("v", pa.string())
+        ]))
         self.assertEqual(expected, actual)
