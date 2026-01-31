@@ -214,6 +214,7 @@ public class ParquetSchemaConverter {
             case ROW:
                 RowType rowType = (RowType) type;
                 Types.GroupBuilder<GroupType> groupTypeBuilder = Types.buildGroup(repetition);
+                // TODO Use Variant until all engines are upgraded to the latest Parquet
                 // if (VariantMetadataUtils.isVariantRowType(rowType)) {
                 //     groupTypeBuilder.as(
                 //            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
@@ -224,6 +225,7 @@ public class ParquetSchemaConverter {
                         .withId(fieldId);
             case VARIANT:
                 return Types.buildGroup(repetition)
+                        // TODO Use Variant until all engines are upgraded to the latest Parquet
                         // .as(LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION))
                         .addField(
                                 Types.primitive(
