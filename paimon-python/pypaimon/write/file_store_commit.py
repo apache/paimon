@@ -20,7 +20,7 @@ import logging
 import random
 import time
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -138,6 +138,33 @@ class FileStoreCommit:
             commit_identifier=commit_identifier,
             commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
                 snapshot, partition_filter, commit_messages)
+        )
+
+    def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+
+        predicate_builder = PredicateBuilder(self.table.fields)
+        partition_predicates = []
+        for part in partitions:
+            sub_predicates = [
+                predicate_builder.equal(key, value)
+                for key, value in part.items()
+            ]
+            if sub_predicates:
+                pred = predicate_builder.and_predicates(sub_predicates)
+                if pred is not None:
+                    partition_predicates.append(pred)
+        if not partition_predicates:
+            raise RuntimeError("Failed to build partition filter for drop_partitions.")
+
+        partition_filter = predicate_builder.or_predicates(partition_predicates)
+
+        self._try_commit(
+            commit_kind="OVERWRITE",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                snapshot, partition_filter, [])
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan):

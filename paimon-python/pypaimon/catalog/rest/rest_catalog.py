@@ -214,6 +214,22 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
+    def drop_partitions(
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+        table = self.get_table(identifier)
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.truncate_partitions(partitions)
+        finally:
+            commit.close()
+
     def alter_table(
         self,
         identifier: Union[str, Identifier],
