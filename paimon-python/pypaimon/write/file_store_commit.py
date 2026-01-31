@@ -144,6 +144,17 @@ class FileStoreCommit:
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
 
+        partition_keys_set = set(self.table.partition_keys)
+        for part in partitions:
+            for key in part:
+                if key not in partition_keys_set:
+                    raise ValueError(
+                        f"Partition spec key '{key}' is not a partition column. "
+                        f"Partition keys are: {list(self.table.partition_keys)}."
+                    )
+
+        # Use full table fields so FullStartingScanner's trim_and_transform_predicate
+        # maps indices correctly (full schema index -> partition index).
         predicate_builder = PredicateBuilder(self.table.fields)
         partition_predicates = []
         for part in partitions:
@@ -177,6 +188,11 @@ class FileStoreCommit:
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
             commit_entries = commit_entries_plan(latest_snapshot)
+
+            # No entries to commit (e.g. drop_partitions with no matching data): skip commit
+            # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
+            if not commit_entries:
+                break
 
             result = self._try_commit_once(
                 retry_result=retry_result,
