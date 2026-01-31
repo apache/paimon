@@ -557,6 +557,9 @@ class DataEvolutionSplitRead(SplitRead):
                 continue
             for j, field in enumerate(all_read_fields):
                 if row_offsets[j] == -1 and field.name in first_file.write_cols:
+                    # Do not assign non-blob fields to a blob bunch (blob file only has blob column)
+                    if self._is_blob_file(first_file.file_name) and field.name != first_file.write_cols[0]:
+                        continue
                     row_offsets[j] = i
                     field_offsets[j] = len(read_fields_per_bunch[i])
                     read_fields_per_bunch[i].append(field)
@@ -598,6 +601,9 @@ class DataEvolutionSplitRead(SplitRead):
                 first_file = bunch.files()[0]
                 if not first_file.write_cols or field.name not in first_file.write_cols:
                     continue
+                # Do not assign non-blob fields to a blob bunch (blob file only has blob column)
+                if self._is_blob_file(first_file.file_name) and field.name != first_file.write_cols[0]:
+                    continue
                 row_offsets[i] = bi
                 field_offsets[i] = len(read_fields_per_bunch[bi])
                 read_fields_per_bunch[bi].append(field)
@@ -611,11 +617,23 @@ class DataEvolutionSplitRead(SplitRead):
         all_same_write_cols = len(set(write_cols_tuples)) <= 1 if write_cols_tuples else True
         use_requested_field_names = not all_same_write_cols
 
+        table_field_names_set = {f.name for f in self.table.fields}
         for i, bunch in enumerate(fields_files):
-            read_fields = read_fields_per_bunch[i]
+            read_fields = list(read_fields_per_bunch[i])
             if not read_fields:
                 file_record_readers[i] = None
             else:
+                if not self._is_blob_file(bunch.files()[0].file_name):
+                    schema = self.table.schema_manager.get_schema(bunch.files()[0].schema_id)
+                    schema_fields = (
+                        SpecialFields.row_type_with_row_tracking(schema.fields)
+                        if self.row_tracking_enabled else schema.fields
+                    )
+                    read_field_names_set = {f.name for f in read_fields}
+                    for f in schema_fields:
+                        if f.name in table_field_names_set and f.name not in read_field_names_set:
+                            read_fields.append(f)
+                            read_field_names_set.add(f.name)
                 read_field_names = self._remove_partition_fields(read_fields)
                 table_fields = self.read_fields
                 self.read_fields = read_fields

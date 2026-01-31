@@ -183,25 +183,52 @@ class DataEvolutionMergeReader(RecordBatchReader):
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
+            field_name = self.schema.field(i).name if self.schema else None
+            column = None
+            out_name = None
+
             if batch_index >= 0 and batches[batch_index] is not None:
                 src_batch = batches[batch_index]
-                field_name = self.schema.field(i).name if self.schema else None
                 if field_name is not None and field_name in src_batch.schema.names:
                     column = src_batch.column(src_batch.schema.get_field_index(field_name))
-                else:
+                    out_name = (
+                        self.schema.field(i).name
+                        if self.schema is not None and i < len(self.schema)
+                        else field_name
+                    )
+                elif field_index < src_batch.num_columns:
                     column = src_batch.column(field_index)
+                    out_name = (
+                        self.schema.field(i).name
+                        if self.schema is not None and i < len(self.schema)
+                        else src_batch.schema.names[field_index]
+                    )
+
+            if column is None and field_name is not None:
+                for b in batches:
+                    if b is not None and field_name in b.schema.names:
+                        column = b.column(b.schema.get_field_index(field_name))
+                        out_name = (
+                            self.schema.field(i).name
+                            if self.schema is not None and i < len(self.schema)
+                            else field_name
+                        )
+                        break
+
+            if column is not None and out_name is not None:
                 columns.append(column)
-                out_name = (
-                    self.schema.field(i).name
-                    if self.schema is not None and i < len(self.schema)
-                    else src_batch.schema.names[field_index]
-                )
                 names.append(out_name)
             elif self.schema is not None and i < len(self.schema):
                 field = self.schema.field(i)
                 columns.append(pa.nulls(num_rows, type=field.type))
                 names.append(field.name)
             else:
+                if batch_index >= 0 and batches[batch_index] is not None:
+                    src_batch = batches[batch_index]
+                    raise ValueError(
+                        f"Field index {field_index} out of bounds for batch with "
+                        f"{src_batch.num_columns} columns and no schema for null column"
+                    )
                 raise ValueError(
                     f"Row offset {batch_index} for field index {i} is invalid and no schema provided for null column"
                 )
