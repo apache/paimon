@@ -174,6 +174,9 @@ class DataEvolutionMergeReader(RecordBatchReader):
                     # all readers are aligned, as long as one returns null, the others will also have no data
                     return None
                 batches[i] = batch
+        # All readers may be None (e.g. all bunches had empty read_fields_per_bunch)
+        if not any(b is not None for b in batches):
+            return None
         num_rows = next(b.num_rows for b in batches if b is not None)
         columns = []
         names = []

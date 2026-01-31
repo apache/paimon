@@ -460,7 +460,6 @@ class DataEvolutionSplitRead(SplitRead):
         for need_merge_files in split_by_row_id:
             if len(need_merge_files) == 1 and need_merge_files[0].write_cols:
                 pass  # skip resolve to avoid plan_files() per split (shard: 100+ splits × 10 shards)
-            use_union = len(need_merge_files) > 1 and bool(self.read_fields)
             if len(need_merge_files) == 1 or not self.read_fields:
                 # No need to merge fields, just create a single file reader.
                 suppliers.append(
@@ -474,33 +473,6 @@ class DataEvolutionSplitRead(SplitRead):
                 )
 
         return ConcatBatchReader(suppliers)
-
-    def _resolve_files_for_row_range(self, single_file: DataFileMeta) -> List[DataFileMeta]:
-        first_row_id = single_file.first_row_id
-        if first_row_id is None:
-            return [single_file]
-        try:
-            scan = self.table.new_read_builder().new_scan()
-            file_entries = scan.starting_scanner.plan_files()
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug("_resolve_files_for_row_range plan_files failed: %s", e)
-            return [single_file]
-        same_range = [
-            entry.file for entry in file_entries
-            if getattr(entry.file, "first_row_id", None) == first_row_id
-            and not self._is_blob_file(entry.file.file_name)
-        ]
-        logger.debug(
-            "[data_evolution] _resolve_files_for_row_range: first_row_id=%s, plan_files total=%d, "
-            "same_range len=%d, write_cols=%s",
-            first_row_id, len(file_entries), len(same_range),
-            [getattr(f, "write_cols", None) for f in same_range]
-        )
-        if len(same_range) <= 1:
-            return [single_file]
-        same_range.sort(key=lambda x: (x.first_row_id or -1, -x.max_sequence_number))
-        return same_range
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """Split files by firstRowId for data evolution."""
@@ -628,7 +600,8 @@ class DataEvolutionSplitRead(SplitRead):
                 if not first_file.write_cols or field.name not in first_file.write_cols:
                     continue
                 row_offsets[i] = bi
-                field_offsets[i] = first_file.write_cols.index(field.name)
+                field_offsets[i] = len(read_fields_per_bunch[bi])
+                read_fields_per_bunch[bi].append(field)
                 break
 
         write_cols_tuples = [
