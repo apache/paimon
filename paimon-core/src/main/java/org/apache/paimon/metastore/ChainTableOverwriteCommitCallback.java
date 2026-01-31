@@ -26,8 +26,6 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
-import org.apache.paimon.table.ChainGroupReadTable;
-import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitCallback;
@@ -78,13 +76,7 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
             return;
         }
 
-        // Find the underlying table for writing snapshot branch.
-        FileStoreTable candidateTable = table;
-        if (table instanceof FallbackReadFileStoreTable) {
-            candidateTable =
-                    ((ChainGroupReadTable) ((FallbackReadFileStoreTable) table).fallback())
-                            .wrapped();
-        }
+        FileStoreTable candidateTable = ChainTableUtils.resolveChainPrimaryTable(table);
 
         FileStoreTable snapshotTable =
                 candidateTable.switchToBranch(coreOptions.scanFallbackSnapshotBranch());

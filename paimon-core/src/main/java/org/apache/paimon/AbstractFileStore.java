@@ -36,6 +36,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
+import org.apache.paimon.metastore.ChainTableCommitPreCallback;
 import org.apache.paimon.metastore.ChainTableOverwriteCommitCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
@@ -59,6 +60,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PartitionHandler;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
@@ -333,7 +335,8 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitDiscardDuplicateFiles(),
                 conflictDetectFactory,
                 strictModeChecker,
-                rollback);
+                rollback,
+                createCommitPreCallbacks(commitUser, table));
     }
 
     @Override
@@ -428,6 +431,15 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
+        return callbacks;
+    }
+
+    private List<CommitPreCallback> createCommitPreCallbacks(
+            String commitUser, FileStoreTable table) {
+        List<CommitPreCallback> callbacks = new ArrayList<>();
+        if (options.isChainTable()) {
+            callbacks.add(new ChainTableCommitPreCallback(table));
+        }
         return callbacks;
     }
 
