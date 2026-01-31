@@ -46,7 +46,7 @@ class SstFileIterator:
     def __init__(self, read_block: Callable[[BlockHandle], BlockReader], index_block_iterator: BlockIterator):
         self.read_block = read_block
         self.index_iterator = index_block_iterator
-        self.seeked_data_block: Optional[BlockIterator] = None
+        self.sought_data_block: Optional[BlockIterator] = None
     
     def seek_to(self, key: bytes) -> None:
         """
@@ -61,20 +61,20 @@ class SstFileIterator:
         if self.index_iterator.has_next():
             index_entry: BlockEntry = self.index_iterator.__next__()
             block_handle_bytes = index_entry.__getattribute__("value")
-            input = MemorySliceInput(block_handle_bytes)
+            handle_input = MemorySliceInput(block_handle_bytes)
 
             # Parse block handle
             block_handle = BlockHandle(
-                input.read_var_len_long(),
-                input.read_var_len_int()
+                handle_input.read_var_len_long(),
+                handle_input.read_var_len_int()
             )
             
             # Create data block reader and seek
             data_block_reader = self.read_block(block_handle)
-            self.seeked_data_block = data_block_reader.iterator()
-            self.seeked_data_block.seek_to(key)
+            self.sought_data_block = data_block_reader.iterator()
+            self.sought_data_block.seek_to(key)
         else:
-            self.seeked_data_block = None
+            self.sought_data_block = None
     
     def read_batch(self) -> Optional[BlockIterator]:
         """
@@ -84,16 +84,16 @@ class SstFileIterator:
         Returns:
             BlockIterator for the current batch, or None if at file end
         """
-        if self.seeked_data_block is not None:
-            result = self.seeked_data_block
-            self.seeked_data_block = None
+        if self.sought_data_block is not None:
+            result = self.sought_data_block
+            self.sought_data_block = None
             return result
         
-        if not self.index_iterator.hasNext():
+        if not self.index_iterator.has_next():
             return None
         
-        index_entry = self.index_iterator.next()
-        block_handle_bytes = index_entry[1]
+        index_entry = self.index_iterator.__next__()
+        block_handle_bytes = index_entry.value
         
         # Parse block handle
         block_handle = BlockHandle(
@@ -102,7 +102,7 @@ class SstFileIterator:
         )
         
         # Create data block reader
-        data_block_reader = self.block_reader_factory(block_handle)
+        data_block_reader = self.read_block(block_handle)
         return data_block_reader.iterator()
 
 

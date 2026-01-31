@@ -59,9 +59,9 @@ class BTreeFileFooter:
         Initialize the BTree file footer.
         
         Args:
-            bloom_filter_handle: Handle to the bloom filter block (may be None)
+            bloom_filter_handle: Handle to the bloom filter block (maybe None)
             index_block_handle: Handle to the index block
-            null_bitmap_handle: Handle to the null bitmap block (may be None)
+            null_bitmap_handle: Handle to the null bitmap block (maybe None)
         """
         self.bloom_filter_handle = bloom_filter_handle
         self.index_block_handle = index_block_handle

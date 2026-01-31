@@ -40,17 +40,67 @@ from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
 
 
 def _deserialize_row_ids(data: bytes) -> List[int]:
-    input = MemorySliceInput(data)
-    length = input.read_var_len_int()
+    data_input = MemorySliceInput(data)
+    length = data_input.read_var_len_int()
 
     if length <= 0:
         raise ValueError(f"Invalid row id length: {length}")
 
     row_ids = []
     for _ in range(length):
-        row_ids.append(input.read_var_len_long())
+        row_ids.append(data_input.read_var_len_long())
 
     return row_ids
+
+
+def _compare_bytes(a: bytes, b: bytes) -> int:
+    """
+    Compare two byte arrays.
+
+    Args:
+        a: First byte array
+        b: Second byte array
+
+    Returns:
+        -1 if a < b, 0 if a == b, 1 if a > b
+    """
+    if a < b:
+        return -1
+    elif a > b:
+        return 1
+    return 0
+
+
+def _is_in_range_bytes(
+        key_bytes: bytes,
+        from_bytes: bytes,
+        to_bytes: bytes,
+        from_inclusive: bool,
+        to_inclusive: bool
+) -> bool:
+    """
+    Check if a key (as bytes) falls within the specified range.
+
+    Args:
+        key_bytes: The key bytes to check
+        from_bytes: Lower bound bytes
+        to_bytes: Upper bound bytes
+        from_inclusive: Whether lower bound is inclusive
+        to_inclusive: Whether upper bound is inclusive
+
+    Returns:
+        True if key is in range, False otherwise
+    """
+    if not from_inclusive and _compare_bytes(key_bytes, from_bytes) == 0:
+        return False
+
+    cmp_to = _compare_bytes(key_bytes, to_bytes)
+    if cmp_to > 0:
+        return False
+    if not to_inclusive and cmp_to == 0:
+        return False
+
+    return True
 
 
 class BTreeIndexReader(GlobalIndexReader):
@@ -211,64 +261,15 @@ class BTreeIndexReader(GlobalIndexReader):
                 value_bytes = entry.value
 
                 # Check if key is within range using byte comparison
-                if self._is_in_range_bytes(key_bytes, serialized_from, serialized_to, from_inclusive, to_inclusive):
+                if _is_in_range_bytes(key_bytes, serialized_from, serialized_to, from_inclusive, to_inclusive):
                     row_ids = _deserialize_row_ids(value_bytes)
                     for row_id in row_ids:
                         result.add(row_id)
-                elif self._compare_bytes(key_bytes, serialized_to) > 0:
+                elif _compare_bytes(key_bytes, serialized_to) > 0:
                     # Key is beyond the range, stop processing
                     return result
 
         return result
-
-    def _is_in_range_bytes(
-        self,
-        key_bytes: bytes,
-        from_bytes: bytes,
-        to_bytes: bytes,
-        from_inclusive: bool,
-        to_inclusive: bool
-    ) -> bool:
-        """
-        Check if a key (as bytes) falls within the specified range.
-
-        Args:
-            key_bytes: The key bytes to check
-            from_bytes: Lower bound bytes
-            to_bytes: Upper bound bytes
-            from_inclusive: Whether lower bound is inclusive
-            to_inclusive: Whether upper bound is inclusive
-
-        Returns:
-            True if key is in range, False otherwise
-        """
-        if not from_inclusive and self._compare_bytes(key_bytes, from_bytes) == 0:
-            return False
-
-        cmp_to = self._compare_bytes(key_bytes, to_bytes)
-        if cmp_to > 0:
-            return False
-        if not to_inclusive and cmp_to == 0:
-            return False
-
-        return True
-
-    def _compare_bytes(self, a: bytes, b: bytes) -> int:
-        """
-        Compare two byte arrays.
-
-        Args:
-            a: First byte array
-            b: Second byte array
-
-        Returns:
-            -1 if a < b, 0 if a == b, 1 if a > b
-        """
-        if a < b:
-            return -1
-        elif a > b:
-            return 1
-        return 0
 
     def _is_in_range(
         self,
@@ -350,8 +351,7 @@ class BTreeIndexReader(GlobalIndexReader):
             try:
                 result = self._all_non_null_rows()
                 equal_result = self._range_query(literal, literal, True, True)
-                result._data = result._data - equal_result._data
-                return result
+                return RoaringBitmap64.remove_all(result, equal_result)
             except Exception as e:
                 raise RuntimeError("fail to read btree index file.", e)
         
@@ -391,7 +391,7 @@ class BTreeIndexReader(GlobalIndexReader):
                 result = RoaringBitmap64()
                 for literal in literals:
                     range_result = self._range_query(literal, literal, True, True)
-                    result._data = result._data | range_result._data
+                    result = RoaringBitmap64.or_(result, range_result)
                 return result
             except Exception as e:
                 raise RuntimeError("fail to read btree index file.", e)
@@ -404,8 +404,7 @@ class BTreeIndexReader(GlobalIndexReader):
             try:
                 result = self._all_non_null_rows()
                 in_result = self.visit_in(field_ref, literals).results()
-                result._data = result._data - in_result._data
-                return result
+                return RoaringBitmap64.remove_all(result, in_result)
             except Exception as e:
                 raise RuntimeError("fail to read btree index file.", e)
         
@@ -415,7 +414,7 @@ class BTreeIndexReader(GlobalIndexReader):
         """
         Visit a starts-with predicate.
         
-        Note: `startsWith` can also be covered by btree index in future.
+        Note: `startsWith` can also be covered by btree index in the future.
         """
         def supplier():
             try:
@@ -457,8 +456,5 @@ class BTreeIndexReader(GlobalIndexReader):
 
     def close(self) -> None:
         """Close the reader and release resources."""
-        if hasattr(self, 'input_stream') and self.input_stream:
-            try:
-                self.input_stream.close()
-            except Exception:
-                pass
+        if self.input_stream is not None:
+            self.input_stream.close()
