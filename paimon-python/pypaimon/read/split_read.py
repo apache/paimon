@@ -457,9 +457,8 @@ class DataEvolutionSplitRead(SplitRead):
         # Split files by row ID
         split_by_row_id = self._split_by_row_id(files)
 
+        # For single-file partial shard splits we skip resolve (no plan_files per split).
         for need_merge_files in split_by_row_id:
-            if len(need_merge_files) == 1 and need_merge_files[0].write_cols:
-                pass  # skip resolve to avoid plan_files() per split (shard: 100+ splits × 10 shards)
             if len(need_merge_files) == 1 or not self.read_fields:
                 # No need to merge fields, just create a single file reader.
                 suppliers.append(
