@@ -139,9 +139,17 @@ class DataEvolutionMergeReader(RecordBatchReader):
      - The fourth field comes from batch1, and it is at offset 1 in batch1.
      - The fifth field comes from batch2, and it is at offset 1 in batch2.
      - The sixth field comes from batch1, and it is at offset 0 in batch1.
+
+    When row_offsets[i] == -1 (no file provides that field), output a column of nulls using schema.
     """
 
-    def __init__(self, row_offsets: List[int], field_offsets: List[int], readers: List[Optional[RecordBatchReader]]):
+    def __init__(
+        self,
+        row_offsets: List[int],
+        field_offsets: List[int],
+        readers: List[Optional[RecordBatchReader]],
+        schema: Optional[pa.Schema] = None,
+    ):
         if row_offsets is None:
             raise ValueError("Row offsets must not be null")
         if field_offsets is None:
@@ -155,6 +163,7 @@ class DataEvolutionMergeReader(RecordBatchReader):
         self.row_offsets = row_offsets
         self.field_offsets = field_offsets
         self.readers = readers
+        self.schema = schema
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         batches: List[Optional[RecordBatch]] = [None] * len(self.readers)
@@ -165,16 +174,34 @@ class DataEvolutionMergeReader(RecordBatchReader):
                     # all readers are aligned, as long as one returns null, the others will also have no data
                     return None
                 batches[i] = batch
-        # Assemble record batches from batches based on row_offsets and field_offsets
+        num_rows = next(b.num_rows for b in batches if b is not None)
         columns = []
         names = []
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
-            if batches[batch_index] is not None:
-                column = batches[batch_index].column(field_index)
+            if batch_index >= 0 and batches[batch_index] is not None:
+                src_batch = batches[batch_index]
+                field_name = self.schema.field(i).name if self.schema else None
+                if field_name is not None and field_name in src_batch.schema.names:
+                    column = src_batch.column(src_batch.schema.get_field_index(field_name))
+                else:
+                    column = src_batch.column(field_index)
                 columns.append(column)
-                names.append(batches[batch_index].schema.names[field_index])
+                out_name = (
+                    self.schema.field(i).name
+                    if self.schema is not None and i < len(self.schema)
+                    else src_batch.schema.names[field_index]
+                )
+                names.append(out_name)
+            elif self.schema is not None and i < len(self.schema):
+                field = self.schema.field(i)
+                columns.append(pa.nulls(num_rows, type=field.type))
+                names.append(field.name)
+            else:
+                raise ValueError(
+                    f"Row offset {batch_index} for field index {i} is invalid and no schema provided for null column"
+                )
         if columns:
             return pa.RecordBatch.from_arrays(columns, names)
         return None

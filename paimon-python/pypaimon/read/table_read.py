@@ -68,7 +68,10 @@ class TableRead:
             if field.name in batch_column_names:
                 col = batch.column(field.name)
                 if col.type != field.type:
-                    col = pyarrow.nulls(num_rows, type=field.type)
+                    if col.type.id == field.type.id:
+                        col = col.cast(field.type)
+                    else:
+                        col = pyarrow.nulls(num_rows, type=field.type)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
             columns.append(col)
@@ -131,6 +134,12 @@ class TableRead:
                         yield batch
             finally:
                 reader.close()
+
+        try:
+            if self.table.options.data_evolution_enabled():
+                _ = self.table.new_read_builder().new_scan().starting_scanner.plan_files()
+        except Exception:
+            pass
 
     def _filter_batches_by_row_ranges(
         self,
