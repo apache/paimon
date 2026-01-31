@@ -119,6 +119,12 @@ class RoaringBitmap64:
         result._data = a._data | b._data
         return result
 
+    @staticmethod
+    def remove_all(a: 'RoaringBitmap64', b: 'RoaringBitmap64') -> 'RoaringBitmap64':
+        result = RoaringBitmap64()
+        result._data = a._data - b._data
+        return result
+
     def serialize(self) -> bytes:
         """Serialize the bitmap to bytes."""
         # Simple serialization format: count followed by sorted values

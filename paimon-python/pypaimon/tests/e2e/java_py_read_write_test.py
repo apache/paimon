@@ -25,6 +25,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
+from pypaimon.read.read_builder import ReadBuilder
 
 if sys.version_info[:2] == (3, 6):
     from pypaimon.tests.py36.pyarrow_compat import table_sort_by
@@ -317,4 +318,31 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
             'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
         }, schema=pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_read_btree_index_table(self):
+        table = self.catalog.get_table('default.test_btree_index')
+        read_builder: ReadBuilder = table.new_read_builder()
+
+        # read all
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k1", "k2", "k3"],
+            'v': ["v1", "v2", "v3"]
+        })
+        self.assertEqual(expected, actual)
+
+        # read using index
+        predicate_builder = read_builder.new_predicate_builder()
+        predicate = predicate_builder.equal('k', 'k2')
+        read_builder.with_filter(predicate)
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k2"],
+            'v': ["v2"]
+        })
         self.assertEqual(expected, actual)

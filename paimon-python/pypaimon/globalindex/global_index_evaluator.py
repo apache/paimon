@@ -133,7 +133,7 @@ class GlobalIndexEvaluator:
             readers = self._readers_function(field_id)
             self._index_readers_cache[field_id] = readers
         
-        field_ref = FieldRef(predicate.index, predicate.field, str(field.data_type))
+        field_ref = FieldRef(predicate.index, predicate.field, str(field.type))
         
         compound_result: Optional[GlobalIndexResult] = None
         
