@@ -30,6 +30,18 @@ import zlib
 from typing import Optional, Callable
 from typing import BinaryIO
 
+try:
+    import lz4.block
+    LZ4_AVAILABLE = True
+except ImportError:
+    LZ4_AVAILABLE = False
+
+try:
+    import python_lzo
+    LZO_AVAILABLE = True
+except ImportError:
+    LZO_AVAILABLE = False
+
 from pypaimon.globalindex.btree.btree_file_footer import BlockHandle
 from pypaimon.globalindex.btree.block_entry import BlockEntry
 from pypaimon.globalindex.btree.block_reader import BlockReader, BlockIterator
@@ -136,9 +148,6 @@ class SstFileReader:
 
         trailer_offset = len(block_data) - 5
         compression_type = block_data[trailer_offset]
-        if compression_type != 0:
-            raise ValueError("Compression type not supported")
-
         crc32_value = struct.unpack('<I', block_data[trailer_offset + 1:trailer_offset + 5])[0]
 
         # Extract block data (without trailer)
@@ -148,6 +157,21 @@ class SstFileReader:
         actual_crc32 = self.crc32c(block_bytes, compression_type)
         if actual_crc32 != crc32_value:
             raise ValueError(f"CRC32 mismatch: expected {crc32_value}, got {actual_crc32}")
+
+        # Decompress if needed
+        if compression_type == 1:  # ZSTD
+            import zstandard as zstd
+            from io import BytesIO
+            decompressor = zstd.ZstdDecompressor()
+            memory_input = MemorySliceInput(block_bytes)
+            expected_len = memory_input.read_var_len_int()
+            compressed = block_bytes[memory_input.position():]
+            with decompressor.stream_reader(BytesIO(compressed)) as reader:
+                block_bytes = reader.read()
+            if len(block_bytes) != expected_len:
+                raise ValueError("Corrupted data, decompression failed.")
+        elif compression_type != 0:  # Not NONE
+            raise ValueError(f"Compression type {compression_type} not supported")
 
         return BlockReader.create(block_bytes, self.comparator)
 

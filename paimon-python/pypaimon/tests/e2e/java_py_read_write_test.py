@@ -324,6 +324,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_generic("test_btree_index_string", "k2", pa.string())
         self._test_read_btree_index_generic("test_btree_index_int", 200, pa.int32())
         self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
+        self._test_read_btree_index_large()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -343,4 +344,20 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ("k", k_type),
             ("v", pa.string())
         ]))
+        self.assertEqual(expected, actual)
+
+    def _test_read_btree_index_large(self):
+        table = self.catalog.get_table('default.test_btree_index_large')
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+
+        # read equal index
+        read_builder.with_filter(predicate_builder.equal('k', 'k2'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k2"],
+            'v': ["v2"]
+        })
         self.assertEqual(expected, actual)

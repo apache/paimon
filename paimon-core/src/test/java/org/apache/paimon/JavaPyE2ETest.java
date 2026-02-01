@@ -81,6 +81,7 @@ import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
+import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_COMPRESSION;
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -414,6 +415,7 @@ public class JavaPyE2ETest {
         testBtreeIndexWriteString();
         testBtreeIndexWriteInt();
         testBtreeIndexWriteBigInt();
+        testBtreeIndexWriteLarge();
     }
 
     private void testBtreeIndexWriteString() throws Exception {
@@ -490,6 +492,75 @@ public class JavaPyE2ETest {
         PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
         ReadBuilder readBuilder =
                 table.newReadBuilder().withFilter(predicateBuilder.equal(0, key2));
+        List<String> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> result.add(r.getString(1).toString()));
+        assertThat(result).containsOnly("v2");
+    }
+
+    private void testBtreeIndexWriteLarge() throws Exception {
+        // create table
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        Path tablePath = new Path(warehouse.toString() + "/default.db/test_btree_index_large");
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        options.set(BTREE_INDEX_COMPRESSION, "zstd");
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // write data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < 2000; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("k" + i),
+                                BinaryString.fromString("v" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        // build index
+        BTreeGlobalIndexBuilder builder =
+                new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+        }
+
+        // assert index
+        List<IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest);
+        assertThat(indexEntries)
+                .singleElement()
+                .matches(entry -> entry.indexFile().rowCount() == 2000);
+
+        // read index
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(predicateBuilder.equal(0, BinaryString.fromString("k2")));
         List<String> result = new ArrayList<>();
         readBuilder
                 .newRead()
