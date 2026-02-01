@@ -26,6 +26,7 @@ import pyarrow
 from pyarrow.fs import S3FileSystem
 
 from pypaimon.common.options import Options
+from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 
@@ -64,6 +65,30 @@ class FileIOTest(unittest.TestCase):
         self.assertEqual(file_io.to_filesystem_path(converted_path), converted_path)
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
+
+        from packaging.version import parse as parse_version
+        oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com'
+        }))
+        lt7 = parse_version(pyarrow.__version__) < parse_version("7.0.0")
+        got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
+        expected_path = (
+            "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
+        self.assertEqual(got, expected_path)
+        nf = MagicMock(type=pyarrow.fs.FileType.NotFound)
+        mock_fs = MagicMock()
+        mock_fs.get_file_info.side_effect = [[nf], [nf]]
+        mock_fs.create_dir = MagicMock()
+        mock_fs.open_output_stream.return_value = MagicMock()
+        oss_io.filesystem = mock_fs
+        oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
+        mock_fs.create_dir.assert_called_once()
+        path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
+        if lt7:
+            expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
+        else:
+            expected_parent = str(Path(path_str).parent)
+        self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
 
     def test_local_filesystem_path_conversion(self):
         file_io = LocalFileIO("file:///tmp/warehouse", Options({}))
@@ -213,6 +238,15 @@ class FileIOTest(unittest.TestCase):
 
             file_io.delete_quietly("file:///some/path")
             file_io.delete_directory_quietly("file:///some/path")
+
+            oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
+                OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com'
+            }))
+            mock_fs = MagicMock()
+            mock_fs.get_file_info.return_value = [
+                MagicMock(type=pyarrow.fs.FileType.NotFound)]
+            oss_io.filesystem = mock_fs
+            self.assertFalse(oss_io.exists("oss://test-bucket/path/to/file.txt"))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
