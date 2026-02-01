@@ -110,7 +110,7 @@ trait PaimonMergeIntoBase
         u.copy(assignments = alignAssignments(targetOutput, assignments))
 
       case i @ InsertAction(_, assignments) =>
-        i.copy(assignments = alignAssignments(targetOutput, assignments))
+        i.copy(assignments = alignAssignments(targetOutput, assignments, isInsert = true))
 
       case _: UpdateStarAction =>
         throw new RuntimeException(s"UpdateStarAction should not be here.")
