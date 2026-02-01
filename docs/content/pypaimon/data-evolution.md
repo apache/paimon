@@ -199,7 +199,5 @@ commit.close()
 
 ## Read After Partial Shard Update
 
-When only some shards have written a new column (e.g. only shard 0 ran and wrote column `d`):
-
-- **Shard read**: use `with_shard(shard_idx, num_shards)` to read only the shard(s) you need. Each shard’s data has the correct schema (new column where written, null elsewhere).
-- **Full table read**: read without `with_shard` (or read all shards); same semantics—rows from updated shards have the new column, others have null for that column.
+- **Full table read**: rows from updated shards have the new column; rows from other shards have null for that column.
+- **Per-shard read** (`with_shard(shard_idx, num_shards)`): read only the shard(s) you need. (new column where written, null elsewhere).
