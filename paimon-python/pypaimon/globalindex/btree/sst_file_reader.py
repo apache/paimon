@@ -30,18 +30,6 @@ import zlib
 from typing import Optional, Callable
 from typing import BinaryIO
 
-try:
-    import lz4.block
-    LZ4_AVAILABLE = True
-except ImportError:
-    LZ4_AVAILABLE = False
-
-try:
-    import python_lzo
-    LZO_AVAILABLE = True
-except ImportError:
-    LZO_AVAILABLE = False
-
 from pypaimon.globalindex.btree.btree_file_footer import BlockHandle
 from pypaimon.globalindex.btree.block_entry import BlockEntry
 from pypaimon.globalindex.btree.block_reader import BlockReader, BlockIterator
