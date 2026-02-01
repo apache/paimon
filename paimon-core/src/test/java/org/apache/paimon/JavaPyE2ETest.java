@@ -411,13 +411,37 @@ public class JavaPyE2ETest {
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testBtreeIndexWrite() throws Exception {
+        testBtreeIndexWriteString();
+        testBtreeIndexWriteInt();
+        testBtreeIndexWriteBigInt();
+    }
+
+    private void testBtreeIndexWriteString() throws Exception {
+        testBtreeIndexWriteGeneric(
+                DataTypes.STRING(),
+                "test_btree_index_string",
+                BinaryString.fromString("k1"),
+                BinaryString.fromString("k2"),
+                BinaryString.fromString("k3"));
+    }
+
+    private void testBtreeIndexWriteInt() throws Exception {
+        testBtreeIndexWriteGeneric(DataTypes.INT(), "test_btree_index_int", 100, 200, 300);
+    }
+
+    private void testBtreeIndexWriteBigInt() throws Exception {
+        testBtreeIndexWriteGeneric(
+                DataTypes.BIGINT(), "test_btree_index_bigint", 1000L, 2000L, 3000L);
+    }
+
+    private <T> void testBtreeIndexWriteGeneric(
+            DataType keyType, String tableName, Object key1, Object key2, Object key3)
+            throws Exception {
         // create table
         RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
-                        new String[] {"k", "v"});
+                RowType.of(new DataType[] {keyType, DataTypes.STRING()}, new String[] {"k", "v"});
         Options options = new Options();
-        Path tablePath = new Path(warehouse.toString() + "/default.db/test_btree_index");
+        Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
         options.set(PATH, tablePath.toString());
         options.set(ROW_TRACKING_ENABLED, true);
         options.set(DATA_EVOLUTION_ENABLED, true);
@@ -442,12 +466,9 @@ public class JavaPyE2ETest {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
-            write.write(
-                    GenericRow.of(BinaryString.fromString("k1"), BinaryString.fromString("v1")));
-            write.write(
-                    GenericRow.of(BinaryString.fromString("k2"), BinaryString.fromString("v2")));
-            write.write(
-                    GenericRow.of(BinaryString.fromString("k3"), BinaryString.fromString("v3")));
+            write.write(GenericRow.of(key1, BinaryString.fromString("v1")));
+            write.write(GenericRow.of(key2, BinaryString.fromString("v2")));
+            write.write(GenericRow.of(key3, BinaryString.fromString("v3")));
             commit.commit(write.prepareCommit());
         }
 
@@ -468,14 +489,13 @@ public class JavaPyE2ETest {
         // read index
         PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
         ReadBuilder readBuilder =
-                table.newReadBuilder()
-                        .withFilter(predicateBuilder.equal(0, BinaryString.fromString("k2")));
+                table.newReadBuilder().withFilter(predicateBuilder.equal(0, key2));
         List<String> result = new ArrayList<>();
         readBuilder
                 .newRead()
                 .createReader(readBuilder.newScan().plan())
-                .forEachRemaining(r -> result.add(r.getString(0) + ":" + r.getString(1)));
-        assertThat(result).containsOnly("k2:v2");
+                .forEachRemaining(r -> result.add(r.getString(1).toString()));
+        assertThat(result).containsOnly("v2");
     }
 
     // Helper method from TableTestBase
