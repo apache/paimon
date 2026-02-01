@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -186,6 +187,36 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
           Seq(Row(0), Row(1), Row(2), Row(3), Row(4), Row(5))
         )
       }
+    }
+  }
+
+  test("Postpone lookup bucket table: write fix bucket then write postpone bucket") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'changelog-producer' = 'lookup',
+            |  'postpone.batch-write-fixed-bucket' = 'true'
+            |)
+            |""".stripMargin)
+
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(1) */
+            |id AS k,
+            |CAST(id AS STRING) AS v,
+            |0 AS pt
+            |FROM range (0, 1000)
+            |""".stripMargin)
+
+      val table = loadTable("t")
+      val files = table.fileIO.listStatus(new Path(table.location, "pt=0/bucket-0"))
+      assert(1 == files.count(_.getPath.getName.startsWith("changelog-")))
     }
   }
 }

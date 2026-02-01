@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
-import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 
 /** Utils for postpone table. */
 public class PostponeUtils {
@@ -56,7 +55,6 @@ public class PostponeUtils {
 
     public static FileStoreTable tableForFixBucketWrite(FileStoreTable table) {
         Map<String, String> batchWriteOptions = new HashMap<>();
-        batchWriteOptions.put(WRITE_ONLY.key(), "true");
         // It's just used to create merge tree writer for writing files to fixed bucket.
         // The real bucket number is determined at runtime.
         batchWriteOptions.put(BUCKET.key(), "1");
