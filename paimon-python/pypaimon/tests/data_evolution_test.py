@@ -580,9 +580,9 @@ class DataEvolutionTest(unittest.TestCase):
             '_SEQUENCE_NUMBER': [1, 1],
         }, schema=pa.schema([
             ('f0', pa.int8()),
-            ('_ROW_ID', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
             ('f1', pa.int16()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
 
@@ -614,7 +614,7 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
-            ('_ROW_ID', pa.int64()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)

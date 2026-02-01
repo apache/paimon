@@ -316,5 +316,139 @@ class ShardTableUpdatorTest(unittest.TestCase):
         self.assertEqual(actual, expected)
         print("\n✅ Test passed! Column d = c + b - a computed correctly!")
 
+    def test_partial_shard_update_full_read_schema_unified(self):
+        table_schema = pa.schema([
+            ('a', pa.int32()),
+            ('b', pa.int32()),
+            ('c', pa.int32()),
+            ('d', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            table_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+        )
+        name = self._create_unique_table_name()
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+
+        # Two commits => two files (two first_row_id ranges)
+        for start, end in [(1, 10), (10, 20)]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write().with_write_type(['a', 'b', 'c'])
+            tc = wb.new_commit()
+            data = pa.Table.from_pydict({
+                'a': list(range(start, end + 1)),
+                'b': [i * 10 for i in range(start, end + 1)],
+                'c': [i * 100 for i in range(start, end + 1)],
+            }, schema=pa.schema([
+                ('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32()),
+            ]))
+            tw.write_arrow(data)
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        # Only shard 0 runs => only first file gets d
+        wb = table.new_batch_write_builder()
+        upd = wb.new_update()
+        upd.with_read_projection(['a', 'b', 'c'])
+        upd.with_update_type(['d'])
+        shard0 = upd.new_shard_updator(0, 2)
+        reader = shard0.arrow_reader()
+        for batch in iter(reader.read_next_batch, None):
+            a_ = batch.column('a').to_pylist()
+            b_ = batch.column('b').to_pylist()
+            c_ = batch.column('c').to_pylist()
+            d_ = [c + b - a for a, b, c in zip(a_, b_, c_)]
+            shard0.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+                {'d': d_}, schema=pa.schema([('d', pa.int32())]),
+            ))
+        tc = wb.new_commit()
+        tc.commit(shard0.prepare_commit())
+        tc.close()
+
+        rb = table.new_read_builder()
+        tr = rb.new_read()
+        actual = tr.to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 21)
+        d_col = actual.column('d')
+        # First 10 rows (shard 0): d = c+b-a
+        for i in range(10):
+            self.assertEqual(d_col[i].as_py(), (i + 1) * 100 + (i + 1) * 10 - (i + 1))
+        # Rows 10-20 (shard 1 not run): d is null
+        for i in range(10, 21):
+            self.assertIsNone(d_col[i].as_py())
+
+    def test_with_shard_read_after_partial_shard_update(self):
+        table_schema = pa.schema([
+            ('a', pa.int32()),
+            ('b', pa.int32()),
+            ('c', pa.int32()),
+            ('d', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            table_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+        )
+        name = self._create_unique_table_name()
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+
+        for start, end in [(1, 10), (10, 20)]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write().with_write_type(['a', 'b', 'c'])
+            tc = wb.new_commit()
+            data = pa.Table.from_pydict({
+                'a': list(range(start, end + 1)),
+                'b': [i * 10 for i in range(start, end + 1)],
+                'c': [i * 100 for i in range(start, end + 1)],
+            }, schema=pa.schema([
+                ('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32()),
+            ]))
+            tw.write_arrow(data)
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        wb = table.new_batch_write_builder()
+        upd = wb.new_update()
+        upd.with_read_projection(['a', 'b', 'c'])
+        upd.with_update_type(['d'])
+        shard0 = upd.new_shard_updator(0, 2)
+        reader = shard0.arrow_reader()
+        for batch in iter(reader.read_next_batch, None):
+            a_ = batch.column('a').to_pylist()
+            b_ = batch.column('b').to_pylist()
+            c_ = batch.column('c').to_pylist()
+            d_ = [c + b - a for a, b, c in zip(a_, b_, c_)]
+            shard0.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+                {'d': d_}, schema=pa.schema([('d', pa.int32())]),
+            ))
+        tc = wb.new_commit()
+        tc.commit(shard0.prepare_commit())
+        tc.close()
+
+        rb = table.new_read_builder()
+        tr = rb.new_read()
+
+        splits_0 = rb.new_scan().with_shard(0, 2).plan().splits()
+        result_0 = tr.to_arrow(splits_0)
+        self.assertEqual(result_0.num_rows, 10)
+        d_col_0 = result_0.column('d')
+        for i in range(10):
+            self.assertEqual(
+                d_col_0[i].as_py(),
+                (i + 1) * 100 + (i + 1) * 10 - (i + 1),
+                "Shard 0 row %d: d should be c+b-a" % i,
+            )
+
+        splits_1 = rb.new_scan().with_shard(1, 2).plan().splits()
+        result_1 = tr.to_arrow(splits_1)
+        self.assertEqual(result_1.num_rows, 11)
+        d_col_1 = result_1.column('d')
+        for i in range(11):
+            self.assertIsNone(d_col_1[i].as_py(), "Shard 1 row %d: d should be null" % i)
+
+
 if __name__ == '__main__':
     unittest.main()

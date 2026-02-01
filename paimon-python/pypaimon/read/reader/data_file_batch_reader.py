@@ -38,7 +38,8 @@ class DataFileBatchReader(RecordBatchReader):
                  max_sequence_number: int,
                  first_row_id: int,
                  row_tracking_enabled: bool,
-                 system_fields: dict):
+                 system_fields: dict,
+                 requested_field_names: Optional[List[str]] = None):
         self.format_reader = format_reader
         self.index_mapping = index_mapping
         self.partition_info = partition_info
@@ -48,6 +49,7 @@ class DataFileBatchReader(RecordBatchReader):
         self.first_row_id = first_row_id
         self.max_sequence_number = max_sequence_number
         self.system_fields = system_fields
+        self.requested_field_names = requested_field_names
 
     def read_arrow_batch(self, start_idx=None, end_idx=None) -> Optional[RecordBatch]:
         if isinstance(self.format_reader, FormatBlobReader):
@@ -57,10 +59,19 @@ class DataFileBatchReader(RecordBatchReader):
         if record_batch is None:
             return None
 
+        num_rows = record_batch.num_rows
         if self.partition_info is None and self.index_mapping is None:
             if self.row_tracking_enabled and self.system_fields:
                 record_batch = self._assign_row_tracking(record_batch)
             return record_batch
+
+        if (self.partition_info is None and self.index_mapping is not None
+                and self.requested_field_names is None):
+            ncol = record_batch.num_columns
+            if len(self.index_mapping) == ncol and self.index_mapping == list(range(ncol)):
+                if self.row_tracking_enabled and self.system_fields:
+                    record_batch = self._assign_row_tracking(record_batch)
+                return record_batch
 
         inter_arrays = []
         inter_names = []
@@ -79,8 +90,37 @@ class DataFileBatchReader(RecordBatchReader):
                         inter_arrays.append(record_batch.column(real_index))
                         inter_names.append(record_batch.schema.field(real_index).name)
         else:
-            inter_arrays = record_batch.columns
-            inter_names = record_batch.schema.names
+            inter_arrays = list(record_batch.columns)
+            inter_names = list(record_batch.schema.names)
+
+        if self.requested_field_names is not None:
+            if (len(inter_names) <= len(self.requested_field_names)
+                    and inter_names == self.requested_field_names[:len(inter_names)]):
+                ordered_arrays = list(inter_arrays)
+                ordered_names = list(inter_names)
+                for name in self.requested_field_names[len(inter_names):]:
+                    field = self.schema_map.get(name)
+                    ordered_arrays.append(
+                        pa.nulls(num_rows, type=field.type) if field is not None else pa.nulls(num_rows)
+                    )
+                    ordered_names.append(name)
+                inter_arrays = ordered_arrays
+                inter_names = ordered_names
+            else:
+                ordered_arrays = []
+                ordered_names = []
+                for name in self.requested_field_names:
+                    if name in inter_names:
+                        ordered_arrays.append(inter_arrays[inter_names.index(name)])
+                        ordered_names.append(name)
+                    else:
+                        field = self.schema_map.get(name)
+                        ordered_arrays.append(
+                            pa.nulls(num_rows, type=field.type) if field is not None else pa.nulls(num_rows)
+                        )
+                        ordered_names.append(name)
+                inter_arrays = ordered_arrays
+                inter_names = ordered_names
 
         if self.index_mapping is not None:
             mapped_arrays = []
@@ -135,7 +175,22 @@ class DataFileBatchReader(RecordBatchReader):
             # Create a new array that fills with max_sequence_number
             arrays[idx] = pa.repeat(self.max_sequence_number, record_batch.num_rows)
 
-        return pa.RecordBatch.from_arrays(arrays, names=record_batch.schema.names)
+        names = record_batch.schema.names
+        fields = []
+        for i, name in enumerate(names):
+            if name == SpecialFields.ROW_ID.name or name == SpecialFields.SEQUENCE_NUMBER.name:
+                fields.append(pa.field(name, arrays[i].type, nullable=False))
+            elif self.schema_map:
+                target_field = self.schema_map.get(name)
+                if target_field is not None:
+                    fields.append(target_field)
+                else:
+                    fields.append(pa.field(name, arrays[i].type))
+            else:
+                fields.append(pa.field(name, arrays[i].type))
+        if fields:
+            return pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields))
+        return pa.RecordBatch.from_arrays(arrays, names=names)
 
     def close(self) -> None:
         self.format_reader.close()
