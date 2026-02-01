@@ -278,6 +278,11 @@ public class CompactProcedure extends BaseProcedure {
                                 table, partitionPredicate, partitionIdleTime, javaSparkContext);
                     }
                     break;
+                case POSTPONE_MODE:
+                    SparkPostponeCompactProcedure.apply(
+                                    table, spark(), partitionPredicate, relation)
+                            .execute();
+                    break;
                 default:
                     throw new UnsupportedOperationException(
                             "Spark compact with " + bucketMode + " is not support yet.");
