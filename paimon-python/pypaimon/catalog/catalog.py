@@ -17,7 +17,7 @@
 #################################################################################
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
@@ -94,3 +94,12 @@ class Catalog(ABC):
             True if commit was successful, False otherwise
 
         """
+
+    def drop_partitions(
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
+    ) -> None:
+        raise NotImplementedError(
+            "drop_partitions is not supported by this catalog. Use REST catalog for partition drop."
+        )
