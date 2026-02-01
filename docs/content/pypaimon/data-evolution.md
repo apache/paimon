@@ -201,5 +201,5 @@ commit.close()
 
 When only some shards have written a new column (e.g. only shard 0 ran and wrote column `d`):
 
-- **Full table read** works: rows from updated shards have the new column; rows from other shards have null for that column.
-- **Per-shard read** (`with_shard(shard_idx, num_shards)`) works: read only the shard(s) you need.
+- **Shard read**: use `with_shard(shard_idx, num_shards)` to read only the shard(s) you need. Each shard’s data has the correct schema (new column where written, null elsewhere).
+- **Full table read**: read without `with_shard` (or read all shards); same semantics—rows from updated shards have the new column, others have null for that column.
