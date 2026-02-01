@@ -346,7 +346,7 @@ public class CompactAction extends TableActionBase {
                             partitionSpec,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
-            boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
+            boolean blobAsDescriptor = table.coreOptions().writeBlobFromDescriptor();
             DataStream<InternalRow> partitioned =
                     FlinkStreamPartitioner.partition(
                             FlinkSinkBuilder.mapToInternalRow(

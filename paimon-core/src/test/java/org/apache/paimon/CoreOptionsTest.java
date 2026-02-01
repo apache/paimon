@@ -108,12 +108,12 @@ public class CoreOptionsTest {
         assertThat(options.blobSplitByFileSize()).isTrue();
 
         conf = new Options();
-        conf.set(CoreOptions.BLOB_AS_DESCRIPTOR, true);
+        conf.set(CoreOptions.READ_BLOB_AS_DESCRIPTOR, true);
         options = new CoreOptions(conf);
         assertThat(options.blobSplitByFileSize()).isFalse();
 
         conf = new Options();
-        conf.set(CoreOptions.BLOB_AS_DESCRIPTOR, false);
+        conf.set(CoreOptions.READ_BLOB_AS_DESCRIPTOR, false);
         options = new CoreOptions(conf);
         assertThat(options.blobSplitByFileSize()).isTrue();
     }

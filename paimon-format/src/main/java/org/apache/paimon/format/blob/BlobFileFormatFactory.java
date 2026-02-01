@@ -34,7 +34,7 @@ public class BlobFileFormatFactory implements FileFormatFactory {
 
     @Override
     public FileFormat create(FormatContext formatContext) {
-        boolean blobAsDescriptor = formatContext.options().get(CoreOptions.BLOB_AS_DESCRIPTOR);
-        return new BlobFileFormat(blobAsDescriptor);
+        CoreOptions coreOptions = new CoreOptions(formatContext.options());
+        return new BlobFileFormat(coreOptions.readBlobAsDescriptor());
     }
 }

@@ -48,7 +48,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** {@link FileFormat} for blob file. */
 public class BlobFileFormat extends FileFormat {
 
-    private final boolean blobAsDescriptor;
+    private final boolean readBlobAsDescriptor;
 
     @Nullable public BlobConsumer writeConsumer;
 
@@ -56,9 +56,9 @@ public class BlobFileFormat extends FileFormat {
         this(false);
     }
 
-    public BlobFileFormat(boolean blobAsDescriptor) {
+    public BlobFileFormat(boolean readBlobAsDescriptor) {
         super(BlobFileFormatFactory.IDENTIFIER);
-        this.blobAsDescriptor = blobAsDescriptor;
+        this.readBlobAsDescriptor = readBlobAsDescriptor;
     }
 
     public static boolean isBlobFile(String fileName) {
@@ -74,7 +74,7 @@ public class BlobFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new BlobFormatReaderFactory(blobAsDescriptor);
+        return new BlobFormatReaderFactory(readBlobAsDescriptor);
     }
 
     @Override
@@ -113,10 +113,10 @@ public class BlobFileFormat extends FileFormat {
 
     private static class BlobFormatReaderFactory implements FormatReaderFactory {
 
-        private final boolean blobAsDescriptor;
+        private final boolean readBlobAsDescriptor;
 
         public BlobFormatReaderFactory(boolean blobAsDescriptor) {
-            this.blobAsDescriptor = blobAsDescriptor;
+            this.readBlobAsDescriptor = blobAsDescriptor;
         }
 
         @Override
@@ -129,7 +129,7 @@ public class BlobFileFormat extends FileFormat {
                 in = fileIO.newInputStream(filePath);
                 fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
             } finally {
-                if (blobAsDescriptor) {
+                if (readBlobAsDescriptor) {
                     IOUtils.closeQuietly(in);
                     in = null;
                 }
