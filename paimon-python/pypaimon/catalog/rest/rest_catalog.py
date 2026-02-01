@@ -224,6 +224,11 @@ class RESTCatalog(Catalog):
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
         table = self.get_table(identifier)
+        if isinstance(table, FormatTable):
+            raise ValueError(
+                "drop_partitions is not supported for format tables. "
+                "Only Paimon (FileStore) tables support partition drop."
+            )
         commit = table.new_batch_write_builder().new_commit()
         try:
             commit.truncate_partitions(partitions)
