@@ -100,6 +100,16 @@ the query results:
 200, 20, 2
 */
 ```
+
+**Schema compatabilty and Partition evolution:**
+
+There is a fundamental difference between Paimon and Iceberg regarding the starting fieldId. Paimon uses fieldId 0, while Iceberg uses fieldId 1. If we create an Iceberg table using a Paimon schema directly, it will shift all fieldIds by +1, causing field disorder. However, it is possible to update the schema after table creation and start the schema from fieldId 0.
+
+Table creation attempts to minimize issues with fieldId disorder and partition evolution by following a 2 option logic:
+
+- Partition fieldId = 0: Paimon creates an empty schema first and then updates the schema to the actual one. Partition evolution is unavoidable.
+- Partition fieldId > 0: Paimon creates an initial dummy schema first, offsetting partition fields correctly, and then updates the schema to the actual one, avoiding partition evolution.
+
 **Note:**
 
 Paimon will firstly write iceberg metadata in a separate directory like hadoop-catalog, and then commit metadata to iceberg rest catalog.
@@ -108,5 +118,5 @@ If the two are incompatible, we take the metadata stored in the separate directo
 There are some cases when committing to iceberg rest catalog:
 1. table not exists in iceberg rest-catalog. It'll create the table in rest catalog first, and commit metadata.
 2. table exists in iceberg rest-catalog and is compatible with the base metadata stored in the separate directory. It'll directly get the table and commit metadata. 
-3. table exists, and isn't compatible with the base metadata stored in the separate directory. It'll **drop the table and recreate the table**, then commit metadata. 
+3. table exists, and isn't compatible with the base metadata stored in the separate directory. It'll **drop the table and recreate the table**, then commit metadata.
 
