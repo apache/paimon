@@ -29,7 +29,7 @@ from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
 ScoreGetter = Callable[[int], Optional[float]]
 
 
-class VectorSearchGlobalIndexResult(GlobalIndexResult):
+class ScoredGlobalIndexResult(GlobalIndexResult):
     """
     Vector search global index result for vector index.
     
@@ -41,7 +41,7 @@ class VectorSearchGlobalIndexResult(GlobalIndexResult):
         """Returns a function to get the score for a given row ID."""
         pass
 
-    def offset(self, offset: int) -> 'VectorSearchGlobalIndexResult':
+    def offset(self, offset: int) -> 'ScoredGlobalIndexResult':
         """Returns a new result with row IDs offset by the given amount."""
         if offset == 0:
             return self
@@ -53,14 +53,14 @@ class VectorSearchGlobalIndexResult(GlobalIndexResult):
         for row_id in bitmap:
             offset_bitmap.add(row_id + offset)
         
-        return SimpleVectorSearchGlobalIndexResult(
+        return SimpleScoredGlobalIndexResult(
             offset_bitmap,
             lambda row_id: this_score_getter(row_id - offset)
         )
 
     def or_(self, other: GlobalIndexResult) -> GlobalIndexResult:
         """Returns the union of this result and the other result."""
-        if not isinstance(other, VectorSearchGlobalIndexResult):
+        if not isinstance(other, ScoredGlobalIndexResult):
             return super().or_(other)
         
         this_row_ids = self.results()
@@ -76,18 +76,18 @@ class VectorSearchGlobalIndexResult(GlobalIndexResult):
                 return this_score_getter(row_id)
             return other_score_getter(row_id)
         
-        return SimpleVectorSearchGlobalIndexResult(result_or, combined_score_getter)
+        return SimpleScoredGlobalIndexResult(result_or, combined_score_getter)
 
     @staticmethod
     def create(
         supplier: Callable[[], RoaringBitmap64],
         score_getter: ScoreGetter
-    ) -> 'VectorSearchGlobalIndexResult':
+    ) -> 'ScoredGlobalIndexResult':
         """Creates a new VectorSearchGlobalIndexResult from supplier."""
-        return LazyVectorSearchGlobalIndexResult(supplier, score_getter)
+        return LazyScoredGlobalIndexResult(supplier, score_getter)
 
 
-class SimpleVectorSearchGlobalIndexResult(VectorSearchGlobalIndexResult):
+class SimpleScoredGlobalIndexResult(ScoredGlobalIndexResult):
     """Simple implementation of VectorSearchGlobalIndexResult."""
 
     def __init__(self, bitmap: RoaringBitmap64, score_getter_fn: ScoreGetter):
@@ -101,7 +101,7 @@ class SimpleVectorSearchGlobalIndexResult(VectorSearchGlobalIndexResult):
         return self._score_getter_fn
 
 
-class LazyVectorSearchGlobalIndexResult(VectorSearchGlobalIndexResult):
+class LazyScoredGlobalIndexResult(ScoredGlobalIndexResult):
     """Lazy implementation of VectorSearchGlobalIndexResult."""
 
     def __init__(self, supplier: Callable[[], RoaringBitmap64], score_getter_fn: ScoreGetter):
@@ -118,7 +118,7 @@ class LazyVectorSearchGlobalIndexResult(VectorSearchGlobalIndexResult):
         return self._score_getter_fn
 
 
-class DictBasedVectorSearchResult(VectorSearchGlobalIndexResult):
+class DictBasedScoredIndexResult(ScoredGlobalIndexResult):
     """Vector search result backed by a dictionary of row_id -> score."""
 
     def __init__(self, id_to_scores: Dict[int, float]):

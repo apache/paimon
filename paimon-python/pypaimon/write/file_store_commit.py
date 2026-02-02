@@ -28,7 +28,7 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
+from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
@@ -371,7 +371,7 @@ class FileStoreCommit:
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = [] if latestSnapshot is None \
-            else (FullStartingScanner(self.table, partition_filter, None).
+            else (FileScanner(self.table, lambda: [], partition_filter).
                   read_manifest_entries(self.manifest_list_manager.read_all(latestSnapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE

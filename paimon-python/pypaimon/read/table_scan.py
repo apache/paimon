@@ -22,12 +22,9 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 
 from pypaimon.read.plan import Plan
-from pypaimon.read.scanner.empty_starting_scanner import EmptyStartingScanner
-from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
-from pypaimon.read.scanner.incremental_starting_scanner import \
-    IncrementalStartingScanner
-from pypaimon.read.scanner.starting_scanner import StartingScanner
+from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
 if TYPE_CHECKING:
     from pypaimon.globalindex.vector_search import VectorSearch
@@ -49,23 +46,25 @@ class TableScan:
         self.predicate = predicate
         self.limit = limit
         self.vector_search = vector_search
-        self.starting_scanner = self._create_starting_scanner()
+        self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
-        return self.starting_scanner.scan()
+        return self.file_scanner.scan()
 
-    def _create_starting_scanner(self) -> Optional[StartingScanner]:
+    def _create_file_scanner(self) -> FileScanner:
         options = self.table.options.options
+        snapshot_manager = SnapshotManager(self.table)
+        manifest_list_manager = ManifestListManager(self.table)
         if options.contains(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP):
             ts = options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP).split(",")
             if len(ts) != 2:
                 raise ValueError(
                     "The incremental-between-timestamp must specific start(exclusive) and end timestamp. But is: " +
                     options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP))
-            earliest_snapshot = SnapshotManager(self.table).try_get_earliest_snapshot()
-            latest_snapshot = SnapshotManager(self.table).get_latest_snapshot()
+            earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
+            latest_snapshot = snapshot_manager.get_latest_snapshot()
             if earliest_snapshot is None or latest_snapshot is None:
-                return EmptyStartingScanner()
+                return FileScanner(self.table, lambda: [])
             start_timestamp = int(ts[0])
             end_timestamp = int(ts[1])
             if start_timestamp >= end_timestamp:
@@ -73,20 +72,53 @@ class TableScan:
                     "Ending timestamp %s should be >= starting timestamp %s." % (end_timestamp, start_timestamp))
             if (start_timestamp == end_timestamp or start_timestamp > latest_snapshot.time_millis
                     or end_timestamp < earliest_snapshot.time_millis):
-                return EmptyStartingScanner()
-            return IncrementalStartingScanner.between_timestamps(self.table, self.predicate, self.limit,
-                                                                 start_timestamp, end_timestamp)
-        return FullStartingScanner(
+                return FileScanner(self.table, lambda: [])
+
+            starting_snapshot = snapshot_manager.earlier_or_equal_time_mills(start_timestamp)
+            earliest_snapshot = snapshot_manager.try_get_earliest_snapshot()
+
+            # If earliest_snapshot.time_millis > start_timestamp we should include the earliest_snapshot
+            if starting_snapshot is None or (earliest_snapshot and earliest_snapshot.time_millis > start_timestamp):
+                start_id = earliest_snapshot.id - 1 if earliest_snapshot else -1
+            else:
+                start_id = starting_snapshot.id
+
+            end_snapshot = snapshot_manager.earlier_or_equal_time_mills(end_timestamp)
+            latest_snapshot = snapshot_manager.get_latest_snapshot()
+            end_id = end_snapshot.id if end_snapshot else (latest_snapshot.id if latest_snapshot else -1)
+
+            def incremental_manifest():
+                snapshots_in_range = []
+                for snapshot_id in range(start_id + 1, end_id + 1):
+                    snapshot = snapshot_manager.get_snapshot_by_id(snapshot_id)
+                    if snapshot.commit_kind == "APPEND":
+                        snapshots_in_range.append(snapshot)
+
+                manifests = []
+
+                for snapshot in snapshots_in_range:
+                    manifest_files = manifest_list_manager.read_delta(snapshot)
+                    manifests.extend(manifest_files)
+                return manifests
+
+            return FileScanner(self.table, incremental_manifest, self.predicate, self.limit)
+
+        def all_manifests():
+            snapshot = snapshot_manager.get_latest_snapshot()
+            return manifest_list_manager.read_all(snapshot)
+
+        return FileScanner(
             self.table,
+            all_manifests,
             self.predicate,
             self.limit,
             vector_search=self.vector_search
         )
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':
-        self.starting_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
+        self.file_scanner.with_shard(idx_of_this_subtask, number_of_para_subtasks)
         return self
 
     def with_slice(self, start_pos, end_pos) -> 'TableScan':
-        self.starting_scanner.with_slice(start_pos, end_pos)
+        self.file_scanner.with_slice(start_pos, end_pos)
         return self

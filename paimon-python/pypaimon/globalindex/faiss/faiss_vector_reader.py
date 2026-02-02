@@ -30,7 +30,7 @@ import numpy as np
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
-from pypaimon.globalindex.vector_search_result import DictBasedVectorSearchResult
+from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.faiss.faiss_options import (
     FaissVectorIndexOptions,
@@ -170,7 +170,7 @@ class FaissVectorGlobalIndexReader(GlobalIndexReader):
         if not results:
             return None
         
-        return DictBasedVectorSearchResult(results)
+        return DictBasedScoredIndexResult(results)
 
     def _configure_search_params(self, index: FaissIndex) -> None:
         """Configure search parameters based on index type."""
