@@ -126,7 +126,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         .sortWithinPartitions(sortFields);
 
         // 3. write index for each partition & range
-        final byte[] builderBytes = InstantiationUtil.serializeObject(indexBuilder);
+        final byte[] serializedBuilder = InstantiationUtil.serializeObject(indexBuilder);
         final RowType rowType =
                 SpecialFields.rowTypeWithRowId(table.rowType()).project(selectedColumns);
         JavaRDD<byte[]> written =
@@ -135,37 +135,19 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         .map(row -> (InternalRow) (new SparkRow(rowType, row)))
                         .mapPartitions(
                                 (FlatMapFunction<Iterator<InternalRow>, byte[]>)
-                                        iter -> {
-                                            CommitMessageSerializer commitMessageSerializer =
-                                                    new CommitMessageSerializer();
-                                            BTreeGlobalIndexBuilder builder =
-                                                    InstantiationUtil.deserializeObject(
-                                                            builderBytes,
-                                                            BTreeGlobalIndexBuilder.class
-                                                                    .getClassLoader());
-                                            List<CommitMessage> commitMessages =
-                                                    builder.build(range, iter);
-                                            List<byte[]> messageBytes = new ArrayList<>();
-
-                                            for (CommitMessage commitMessage : commitMessages) {
-                                                messageBytes.add(
-                                                        commitMessageSerializer.serialize(
-                                                                commitMessage));
-                                            }
-
-                                            return messageBytes.iterator();
-                                        });
+                                        iter -> buildBTreeIndex(iter, serializedBuilder, range));
 
         // 4. collect all commit messages and return
         List<byte[]> commitBytes = written.collect();
-        List<CommitMessage> result = new ArrayList<>();
-        CommitMessageSerializer commitMessageSerializer = new CommitMessageSerializer();
-        for (byte[] commitByte : commitBytes) {
-            result.add(
-                    commitMessageSerializer.deserialize(
-                            commitMessageSerializer.getVersion(), commitByte));
-        }
+        return CommitMessageSerializer.deserializeAll(commitBytes);
+    }
 
-        return result;
+    private static Iterator<byte[]> buildBTreeIndex(
+            Iterator<InternalRow> input, byte[] serializedBuilder, Range range)
+            throws IOException, ClassNotFoundException {
+        BTreeGlobalIndexBuilder builder =
+                InstantiationUtil.deserializeObject(
+                        serializedBuilder, BTreeGlobalIndexBuilder.class.getClassLoader());
+        return CommitMessageSerializer.serializeAll(builder.build(range, input)).iterator();
     }
 }

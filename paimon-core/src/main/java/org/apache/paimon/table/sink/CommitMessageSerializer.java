@@ -236,4 +236,23 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
             return () -> indexEntryV1Deserializer.deserializeList(view);
         }
     }
+
+    public static List<byte[]> serializeAll(List<CommitMessage> commitMessages) throws IOException {
+        List<byte[]> messageBytes = new ArrayList<>();
+        CommitMessageSerializer commitMessageSerializer = new CommitMessageSerializer();
+        for (CommitMessage commitMessage : commitMessages) {
+            messageBytes.add(commitMessageSerializer.serialize(commitMessage));
+        }
+        return messageBytes;
+    }
+
+    public static List<CommitMessage> deserializeAll(List<byte[]> messageBytes) throws IOException {
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        CommitMessageSerializer commitMessageSerializer = new CommitMessageSerializer();
+        int currentVersion = commitMessageSerializer.getVersion();
+        for (byte[] bytes : messageBytes) {
+            commitMessages.add(commitMessageSerializer.deserialize(currentVersion, bytes));
+        }
+        return commitMessages;
+    }
 }
