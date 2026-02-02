@@ -42,6 +42,8 @@ class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
+        self._pyarrow_gte_7 = parse(pyarrow.__version__) >= parse("7.0.0")
+        self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
@@ -66,13 +68,13 @@ class PyArrowFileIO(FileIO):
         else:
             return uri.scheme, uri.netloc, f"{uri.netloc}{uri.path}"
 
-    @staticmethod
     def _create_s3_retry_config(
+            self,
             max_attempts: int = 10,
             request_timeout: int = 60,
             connect_timeout: int = 60
     ) -> Dict[str, Any]:
-        if parse(pyarrow.__version__) >= parse("8.0.0"):
+        if self._pyarrow_gte_8:
             config = {
                 'request_timeout': request_timeout,
                 'connect_timeout': connect_timeout
@@ -117,7 +119,7 @@ class PyArrowFileIO(FileIO):
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
 
-        if parse(pyarrow.__version__) >= parse("7.0.0"):
+        if self._pyarrow_gte_7:
             client_kwargs['force_virtual_addressing'] = True
             client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
@@ -139,7 +141,7 @@ class PyArrowFileIO(FileIO):
             "session_token": self.properties.get(S3Options.S3_SECURITY_TOKEN),
             "region": self.properties.get(S3Options.S3_REGION),
         }
-        if parse(pyarrow.__version__) >= parse("7.0.0"):
+        if self._pyarrow_gte_7:
             client_kwargs["force_virtual_addressing"] = True
 
         retry_config = self._create_s3_retry_config()
@@ -181,7 +183,7 @@ class PyArrowFileIO(FileIO):
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
 
-        if self._is_oss and parse(pyarrow.__version__) < parse("7.0.0"):
+        if self._is_oss and not self._pyarrow_gte_7:
             # For PyArrow 6.x + OSS, path_str is already just the key part
             if '/' in path_str:
                 parent_dir = '/'.join(path_str.split('/')[:-1])
@@ -505,7 +507,7 @@ class PyArrowFileIO(FileIO):
             if parsed.scheme:
                 if parsed.netloc:
                     path_part = normalized_path.lstrip('/')
-                    if self._is_oss and parse(pyarrow.__version__) < parse("7.0.0"):
+                    if self._is_oss and not self._pyarrow_gte_7:
                         # For PyArrow 6.x + OSS, endpoint_override already contains bucket,
                         result = path_part if path_part else '.'
                         return result
