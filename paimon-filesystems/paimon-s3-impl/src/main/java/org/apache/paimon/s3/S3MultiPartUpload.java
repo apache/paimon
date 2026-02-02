@@ -20,30 +20,33 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.MultiPartUploadStore;
 
-import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
-import com.amazonaws.services.s3.model.PartETag;
-import com.amazonaws.services.s3.model.UploadPartRequest;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.apache.hadoop.fs.s3a.WriteOperationHelper;
+import org.apache.hadoop.fs.s3a.impl.PutObjectOptions;
 import org.apache.hadoop.fs.s3a.statistics.S3AStatisticsContext;
 import org.apache.hadoop.fs.store.audit.AuditSpan;
 import org.apache.hadoop.fs.store.audit.AuditSpanSource;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.CompletedPart;
+import software.amazon.awssdk.services.s3.model.UploadPartRequest;
+import software.amazon.awssdk.services.s3.model.UploadPartResponse;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Provides the multipart upload by Amazon S3. */
+/** Provides the multipart upload by Amazon S3 using Hadoop 3.4+ API (AWS SDK v2). */
 public class S3MultiPartUpload
-        implements MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> {
+        implements MultiPartUploadStore<CompletedPart, CompleteMultipartUploadResponse> {
 
     private final S3AFileSystem s3a;
-
     private final InternalWriteOperationHelper s3accessHelper;
 
     public S3MultiPartUpload(S3AFileSystem s3a, Configuration conf) {
@@ -65,25 +68,37 @@ public class S3MultiPartUpload
 
     @Override
     public String startMultiPartUpload(String objectName) throws IOException {
-        return s3accessHelper.initiateMultiPartUpload(objectName);
+        return s3accessHelper.initiateMultiPartUpload(objectName, PutObjectOptions.keepingDirs());
     }
 
     @Override
-    public CompleteMultipartUploadResult completeMultipartUpload(
-            String objectName, String uploadId, List<PartETag> partETags, long numBytesInParts)
+    public CompleteMultipartUploadResponse completeMultipartUpload(
+            String objectName, String uploadId, List<CompletedPart> parts, long numBytesInParts)
             throws IOException {
         return s3accessHelper.completeMPUwithRetries(
-                objectName, uploadId, partETags, numBytesInParts, new AtomicInteger(0));
+                objectName,
+                uploadId,
+                parts,
+                numBytesInParts,
+                new AtomicInteger(0),
+                PutObjectOptions.keepingDirs());
     }
 
     @Override
-    public PartETag uploadPart(
+    public CompletedPart uploadPart(
             String objectName, String uploadId, int partNumber, File file, int byteLength)
             throws IOException {
-        final UploadPartRequest uploadRequest =
-                s3accessHelper.newUploadPartRequest(
-                        objectName, uploadId, partNumber, byteLength, null, file, 0L);
-        return s3accessHelper.uploadPart(uploadRequest).getPartETag();
+        UploadPartRequest request =
+                UploadPartRequest.builder()
+                        .bucket(s3a.getBucket())
+                        .key(objectName)
+                        .uploadId(uploadId)
+                        .partNumber(partNumber)
+                        .contentLength((long) byteLength)
+                        .build();
+        RequestBody body = RequestBody.fromBytes(Files.readAllBytes(file.toPath()));
+        UploadPartResponse response = s3accessHelper.uploadPart(request, body, null);
+        return CompletedPart.builder().partNumber(partNumber).eTag(response.eTag()).build();
     }
 
     @Override
@@ -99,7 +114,7 @@ public class S3MultiPartUpload
                 S3AStatisticsContext statisticsContext,
                 AuditSpanSource auditSpanSource,
                 AuditSpan auditSpan) {
-            super(owner, conf, statisticsContext, auditSpanSource, auditSpan);
+            super(owner, conf, statisticsContext, auditSpanSource, auditSpan, null);
         }
     }
 }

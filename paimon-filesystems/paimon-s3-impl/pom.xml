@@ -103,6 +103,11 @@
                     <artifactId>jersey-json</artifactId>
                 </exclusion>
                 <exclusion>
+                    <!-- Hadoop 3.4+ uses pjfanning fork of jersey-json which contains GPL-referencing files -->
+                    <groupId>com.github.pjfanning</groupId>
+                    <artifactId>jersey-json</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>com.sun.jersey</groupId>
                     <artifactId>jersey-server</artifactId>
                 </exclusion>
@@ -245,6 +250,11 @@
                 <exclusion>
                     <groupId>com.amazonaws</groupId>
                     <artifactId>aws-java-sdk-bundle</artifactId>
+                </exclusion>
+                <exclusion>
+                    <!-- Optional S3A analytics accelerator - only used with fs.s3a.input.stream.type=analytics -->
+                    <groupId>software.amazon.s3.analyticsaccelerator</groupId>
+                    <artifactId>analyticsaccelerator-s3</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>ch.qos.reload4j</groupId>
