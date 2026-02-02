@@ -188,8 +188,6 @@ class FileScanner:
                 score_getter = global_index_result.score_getter()
 
         manifest_files = self.manifest_scanner()
-        if len(manifest_files) == 0:
-            return []
 
         # Filter manifest files by row ranges if available
         if row_ranges is not None:
