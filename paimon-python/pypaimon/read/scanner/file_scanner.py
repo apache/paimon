@@ -133,7 +133,7 @@ class FileScanner:
             self.table.table_schema.id
         )
 
-    def _deletion_files_map(self, entries: List[ManifestEntry]) -> dict[tuple, dict[str, DeletionFile]]:
+    def _deletion_files_map(self, entries: List[ManifestEntry]) -> Dict[tuple, Dict[str, DeletionFile]]:
         if not self.deletion_vectors_enabled:
             return {}
         # Extract unique partition-bucket pairs from file entries
