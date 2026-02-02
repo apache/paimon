@@ -179,12 +179,9 @@ class PyArrowFileIO(FileIO):
         return self.filesystem.open_input_file(path_str)
 
     def new_output_stream(self, path: str):
-        import pyarrow
-        from packaging.version import parse as parse_version
-        
         path_str = self.to_filesystem_path(path)
-        
-        if self._is_oss and parse_version(pyarrow.__version__) < parse_version("7.0.0"):
+
+        if self._is_oss and parse(pyarrow.__version__) < parse("7.0.0"):
             # For PyArrow 6.x + OSS, path_str is already just the key part
             if '/' in path_str:
                 parent_dir = '/'.join(path_str.split('/')[:-1])
@@ -492,8 +489,6 @@ class PyArrowFileIO(FileIO):
     def to_filesystem_path(self, path: str) -> str:
         from pyarrow.fs import S3FileSystem
         import re
-        from packaging.version import parse as parse_version
-        import pyarrow
 
         parsed = urlparse(path)
         normalized_path = re.sub(r'/+', '/', parsed.path) if parsed.path else ''
@@ -510,7 +505,7 @@ class PyArrowFileIO(FileIO):
             if parsed.scheme:
                 if parsed.netloc:
                     path_part = normalized_path.lstrip('/')
-                    if self._is_oss and parse_version(pyarrow.__version__) < parse_version("7.0.0"):
+                    if self._is_oss and parse(pyarrow.__version__) < parse("7.0.0"):
                         # For PyArrow 6.x + OSS, endpoint_override already contains bucket,
                         result = path_part if path_part else '.'
                         return result

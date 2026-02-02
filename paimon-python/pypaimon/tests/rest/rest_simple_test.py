@@ -204,7 +204,7 @@ class RESTSimpleTest(RESTBaseTest):
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
-        actual = table_read.to_arrow(splits).sort_by('user_id')
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
             'user_id': [1, 2, 3, 5, 8, 12],
             'item_id': [1001, 1002, 1003, 1005, 1008, 1012],
@@ -215,15 +215,15 @@ class RESTSimpleTest(RESTBaseTest):
 
         # Get the three actual tables
         splits1 = read_builder.new_scan().with_shard(0, 3).plan().splits()
-        actual1 = table_read.to_arrow(splits1).sort_by('user_id')
+        actual1 = table_sort_by(table_read.to_arrow(splits1), 'user_id')
         splits2 = read_builder.new_scan().with_shard(1, 3).plan().splits()
-        actual2 = table_read.to_arrow(splits2).sort_by('user_id')
+        actual2 = table_sort_by(table_read.to_arrow(splits2), 'user_id')
         splits3 = read_builder.new_scan().with_shard(2, 3).plan().splits()
-        actual3 = table_read.to_arrow(splits3).sort_by('user_id')
+        actual3 = table_sort_by(table_read.to_arrow(splits3), 'user_id')
 
         # Concatenate the three tables
-        actual = pa.concat_tables([actual1, actual2, actual3]).sort_by('user_id')
-        expected = self._read_test_table(read_builder).sort_by('user_id')
+        actual = table_sort_by(pa.concat_tables([actual1, actual2, actual3]), 'user_id')
+        expected = table_sort_by(self._read_test_table(read_builder), 'user_id')
         self.assertEqual(actual, expected)
 
     def test_with_shard_single_partition(self):
