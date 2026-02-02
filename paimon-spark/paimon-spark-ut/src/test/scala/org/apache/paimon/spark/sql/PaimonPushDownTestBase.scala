@@ -724,6 +724,47 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test(s"Paimon pushdown: parquet decimal filter") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a DECIMAL(18,4), b STRING) using paimon TBLPROPERTIES
+                   |(
+                   |'file.format' = 'parquet',
+                   |'parquet.block.size' = '100',
+                   |'target-file-size' = '10g'
+                   |)
+                   |""".stripMargin)
+
+      spark.sql("""INSERT INTO T VALUES
+                  |(CAST(100.1234 AS DECIMAL(18,4)), 'a'),
+                  |(CAST(200.5678 AS DECIMAL(18,4)), 'b'),
+                  |(CAST(300.9999 AS DECIMAL(18,4)), 'c'),
+                  |(CAST(150.0000 AS DECIMAL(18,4)), 'd')
+                  |""".stripMargin)
+
+      // Test equals filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a = CAST(100.1234 AS DECIMAL(18,4))"),
+        Row(new java.math.BigDecimal("100.1234"), "a") :: Nil
+      )
+
+      // Test comparison filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a < CAST(200.0000 AS DECIMAL(18,4)) ORDER BY a"),
+        Row(new java.math.BigDecimal("100.1234"), "a") ::
+          Row(new java.math.BigDecimal("150.0000"), "d") :: Nil
+      )
+
+      // Test in filter
+      checkAnswer(
+        spark.sql(
+          "SELECT * FROM T WHERE a IN (CAST(100.1234 AS DECIMAL(18,4)), CAST(300.9999 AS DECIMAL(18,4))) ORDER BY a"),
+        Row(new java.math.BigDecimal("100.1234"), "a") ::
+          Row(new java.math.BigDecimal("300.9999"), "c") :: Nil
+      )
+    }
+  }
+
   private def getScanBuilder(tableName: String = "T"): ScanBuilder = {
     SparkTable(loadTable(tableName)).newScanBuilder(CaseInsensitiveStringMap.empty())
   }
