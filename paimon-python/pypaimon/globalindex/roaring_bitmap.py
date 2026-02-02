@@ -20,20 +20,20 @@
 Roaring Bitmap.
 """
 
-from typing import Iterator, Set
-import struct
+from typing import Iterator
+from pyroaring import BitMap64
 
 
 class RoaringBitmap64:
     """
     A 64-bit roaring bitmap implementation.
+
     This class provides efficient storage and operations for sets of 64-bit integers.
-    It uses a set-based implementation for simplicity, which can be replaced with
-    a more efficient roaring bitmap library if needed.
+    It uses pyroaring.BitMap64 for better performance and memory efficiency.
     """
 
     def __init__(self):
-        self._data: Set[int] = set()
+        self._data = BitMap64()
 
     def add(self, value: int) -> None:
         """Add a single value to the bitmap."""
@@ -41,8 +41,7 @@ class RoaringBitmap64:
 
     def add_range(self, from_: int, to: int) -> None:
         """Add a range of values [from_, to] to the bitmap."""
-        for i in range(from_, to + 1):
-            self._data.add(i)
+        self._data.add_range(from_, to + 1)
 
     def contains(self, value: int) -> bool:
         """Check if the bitmap contains the given value."""
@@ -58,7 +57,7 @@ class RoaringBitmap64:
 
     def __iter__(self) -> Iterator[int]:
         """Iterate over all values in the bitmap in sorted order."""
-        return iter(sorted(self._data))
+        return iter(self._data)
 
     def __len__(self) -> int:
         """Return the number of elements in the bitmap."""
@@ -74,7 +73,7 @@ class RoaringBitmap64:
 
     def to_list(self) -> list:
         """Return a sorted list of all values in the bitmap."""
-        return sorted(self._data)
+        return list(self._data)
 
     def to_range_list(self) -> list:
         """
@@ -85,8 +84,9 @@ class RoaringBitmap64:
         if self.is_empty():
             return []
 
-        sorted_values = sorted(self._data)
+        # Use pyroaring's efficient iteration
         ranges = []
+        sorted_values = list(self._data)
         start = sorted_values[0]
         end = start
 
@@ -127,23 +127,13 @@ class RoaringBitmap64:
 
     def serialize(self) -> bytes:
         """Serialize the bitmap to bytes."""
-        # Simple serialization format: count followed by sorted values
-        values = sorted(self._data)
-        data = struct.pack('>Q', len(values))  # 8-byte count
-        for v in values:
-            data += struct.pack('>q', v)  # 8-byte signed value
-        return data
+        return self._data.serialize()
 
     @staticmethod
     def deserialize(data: bytes) -> 'RoaringBitmap64':
         """Deserialize a bitmap from bytes."""
         result = RoaringBitmap64()
-        count = struct.unpack('>Q', data[:8])[0]
-        offset = 8
-        for _ in range(count):
-            value = struct.unpack('>q', data[offset:offset + 8])[0]
-            result.add(value)
-            offset += 8
+        result._data = BitMap64.deserialize(data)
         return result
 
     def __eq__(self, other: object) -> bool:
@@ -152,9 +142,10 @@ class RoaringBitmap64:
         return self._data == other._data
 
     def __hash__(self) -> int:
-        return hash(frozenset(self._data))
+        return hash(tuple(sorted(self._data)))
 
     def __repr__(self) -> str:
-        if len(self._data) <= 10:
-            return f"RoaringBitmap64({sorted(self._data)})"
-        return f"RoaringBitmap64({len(self._data)} elements)"
+        values = list(self._data)
+        if len(values) <= 10:
+            return f"RoaringBitmap64({values})"
+        return f"RoaringBitmap64({len(values)} elements)"
