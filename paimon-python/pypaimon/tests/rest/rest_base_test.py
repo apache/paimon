@@ -161,6 +161,7 @@ class RESTBaseTest(unittest.TestCase):
         logging.basicConfig(level=logging.INFO)
 
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.drop_table("default.test_table", True)
         self.rest_catalog.create_table("default.test_table", schema, False)
         table = self.rest_catalog.get_table("default.test_table")
 

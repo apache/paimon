@@ -42,9 +42,14 @@ class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
+        self._pyarrow_gte_7 = parse(pyarrow.__version__) >= parse("7.0.0")
+        self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
-        if scheme in {"oss"}:
+        self._is_oss = scheme in {"oss"}
+        self._oss_bucket = None
+        if self._is_oss:
+            self._oss_bucket = self._extract_oss_bucket(path)
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
             self.filesystem = self._initialize_s3_fs()
@@ -63,13 +68,13 @@ class PyArrowFileIO(FileIO):
         else:
             return uri.scheme, uri.netloc, f"{uri.netloc}{uri.path}"
 
-    @staticmethod
     def _create_s3_retry_config(
+            self,
             max_attempts: int = 10,
             request_timeout: int = 60,
             connect_timeout: int = 60
     ) -> Dict[str, Any]:
-        if parse(pyarrow.__version__) >= parse("8.0.0"):
+        if self._pyarrow_gte_8:
             config = {
                 'request_timeout': request_timeout,
                 'connect_timeout': connect_timeout
@@ -114,12 +119,11 @@ class PyArrowFileIO(FileIO):
             "region": self.properties.get(OssOptions.OSS_REGION),
         }
 
-        if parse(pyarrow.__version__) >= parse("7.0.0"):
+        if self._pyarrow_gte_7:
             client_kwargs['force_virtual_addressing'] = True
             client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
-            oss_bucket = self._extract_oss_bucket(path)
-            client_kwargs['endpoint_override'] = (oss_bucket + "." +
+            client_kwargs['endpoint_override'] = (self._oss_bucket + "." +
                                                   self.properties.get(OssOptions.OSS_ENDPOINT))
 
         retry_config = self._create_s3_retry_config()
@@ -136,8 +140,9 @@ class PyArrowFileIO(FileIO):
             "secret_key": self.properties.get(S3Options.S3_ACCESS_KEY_SECRET),
             "session_token": self.properties.get(S3Options.S3_SECURITY_TOKEN),
             "region": self.properties.get(S3Options.S3_REGION),
-            "force_virtual_addressing": True,
         }
+        if self._pyarrow_gte_7:
+            client_kwargs["force_virtual_addressing"] = True
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
@@ -177,9 +182,20 @@ class PyArrowFileIO(FileIO):
 
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
-        parent_dir = Path(path_str).parent
-        if str(parent_dir) and not self.exists(str(parent_dir)):
-            self.mkdirs(str(parent_dir))
+
+        if self._is_oss and not self._pyarrow_gte_7:
+            # For PyArrow 6.x + OSS, path_str is already just the key part
+            if '/' in path_str:
+                parent_dir = '/'.join(path_str.split('/')[:-1])
+            else:
+                parent_dir = ''
+            
+            if parent_dir and not self.exists(parent_dir):
+                self.mkdirs(parent_dir)
+        else:
+            parent_dir = Path(path_str).parent
+            if str(parent_dir) and not self.exists(str(parent_dir)):
+                self.mkdirs(str(parent_dir))
 
         return self.filesystem.open_output_stream(path_str)
 
@@ -491,11 +507,18 @@ class PyArrowFileIO(FileIO):
             if parsed.scheme:
                 if parsed.netloc:
                     path_part = normalized_path.lstrip('/')
-                    return f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+                    if self._is_oss and not self._pyarrow_gte_7:
+                        # For PyArrow 6.x + OSS, endpoint_override already contains bucket,
+                        result = path_part if path_part else '.'
+                        return result
+                    else:
+                        result = f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+                        return result
                 else:
                     result = normalized_path.lstrip('/')
                     return result if result else '.'
-            return str(path)
+            else:
+                return str(path)
 
         if parsed.scheme:
             if not normalized_path:
