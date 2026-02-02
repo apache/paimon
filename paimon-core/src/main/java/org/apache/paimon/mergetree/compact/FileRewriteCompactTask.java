@@ -43,8 +43,9 @@ public class FileRewriteCompactTask extends CompactTask {
             CompactRewriter rewriter,
             CompactUnit unit,
             boolean dropDelete,
-            @Nullable CompactionMetrics.Reporter metricsReporter) {
-        super(metricsReporter);
+            @Nullable CompactionMetrics.Reporter metricsReporter,
+            @Nullable String type) {
+        super(metricsReporter, type);
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();
         this.files = unit.files();

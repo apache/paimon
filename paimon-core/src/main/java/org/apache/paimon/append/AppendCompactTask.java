@@ -18,11 +18,13 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.compact.CompactMetricMeta;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.deletionvectors.append.BaseAppendDeleteFileMaintainer;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.CompactMetricIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.FileKind;
@@ -68,6 +70,7 @@ public class AppendCompactTask {
 
     public CommitMessage doCompact(FileStoreTable table, BaseAppendFileStoreWrite write)
             throws Exception {
+        long startMillis = System.currentTimeMillis();
         boolean dvEnabled = table.coreOptions().deletionVectorsEnabled();
         Preconditions.checkArgument(
                 dvEnabled || compactBefore.size() > 1,
@@ -111,6 +114,9 @@ public class AppendCompactTask {
                         Collections.emptyList(),
                         newIndexFiles,
                         deletedIndexFiles);
+        CompactMetricIncrement compactMetricIncrement =
+                new CompactMetricIncrement(
+                        new CompactMetricMeta("full", System.currentTimeMillis() - startMillis));
         return new CommitMessageImpl(
                 partition,
                 // bucket 0 is bucket for unaware-bucket table
@@ -118,7 +124,8 @@ public class AppendCompactTask {
                 0,
                 table.coreOptions().bucket(),
                 DataIncrement.emptyIncrement(),
-                compactIncrement);
+                compactIncrement,
+                compactMetricIncrement);
     }
 
     public int hashCode() {
