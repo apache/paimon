@@ -190,6 +190,48 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test(s"Paimon push down: apply SUBSTRING") {
+    // Spark support push down LOWER since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, '_hello')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE SUBSTRING(dt, 2) = 'hello'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "_hello"))
+        )
+
+        val q1 =
+          """
+            |SELECT * FROM t
+            |WHERE SUBSTRING(dt, 2, 2) = 'he'
+            |""".stripMargin
+        assert(!checkFilterExists(q1))
+
+        checkAnswer(
+          spark.sql(q1),
+          Seq(Row(1, 100, "_hello"))
+        )
+      }
+    }
+  }
+
   test(s"Paimon push down: apply CAST") {
     if (gteqSpark3_4) {
       withSparkSQLConf("spark.sql.ansi.enabled" -> "true") {
