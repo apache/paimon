@@ -208,7 +208,7 @@ public class FaissVectorGlobalIndexReader implements GlobalIndexReader {
             id2scores.put(scoredRow.rowId, scoredRow.score);
             roaringBitmap64.add(scoredRow.rowId);
         }
-        return new FaissVectorSearchGlobalIndexResult(roaringBitmap64, id2scores);
+        return new FaissScoredGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
     private void configureSearchParams(FaissIndex index) {

@@ -19,7 +19,6 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.variant.Variant;
-import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
@@ -215,17 +214,19 @@ public class ParquetSchemaConverter {
             case ROW:
                 RowType rowType = (RowType) type;
                 Types.GroupBuilder<GroupType> groupTypeBuilder = Types.buildGroup(repetition);
-                if (VariantMetadataUtils.isVariantRowType(rowType)) {
-                    groupTypeBuilder.as(
-                            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
-                }
+                // TODO Use Variant until all engines are upgraded to the latest Parquet
+                // if (VariantMetadataUtils.isVariantRowType(rowType)) {
+                //     groupTypeBuilder.as(
+                //            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
+                // }
                 return groupTypeBuilder
                         .addFields(convertToParquetTypes(rowType))
                         .named(name)
                         .withId(fieldId);
             case VARIANT:
                 return Types.buildGroup(repetition)
-                        .as(LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION))
+                        // TODO Use Variant until all engines are upgraded to the latest Parquet
+                        // .as(LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION))
                         .addField(
                                 Types.primitive(
                                                 PrimitiveType.PrimitiveTypeName.BINARY,

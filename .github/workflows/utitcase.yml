@@ -29,6 +29,7 @@ on:
       - 'paimon-lucene/**'
       - 'paimon-faiss/**'
       - '.github/workflows/faiss-vector-index-tests.yml'
+      - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
 
 env:
   JDK_VERSION: 8

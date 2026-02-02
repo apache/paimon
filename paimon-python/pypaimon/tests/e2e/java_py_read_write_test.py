@@ -25,6 +25,7 @@ import pyarrow as pa
 from parameterized import parameterized
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.schema.schema import Schema
+from pypaimon.read.read_builder import ReadBuilder
 
 if sys.version_info[:2] == (3, 6):
     from pypaimon.tests.py36.pyarrow_compat import table_sort_by
@@ -127,7 +128,15 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 ('category', pa.string()),
                 ('value', pa.float64()),
                 ('ts', pa.timestamp('us')),
-                ('ts_ltz', pa.timestamp('us', tz='UTC'))
+                ('ts_ltz', pa.timestamp('us', tz='UTC')),
+                ('metadata', pa.struct([
+                    pa.field('source', pa.string()),
+                    pa.field('created_at', pa.int64()),
+                    pa.field('location', pa.struct([
+                        pa.field('city', pa.string()),
+                        pa.field('country', pa.string())
+                    ]))
+                ]))
             ])
 
         table_name = f'default.mixed_test_pk_tablep_{file_format}'
@@ -169,7 +178,15 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
                 'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
                 'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
-                'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
+                'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+                'metadata': [
+                    {'source': 'store1', 'created_at': 1001, 'location': {'city': 'Beijing', 'country': 'China'}},
+                    {'source': 'store1', 'created_at': 1002, 'location': {'city': 'Shanghai', 'country': 'China'}},
+                    {'source': 'store2', 'created_at': 1003, 'location': {'city': 'Tokyo', 'country': 'Japan'}},
+                    {'source': 'store2', 'created_at': 1004, 'location': {'city': 'Seoul', 'country': 'Korea'}},
+                    {'source': 'store3', 'created_at': 1005, 'location': {'city': 'NewYork', 'country': 'USA'}},
+                    {'source': 'store3', 'created_at': 1006, 'location': {'city': 'London', 'country': 'UK'}}
+                ]
             })
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -210,10 +227,23 @@ class JavaPyReadWriteTest(unittest.TestCase):
         if file_format != "lance":
             self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
             self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
+            from pypaimon.schema.data_types import RowType
+            self.assertIsInstance(table.fields[6].type, RowType)
+            metadata_fields = table.fields[6].type.fields
+            self.assertEqual(len(metadata_fields), 3)
+            self.assertEqual(metadata_fields[0].name, 'source')
+            self.assertEqual(metadata_fields[1].name, 'created_at')
+            self.assertEqual(metadata_fields[2].name, 'location')
+            self.assertIsInstance(metadata_fields[2].type, RowType)
+        
         # Data order may vary due to partitioning/bucketing, so compare as sets
         expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
         actual_names = set(res['name'].tolist())
         self.assertEqual(actual_names, expected_names)
+
+        # Verify metadata column can be read and contains nested structures
+        if 'metadata' in res.columns:
+            self.assertFalse(res['metadata'].isnull().all())
 
         # For primary key tables, verify that _VALUE_KIND is written correctly
         # by checking if we can read the raw data with system fields
@@ -288,4 +318,46 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'a': [i * 10 for i in range(1, 10001) if i * 10 != 81930],
             'b': [i * 100 for i in range(1, 10001) if i * 10 != 81930]
         }, schema=pa_schema)
+        self.assertEqual(expected, actual)
+
+    def test_read_btree_index_table(self):
+        self._test_read_btree_index_generic("test_btree_index_string", "k2", pa.string())
+        self._test_read_btree_index_generic("test_btree_index_int", 200, pa.int32())
+        self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
+        self._test_read_btree_index_large()
+
+    def _test_read_btree_index_generic(self, table_name: str, k, k_type):
+        table = self.catalog.get_table('default.' + table_name)
+        read_builder: ReadBuilder = table.new_read_builder()
+
+        # read using index
+        predicate_builder = read_builder.new_predicate_builder()
+        predicate = predicate_builder.equal('k', k)
+        read_builder.with_filter(predicate)
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': [k],
+            'v': ["v2"]
+        }, schema=pa.schema([
+            ("k", k_type),
+            ("v", pa.string())
+        ]))
+        self.assertEqual(expected, actual)
+
+    def _test_read_btree_index_large(self):
+        table = self.catalog.get_table('default.test_btree_index_large')
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+
+        # read equal index
+        read_builder.with_filter(predicate_builder.equal('k', 'k2'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k2"],
+            'v': ["v2"]
+        })
         self.assertEqual(expected, actual)

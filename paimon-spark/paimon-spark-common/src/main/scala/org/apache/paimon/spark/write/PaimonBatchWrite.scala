@@ -54,11 +54,15 @@ case class PaimonBatchWrite(
   }
 
   override def createBatchWriterFactory(info: PhysicalWriteInfo): DataWriterFactory = {
-    val fullCompactionDeltaCommits: Option[Int] =
-      Option.apply(coreOptions.fullCompactionDeltaCommits())
-    (_: Int, _: Long) => {
-      PaimonV2DataWriter(batchWriteBuilder, writeSchema, dataSchema, fullCompactionDeltaCommits)
-    }
+    (_: Int, _: Long) =>
+      {
+        PaimonV2DataWriter(
+          batchWriteBuilder,
+          writeSchema,
+          dataSchema,
+          coreOptions,
+          table.catalogEnvironment().catalogContext())
+      }
   }
 
   override def useCommitCoordinator(): Boolean = false

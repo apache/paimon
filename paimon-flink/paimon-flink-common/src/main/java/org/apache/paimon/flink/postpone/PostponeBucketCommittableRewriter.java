@@ -20,22 +20,13 @@ package org.apache.paimon.flink.postpone;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.postpone.BucketFiles;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -83,78 +74,5 @@ public class PostponeBucketCommittableRewriter {
         }
         buckets.clear();
         return result;
-    }
-
-    private static class BucketFiles {
-
-        private final DataFilePathFactory pathFactory;
-        private final FileIO fileIO;
-
-        private @Nullable Integer totalBuckets;
-        private final Map<String, DataFileMeta> newFiles;
-        private final List<DataFileMeta> compactBefore;
-        private final List<DataFileMeta> compactAfter;
-        private final List<DataFileMeta> changelogFiles;
-        private final List<IndexFileMeta> newIndexFiles;
-        private final List<IndexFileMeta> deletedIndexFiles;
-
-        private BucketFiles(DataFilePathFactory pathFactory, FileIO fileIO) {
-            this.pathFactory = pathFactory;
-            this.fileIO = fileIO;
-
-            this.newFiles = new LinkedHashMap<>();
-            this.compactBefore = new ArrayList<>();
-            this.compactAfter = new ArrayList<>();
-            this.changelogFiles = new ArrayList<>();
-            this.newIndexFiles = new ArrayList<>();
-            this.deletedIndexFiles = new ArrayList<>();
-        }
-
-        private void update(CommitMessageImpl message) {
-            totalBuckets = message.totalBuckets();
-
-            for (DataFileMeta file : message.newFilesIncrement().newFiles()) {
-                newFiles.put(file.fileName(), file);
-            }
-
-            Map<String, Path> toDelete = new HashMap<>();
-            for (DataFileMeta file : message.compactIncrement().compactBefore()) {
-                if (newFiles.containsKey(file.fileName())) {
-                    toDelete.put(file.fileName(), pathFactory.toPath(file));
-                    newFiles.remove(file.fileName());
-                } else {
-                    compactBefore.add(file);
-                }
-            }
-
-            for (DataFileMeta file : message.compactIncrement().compactAfter()) {
-                compactAfter.add(file);
-                toDelete.remove(file.fileName());
-            }
-
-            changelogFiles.addAll(message.newFilesIncrement().changelogFiles());
-            changelogFiles.addAll(message.compactIncrement().changelogFiles());
-
-            newIndexFiles.addAll(message.compactIncrement().newIndexFiles());
-            deletedIndexFiles.addAll(message.compactIncrement().deletedIndexFiles());
-
-            toDelete.forEach((fileName, path) -> fileIO.deleteQuietly(path));
-        }
-
-        private CommitMessageImpl makeMessage(BinaryRow partition, int bucket) {
-            List<DataFileMeta> realCompactAfter = new ArrayList<>(newFiles.values());
-            realCompactAfter.addAll(compactAfter);
-            return new CommitMessageImpl(
-                    partition,
-                    bucket,
-                    totalBuckets,
-                    DataIncrement.emptyIncrement(),
-                    new CompactIncrement(
-                            compactBefore,
-                            realCompactAfter,
-                            changelogFiles,
-                            newIndexFiles,
-                            deletedIndexFiles));
-        }
     }
 }

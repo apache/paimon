@@ -16,21 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lucene.index;
+package org.apache.paimon.faiss.index;
 
 import org.apache.paimon.globalindex.ScoreGetter;
-import org.apache.paimon.globalindex.VectorSearchGlobalIndexResult;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.HashMap;
 
-/** Vector search global index result for Lucene vector index. */
-public class LuceneVectorSearchGlobalIndexResult implements VectorSearchGlobalIndexResult {
+/** Vector search global index result for FAISS vector index. */
+public class FaissScoredGlobalIndexResult implements ScoredGlobalIndexResult {
 
     private final HashMap<Long, Float> id2scores;
     private final RoaringNavigableMap64 results;
 
-    public LuceneVectorSearchGlobalIndexResult(
+    public FaissScoredGlobalIndexResult(
             RoaringNavigableMap64 results, HashMap<Long, Float> id2scores) {
         this.id2scores = id2scores;
         this.results = results;

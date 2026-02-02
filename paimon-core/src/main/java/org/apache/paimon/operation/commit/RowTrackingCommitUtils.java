@@ -49,7 +49,11 @@ public class RowTrackingCommitUtils {
     private static void assignSnapshotId(
             long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
         for (ManifestEntry entry : deltaFiles) {
-            snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            if (entry.file().minSequenceNumber() == 0L) {
+                snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            } else {
+                snapshotAssigned.add(entry);
+            }
         }
     }
 

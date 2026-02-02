@@ -25,7 +25,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.{ImmutableMap, 
 import org.apache.paimon.spark.SparkInternalRowWrapper
 import org.apache.paimon.spark.SparkTypeUtils.toPaimonRowType
 import org.apache.paimon.spark.catalog.functions.PaimonFunctions._
-import org.apache.paimon.spark.function.{DescriptorToStringFunction, DescriptorToStringUnbound, PathToDescriptorFunction, PathToDescriptorUnbound}
+import org.apache.paimon.spark.function.{DescriptorToStringUnbound, PathToDescriptorUnbound}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.types.{ArrayType, DataType => PaimonDataType, LocalZonedTimestampType, MapType, RowType, TimestampType}
 import org.apache.paimon.utils.ProjectedRow
@@ -90,7 +90,7 @@ class BucketFunction(NAME: String, bucketFunctionType: BucketFunctionType) exten
     val serializer = new InternalRowSerializer(bucketKeyRowType)
     val mapping = (1 to bucketKeyRowType.getFieldCount).toArray
     val reusedRow =
-      new SparkInternalRowWrapper(-1, inputType, inputType.fields.length)
+      new SparkInternalRowWrapper(inputType, inputType.fields.length)
     val bucketFunc: bucket.BucketFunction =
       bucket.BucketFunction.create(bucketFunctionType, bucketKeyRowType)
     new ScalarFunction[Int]() {

@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pypaimon.globalindex import GlobalIndexIOMeta, GlobalIndexReader, GlobalIndexEvaluator
 from pypaimon.globalindex.range import Range
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
+from pypaimon.schema.data_types import DataField
 
 
 class GlobalIndexScanBuilder(ABC):
@@ -160,12 +161,12 @@ class RowRangeGlobalIndexScanner:
             )
             index_metas[field_id][index_type].append(io_meta)
         
-        def readers_function(field_id: int) -> Collection[GlobalIndexReader]:
+        def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
             readers = []
-            if field_id not in index_metas:
+            if field.id not in index_metas:
                 return readers
             
-            for index_type, io_metas in index_metas[field_id].items():
+            for index_type, io_metas in index_metas[field.id].items():
                 if index_type == 'faiss-vector-ann':
                     # Lazy import to avoid requiring faiss when not used
                     from pypaimon.globalindex.faiss import (
@@ -180,6 +181,17 @@ class RowRangeGlobalIndexScanner:
                         options=options
                     )
                     readers.append(reader)
+                if index_type == 'btree':
+                    from pypaimon.globalindex.btree import BTreeIndexReader
+                    from pypaimon.globalindex.btree.key_serializer import create_serializer
+                    for metadata in io_metas:
+                        reader = BTreeIndexReader(
+                            key_serializer=create_serializer(field.type),
+                            file_io=file_io,
+                            index_path=index_path,
+                            io_meta=metadata
+                        )
+                        readers.append(reader)
             
             return readers
         

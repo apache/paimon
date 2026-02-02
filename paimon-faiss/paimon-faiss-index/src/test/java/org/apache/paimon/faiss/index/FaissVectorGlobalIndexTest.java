@@ -280,9 +280,8 @@ public class FaissVectorGlobalIndexTest {
         try (FaissVectorGlobalIndexReader reader =
                 new FaissVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
-            FaissVectorSearchGlobalIndexResult result =
-                    (FaissVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            FaissScoredGlobalIndexResult result =
+                    (FaissScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             long expectedRowId = 0;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
@@ -293,17 +292,13 @@ public class FaissVectorGlobalIndexTest {
             filterResults.add(expectedRowId);
             vectorSearch =
                     new VectorSearch(vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
-            result =
-                    (FaissVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            result = (FaissScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             // Test with multiple results
             float[] queryVector = new float[] {0.85f, 0.15f};
             vectorSearch = new VectorSearch(queryVector, 2, fieldName);
-            result =
-                    (FaissVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            result = (FaissScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
         }
     }
@@ -407,9 +402,8 @@ public class FaissVectorGlobalIndexTest {
             // Verify that search returns vectors from the correct file
             // The exact match should have rowId equal to the vector index
             vectorSearch = new VectorSearch(testVectors.get(200), 1, fieldName);
-            FaissVectorSearchGlobalIndexResult result =
-                    (FaissVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            FaissScoredGlobalIndexResult result =
+                    (FaissScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(containsRowId(result, 200)).isTrue();
         }
     }
@@ -448,17 +442,14 @@ public class FaissVectorGlobalIndexTest {
                 new FaissVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
             // Search for vector in the remainder file (second file)
             VectorSearch vectorSearch = new VectorSearch(testVectors.get(60), 1, fieldName);
-            FaissVectorSearchGlobalIndexResult result =
-                    (FaissVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            FaissScoredGlobalIndexResult result =
+                    (FaissScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result).isNotNull();
             assertThat(containsRowId(result, 60)).isTrue();
 
             // Search for the last vector
             vectorSearch = new VectorSearch(testVectors.get(72), 1, fieldName);
-            result =
-                    (FaissVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            result = (FaissScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result).isNotNull();
             assertThat(containsRowId(result, 72)).isTrue();
         }

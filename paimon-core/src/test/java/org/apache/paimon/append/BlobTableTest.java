@@ -75,16 +75,20 @@ public class BlobTableTest extends TableTestBase {
                     });
             write.write(dataDefault(0, 0));
             write.write(dataDefault(0, 0));
+            write.write(GenericRow.of(1, BinaryString.fromString("nice"), null));
         }
-        assertThat(blobs.size()).isEqualTo(2);
+        assertThat(blobs.size()).isEqualTo(3);
         FileIO fileIO = table.fileIO();
         UriReader uriReader = UriReader.fromFile(fileIO);
-        for (BlobDescriptor blob : blobs) {
+        for (int i = 0; i < 2; i++) {
+            BlobDescriptor blob = blobs.get(i);
             assertThat(Blob.fromDescriptor(uriReader, blob).toData()).isEqualTo(blobBytes);
         }
-        for (BlobDescriptor blob : blobs) {
+        for (int i = 0; i < 2; i++) {
+            BlobDescriptor blob = blobs.get(i);
             fileIO.deleteQuietly(new Path(blob.uri()));
         }
+        assertThat(blobs.get(2)).isNull();
     }
 
     @Test

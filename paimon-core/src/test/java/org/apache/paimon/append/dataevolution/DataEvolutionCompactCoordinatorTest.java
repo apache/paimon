@@ -19,6 +19,7 @@
 package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
@@ -27,6 +28,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -187,6 +189,8 @@ public class DataEvolutionCompactCoordinatorTest {
         SnapshotManager snapshotManager = mock(SnapshotManager.class);
         Snapshot snapshot = mock(Snapshot.class);
         ManifestsReader manifestsReader = mock(ManifestsReader.class);
+        FileStore fileStore = mock(FileStore.class);
+        FileStoreScan scan = mock(FileStoreScan.class);
 
         Options options = new Options();
         options.set("target-file-size", "1 kb");
@@ -199,6 +203,8 @@ public class DataEvolutionCompactCoordinatorTest {
         when(snapshotReader.snapshotManager()).thenReturn(snapshotManager);
         when(snapshotManager.latestSnapshot()).thenReturn(snapshot);
         when(snapshotReader.manifestsReader()).thenReturn(manifestsReader);
+        when(table.store()).thenReturn(fileStore);
+        when(fileStore.newScan()).thenReturn(scan);
 
         ManifestFileMeta metaWithNullRowId =
                 new ManifestFileMeta(
@@ -234,10 +240,8 @@ public class DataEvolutionCompactCoordinatorTest {
 
         ManifestEntry entry1 = makeEntry("file1.parquet", 0L, 100L, 600);
         ManifestEntry entry2 = makeEntry("file2.parquet", 100L, 100L, 600);
-        when(snapshotReader.readManifest(metaWithNullRowId))
-                .thenReturn(Collections.singletonList(entry1));
-        when(snapshotReader.readManifest(metaWithRowId))
-                .thenReturn(Collections.singletonList(entry2));
+        when(scan.readFileIterator(Arrays.asList(metaWithNullRowId, metaWithRowId)))
+                .thenReturn(Arrays.asList(entry1, entry2).iterator());
 
         DataEvolutionCompactCoordinator coordinator =
                 new DataEvolutionCompactCoordinator(table, false);

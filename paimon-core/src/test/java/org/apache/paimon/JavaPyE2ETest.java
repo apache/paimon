@@ -30,19 +30,27 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
@@ -66,9 +74,14 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ENABLED;
+import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.ROW_TRACKING_ENABLED;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
+import static org.apache.paimon.globalindex.btree.BTreeIndexOptions.BTREE_INDEX_COMPRESSION;
 import static org.apache.paimon.table.SimpleTableTestBase.getResult;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -105,60 +118,6 @@ public class JavaPyE2ETest {
 
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testJavaWriteReadAppendTable() throws Exception {
-        for (String format : Arrays.asList("parquet", "orc", "avro")) {
-            Identifier identifier = identifier("mixed_test_append_tablej_" + format);
-            Schema schema =
-                    Schema.newBuilder()
-                            .column("id", DataTypes.INT())
-                            .column("name", DataTypes.STRING())
-                            .column("category", DataTypes.STRING())
-                            .column("value", DataTypes.DOUBLE())
-                            .column("ts", DataTypes.TIMESTAMP())
-                            .column("ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
-                            .partitionKeys("category")
-                            .option("dynamic-partition-overwrite", "false")
-                            .option("file.format", format)
-                            .build();
-
-            catalog.createTable(identifier, schema, true);
-            Table table = catalog.getTable(identifier);
-            FileStoreTable fileStoreTable = (FileStoreTable) table;
-
-            try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
-                    InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
-
-                write.write(createRow6Cols(1, "Apple", "Fruit", 1.5, 1000000L, 2000000L));
-                write.write(createRow6Cols(2, "Banana", "Fruit", 0.8, 1000001L, 2000001L));
-                write.write(createRow6Cols(3, "Carrot", "Vegetable", 0.6, 1000002L, 2000002L));
-                write.write(createRow6Cols(4, "Broccoli", "Vegetable", 1.2, 1000003L, 2000003L));
-                write.write(createRow6Cols(5, "Chicken", "Meat", 5.0, 1000004L, 2000004L));
-                write.write(createRow6Cols(6, "Beef", "Meat", 8.0, 1000005L, 2000005L));
-
-                commit.commit(0, write.prepareCommit(true, 0));
-            }
-
-            List<Split> splits =
-                    new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
-            TableRead read = fileStoreTable.newRead();
-            List<String> res =
-                    getResult(
-                            read,
-                            splits,
-                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
-            assertThat(res)
-                    .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
-                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001",
-                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002",
-                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003",
-                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004",
-                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005");
-        }
-    }
-
-    @Test
-    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testReadAppendTable() throws Exception {
         for (String format : Arrays.asList("parquet", "orc", "avro")) {
             Identifier identifier = identifier("mixed_test_append_tablep_" + format);
@@ -189,6 +148,21 @@ public class JavaPyE2ETest {
                             .column("value", DataTypes.DOUBLE())
                             .column("ts", DataTypes.TIMESTAMP())
                             .column("ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+                            .column(
+                                    "metadata",
+                                    DataTypes.ROW(
+                                            DataTypes.FIELD(0, "source", DataTypes.STRING()),
+                                            DataTypes.FIELD(1, "created_at", DataTypes.BIGINT()),
+                                            DataTypes.FIELD(
+                                                    2,
+                                                    "location",
+                                                    DataTypes.ROW(
+                                                            DataTypes.FIELD(
+                                                                    0, "city", DataTypes.STRING()),
+                                                            DataTypes.FIELD(
+                                                                    1,
+                                                                    "country",
+                                                                    DataTypes.STRING())))))
                             .primaryKey("id")
                             .partitionKeys("category")
                             .option("dynamic-partition-overwrite", "false")
@@ -203,12 +177,54 @@ public class JavaPyE2ETest {
             try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
                     InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
 
-                write.write(createRow6Cols(1, "Apple", "Fruit", 1.5, 1000000L, 2000000L));
-                write.write(createRow6Cols(2, "Banana", "Fruit", 0.8, 1000001L, 2000001L));
-                write.write(createRow6Cols(3, "Carrot", "Vegetable", 0.6, 1000002L, 2000002L));
-                write.write(createRow6Cols(4, "Broccoli", "Vegetable", 1.2, 1000003L, 2000003L));
-                write.write(createRow6Cols(5, "Chicken", "Meat", 5.0, 1000004L, 2000004L));
-                write.write(createRow6Cols(6, "Beef", "Meat", 8.0, 1000005L, 2000005L));
+                write.write(
+                        createRow7Cols(
+                                1, "Apple", "Fruit", 1.5, 1000000L, 2000000L, "store1", 1001L,
+                                "Beijing", "China"));
+                write.write(
+                        createRow7Cols(
+                                2,
+                                "Banana",
+                                "Fruit",
+                                0.8,
+                                1000001L,
+                                2000001L,
+                                "store1",
+                                1002L,
+                                "Shanghai",
+                                "China"));
+                write.write(
+                        createRow7Cols(
+                                3,
+                                "Carrot",
+                                "Vegetable",
+                                0.6,
+                                1000002L,
+                                2000002L,
+                                "store2",
+                                1003L,
+                                "Tokyo",
+                                "Japan"));
+                write.write(
+                        createRow7Cols(
+                                4,
+                                "Broccoli",
+                                "Vegetable",
+                                1.2,
+                                1000003L,
+                                2000003L,
+                                "store2",
+                                1004L,
+                                "Seoul",
+                                "Korea"));
+                write.write(
+                        createRow7Cols(
+                                5, "Chicken", "Meat", 5.0, 1000004L, 2000004L, "store3", 1005L,
+                                "NewYork", "USA"));
+                write.write(
+                        createRow7Cols(
+                                6, "Beef", "Meat", 8.0, 1000005L, 2000005L, "store3", 1006L,
+                                "London", "UK"));
 
                 commit.commit(0, write.prepareCommit(true, 0));
             }
@@ -217,18 +233,15 @@ public class JavaPyE2ETest {
                     new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
             TableRead read = fileStoreTable.newRead();
             List<String> res =
-                    getResult(
-                            read,
-                            splits,
-                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+                    getResult(read, splits, row -> rowToStringWithStruct(row, table.rowType()));
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
-                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001",
-                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002",
-                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003",
-                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004",
-                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
         }
     }
 
@@ -377,23 +390,183 @@ public class JavaPyE2ETest {
                     new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
             TableRead read = fileStoreTable.newRead();
             List<String> res =
-                    getResult(
-                            read,
-                            splits,
-                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+                    getResult(read, splits, row -> rowToStringWithStruct(row, table.rowType()));
             System.out.println("Result for " + format + " : " + res);
             assertThat(table.rowType().getFieldTypes().get(4)).isEqualTo(DataTypes.TIMESTAMP());
             assertThat(table.rowType().getFieldTypes().get(5))
                     .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
+            assertThat(table.rowType().getFieldTypes().get(6)).isInstanceOf(RowType.class);
+            RowType metadataType = (RowType) table.rowType().getFieldTypes().get(6);
+            assertThat(metadataType.getFieldTypes().get(2)).isInstanceOf(RowType.class);
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20",
-                            "2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001",
-                            "3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002",
-                            "4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003",
-                            "5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004",
-                            "6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
         }
+    }
+
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testBtreeIndexWrite() throws Exception {
+        testBtreeIndexWriteString();
+        testBtreeIndexWriteInt();
+        testBtreeIndexWriteBigInt();
+        testBtreeIndexWriteLarge();
+    }
+
+    private void testBtreeIndexWriteString() throws Exception {
+        testBtreeIndexWriteGeneric(
+                DataTypes.STRING(),
+                "test_btree_index_string",
+                BinaryString.fromString("k1"),
+                BinaryString.fromString("k2"),
+                BinaryString.fromString("k3"));
+    }
+
+    private void testBtreeIndexWriteInt() throws Exception {
+        testBtreeIndexWriteGeneric(DataTypes.INT(), "test_btree_index_int", 100, 200, 300);
+    }
+
+    private void testBtreeIndexWriteBigInt() throws Exception {
+        testBtreeIndexWriteGeneric(
+                DataTypes.BIGINT(), "test_btree_index_bigint", 1000L, 2000L, 3000L);
+    }
+
+    private <T> void testBtreeIndexWriteGeneric(
+            DataType keyType, String tableName, Object key1, Object key2, Object key3)
+            throws Exception {
+        // create table
+        RowType rowType =
+                RowType.of(new DataType[] {keyType, DataTypes.STRING()}, new String[] {"k", "v"});
+        Options options = new Options();
+        Path tablePath = new Path(warehouse.toString() + "/default.db/" + tableName);
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // write data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(GenericRow.of(key1, BinaryString.fromString("v1")));
+            write.write(GenericRow.of(key2, BinaryString.fromString("v2")));
+            write.write(GenericRow.of(key3, BinaryString.fromString("v3")));
+            commit.commit(write.prepareCommit());
+        }
+
+        // build index
+        BTreeGlobalIndexBuilder builder =
+                new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+        }
+
+        // assert index
+        List<IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest);
+        assertThat(indexEntries)
+                .singleElement()
+                .matches(entry -> entry.indexFile().rowCount() == 3);
+
+        // read index
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withFilter(predicateBuilder.equal(0, key2));
+        List<String> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> result.add(r.getString(1).toString()));
+        assertThat(result).containsOnly("v2");
+    }
+
+    private void testBtreeIndexWriteLarge() throws Exception {
+        // create table
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        Path tablePath = new Path(warehouse.toString() + "/default.db/test_btree_index_large");
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        options.set(BTREE_INDEX_COMPRESSION, "zstd");
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // write data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (int i = 0; i < 2000; i++) {
+                write.write(
+                        GenericRow.of(
+                                BinaryString.fromString("k" + i),
+                                BinaryString.fromString("v" + i)));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        // build index
+        BTreeGlobalIndexBuilder builder =
+                new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+        }
+
+        // assert index
+        List<IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest);
+        assertThat(indexEntries)
+                .singleElement()
+                .matches(entry -> entry.indexFile().rowCount() == 2000);
+
+        // read index
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder =
+                table.newReadBuilder()
+                        .withFilter(predicateBuilder.equal(0, BinaryString.fromString("k2")));
+        List<String> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> result.add(r.getString(1).toString()));
+        assertThat(result).containsOnly("v2");
     }
 
     // Helper method from TableTestBase
@@ -408,7 +581,7 @@ public class JavaPyE2ETest {
                         new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
                         new String[] {"pt", "a", "b"});
         Options options = new Options();
-        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(PATH, tablePath.toString());
         options.set(BUCKET, 1);
         configure.accept(options);
         TableSchema tableSchema =
@@ -424,15 +597,30 @@ public class JavaPyE2ETest {
                 FileIOFinder.find(tablePath), tablePath, tableSchema, CatalogEnvironment.empty());
     }
 
-    private static InternalRow createRow6Cols(
-            int id, String name, String category, double value, long ts, long tsLtz) {
+    private static InternalRow createRow7Cols(
+            int id,
+            String name,
+            String category,
+            double value,
+            long ts,
+            long tsLtz,
+            String metadataSource,
+            long metadataCreatedAt,
+            String city,
+            String country) {
+        GenericRow locationRow =
+                GenericRow.of(BinaryString.fromString(city), BinaryString.fromString(country));
+        GenericRow metadataRow =
+                GenericRow.of(
+                        BinaryString.fromString(metadataSource), metadataCreatedAt, locationRow);
         return GenericRow.of(
                 id,
                 BinaryString.fromString(name),
                 BinaryString.fromString(category),
                 value,
                 org.apache.paimon.data.Timestamp.fromEpochMillis(ts),
-                org.apache.paimon.data.Timestamp.fromEpochMillis(tsLtz));
+                org.apache.paimon.data.Timestamp.fromEpochMillis(tsLtz),
+                metadataRow);
     }
 
     protected GenericRow createRow3Cols(Object... values) {
@@ -441,5 +629,25 @@ public class JavaPyE2ETest {
 
     protected GenericRow createRow3ColsWithKind(RowKind rowKind, Object... values) {
         return GenericRow.ofKind(rowKind, values[0], values[1], values[2]);
+    }
+
+    private static String rowToStringWithStruct(InternalRow row, RowType type) {
+        StringBuilder build = new StringBuilder();
+        build.append(row.getRowKind().shortString()).append("[");
+        for (int i = 0; i < type.getFieldCount(); i++) {
+            if (i != 0) {
+                build.append(", ");
+            }
+            if (row.isNullAt(i)) {
+                build.append("NULL");
+            } else {
+                InternalRow.FieldGetter fieldGetter =
+                        InternalRow.createFieldGetter(type.getTypeAt(i), i);
+                Object field = fieldGetter.getFieldOrNull(row);
+                build.append(DataFormatTestUtil.getDataFieldString(field, type.getTypeAt(i)));
+            }
+        }
+        build.append("]");
+        return build.toString();
     }
 }

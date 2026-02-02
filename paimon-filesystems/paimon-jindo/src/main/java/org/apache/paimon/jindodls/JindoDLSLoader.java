@@ -16,33 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.faiss.index;
+package org.apache.paimon.jindodls;
 
-import org.apache.paimon.globalindex.ScoreGetter;
-import org.apache.paimon.globalindex.VectorSearchGlobalIndexResult;
-import org.apache.paimon.utils.RoaringNavigableMap64;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.jindo.JindoFileIO;
 
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 
-/** Vector search global index result for FAISS vector index. */
-public class FaissVectorSearchGlobalIndexResult implements VectorSearchGlobalIndexResult {
+/** File loader for {@link JindoFileIO}. */
+public class JindoDLSLoader implements FileIOLoader {
 
-    private final HashMap<Long, Float> id2scores;
-    private final RoaringNavigableMap64 results;
-
-    public FaissVectorSearchGlobalIndexResult(
-            RoaringNavigableMap64 results, HashMap<Long, Float> id2scores) {
-        this.id2scores = id2scores;
-        this.results = results;
+    @Override
+    public List<String[]> requiredOptions() {
+        return new ArrayList<>();
     }
 
     @Override
-    public ScoreGetter scoreGetter() {
-        return id2scores::get;
+    public String getScheme() {
+        return "dls";
     }
 
     @Override
-    public RoaringNavigableMap64 results() {
-        return this.results;
+    public FileIO load(Path path) {
+        return new JindoFileIO();
     }
 }

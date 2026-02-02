@@ -40,13 +40,13 @@ case class SparkCatalystPartitionPredicate(
 
   private val partitionSchema: StructType = CharVarcharUtils.replaceCharVarcharWithStringInSchema(
     SparkTypeUtils.fromPaimonRowType(partitionRowType))
-  @transient private val predicate: BasePredicate =
-    new StructExpressionFilters(partitionFilter, partitionSchema).toPredicate
-  @transient private val sparkPartitionRow: SparkInternalRow =
-    SparkInternalRow.create(partitionRowType)
+  @transient private lazy val predicateThreadLocal: ThreadLocal[BasePredicate] =
+    ThreadLocal.withInitial(
+      () => new StructExpressionFilters(partitionFilter, partitionSchema).toPredicate)
 
   override def test(partition: BinaryRow): Boolean = {
-    predicate.eval(sparkPartitionRow.replace(partition))
+    val predicate = predicateThreadLocal.get()
+    predicate.eval(SparkInternalRow.create(partitionRowType).replace(partition))
   }
 
   override def test(

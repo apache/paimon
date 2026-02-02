@@ -41,7 +41,7 @@ public class GlobalIndexSerDeUtilsTest {
         byte[] serialized = serialize(original);
         GlobalIndexResult deserialized = deserialize(serialized);
 
-        assertThat(deserialized).isNotInstanceOf(VectorSearchGlobalIndexResult.class);
+        assertThat(deserialized).isNotInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results()).isEqualTo(bitmap);
     }
 
@@ -52,7 +52,7 @@ public class GlobalIndexSerDeUtilsTest {
         byte[] serialized = serialize(original);
         GlobalIndexResult deserialized = deserialize(serialized);
 
-        assertThat(deserialized).isNotInstanceOf(VectorSearchGlobalIndexResult.class);
+        assertThat(deserialized).isNotInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results().isEmpty()).isTrue();
     }
 
@@ -65,16 +65,16 @@ public class GlobalIndexSerDeUtilsTest {
         scoreMap.put(10L, 0.7f);
         scoreMap.put(100L, 0.6f);
 
-        VectorSearchGlobalIndexResult original =
-                VectorSearchGlobalIndexResult.create(() -> bitmap, scoreMap::get);
+        ScoredGlobalIndexResult original =
+                ScoredGlobalIndexResult.create(() -> bitmap, scoreMap::get);
 
         byte[] serialized = serialize(original);
         GlobalIndexResult deserialized = deserialize(serialized);
 
-        assertThat(deserialized).isInstanceOf(VectorSearchGlobalIndexResult.class);
+        assertThat(deserialized).isInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results()).isEqualTo(bitmap);
 
-        VectorSearchGlobalIndexResult topkResult = (VectorSearchGlobalIndexResult) deserialized;
+        ScoredGlobalIndexResult topkResult = (ScoredGlobalIndexResult) deserialized;
         ScoreGetter scoreGetter = topkResult.scoreGetter();
         assertThat(scoreGetter.score(1L)).isEqualTo(0.9f);
         assertThat(scoreGetter.score(5L)).isEqualTo(0.8f);
@@ -92,16 +92,16 @@ public class GlobalIndexSerDeUtilsTest {
         scoreMap.put(Integer.MAX_VALUE + 100L, 0.3f);
         scoreMap.put(Long.MAX_VALUE - 1, 0.1f);
 
-        VectorSearchGlobalIndexResult original =
-                VectorSearchGlobalIndexResult.create(() -> bitmap, scoreMap::get);
+        ScoredGlobalIndexResult original =
+                ScoredGlobalIndexResult.create(() -> bitmap, scoreMap::get);
 
         byte[] serialized = serialize(original);
         GlobalIndexResult deserialized = deserialize(serialized);
 
-        assertThat(deserialized).isInstanceOf(VectorSearchGlobalIndexResult.class);
+        assertThat(deserialized).isInstanceOf(ScoredGlobalIndexResult.class);
         assertThat(deserialized.results()).isEqualTo(bitmap);
 
-        VectorSearchGlobalIndexResult topkResult = (VectorSearchGlobalIndexResult) deserialized;
+        ScoredGlobalIndexResult topkResult = (ScoredGlobalIndexResult) deserialized;
         ScoreGetter scoreGetter = topkResult.scoreGetter();
         assertThat(scoreGetter.score(Integer.MAX_VALUE + 1L)).isEqualTo(0.5f);
         assertThat(scoreGetter.score(Integer.MAX_VALUE + 100L)).isEqualTo(0.3f);

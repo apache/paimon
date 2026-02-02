@@ -37,6 +37,7 @@ import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.DLFAuthProvider;
+import org.apache.paimon.rest.auth.DLFDefaultSigner;
 import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
@@ -121,8 +122,11 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         String akId = "akId" + UUID.randomUUID();
         String akSecret = "akSecret" + UUID.randomUUID();
         String securityToken = "securityToken" + UUID.randomUUID();
+        String uri = "https://cn-hangzhou-vpc.dlf.aliyuncs.com";
         String region = "cn-hangzhou";
-        this.authProvider = DLFAuthProvider.fromAccessKey(akId, akSecret, securityToken, region);
+        this.authProvider =
+                DLFAuthProvider.fromAccessKey(
+                        akId, akSecret, securityToken, uri, region, DLFDefaultSigner.IDENTIFIER);
         this.authMap =
                 ImmutableMap.of(
                         RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
@@ -136,6 +140,7 @@ class MockRESTCatalogTest extends RESTCatalogTest {
 
     @Test
     void testDlfStSTokenPathAuth() throws Exception {
+        String uri = "https://cn-hangzhou-vpc.dlf.aliyuncs.com";
         String region = "cn-hangzhou";
         String tokenPath = dataPath + UUID.randomUUID();
         generateTokenAndWriteToFile(tokenPath);
@@ -145,7 +150,9 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         new Options(
                                 ImmutableMap.of(
                                         RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
-        this.authProvider = DLFAuthProvider.fromTokenLoader(tokenLoader, region);
+        this.authProvider =
+                DLFAuthProvider.fromTokenLoader(
+                        tokenLoader, uri, region, DLFDefaultSigner.IDENTIFIER);
         this.authMap =
                 ImmutableMap.of(
                         RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),

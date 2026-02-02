@@ -18,10 +18,12 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.RowType;
@@ -35,6 +37,7 @@ import org.apache.parquet.filter2.predicate.ParquetFilters;
 import org.apache.parquet.io.api.Binary;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.stream.Collectors;
@@ -228,6 +231,182 @@ class ParquetFiltersTest {
                                 .boxed()
                                 .map(Float::new)
                                 .collect(Collectors.toSet())),
+                true);
+    }
+
+    @Test
+    public void testDecimal32Bit() {
+        // precision <= 9 uses INT32
+        int precision = 9;
+        int scale = 2;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(precision, scale)))));
+
+        Decimal value = Decimal.fromBigDecimal(new BigDecimal("123.45"), precision, scale);
+        int expectedIntVal = (int) value.toUnscaledLong(); // 12345
+
+        test(builder.isNull(0), "eq(decimal1, null)", true);
+        test(builder.isNotNull(0), "noteq(decimal1, null)", true);
+        test(builder.equal(0, value), "eq(decimal1, " + expectedIntVal + ")", true);
+        test(builder.notEqual(0, value), "noteq(decimal1, " + expectedIntVal + ")", true);
+        test(builder.lessThan(0, value), "lt(decimal1, " + expectedIntVal + ")", true);
+        test(builder.lessOrEqual(0, value), "lteq(decimal1, " + expectedIntVal + ")", true);
+        test(builder.greaterThan(0, value), "gt(decimal1, " + expectedIntVal + ")", true);
+        test(builder.greaterOrEqual(0, value), "gteq(decimal1, " + expectedIntVal + ")", true);
+    }
+
+    @Test
+    public void testDecimal64Bit() {
+        // 9 < precision <= 18 uses INT64
+        int precision = 18;
+        int scale = 4;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(precision, scale)))));
+
+        Decimal value =
+                Decimal.fromBigDecimal(new BigDecimal("12345678901234.5678"), precision, scale);
+        long expectedLongVal = value.toUnscaledLong();
+
+        test(builder.isNull(0), "eq(decimal1, null)", true);
+        test(builder.isNotNull(0), "noteq(decimal1, null)", true);
+        test(builder.equal(0, value), "eq(decimal1, " + expectedLongVal + ")", true);
+        test(builder.notEqual(0, value), "noteq(decimal1, " + expectedLongVal + ")", true);
+        test(builder.lessThan(0, value), "lt(decimal1, " + expectedLongVal + ")", true);
+        test(builder.lessOrEqual(0, value), "lteq(decimal1, " + expectedLongVal + ")", true);
+        test(builder.greaterThan(0, value), "gt(decimal1, " + expectedLongVal + ")", true);
+        test(builder.greaterOrEqual(0, value), "gteq(decimal1, " + expectedLongVal + ")", true);
+    }
+
+    @Test
+    public void testDecimalBinary() {
+        // precision > 18 uses Binary
+        int precision = 38;
+        int scale = 10;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(precision, scale)))));
+
+        Decimal value =
+                Decimal.fromBigDecimal(
+                        new BigDecimal("12345678901234567890.1234567890"), precision, scale);
+        Binary expectedBinary = Binary.fromConstantByteArray(value.toUnscaledBytes());
+
+        test(builder.isNull(0), "eq(decimal1, null)", true);
+        test(builder.isNotNull(0), "noteq(decimal1, null)", true);
+        test(
+                builder.equal(0, value),
+                FilterApi.eq(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                true);
+        test(
+                builder.notEqual(0, value),
+                FilterApi.notEq(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                true);
+        test(
+                builder.lessThan(0, value),
+                FilterApi.lt(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                true);
+        test(
+                builder.greaterThan(0, value),
+                FilterApi.gt(FilterApi.binaryColumn("decimal1"), expectedBinary),
+                true);
+    }
+
+    @Test
+    public void testInFilterDecimal32Bit() {
+        int precision = 9;
+        int scale = 2;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(precision, scale)))));
+
+        Decimal v1 = Decimal.fromBigDecimal(new BigDecimal("100.00"), precision, scale);
+        Decimal v2 = Decimal.fromBigDecimal(new BigDecimal("200.00"), precision, scale);
+        Decimal v3 = Decimal.fromBigDecimal(new BigDecimal("300.00"), precision, scale);
+
+        // For less than 21 elements, it expands to or(eq, eq, eq)
+        test(
+                builder.in(0, Arrays.asList(v1, v2, v3)),
+                "or(or(eq(decimal1, "
+                        + (int) v1.toUnscaledLong()
+                        + "), eq(decimal1, "
+                        + (int) v2.toUnscaledLong()
+                        + ")), eq(decimal1, "
+                        + (int) v3.toUnscaledLong()
+                        + "))",
+                true);
+
+        test(
+                builder.notIn(0, Arrays.asList(v1, v2, v3)),
+                "and(and(noteq(decimal1, "
+                        + (int) v1.toUnscaledLong()
+                        + "), noteq(decimal1, "
+                        + (int) v2.toUnscaledLong()
+                        + ")), noteq(decimal1, "
+                        + (int) v3.toUnscaledLong()
+                        + "))",
+                true);
+    }
+
+    @Test
+    public void testInFilterDecimal64Bit() {
+        int precision = 18;
+        int scale = 4;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "decimal1",
+                                                new DecimalType(precision, scale)))));
+
+        Decimal v1 = Decimal.fromBigDecimal(new BigDecimal("10000000000.0000"), precision, scale);
+        Decimal v2 = Decimal.fromBigDecimal(new BigDecimal("20000000000.0000"), precision, scale);
+        Decimal v3 = Decimal.fromBigDecimal(new BigDecimal("30000000000.0000"), precision, scale);
+
+        // For less than 21 elements, it expands to or(eq, eq, eq)
+        test(
+                builder.in(0, Arrays.asList(v1, v2, v3)),
+                "or(or(eq(decimal1, "
+                        + v1.toUnscaledLong()
+                        + "), eq(decimal1, "
+                        + v2.toUnscaledLong()
+                        + ")), eq(decimal1, "
+                        + v3.toUnscaledLong()
+                        + "))",
+                true);
+
+        test(
+                builder.notIn(0, Arrays.asList(v1, v2, v3)),
+                "and(and(noteq(decimal1, "
+                        + v1.toUnscaledLong()
+                        + "), noteq(decimal1, "
+                        + v2.toUnscaledLong()
+                        + ")), noteq(decimal1, "
+                        + v3.toUnscaledLong()
+                        + "))",
                 true);
     }
 

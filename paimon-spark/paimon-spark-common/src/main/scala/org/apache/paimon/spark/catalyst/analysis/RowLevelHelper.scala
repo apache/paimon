@@ -18,7 +18,9 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.table.Table
+import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.optimizer.OptimizeMetadataOnlyDeleteFromPaimonTable
+import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
@@ -72,5 +74,25 @@ trait RowLevelHelper extends SQLConfHelper {
           isTargetPrimaryKey(key)
         case _ => false
       }
+  }
+
+  /** Determines if DataSourceV2 is not supported for the given table. */
+  protected def shouldFallbackToV1(table: SparkTable): Boolean = {
+    val baseTable = table.getTable
+    org.apache.spark.SPARK_VERSION < "3.5" ||
+    !baseTable.isInstanceOf[FileStoreTable] ||
+    !baseTable.primaryKeys().isEmpty ||
+    !table.useV2Write ||
+    table.coreOptions.deletionVectorsEnabled() ||
+    table.coreOptions.rowTrackingEnabled() ||
+    table.coreOptions.dataEvolutionEnabled()
+  }
+
+  /** Determines if DataSourceV2 delete is not supported for the given table. */
+  protected def shouldFallbackToV1Delete(table: SparkTable, condition: Expression): Boolean = {
+    shouldFallbackToV1(table) ||
+    OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(
+      table.getTable.asInstanceOf[FileStoreTable],
+      condition)
   }
 }

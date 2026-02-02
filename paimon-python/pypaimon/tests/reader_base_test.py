@@ -227,9 +227,9 @@ class ReaderBasicTest(unittest.TestCase):
 
         # to test GenericRow ability
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
-        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
-            manifest_files[0].file_name, lambda row: table_scan.starting_scanner._filter_manifest_entry(row), False)
+        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
+            manifest_files[0].file_name, lambda row: table_scan.file_scanner._filter_manifest_entry(row), False)
 
         # Python write does not produce value stats
         if stats_enabled:
@@ -513,10 +513,10 @@ class ReaderBasicTest(unittest.TestCase):
         pk_read_builder = pk_table.new_read_builder()
         pk_table_scan = pk_read_builder.new_scan()
         latest_snapshot = SnapshotManager(pk_table).get_latest_snapshot()
-        pk_manifest_files = pk_table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
-        pk_manifest_entries = pk_table_scan.starting_scanner.manifest_file_manager.read(
+        pk_manifest_files = pk_table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        pk_manifest_entries = pk_table_scan.file_scanner.manifest_file_manager.read(
             pk_manifest_files[0].file_name,
-            lambda row: pk_table_scan.starting_scanner._filter_manifest_entry(row),
+            lambda row: pk_table_scan.file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -530,7 +530,7 @@ class ReaderBasicTest(unittest.TestCase):
                          f"table.fields should NOT contain system fields, but got: {pk_table_field_names}")
 
         if pk_file_meta.value_stats_cols is None:
-            pk_value_stats_fields = pk_table_scan.starting_scanner.manifest_file_manager._get_value_stats_fields(
+            pk_value_stats_fields = pk_table_scan.file_scanner.manifest_file_manager._get_value_stats_fields(
                 {'_VALUE_STATS_COLS': None},
                 pk_table.fields
             )
@@ -583,10 +583,10 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
-        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -1090,10 +1090,10 @@ class ReaderBasicTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
-        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
             False
         )
 
@@ -1146,7 +1146,7 @@ class ReaderBasicTest(unittest.TestCase):
                 self.assertFalse(is_system_field,
                                  f"value_stats_cols should not contain system field: {field_name}")
             
-            value_stats_fields = table_scan.starting_scanner.manifest_file_manager._get_value_stats_fields(
+            value_stats_fields = table_scan.file_scanner.manifest_file_manager._get_value_stats_fields(
                 {'_VALUE_STATS_COLS': file_meta.value_stats_cols},
                 table.fields
             )

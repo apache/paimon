@@ -711,7 +711,8 @@ public class AppendOnlyWriterTest {
                         new FileIndexOptions(),
                         true,
                         false,
-                        null);
+                        null,
+                        options.dataEvolutionEnabled());
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

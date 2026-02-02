@@ -228,8 +228,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
                 rowRanges = result.results().toRangeList();
-                if (result instanceof VectorSearchGlobalIndexResult) {
-                    scoreGetter = ((VectorSearchGlobalIndexResult) result).scoreGetter();
+                if (result instanceof ScoredGlobalIndexResult) {
+                    scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
             }
         }

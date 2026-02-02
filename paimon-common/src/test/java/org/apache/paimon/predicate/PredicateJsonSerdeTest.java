@@ -114,6 +114,16 @@ class PredicateJsonSerdeTest {
                         .expectJson(
                                 "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"UPPER\",\"inputs\":[{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":\"STARTS_WITH\",\"literals\":[\"ABC\"]}"),
 
+                // LeafPredicate - UpperTransform
+                TestSpec.forPredicate(
+                                builder.startsWith(
+                                        new LowerTransform(
+                                                Collections.singletonList(
+                                                        new FieldRef(2, "f2", DataTypes.STRING()))),
+                                        BinaryString.fromString("abc")))
+                        .expectJson(
+                                "{\"kind\":\"LEAF\",\"transform\":{\"name\":\"LOWER\",\"inputs\":[{\"index\":2,\"name\":\"f2\",\"type\":\"STRING\"}]},\"function\":\"STARTS_WITH\",\"literals\":[\"abc\"]}"),
+
                 // LeafPredicate - ConcatTransform
                 TestSpec.forPredicate(
                                 builder.contains(

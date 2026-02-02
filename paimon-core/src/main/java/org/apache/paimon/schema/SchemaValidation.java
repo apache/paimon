@@ -599,6 +599,9 @@ public class SchemaValidation {
             checkArgument(
                     !options.deletionVectorsEnabled(),
                     "Data evolution config must disabled with deletion-vectors.enabled");
+            checkArgument(
+                    !options.clusteringIncrementalEnabled(),
+                    "Data evolution config must disabled with clustering.incremental");
         }
 
         Pair<RowType, RowType> normalAndBlobType = BlobType.splitBlob(schema.logicalRowType());
@@ -657,9 +660,6 @@ public class SchemaValidation {
                     options.bucket() > 0, "Bucket number must be greater than 0 for chain table.");
             Preconditions.checkArgument(
                     options.sequenceField() != null, "Sequence field is required for chain table.");
-            Preconditions.checkArgument(
-                    options.mergeEngine() == MergeEngine.DEDUPLICATE,
-                    "Merge engine must be deduplicate for chain table.");
             Preconditions.checkArgument(
                     changelogProducer == ChangelogProducer.NONE
                             || changelogProducer == ChangelogProducer.INPUT,

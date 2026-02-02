@@ -18,15 +18,13 @@
 
 """Global index evaluator for filtering data using global indexes."""
 
-from typing import Callable, Collection, Dict, List, Optional, TYPE_CHECKING
+from typing import Callable, Collection, Dict, List, Optional
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-
-if TYPE_CHECKING:
-    from pypaimon.common.predicate import Predicate
-    from pypaimon.globalindex.vector_search import VectorSearch
-    from pypaimon.schema.data_types import DataField
+from pypaimon.common.predicate import Predicate
+from pypaimon.globalindex.vector_search import VectorSearch
+from pypaimon.schema.data_types import DataField
 
 
 class GlobalIndexEvaluator:
@@ -36,8 +34,8 @@ class GlobalIndexEvaluator:
 
     def __init__(
         self,
-        fields: List['DataField'],
-        readers_function: Callable[[int], Collection[GlobalIndexReader]]
+        fields: List[DataField],
+        readers_function: Callable[[DataField], Collection[GlobalIndexReader]]
     ):
         self._fields = fields
         self._field_by_name = {f.name: f for f in fields}
@@ -46,8 +44,8 @@ class GlobalIndexEvaluator:
 
     def evaluate(
         self,
-        predicate: Optional['Predicate'],
-        vector_search: Optional['VectorSearch']
+        predicate: Optional[Predicate],
+        vector_search: Optional[VectorSearch]
     ) -> Optional[GlobalIndexResult]:
         compound_result: Optional[GlobalIndexResult] = None
         
@@ -64,7 +62,7 @@ class GlobalIndexEvaluator:
             field_id = field.id
             readers = self._index_readers_cache.get(field_id)
             if readers is None:
-                readers = self._readers_function(field_id)
+                readers = self._readers_function(field)
                 self._index_readers_cache[field_id] = readers
             
             # If we have a compound result from predicates, use it to filter vector search
@@ -87,7 +85,7 @@ class GlobalIndexEvaluator:
         
         return compound_result
 
-    def _visit_predicate(self, predicate: 'Predicate') -> Optional[GlobalIndexResult]:
+    def _visit_predicate(self, predicate: Predicate) -> Optional[GlobalIndexResult]:
         """Visit a predicate and return the index result."""
         if predicate.method == 'and':
             compound_result: Optional[GlobalIndexResult] = None
@@ -121,7 +119,7 @@ class GlobalIndexEvaluator:
             # Leaf predicate
             return self._visit_leaf_predicate(predicate)
 
-    def _visit_leaf_predicate(self, predicate: 'Predicate') -> Optional[GlobalIndexResult]:
+    def _visit_leaf_predicate(self, predicate: Predicate) -> Optional[GlobalIndexResult]:
         """Visit a leaf predicate and return the index result."""
         field = self._field_by_name.get(predicate.field)
         if field is None:
@@ -130,10 +128,10 @@ class GlobalIndexEvaluator:
         field_id = field.id
         readers = self._index_readers_cache.get(field_id)
         if readers is None:
-            readers = self._readers_function(field_id)
+            readers = self._readers_function(field)
             self._index_readers_cache[field_id] = readers
         
-        field_ref = FieldRef(predicate.index, predicate.field, str(field.data_type))
+        field_ref = FieldRef(predicate.index, predicate.field, str(field.type))
         
         compound_result: Optional[GlobalIndexResult] = None
         
@@ -155,7 +153,7 @@ class GlobalIndexEvaluator:
     def _visit_function(
         self,
         reader: GlobalIndexReader,
-        predicate: 'Predicate',
+        predicate: Predicate,
         field_ref: FieldRef
     ) -> Optional[GlobalIndexResult]:
         """Visit a predicate function with the given reader."""

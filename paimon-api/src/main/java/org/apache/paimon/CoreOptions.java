@@ -2057,6 +2057,7 @@ public class CoreOptions implements Serializable {
                             "The duration after which a partition without new updates is considered a historical partition. "
                                     + "Historical partitions will be automatically fully clustered during the cluster operation.");
 
+    @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
@@ -2162,6 +2163,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(true)
                     .withDescription(
                             "Whether to write the data into fixed bucket for batch writing a postpone bucket table.");
+
+    public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
+            key("postpone.default-bucket-num")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
     public static final ConfigOption<Long> GLOBAL_INDEX_ROW_COUNT_PER_SHARD =
             key("global-index.row-count-per-shard")
@@ -3338,7 +3346,9 @@ public class CoreOptions implements Serializable {
         if (clusteringColumns == null || clusteringColumns.isEmpty()) {
             return Collections.emptyList();
         }
-        return Arrays.asList(clusteringColumns.split(","));
+        return Arrays.stream(clusteringColumns.split(","))
+                .map(String::trim)
+                .collect(Collectors.toList());
     }
 
     public static OrderType clusteringStrategy(String clusteringStrategy, int columnSize) {
@@ -3389,6 +3399,10 @@ public class CoreOptions implements Serializable {
 
     public boolean postponeBatchWriteFixedBucket() {
         return options.get(POSTPONE_BATCH_WRITE_FIXED_BUCKET);
+    }
+
+    public int postponeDefaultBucketNum() {
+        return options.get(POSTPONE_DEFAULT_BUCKET_NUM);
     }
 
     public long globalIndexRowCountPerShard() {

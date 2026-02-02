@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN}
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
@@ -28,7 +27,7 @@ import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Column, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, If, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -38,15 +37,12 @@ case class UpdatePaimonTableCommand(
     relation: DataSourceV2Relation,
     override val table: FileStoreTable,
     condition: Expression,
-    assignments: Seq[Assignment])
+    alignedExpressions: Seq[(Expression, Attribute)])
   extends PaimonRowLevelCommand
-  with AssignmentAlignmentHelper
   with SupportsSubquery {
 
-  private lazy val updateExpressions = {
-    generateAlignedExpressions(relation.output, assignments).zip(relation.output).map {
-      case (expr, attr) => Alias(expr, attr.name)()
-    }
+  private lazy val updateExpressions = alignedExpressions.map {
+    case (expr, attr) => Alias(expr, attr.name)()
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {

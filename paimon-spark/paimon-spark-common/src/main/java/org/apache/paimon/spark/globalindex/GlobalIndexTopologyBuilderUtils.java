@@ -21,8 +21,6 @@ package org.apache.paimon.spark.globalindex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.ServiceLoader;
@@ -55,8 +53,8 @@ public class GlobalIndexTopologyBuilderUtils {
         }
     }
 
-    @Nullable
     public static GlobalIndexTopologyBuilder createTopoBuilder(String indexType) {
-        return FACTORIES.get(indexType);
+        GlobalIndexTopologyBuilder builder = FACTORIES.get(indexType);
+        return builder == null ? new DefaultGlobalIndexTopoBuilder() : builder;
     }
 }

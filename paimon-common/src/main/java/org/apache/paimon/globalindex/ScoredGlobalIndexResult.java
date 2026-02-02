@@ -23,8 +23,8 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import java.util.function.Supplier;
 
-/** Vector search global index result for vector index. */
-public interface VectorSearchGlobalIndexResult extends GlobalIndexResult {
+/** Vector search global index result for scored index. */
+public interface ScoredGlobalIndexResult extends GlobalIndexResult {
 
     ScoreGetter scoreGetter();
 
@@ -32,7 +32,7 @@ public interface VectorSearchGlobalIndexResult extends GlobalIndexResult {
         throw new UnsupportedOperationException("Please realize this by specified global index");
     }
 
-    default VectorSearchGlobalIndexResult offset(long offset) {
+    default ScoredGlobalIndexResult offset(long offset) {
         if (offset == 0) {
             return this;
         }
@@ -45,23 +45,22 @@ public interface VectorSearchGlobalIndexResult extends GlobalIndexResult {
         }
 
         return create(
-                () -> roaringNavigableMap64Offset,
-                (ScoreGetter) rowId -> thisScoreGetter.score(rowId - offset));
+                () -> roaringNavigableMap64Offset, rowId -> thisScoreGetter.score(rowId - offset));
     }
 
     @Override
     default GlobalIndexResult or(GlobalIndexResult other) {
-        if (!(other instanceof VectorSearchGlobalIndexResult)) {
+        if (!(other instanceof ScoredGlobalIndexResult)) {
             return GlobalIndexResult.super.or(other);
         }
         RoaringNavigableMap64 thisRowIds = results();
         ScoreGetter thisScoreGetter = scoreGetter();
 
         RoaringNavigableMap64 otherRowIds = other.results();
-        ScoreGetter otherScoreGetter = ((VectorSearchGlobalIndexResult) other).scoreGetter();
+        ScoreGetter otherScoreGetter = ((ScoredGlobalIndexResult) other).scoreGetter();
 
         final RoaringNavigableMap64 resultOr = RoaringNavigableMap64.or(thisRowIds, otherRowIds);
-        return new VectorSearchGlobalIndexResult() {
+        return new ScoredGlobalIndexResult() {
             @Override
             public ScoreGetter scoreGetter() {
                 return rowId -> {
@@ -79,11 +78,11 @@ public interface VectorSearchGlobalIndexResult extends GlobalIndexResult {
         };
     }
 
-    /** Returns a new {@link VectorSearchGlobalIndexResult} from supplier. */
-    static VectorSearchGlobalIndexResult create(
+    /** Returns a new {@link ScoredGlobalIndexResult} from supplier. */
+    static ScoredGlobalIndexResult create(
             Supplier<RoaringNavigableMap64> supplier, ScoreGetter scoreGetter) {
         LazyField<RoaringNavigableMap64> lazyField = new LazyField<>(supplier);
-        return new VectorSearchGlobalIndexResult() {
+        return new ScoredGlobalIndexResult() {
             @Override
             public ScoreGetter scoreGetter() {
                 return scoreGetter;

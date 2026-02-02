@@ -291,7 +291,8 @@ public class KeyValueFileReadWriteTest {
                         new FileIndexOptions(),
                         true,
                         false,
-                        null);
+                        null,
+                        options.dataEvolutionEnabled());
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

@@ -145,7 +145,7 @@ private class FormatTableDataWriter(batchWriteBuilder: BatchWriteBuilder, writeS
   private val rowConverter: InternalRow => org.apache.paimon.data.InternalRow = {
     val numFields = writeSchema.fields.length
     record => {
-      new SparkInternalRowWrapper(-1, writeSchema, numFields).replace(record)
+      new SparkInternalRowWrapper(writeSchema, numFields).replace(record)
     }
   }
 

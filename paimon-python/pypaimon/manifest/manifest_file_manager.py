@@ -53,15 +53,15 @@ class ManifestFileManager:
         def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
             return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats)
 
-        def _entry_identifier(entry: ManifestEntry) -> tuple:
+        def _entry_identifier(e: ManifestEntry) -> tuple:
             return (
-                tuple(entry.partition.values),
-                entry.bucket,
-                entry.file.level,
-                entry.file.file_name,
-                tuple(entry.file.extra_files) if entry.file.extra_files else (),
-                entry.file.embedded_index,
-                entry.file.external_path,
+                tuple(e.partition.values),
+                e.bucket,
+                e.file.level,
+                e.file.file_name,
+                tuple(e.file.extra_files) if e.file.extra_files else (),
+                e.file.embedded_index,
+                e.file.external_path,
             )
 
         deleted_entry_keys = set()

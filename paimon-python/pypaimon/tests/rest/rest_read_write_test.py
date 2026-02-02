@@ -25,6 +25,7 @@ import unittest
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon import CatalogFactory
+from pypaimon.catalog.catalog_exception import TableNotExistException
 from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon import Schema
@@ -639,3 +640,52 @@ class RESTTableReadWriteTest(RESTBaseTest):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         self.assertEqual(table_read.to_arrow(splits).num_rows, total_rows)
+
+    def test_drop_partitions(self):
+        pa_schema = pa.schema([
+            ('col', pa.int32()),
+            ('dt', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_drop_partitions_table', schema, False)
+        table = self.rest_catalog.get_table('default.test_drop_partitions_table')
+
+        partition_specs = [{'dt': '20250101'}, {'dt': '20250102'}]
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        for spec in partition_specs:
+            batch = pa.RecordBatch.from_pydict(
+                {'col': [0], 'dt': [spec['dt']]},
+                schema=pa_schema,
+            )
+            table_write.write_arrow(pa.Table.from_batches([batch]))
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        before = table_read.to_arrow(splits)
+        self.assertEqual(before.num_rows, 2, "Should have 2 rows before drop_partitions")
+
+        self.rest_catalog.drop_partitions(
+            'default.test_drop_partitions_table',
+            partition_specs,
+        )
+
+        splits_after = read_builder.new_scan().plan().splits()
+        after = table_read.to_arrow(splits_after)
+        self.assertEqual(after.num_rows, 0, "Table should be empty after drop_partitions")
+
+    def test_drop_partitions_table_not_exist(self):
+        with self.assertRaises(TableNotExistException):
+            self.rest_catalog.drop_partitions(
+                'default.non_existing_table',
+                [{'dt': '20250101'}],
+            )
+
+    def test_drop_partitions_empty_list(self):
+        with self.assertRaises(ValueError):
+            self.rest_catalog.drop_partitions('default.test_reader_iterator', [])

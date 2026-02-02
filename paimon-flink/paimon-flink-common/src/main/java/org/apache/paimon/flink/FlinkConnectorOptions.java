@@ -447,13 +447,6 @@ public class FlinkConnectorOptions {
                             "Bounded mode for Paimon consumer. "
                                     + "By default, Paimon automatically selects bounded mode based on the mode of the Flink job.");
 
-    public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
-            key("postpone.default-bucket-num")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
-
     public static final ConfigOption<Boolean> SCAN_DEDICATED_SPLIT_GENERATION =
             key("scan.dedicated-split-generation")
                     .booleanType()

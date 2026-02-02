@@ -85,6 +85,68 @@ class DataEvolutionTest(unittest.TestCase):
         ]))
         self.assertEqual(actual_data, expect_data)
 
+    def test_with_slice(self):
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("b", pa.int32()),
+            ("c", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+                "source.split.target-size": "512m",
+            },
+        )
+        table_name = "default.test_with_slice_data_evolution"
+        self.catalog.create_table(table_name, schema, ignore_if_exists=True)
+        table = self.catalog.get_table(table_name)
+
+        for batch in [
+            {"id": [1, 2], "b": [10, 20], "c": [100, 200]},
+            {"id": [1001, 2001], "b": [1011, 2011], "c": [1001, 2001]},
+            {"id": [-1, -2], "b": [-10, -20], "c": [-100, -200]},
+        ]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write()
+            tc = wb.new_commit()
+            tw.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        rb = table.new_read_builder()
+        full_splits = rb.new_scan().plan().splits()
+        full_result = rb.new_read().to_pandas(full_splits)
+        self.assertEqual(
+            len(full_result),
+            6,
+            "Full scan should return 6 rows",
+        )
+        self.assertEqual(
+            sorted(full_result["id"].tolist()),
+            [-2, -1, 1, 2, 1001, 2001],
+            "Full set ids mismatch",
+        )
+
+        # with_slice(1, 4) -> row indices [1, 2, 3] -> 3 rows with id in (2, 1001, 2001)
+        scan = rb.new_scan().with_slice(1, 4)
+        splits = scan.plan().splits()
+        result = rb.new_read().to_pandas(splits)
+        self.assertEqual(
+            len(result),
+            3,
+            "with_slice(1, 4) should return 3 rows (indices 1,2,3). "
+            "Bug: DataEvolutionSplitGenerator returns 2 when split has multiple data files.",
+        )
+        ids = result["id"].tolist()
+        self.assertEqual(
+            sorted(ids),
+            [2, 1001, 2001],
+            "with_slice(1, 4) should return id in (2, 1001, 2001). Got ids=%s" % ids,
+        )
+
     def test_multiple_appends(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
@@ -421,6 +483,20 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=simple_pa_schema)
         self.assertEqual(actual, expect)
 
+        read_builder = table.new_read_builder()
+        read_builder.with_projection(['f0', 'f1', 'f2', '_ROW_ID', '_SEQUENCE_NUMBER'])
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_with_meta = table_read.to_arrow(table_scan.plan().splits())
+        self.assertFalse(
+            actual_with_meta.schema.field('_ROW_ID').nullable,
+            '_ROW_ID must be non-nullable per SpecialFields',
+        )
+        self.assertFalse(
+            actual_with_meta.schema.field('_SEQUENCE_NUMBER').nullable,
+            '_SEQUENCE_NUMBER must be non-nullable per SpecialFields',
+        )
+
     def test_more_data(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
@@ -518,9 +594,9 @@ class DataEvolutionTest(unittest.TestCase):
             '_SEQUENCE_NUMBER': [1, 1],
         }, schema=pa.schema([
             ('f0', pa.int8()),
-            ('_ROW_ID', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
             ('f1', pa.int16()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
 
@@ -544,6 +620,8 @@ class DataEvolutionTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         actual_data = table_read.to_arrow(table_scan.plan().splits())
+        self.assertFalse(actual_data.schema.field('_ROW_ID').nullable)
+        self.assertFalse(actual_data.schema.field('_SEQUENCE_NUMBER').nullable)
         expect_data = pa.Table.from_pydict({
             'f0': [3, 4],
             'f1': [-1001, 1002],
@@ -552,7 +630,25 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
-            ('_ROW_ID', pa.int64()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
+
+    def test_from_arrays_without_schema(self):
+        schema = pa.schema([
+            ('f0', pa.int8()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
+        ])
+        batch = pa.RecordBatch.from_pydict(
+            {'f0': [1], '_ROW_ID': [0], '_SEQUENCE_NUMBER': [1]},
+            schema=schema
+        )
+        self.assertFalse(batch.schema.field('_ROW_ID').nullable)
+        self.assertFalse(batch.schema.field('_SEQUENCE_NUMBER').nullable)
+
+        arrays = list(batch.columns)
+        rebuilt = pa.RecordBatch.from_arrays(arrays, names=batch.schema.names)
+        self.assertTrue(rebuilt.schema.field('_ROW_ID').nullable)
+        self.assertTrue(rebuilt.schema.field('_SEQUENCE_NUMBER').nullable)

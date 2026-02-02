@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.globalindex;
+package org.apache.paimon.globalindex;
 
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;

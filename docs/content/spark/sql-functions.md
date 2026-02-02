@@ -93,6 +93,7 @@ Converts a blob descriptor (BINARY) to its string representation (STRING). This 
 ```sql
 -- Convert a blob descriptor to string for inspection
 SELECT sys.descriptor_to_string(content) FROM t WHERE id = '1';
+-- [BlobDescriptor{version=1', uri='/path/to/data-2c103f6f-3857-4062-abc3-2e260374a68e-1.blob', offset=4, length=1048576}]
 ```
 
 ## User-defined Function

@@ -56,7 +56,6 @@ public class SortCompactAction extends CompactAction {
             Map<String, String> catalogConfig,
             Map<String, String> tableConf) {
         super(database, tableName, catalogConfig, tableConf);
-
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "true"));
     }
 
@@ -76,6 +75,10 @@ public class SortCompactAction extends CompactAction {
             env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         }
         FileStoreTable fileStoreTable = (FileStoreTable) table;
+
+        if (fileStoreTable.coreOptions().dataEvolutionEnabled()) {
+            throw new UnsupportedOperationException("Data Evolution table cannot be sorted!");
+        }
 
         if (fileStoreTable.bucketMode() != BucketMode.BUCKET_UNAWARE
                 && fileStoreTable.bucketMode() != BucketMode.HASH_DYNAMIC) {
