@@ -290,7 +290,7 @@ public class CompactAction extends TableActionBase {
                 "Postpone bucket compaction currently does not support predicates");
 
         Options options = new Options(table.options());
-        int defaultBucketNum = options.get(FlinkConnectorOptions.POSTPONE_DEFAULT_BUCKET_NUM);
+        int defaultBucketNum = options.get(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM);
 
         // change bucket to a positive value, so we can scan files from the bucket = -2 directory
         Map<String, String> bucketOptions = new HashMap<>(table.options());

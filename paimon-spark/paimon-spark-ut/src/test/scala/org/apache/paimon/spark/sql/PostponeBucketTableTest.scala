@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -186,6 +187,108 @@ class PostponeBucketTableTest extends PaimonSparkTestBase {
           Seq(Row(0), Row(1), Row(2), Row(3), Row(4), Row(5))
         )
       }
+    }
+  }
+
+  test("Postpone bucket table: write postpone bucket then compact") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING
+            |) TBLPROPERTIES (
+            |  'primary-key' = 'k',
+            |  'bucket' = '-2',
+            |  'postpone.batch-write-fixed-bucket' = 'false'
+            |)
+            |""".stripMargin)
+
+      // write postpone bucket
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(4) */
+            |id AS k,
+            |CAST(id AS STRING) AS v
+            |FROM range (0, 1000)
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(0)))
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
+        Seq(Row(-2))
+      )
+
+      sql("SET spark.default.parallelism = 2")
+      // compact
+      sql("CALL sys.compact(table => 't')")
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1000)))
+      checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row((0 until 1000).sum)))
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
+        Seq(Row(0), Row(1))
+      )
+    }
+  }
+
+  test("Postpone partition bucket table: write postpone bucket then compact") {
+    withTable("t") {
+      sql("""
+            |CREATE TABLE t (
+            |  k INT,
+            |  v STRING,
+            |  pt INT
+            |) PARTITIONED BY (pt)
+            |TBLPROPERTIES (
+            |  'primary-key' = 'k, pt',
+            |  'bucket' = '-2',
+            |  'postpone.default-bucket-num' = '3',
+            |  'changelog-producer' = 'lookup',
+            |  'snapshot.num-retained.min' = '5',
+            |  'snapshot.num-retained.max' = '5',
+            |  'postpone.batch-write-fixed-bucket' = 'false'
+            |)
+            |""".stripMargin)
+
+      // write postpone bucket
+      sql("""
+            |INSERT INTO t SELECT /*+ REPARTITION(4) */
+            |id AS k,
+            |CAST(id AS STRING) AS v,
+            |id % 2 AS pt
+            |FROM range (0, 1000)
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(0)))
+      checkAnswer(sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"), Seq(Row(-2)))
+
+      // compact
+      sql("SET spark.default.parallelism = 2")
+      sql("CALL sys.compact(table => 't')")
+
+      checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1000)))
+      checkAnswer(sql("SELECT sum(k) FROM t"), Seq(Row((0 until 1000).sum)))
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` ORDER BY bucket"),
+        Seq(Row(0), Row(1), Row(2))
+      )
+
+      val table = loadTable("t")
+      val files = table.fileIO.listStatus(new Path(table.location, "pt=0/bucket-0"))
+      assert(files.count(_.getPath.getName.startsWith("changelog-")) > 0)
+
+      for (i <- 2000 until 2020) {
+        spark.sql(s"INSERT INTO t (k, v, pt) VALUES ($i, '$i', ${i % 2})")
+      }
+
+      // Verify that snapshots are not automatically expired before compaction
+      checkAnswer(sql("SELECT count(1) FROM `t$snapshots`"), Seq(Row(22)))
+
+      sql("CALL sys.compact(table => 't')")
+      checkAnswer(
+        sql("SELECT distinct(bucket) FROM `t$buckets` where partition = '{0}' ORDER BY bucket"),
+        Seq(Row(0), Row(1), Row(2))
+      )
+      checkAnswer(sql("SELECT count(1) FROM `t$snapshots`"), Seq(Row(5)))
     }
   }
 }
