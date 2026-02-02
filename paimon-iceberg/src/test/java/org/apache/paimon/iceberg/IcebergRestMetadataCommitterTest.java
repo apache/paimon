@@ -43,6 +43,8 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogProperties;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.data.IcebergGenerics;
@@ -53,6 +55,8 @@ import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.rest.RESTCatalogServer;
 import org.apache.iceberg.rest.RESTServerExtension;
+import org.apache.iceberg.types.Types;
+import org.apache.iceberg.types.Types.NestedField;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -139,6 +143,9 @@ public class IcebergRestMetadataCommitterTest {
                 testRecords,
                 expected,
                 Record::toString);
+
+        PartitionSpec expectedPartitionSpec = PartitionSpec.builderFor(new Schema()).build();
+        runPartitionSpecCompatibilityTest(expectedPartitionSpec);
     }
 
     @Test
@@ -206,6 +213,9 @@ public class IcebergRestMetadataCommitterTest {
                 testRecords,
                 expected,
                 Record::toString);
+
+        PartitionSpec expectedPartitionSpec = PartitionSpec.builderFor(new Schema()).build();
+        runPartitionSpecCompatibilityTest(expectedPartitionSpec);
     }
 
     @Test
@@ -276,6 +286,16 @@ public class IcebergRestMetadataCommitterTest {
                 testRecords,
                 expected,
                 Record::toString);
+
+        PartitionSpec expectedPartitionSpec =
+                PartitionSpec.builderFor(
+                                new Schema(
+                                        NestedField.required(1, "pt1", Types.IntegerType.get()),
+                                        NestedField.required(2, "pt2", Types.StringType.get())))
+                        .identity("pt1")
+                        .identity("pt2")
+                        .build();
+        runPartitionSpecCompatibilityTest(expectedPartitionSpec);
     }
 
     private void runCompatibilityTest(
@@ -324,6 +344,12 @@ public class IcebergRestMetadataCommitterTest {
 
         write.close();
         commit.close();
+    }
+
+    private void runPartitionSpecCompatibilityTest(PartitionSpec expectedSpec) {
+        Table icebergTable = restCatalog.loadTable(TableIdentifier.of("mydb", "t"));
+        PartitionSpec spec = icebergTable.spec();
+        assertThat(spec).isEqualTo(expectedSpec);
     }
 
     @Test

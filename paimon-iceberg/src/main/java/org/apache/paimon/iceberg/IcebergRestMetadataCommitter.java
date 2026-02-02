@@ -272,11 +272,16 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     }
 
     private Table createTable(TableMetadata newMetadata) {
-        /* Here we create iceberg table with an emptySchema. This is because:
-        When creating table, fieldId in iceberg will be forced to start from 1, while fieldId in paimon usually start from 0.
-        If we directly use the schema extracted from paimon to create iceberg table, the fieldId will be in disorder, and this
-        may cause incorrectness when reading by iceberg reader. So we use an emptySchema here, and add the corresponding
-        schemas later.
+        /*
+        Handles fieldId incompatibility between Paimon (starts at 0) and Iceberg (starts at 1).
+
+        Direct schema conversion shifts all fieldIds by +1, causing field disorder. While
+        schemas can be updated post-creation to start at fieldId 0, creating an empty schema
+        first triggers partition evolution issues that break some query engines.
+
+        Strategy based on partition field position:
+        Position 0: Creates empty schema first (partition evolution unavoidable)
+        Position > 0: Creates dummy schema with offset fields and gap filling to preserve the partition spec
         */
         PartitionSpec spec = newMetadata.spec();
         boolean isPartitionedWithZeroFieldId =
@@ -294,16 +299,20 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
             int size =
                     spec.fields().stream().mapToInt(PartitionField::sourceId).max().orElseThrow();
-            NestedField[] c = new NestedField[size];
+            // prefill the schema with dummy fields
+            NestedField[] columns = new NestedField[size];
             for (int idx = 0; idx < size; idx++) {
                 int fieldId = idx + 1;
-                c[idx] = NestedField.optional(fieldId, "f" + fieldId, Types.BooleanType.get());
+                columns[idx] =
+                        NestedField.optional(fieldId, "f" + fieldId, Types.BooleanType.get());
             }
+            // find and set partition fields with offset -1, so they align correctly after table
+            // creation
             for (PartitionField f : spec.fields()) {
-                c[f.sourceId() - 1] = newMetadata.schema().findField(f.sourceId());
+                columns[f.sourceId() - 1] = newMetadata.schema().findField(f.sourceId());
             }
 
-            Schema dummySchema = new Schema(c);
+            Schema dummySchema = new Schema(columns);
             return restCatalog.createTable(icebergTableIdentifier, dummySchema, spec);
         }
     }
