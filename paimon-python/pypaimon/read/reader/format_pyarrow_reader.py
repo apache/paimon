@@ -62,18 +62,20 @@ class FormatPyArrowReader(RecordBatchReader):
 
             # Reconstruct the batch with all fields in the correct order
             all_columns = []
+            out_fields = []
             for field_name in self.read_fields:
                 if field_name in self.existing_fields:
                     # Get the column from the existing batch
                     column_idx = self.existing_fields.index(field_name)
                     all_columns.append(batch.column(column_idx))
+                    out_fields.append(batch.schema.field(column_idx))
                 else:
                     # Get the column from missing fields
                     column_idx = self.missing_fields.index(field_name)
                     all_columns.append(missing_columns[column_idx])
-
+                    out_fields.append(pa.field(field_name, pa.null(), nullable=True))
             # Create a new RecordBatch with all columns
-            return pa.RecordBatch.from_arrays(all_columns, names=self.read_fields)
+            return pa.RecordBatch.from_arrays(all_columns, schema=pa.schema(out_fields))
 
         except StopIteration:
             return None

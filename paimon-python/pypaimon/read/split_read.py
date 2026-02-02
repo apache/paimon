@@ -52,7 +52,7 @@ from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
-from pypaimon.schema.data_types import DataField
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
 
 KEY_PREFIX = "_KEY_"
@@ -571,7 +571,8 @@ class DataEvolutionSplitRead(SplitRead):
                 if not field.type.nullable:
                     raise ValueError(f"Field {field} is not null but can't find any file contains it.")
 
-        return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers)
+        output_schema = PyarrowFieldParser.from_paimon_schema(all_read_fields)
+        return DataEvolutionMergeReader(row_offsets, field_offsets, file_record_readers, schema=output_schema)
 
     def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> Optional[RecordReader]:
         """Create a file reader for a single file."""
