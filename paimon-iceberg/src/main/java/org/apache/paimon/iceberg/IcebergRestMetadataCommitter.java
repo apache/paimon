@@ -352,8 +352,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         // if the table has no current snapshot (e.g., freshly created empty table),
         // treat it as having no base
         if (currentMetadata.currentSnapshot() == null) {
-            LOG.info(
-                    "new metadata without base metadata cause current metadata has no snapshot.");
+            LOG.info("new metadata without base metadata cause current metadata has no snapshot.");
             return false;
         }
 
