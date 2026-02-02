@@ -181,10 +181,10 @@ class RESTAOReadWritePy36Test(RESTBaseTest):
 
         # to test GenericRow ability
         latest_snapshot = SnapshotManager(table).get_latest_snapshot()
-        manifest_files = table_scan.starting_scanner.manifest_list_manager.read_all(latest_snapshot)
-        manifest_entries = table_scan.starting_scanner.manifest_file_manager.read(
+        manifest_files = table_scan.file_scanner.manifest_list_manager.read_all(latest_snapshot)
+        manifest_entries = table_scan.file_scanner.manifest_file_manager.read(
             manifest_files[0].file_name,
-            lambda row: table_scan.starting_scanner._filter_manifest_entry(row),
+            lambda row: table_scan.file_scanner._filter_manifest_entry(row),
             drop_stats=False)
         # Python write does not produce value stats
         if stats_enabled:
