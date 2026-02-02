@@ -176,4 +176,28 @@ class SchemaValidationTest {
         options.put("fields.f2.sequence-group", "f3");
         assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
     }
+
+    @Test
+    public void testChainTableAllowsNonDeduplicateMergeEngine() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.SEQUENCE_FIELD.key(), "f2");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$f0");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.STRING()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.BIGINT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = Arrays.asList("f0", "f1");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+
+        assertThatNoException().isThrownBy(() -> validateTableSchema(schema));
+    }
 }

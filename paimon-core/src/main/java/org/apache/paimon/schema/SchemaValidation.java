@@ -661,9 +661,6 @@ public class SchemaValidation {
             Preconditions.checkArgument(
                     options.sequenceField() != null, "Sequence field is required for chain table.");
             Preconditions.checkArgument(
-                    options.mergeEngine() == MergeEngine.DEDUPLICATE,
-                    "Merge engine must be deduplicate for chain table.");
-            Preconditions.checkArgument(
                     changelogProducer == ChangelogProducer.NONE
                             || changelogProducer == ChangelogProducer.INPUT,
                     "Changelog producer must be none or input for chain table.");
