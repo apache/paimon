@@ -19,7 +19,7 @@
 from abc import ABC, abstractmethod
 from typing import Callable, List, Optional
 
-from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.range import Range
 
 

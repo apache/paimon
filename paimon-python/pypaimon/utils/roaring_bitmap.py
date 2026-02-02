@@ -21,7 +21,6 @@ Roaring Bitmap.
 """
 
 from typing import Iterator
-from pyroaring import BitMap64
 
 
 class RoaringBitmap64:
@@ -33,6 +32,7 @@ class RoaringBitmap64:
     """
 
     def __init__(self):
+        from pyroaring import BitMap64
         self._data = BitMap64()
 
     def add(self, value: int) -> None:
@@ -133,6 +133,7 @@ class RoaringBitmap64:
     def deserialize(data: bytes) -> 'RoaringBitmap64':
         """Deserialize a bitmap from bytes."""
         result = RoaringBitmap64()
+        from pyroaring import BitMap64
         result._data = BitMap64.deserialize(data)
         return result
 
@@ -149,3 +150,102 @@ class RoaringBitmap64:
         if len(values) <= 10:
             return f"RoaringBitmap64({values})"
         return f"RoaringBitmap64({len(values)} elements)"
+
+
+class RoaringBitmap:
+    """
+    A 32-bit roaring bitmap implementation.
+
+    This class provides efficient storage and operations for sets of 32-bit integers.
+    It uses pyroaring.BitMap for better performance and memory efficiency.
+    """
+
+    def __init__(self):
+        from pyroaring import BitMap
+        self._data = BitMap()
+
+    def add(self, value: int) -> None:
+        """Add a single value to the bitmap."""
+        self._data.add(value)
+
+    def add_range(self, from_: int, to: int) -> None:
+        """Add a range of values [from_, to] to the bitmap."""
+        self._data.add_range(from_, to + 1)
+
+    def contains(self, value: int) -> bool:
+        """Check if the bitmap contains the given value."""
+        return value in self._data
+
+    def is_empty(self) -> bool:
+        """Check if the bitmap is empty."""
+        return len(self._data) == 0
+
+    def cardinality(self) -> int:
+        """Return the number of elements in the bitmap."""
+        return len(self._data)
+
+    def __iter__(self) -> Iterator[int]:
+        """Iterate over all values in the bitmap in sorted order."""
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        """Return the number of elements in the bitmap."""
+        return len(self._data)
+
+    def __contains__(self, value: int) -> bool:
+        """Check if the bitmap contains the given value."""
+        return self.contains(value)
+
+    def clear(self) -> None:
+        """Clear all values from the bitmap."""
+        self._data.clear()
+
+    def to_list(self) -> list:
+        """Return a sorted list of all values in the bitmap."""
+        return list(self._data)
+
+    @staticmethod
+    def and_(a: 'RoaringBitmap', b: 'RoaringBitmap') -> 'RoaringBitmap':
+        """Return the intersection of two bitmaps."""
+        result = RoaringBitmap()
+        result._data = a._data & b._data
+        return result
+
+    @staticmethod
+    def or_(a: 'RoaringBitmap', b: 'RoaringBitmap') -> 'RoaringBitmap':
+        """Return the union of two bitmaps."""
+        result = RoaringBitmap()
+        result._data = a._data | b._data
+        return result
+
+    @staticmethod
+    def remove_all(a: 'RoaringBitmap', b: 'RoaringBitmap') -> 'RoaringBitmap':
+        result = RoaringBitmap()
+        result._data = a._data - b._data
+        return result
+
+    def serialize(self) -> bytes:
+        """Serialize the bitmap to bytes."""
+        return self._data.serialize()
+
+    @staticmethod
+    def deserialize(data: bytes) -> 'RoaringBitmap':
+        """Deserialize a bitmap from bytes."""
+        result = RoaringBitmap()
+        from pyroaring import BitMap
+        result._data = BitMap.deserialize(data)
+        return result
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, RoaringBitmap):
+            return False
+        return self._data == other._data
+
+    def __hash__(self) -> int:
+        return hash(tuple(sorted(self._data)))
+
+    def __repr__(self) -> str:
+        values = list(self._data)
+        if len(values) <= 10:
+            return f"RoaringBitmap({values})"
+        return f"RoaringBitmap({len(values)} elements)"

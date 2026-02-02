@@ -22,7 +22,7 @@ from abc import abstractmethod
 from typing import Callable, Dict, Optional
 
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
 
 # Type alias for score getter function
