@@ -16,10 +16,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import os
-from typing import List, Optional, Dict, Set
+from typing import List, Optional, Dict, Set, Callable
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.globalindex import VectorSearchGlobalIndexResult
+from pypaimon.globalindex import ScoredGlobalIndexResult
 from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -31,24 +31,73 @@ from pypaimon.read.push_down_utils import (trim_and_transform_predicate)
 from pypaimon.read.scanner.append_table_split_generator import AppendTableSplitGenerator
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
 from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
-from pypaimon.read.scanner.starting_scanner import StartingScanner
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 
 
-class FullStartingScanner(StartingScanner):
+def _filter_manifest_files_by_row_ranges(
+        manifest_files: List[ManifestFileMeta],
+        row_ranges: List) -> List[ManifestFileMeta]:
+    """
+    Filter manifest files by row ranges.
+
+    Only keep manifest files that have min_row_id and max_row_id and overlap with the given row ranges.
+
+    Args:
+        manifest_files: List of manifest file metadata
+        row_ranges: List of row ranges to filter by
+
+    Returns:
+        Filtered list of manifest files
+    """
+    from pypaimon.globalindex.range import Range
+
+    filtered_files = []
+    for manifest in manifest_files:
+        min_row_id = manifest.min_row_id
+        max_row_id = manifest.max_row_id
+
+        # If min_row_id or max_row_id is None, we cannot filter, keep the file
+        if min_row_id is None or max_row_id is None:
+            filtered_files.append(manifest)
+            continue
+
+        # Check if manifest row range overlaps with any of the expected row ranges
+        manifest_row_range = Range(min_row_id, max_row_id)
+        should_keep = False
+
+        for expected_range in row_ranges:
+            # Check if ranges intersect
+            intersection = Range.intersect(
+                manifest_row_range.from_,
+                manifest_row_range.to,
+                expected_range.from_,
+                expected_range.to)
+            if intersection is not None:
+                should_keep = True
+                break
+
+        if should_keep:
+            filtered_files.append(manifest)
+
+    return filtered_files
+
+
+class FileScanner:
     def __init__(
         self,
         table,
-        predicate: Optional[Predicate],
-        limit: Optional[int],
+        manifest_scanner: Callable[[], List[ManifestFileMeta]],
+        predicate: Optional[Predicate] = None,
+        limit: Optional[int] = None,
         vector_search: Optional['VectorSearch'] = None
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
+        self.manifest_scanner = manifest_scanner
         self.predicate = predicate
         self.limit = limit
         self.vector_search = vector_search
@@ -84,52 +133,38 @@ class FullStartingScanner(StartingScanner):
             self.table.table_schema.id
         )
 
-    def scan(self) -> Plan:
-        file_entries = self.plan_files()
-        if not file_entries:
-            return Plan([])
-        # Get deletion files map if deletion vectors are enabled.
-        # {partition-bucket -> {filename -> DeletionFile}}
-        deletion_files_map: dict[tuple, dict[str, DeletionFile]] = {}
-        if self.deletion_vectors_enabled:
-            latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            # Extract unique partition-bucket pairs from file entries
-            buckets = set()
-            for entry in file_entries:
-                buckets.add((tuple(entry.partition.values), entry.bucket))
-            deletion_files_map = self._scan_dv_index(latest_snapshot, buckets)
+    def _deletion_files_map(self, entries: List[ManifestEntry]) -> dict[tuple, dict[str, DeletionFile]]:
+        if not self.deletion_vectors_enabled:
+            return {}
+        # Extract unique partition-bucket pairs from file entries
+        bucket_files = set()
+        for e in entries:
+            bucket_files.add((tuple(e.partition.values), e.bucket))
+        return self._scan_dv_index(self.snapshot_manager.get_latest_snapshot(), bucket_files)
 
+    def scan(self) -> Plan:
         # Create appropriate split generator based on table type
         if self.table.is_primary_key_table:
+            entries = self.plan_files()
             split_generator = PrimaryKeyTableSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                deletion_files_map
+                self._deletion_files_map(entries)
             )
         elif self.data_evolution:
-            global_index_result = self._eval_global_index()
-            row_ranges = None
-            score_getter = None
-            if global_index_result is not None:
-                row_ranges = global_index_result.results().to_range_list()
-                if isinstance(global_index_result, VectorSearchGlobalIndexResult):
-                    score_getter = global_index_result.score_getter()
-            split_generator = DataEvolutionSplitGenerator(
-                self.table,
-                self.target_split_size,
-                self.open_file_cost,
-                deletion_files_map,
-                row_ranges,
-                score_getter
-            )
+            entries, split_generator = self._create_data_evolution_split_generator()
         else:
+            entries = self.plan_files()
             split_generator = AppendTableSplitGenerator(
                 self.table,
                 self.target_split_size,
                 self.open_file_cost,
-                deletion_files_map
+                self._deletion_files_map(entries)
             )
+
+        if not entries:
+            return Plan([])
 
         # Configure sharding if needed
         if self.idx_of_this_subtask is not None:
@@ -138,16 +173,43 @@ class FullStartingScanner(StartingScanner):
             split_generator.with_slice(self.start_pos_of_this_subtask, self.end_pos_of_this_subtask)
 
         # Generate splits
-        splits = split_generator.create_splits(file_entries)
+        splits = split_generator.create_splits(entries)
 
         splits = self._apply_push_down_limit(splits)
         return Plan(splits)
 
-    def plan_files(self) -> List[ManifestEntry]:
-        latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-        if not latest_snapshot:
+    def _create_data_evolution_split_generator(self):
+        row_ranges = None
+        score_getter = None
+        global_index_result = self._eval_global_index()
+        if global_index_result is not None:
+            row_ranges = global_index_result.results().to_range_list()
+            if isinstance(global_index_result, ScoredGlobalIndexResult):
+                score_getter = global_index_result.score_getter()
+
+        manifest_files = self.manifest_scanner()
+        if len(manifest_files) == 0:
             return []
-        manifest_files = self.manifest_list_manager.read_all(latest_snapshot)
+
+        # Filter manifest files by row ranges if available
+        if row_ranges is not None:
+            manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
+
+        entries = self.read_manifest_entries(manifest_files)
+
+        return entries, DataEvolutionSplitGenerator(
+            self.table,
+            self.target_split_size,
+            self.open_file_cost,
+            self._deletion_files_map(entries),
+            row_ranges,
+            score_getter
+        )
+
+    def plan_files(self) -> List[ManifestEntry]:
+        manifest_files = self.manifest_scanner()
+        if len(manifest_files) == 0:
+            return []
         return self.read_manifest_entries(manifest_files)
 
     def _eval_global_index(self):
@@ -222,7 +284,7 @@ class FullStartingScanner(StartingScanner):
             max_workers=max_workers
         )
 
-    def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FullStartingScanner':
+    def with_shard(self, idx_of_this_subtask: int, number_of_para_subtasks: int) -> 'FileScanner':
         if idx_of_this_subtask >= number_of_para_subtasks:
             raise ValueError("idx_of_this_subtask must be less than number_of_para_subtasks")
         if self.start_pos_of_this_subtask is not None:
@@ -231,7 +293,7 @@ class FullStartingScanner(StartingScanner):
         self.number_of_para_subtasks = number_of_para_subtasks
         return self
 
-    def with_slice(self, start_pos: int, end_pos: int) -> 'FullStartingScanner':
+    def with_slice(self, start_pos: int, end_pos: int) -> 'FileScanner':
         if start_pos >= end_pos:
             raise ValueError("start_pos must be less than end_pos")
         if self.idx_of_this_subtask is not None:

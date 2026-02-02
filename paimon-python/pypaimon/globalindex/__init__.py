@@ -20,8 +20,8 @@ from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vector_search_result import (
-    VectorSearchGlobalIndexResult,
-    DictBasedVectorSearchResult,
+    ScoredGlobalIndexResult,
+    DictBasedScoredIndexResult,
     ScoreGetter,
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta, GlobalIndexIOMeta
@@ -38,8 +38,8 @@ __all__ = [
     'GlobalIndexReader',
     'FieldRef',
     'VectorSearch',
-    'VectorSearchGlobalIndexResult',
-    'DictBasedVectorSearchResult',
+    'ScoredGlobalIndexResult',
+    'DictBasedScoredIndexResult',
     'ScoreGetter',
     'GlobalIndexMeta',
     'GlobalIndexIOMeta',

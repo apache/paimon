@@ -26,7 +26,7 @@ import pyarrow as pa
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
+from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 
 
@@ -112,7 +112,7 @@ class BinaryRowTest(unittest.TestCase):
 
     def test_is_not_null_append(self):
         table = self.catalog.get_table('default.test_append')
-        starting_scanner = FullStartingScanner(table, None, None)
+        starting_scanner = FileScanner(table, lambda: [])
         latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
@@ -249,7 +249,7 @@ class BinaryRowTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
-        starting_scanner = FullStartingScanner(table, None, None)
+        starting_scanner = FileScanner(table, lambda: [])
         latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
@@ -288,7 +288,7 @@ class BinaryRowTest(unittest.TestCase):
                          }
         self.assertEqual(expected_data, actual.to_pydict())
 
-        starting_scanner = FullStartingScanner(table, None, None)
+        starting_scanner = FileScanner(table, lambda: [])
         latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
@@ -319,7 +319,7 @@ class BinaryRowTest(unittest.TestCase):
                                                                                 trimmed_pk_fields)
 
     def _overwrite_manifest_entry(self, table):
-        starting_scanner = FullStartingScanner(table, None, None)
+        starting_scanner = FileScanner(table, lambda: [])
         latest_snapshot = starting_scanner.snapshot_manager.get_latest_snapshot()
         manifest_files = starting_scanner.manifest_list_manager.read_all(latest_snapshot)
         manifest_entries = starting_scanner.manifest_file_manager.read(manifest_files[0].file_name)
