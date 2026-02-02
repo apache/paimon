@@ -156,9 +156,14 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
                     LOG.info("create updates with base metadata.");
                     updatdeBuilder = updatesForCorrectBase(metadata, newMetadata, false);
                 } else {
+                    Long currentSnapshotId =
+                            metadata.currentSnapshot() != null
+                                    ? metadata.currentSnapshot().snapshotId()
+                                    : null;
                     LOG.info(
-                            "create updates without base metadata. currentSnapshotId for base metadata: {}, for new metadata:{}",
-                            metadata.currentSnapshot().snapshotId(),
+                            "create updates without base metadata. REST catalog currentSnapshotId: {}, new metadata snapshotId: {}. "
+                                    + "Table will be recreated.",
+                            currentSnapshotId,
                             newMetadata.currentSnapshot().snapshotId());
                     updatdeBuilder = updatesForIncorrectBase(newMetadata);
                 }
@@ -336,24 +341,46 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
     /**
      * @param currentMetadata the current metadata used by iceberg table
      * @param newMetadata the new metadata to be committed
-     * @param baseIcebergMetadata the base metadata previously written by paimon
+     * @param baseIcebergMetadata the base metadata previously written by paimon (may be null for
+     *     externally registered tables)
      * @return whether the iceberg table has base metadata
      */
     private static boolean checkBase(
             TableMetadata currentMetadata,
             TableMetadata newMetadata,
             @Nullable IcebergMetadata baseIcebergMetadata) {
-        // take the base metadata from IcebergCommitCallback as the first reference
-        if (baseIcebergMetadata == null) {
+        // if the table has no current snapshot (e.g., freshly created empty table),
+        // treat it as having no base
+        if (currentMetadata.currentSnapshot() == null) {
             LOG.info(
-                    "new metadata without base metadata cause base metadata from upstream is null.");
+                    "new metadata without base metadata cause current metadata has no snapshot.");
             return false;
         }
 
-        // if the iceberg table is existed, check whether the current metadata of the table is the
-        // base of the new table metadata, we use current snapshot id to check
-        return currentMetadata.currentSnapshot().snapshotId()
-                == newMetadata.currentSnapshot().snapshotId() - 1;
+        // Check if the REST catalog's current snapshot matches the expected parent of the new
+        // snapshot. This handles both:
+        // 1. Normal case: baseIcebergMetadata is non-null and matches
+        // 2. Externally registered tables: baseIcebergMetadata is null but REST catalog has correct
+        // state
+        long expectedBaseSnapshotId = newMetadata.currentSnapshot().snapshotId() - 1;
+        long actualCurrentSnapshotId = currentMetadata.currentSnapshot().snapshotId();
+
+        if (actualCurrentSnapshotId == expectedBaseSnapshotId) {
+            if (baseIcebergMetadata == null) {
+                LOG.info(
+                        "baseIcebergMetadata from callback is null, but REST catalog has correct base snapshot {}. "
+                                + "This is expected for externally registered tables.",
+                        expectedBaseSnapshotId);
+            }
+            return true;
+        }
+
+        // Base doesn't match - either the REST catalog is out of sync or this is a fresh table
+        LOG.info(
+                "base metadata mismatch. REST catalog has snapshot {}, expected {}",
+                actualCurrentSnapshotId,
+                expectedBaseSnapshotId);
+        return false;
     }
 
     private IcebergMetadata adjustMetadataForRest(IcebergMetadata newIcebergMetadata) {
