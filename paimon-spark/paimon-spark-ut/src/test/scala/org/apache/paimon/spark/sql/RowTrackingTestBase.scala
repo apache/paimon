@@ -216,6 +216,19 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Row Tracking: cannot alter immutable row-tracking.enabled option") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'false')")
+      sql("INSERT INTO t VALUES (1, 'a'), (2, 'b')")
+
+      assert(
+        intercept[Exception] {
+          sql("ALTER TABLE t SET TBLPROPERTIES ('row-tracking.enabled' = 'true')")
+        }.getMessage
+          .contains("Change 'row-tracking.enabled' is not supported yet."))
+    }
+  }
+
   test("Row Tracking: read row Tracking") {
     withTable("t") {
       sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
