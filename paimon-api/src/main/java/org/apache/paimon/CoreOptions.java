@@ -2057,6 +2057,7 @@ public class CoreOptions implements Serializable {
                             "The duration after which a partition without new updates is considered a historical partition. "
                                     + "Historical partitions will be automatically fully clustered during the cluster operation.");
 
+    @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
                     .booleanType()
