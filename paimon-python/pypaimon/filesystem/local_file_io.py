@@ -23,6 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
+from pyarrow.fs import FileSystem
 
 import pyarrow
 import pyarrow.fs
@@ -437,3 +438,6 @@ class LocalFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
+
+    def filesystem(self) -> FileSystem:
+        return self.filesystem

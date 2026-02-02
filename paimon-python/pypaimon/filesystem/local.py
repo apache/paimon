@@ -18,7 +18,7 @@
 import threading
 import pyarrow
 from pathlib import Path
-from pyarrow._fs import LocalFileSystem
+from pyarrow.fs import LocalFileSystem
 
 
 class PaimonLocalFileSystem(LocalFileSystem):

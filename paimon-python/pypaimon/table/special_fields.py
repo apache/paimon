@@ -50,15 +50,7 @@ class SpecialFields:
         return system_fields
 
     @staticmethod
-    def row_type_with_row_tracking(table_fields: List[DataField],
-                                   sequence_number_nullable: bool = False) -> List[DataField]:
-        """
-        Add row tracking fields.
-
-        Args:
-            table_fields: The original table fields
-            sequence_number_nullable: Whether sequence number should be nullable
-        """
+    def row_type_with_row_tracking(table_fields: List[DataField]) -> List[DataField]:
         fields_with_row_tracking = list(table_fields)
 
         for field in fields_with_row_tracking:
@@ -69,15 +61,5 @@ class SpecialFields:
                 )
 
         fields_with_row_tracking.append(SpecialFields.ROW_ID)
-
-        if sequence_number_nullable:
-            seq_num_field = DataField(
-                id=SpecialFields.SEQUENCE_NUMBER.id,
-                name=SpecialFields.SEQUENCE_NUMBER.name,
-                type=AtomicType("BIGINT", nullable=True)  # Make it nullable
-            )
-            fields_with_row_tracking.append(seq_num_field)
-        else:
-            fields_with_row_tracking.append(SpecialFields.SEQUENCE_NUMBER)
-
+        fields_with_row_tracking.append(SpecialFields.SEQUENCE_NUMBER)
         return fields_with_row_tracking

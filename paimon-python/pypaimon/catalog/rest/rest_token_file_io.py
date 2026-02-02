@@ -21,6 +21,7 @@ import time
 from typing import Optional, Union
 
 from cachetools import TTLCache
+from pyarrow.fs import FileSystem
 
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_util import RESTUtil
@@ -193,6 +194,9 @@ class RESTTokenFileIO(FileIO):
     def write_blob(self, path: str, data, blob_as_descriptor: bool, **kwargs):
         return self.file_io().write_blob(path, data, blob_as_descriptor, **kwargs)
 
+    def filesystem(self) -> FileSystem:
+        return self.file_io().filesystem()
+
     @property
     def uri_reader_factory(self):
         if self._uri_reader_factory_cache is None:
@@ -200,10 +204,6 @@ class RESTTokenFileIO(FileIO):
             self._uri_reader_factory_cache = UriReaderFactory(catalog_options)
         
         return self._uri_reader_factory_cache
-
-    @property
-    def filesystem(self):
-        return self.file_io().filesystem
 
     def try_to_refresh_token(self):
         identifier_str = str(self.identifier)

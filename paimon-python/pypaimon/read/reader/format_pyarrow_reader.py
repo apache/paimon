@@ -35,7 +35,7 @@ class FormatPyArrowReader(RecordBatchReader):
     def __init__(self, file_io: FileIO, file_format: str, file_path: str, read_fields: List[str],
                  push_down_predicate: Any, batch_size: int = 1024):
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
-        self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
+        self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem())
         self.read_fields = read_fields
 
         # Identify which fields exist in the file and which are missing

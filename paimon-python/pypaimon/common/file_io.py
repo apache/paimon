@@ -17,6 +17,7 @@
 ################################################################################
 import logging
 import uuid
+from pyarrow.fs import FileSystem
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
@@ -24,6 +25,25 @@ from typing import List, Optional
 import pyarrow
 
 from pypaimon.common.options import Options
+
+
+def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
+    """
+    Returns a FileIO instance for accessing the file system identified by the given path.
+    - LocalFileIO for local file system (file:// or no scheme)
+    - PyArrowFileIO for remote file systems (oss://, s3://, hdfs://, etc.)
+    """
+    from urllib.parse import urlparse
+
+    uri = urlparse(path)
+    scheme = uri.scheme
+
+    if not scheme or scheme == "file":
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        return LocalFileIO(path, catalog_options)
+
+    from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+    return PyArrowFileIO(path, catalog_options or Options({}))
 
 
 class FileIO(ABC):
@@ -61,6 +81,10 @@ class FileIO(ABC):
     
     @abstractmethod
     def rename(self, src: str, dst: str) -> bool:
+        pass
+
+    @abstractmethod
+    def filesystem(self) -> FileSystem:
         pass
     
     def delete_quietly(self, path: str):
@@ -222,22 +246,3 @@ class FileIO(ABC):
     
     def close(self):
         pass
-    
-    @staticmethod
-    def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
-        """
-        Returns a FileIO instance for accessing the file system identified by the given path.
-        - LocalFileIO for local file system (file:// or no scheme)
-        - PyArrowFileIO for remote file systems (oss://, s3://, hdfs://, etc.)
-        """
-        from urllib.parse import urlparse
-        
-        uri = urlparse(path)
-        scheme = uri.scheme
-        
-        if not scheme or scheme == "file":
-            from pypaimon.filesystem.local_file_io import LocalFileIO
-            return LocalFileIO(path, catalog_options)
-        
-        from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
-        return PyArrowFileIO(path, catalog_options or Options({}))

@@ -25,7 +25,7 @@ from urllib.parse import splitport, urlparse
 
 import pyarrow
 from packaging.version import parse
-from pyarrow._fs import FileSystem
+from pyarrow.fs import FileSystem
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
@@ -503,3 +503,6 @@ class PyArrowFileIO(FileIO):
             return normalized_path
 
         return str(path)
+
+    def filesystem(self) -> FileSystem:
+        return self.filesystem
