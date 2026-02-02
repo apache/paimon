@@ -70,12 +70,12 @@ def _filter_manifest_files_by_row_ranges(
 
         for expected_range in row_ranges:
             # Check if ranges intersect
-            intersection = Range.intersect(
+            intersect = Range.intersect(
                 manifest_row_range.from_,
                 manifest_row_range.to,
                 expected_range.from_,
                 expected_range.to)
-            if intersection is not None:
+            if intersect:
                 should_keep = True
                 break
 
