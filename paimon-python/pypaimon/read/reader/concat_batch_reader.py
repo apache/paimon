@@ -184,8 +184,7 @@ class DataEvolutionMergeReader(RecordBatchReader):
                 names.append(batches[batch_index].schema.names[field_index])
         if columns:
             if self.schema is not None and len(columns) == len(self.schema):
-                schema_fields = [self.schema.field(i) for i in range(len(columns))]
-                return pa.RecordBatch.from_arrays(columns, schema=pa.schema(schema_fields))
+                return pa.RecordBatch.from_arrays(columns, schema=self.schema)
             return pa.RecordBatch.from_arrays(columns, names)
         return None
 
