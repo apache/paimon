@@ -121,8 +121,7 @@ class PyArrowFileIO(FileIO):
             client_kwargs['force_virtual_addressing'] = True
             client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
         else:
-            oss_bucket = self._extract_oss_bucket(path)
-            client_kwargs['endpoint_override'] = (oss_bucket + "." +
+            client_kwargs['endpoint_override'] = (self._oss_bucket + "." +
                                                   self.properties.get(OssOptions.OSS_ENDPOINT))
 
         retry_config = self._create_s3_retry_config()
@@ -522,11 +521,7 @@ class PyArrowFileIO(FileIO):
                     result = normalized_path.lstrip('/')
                     return result if result else '.'
             else:
-                # For PyArrow 6.x + OSS, endpoint_override already contains bucket,
-                if self._is_oss and parse_version(pyarrow.__version__) < parse_version("7.0.0"):
-                    return str(path)
-                else:
-                    return str(path)
+                return str(path)
 
         if parsed.scheme:
             if not normalized_path:

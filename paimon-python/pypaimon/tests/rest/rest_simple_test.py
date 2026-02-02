@@ -31,6 +31,7 @@ try:
     from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 except ImportError:
     import pyarrow.compute as pc
+
     def table_sort_by(table: pa.Table, column_name: str) -> pa.Table:
         indices = pc.sort_indices(table, sort_keys=[(column_name, 'ascending')])
         return table.take(indices)
@@ -276,7 +277,7 @@ class RESTSimpleTest(RESTBaseTest):
     def test_with_shard_uneven_distribution(self):
         """Test sharding with uneven row distribution across shards"""
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
-        self.rest_catalog.drop_table('default.test_shard_uneven')
+        self.rest_catalog.drop_table('default.test_shard_uneven', True)
         self.rest_catalog.create_table('default.test_shard_uneven', schema, False)
         table = self.rest_catalog.get_table('default.test_shard_uneven')
         write_builder = table.new_batch_write_builder()
@@ -594,7 +595,7 @@ class RESTSimpleTest(RESTBaseTest):
 
     def test_with_shard_pk_dynamic_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'])
-        self.rest_catalog.drop_table('default.test_with_shard')
+        self.rest_catalog.drop_table('default.test_with_shard', True)
         self.rest_catalog.create_table('default.test_with_shard', schema, False)
         table = self.rest_catalog.get_table('default.test_with_shard')
 
@@ -750,7 +751,7 @@ class RESTSimpleTest(RESTBaseTest):
             options={},
             comment="comment"
         )
-        catalog.drop_table(identifier)
+        catalog.drop_table(identifier, True)
         catalog.create_table(identifier, schema, False)
 
         catalog.alter_table(
