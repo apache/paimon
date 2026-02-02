@@ -305,6 +305,26 @@ class RescaleProcedureTest extends PaimonSparkTestBase {
         spark.sql("CALL sys.rescale(table => 'T4', bucket_num => 4, where => 'id = 1')")
       }.getMessage.contains("Only partition predicate is supported"))
     }
+
+  }
+
+  test("Paimon Procedure: rescale postpone bucket table") {
+    // Postpone bucket table needs to compact before rescale
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (id INT, value STRING, pt STRING)
+                   |TBLPROPERTIES (
+                   |  'primary-key'='id',
+                   |  'bucket'='-2',
+                   |  'postpone.batch-write-fixed-bucket' = 'false',
+                   |  'postpone.default-bucket-num' = '1'
+                   |)
+                   |PARTITIONED BY (pt)
+                   |""".stripMargin)
+      spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p1')")
+      spark.sql("CALL sys.rescale(table => 'T', bucket_num => 2, partitions => 'pt=\"p1\"')")
+      checkAnswer(sql("SELECT count(*) FROM T"), Seq(Row(0)))
+    }
   }
 
   // ----------------------- Helper Methods -----------------------

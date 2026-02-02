@@ -476,5 +476,18 @@ This section introduce all available spark procedures about paimon.
          CALL sys.copy(source_table => "t1", target_table => "t1_copy", where => "day = '2025-08-17'")<br/>
       </td>
    </tr>
+   <tr>
+      <td>rescale</td>
+      <td>
+         Rescale partitions of a table by changing the bucket number. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>bucket_num: resulting bucket number after rescale. The default value is the current bucket number of the table. Cannot be empty for postpone bucket tables.</li>
+            <li>partitions: partition filter. Left empty for all partitions. (Can't be used together with "where")</li>
+            <li>where: partition predicate. Left empty for all partitions. (Can't be used together with "partitions")</li>
+      </td>
+      <td>
+         CALL sys.rescale(table => 'default.T', bucket_num => 16, partitions => 'dt=20250217,hh=08;dt=20250217,hh=09')<br/>
+      </td>
+   </tr>
    </tbody>
 </table>
