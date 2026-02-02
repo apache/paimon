@@ -141,7 +141,13 @@ class DataEvolutionMergeReader(RecordBatchReader):
      - The sixth field comes from batch1, and it is at offset 0 in batch1.
     """
 
-    def __init__(self, row_offsets: List[int], field_offsets: List[int], readers: List[Optional[RecordBatchReader]]):
+    def __init__(
+        self,
+        row_offsets: List[int],
+        field_offsets: List[int],
+        readers: List[Optional[RecordBatchReader]],
+        schema: Optional[pa.Schema] = None,
+    ):
         if row_offsets is None:
             raise ValueError("Row offsets must not be null")
         if field_offsets is None:
@@ -155,6 +161,7 @@ class DataEvolutionMergeReader(RecordBatchReader):
         self.row_offsets = row_offsets
         self.field_offsets = field_offsets
         self.readers = readers
+        self.schema = schema
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         batches: List[Optional[RecordBatch]] = [None] * len(self.readers)
@@ -176,6 +183,9 @@ class DataEvolutionMergeReader(RecordBatchReader):
                 columns.append(column)
                 names.append(batches[batch_index].schema.names[field_index])
         if columns:
+            if self.schema is not None and len(columns) == len(self.schema):
+                schema_fields = [self.schema.field(i) for i in range(len(columns))]
+                return pa.RecordBatch.from_arrays(columns, schema=pa.schema(schema_fields))
             return pa.RecordBatch.from_arrays(columns, names)
         return None
 

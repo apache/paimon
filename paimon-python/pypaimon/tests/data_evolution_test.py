@@ -483,6 +483,20 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=simple_pa_schema)
         self.assertEqual(actual, expect)
 
+        read_builder = table.new_read_builder()
+        read_builder.with_projection(['f0', 'f1', 'f2', '_ROW_ID', '_SEQUENCE_NUMBER'])
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_with_meta = table_read.to_arrow(table_scan.plan().splits())
+        self.assertFalse(
+            actual_with_meta.schema.field('_ROW_ID').nullable,
+            '_ROW_ID must be non-nullable per SpecialFields',
+        )
+        self.assertFalse(
+            actual_with_meta.schema.field('_SEQUENCE_NUMBER').nullable,
+            '_SEQUENCE_NUMBER must be non-nullable per SpecialFields',
+        )
+
     def test_more_data(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
@@ -580,9 +594,9 @@ class DataEvolutionTest(unittest.TestCase):
             '_SEQUENCE_NUMBER': [1, 1],
         }, schema=pa.schema([
             ('f0', pa.int8()),
-            ('_ROW_ID', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
             ('f1', pa.int16()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
 
@@ -606,6 +620,8 @@ class DataEvolutionTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         actual_data = table_read.to_arrow(table_scan.plan().splits())
+        self.assertFalse(actual_data.schema.field('_ROW_ID').nullable)
+        self.assertFalse(actual_data.schema.field('_SEQUENCE_NUMBER').nullable)
         expect_data = pa.Table.from_pydict({
             'f0': [3, 4],
             'f1': [-1001, 1002],
@@ -614,7 +630,7 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
-            ('_ROW_ID', pa.int64()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
