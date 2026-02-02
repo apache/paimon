@@ -20,6 +20,7 @@ package org.apache.parquet.filter2.predicate;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
@@ -237,6 +238,15 @@ public class ParquetFilters {
         return converted;
     }
 
+    private static int getTimestampPrecision(org.apache.paimon.types.DataType type) {
+        if (type instanceof TimestampType) {
+            return ((TimestampType) type).getPrecision();
+        } else if (type instanceof LocalZonedTimestampType) {
+            return ((LocalZonedTimestampType) type).getPrecision();
+        }
+        throw new IllegalArgumentException("Not a timestamp type: " + type);
+    }
+
     private static Operators.Column<?> toParquetColumn(FieldRef fieldRef) {
         return fieldRef.type().accept(new ConvertToColumnTypeVisitor(fieldRef.name()));
     }
@@ -270,9 +280,20 @@ public class ParquetFilters {
             } else {
                 return Binary.fromConstantByteArray(decimal.toUnscaledBytes());
             }
+        } else if (value instanceof Timestamp) {
+            Timestamp timestamp = (Timestamp) value;
+            int precision = getTimestampPrecision(type);
+            if (precision <= 3) {
+                // milliseconds
+                return timestamp.getMillisecond();
+            } else if (precision <= 6) {
+                // microseconds
+                return timestamp.getMillisecond() * 1000 + timestamp.getNanoOfMillisecond() / 1000;
+            }
+            // precision > 6 uses INT96, not supported
+            throw new UnsupportedOperationException();
         }
 
-        // TODO Support Timestamp
         throw new UnsupportedOperationException();
     }
 
@@ -362,15 +383,23 @@ public class ParquetFilters {
             }
         }
 
-        // TODO we can support timestamp
-
         @Override
         public Operators.Column<?> visit(TimestampType timestampType) {
+            int precision = timestampType.getPrecision();
+            if (precision <= 6) {
+                return FilterApi.longColumn(name);
+            }
+            // precision > 6 uses INT96, not supported for filter pushdown
             throw new UnsupportedOperationException();
         }
 
         @Override
         public Operators.Column<?> visit(LocalZonedTimestampType localZonedTimestampType) {
+            int precision = localZonedTimestampType.getPrecision();
+            if (precision <= 6) {
+                return FilterApi.longColumn(name);
+            }
+            // precision > 6 uses INT96, not supported for filter pushdown
             throw new UnsupportedOperationException();
         }
 
