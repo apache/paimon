@@ -113,7 +113,7 @@ class MergeAllBatchReader(RecordBatchReader):
                         combined_arrays.append(pa.concat_arrays(column_arrays))
                     self.merged_batch = pa.RecordBatch.from_arrays(
                         combined_arrays,
-                        names=all_concatenated_batches[0].schema.names
+                        schema=all_concatenated_batches[0].schema
                     )
         else:
             self.merged_batch = None
@@ -146,7 +146,7 @@ class DataEvolutionMergeReader(RecordBatchReader):
         row_offsets: List[int],
         field_offsets: List[int],
         readers: List[Optional[RecordBatchReader]],
-        schema: Optional[pa.Schema] = None,
+        schema: pa.Schema,
     ):
         if row_offsets is None:
             raise ValueError("Row offsets must not be null")
@@ -174,18 +174,14 @@ class DataEvolutionMergeReader(RecordBatchReader):
                 batches[i] = batch
         # Assemble record batches from batches based on row_offsets and field_offsets
         columns = []
-        names = []
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
             if batches[batch_index] is not None:
                 column = batches[batch_index].column(field_index)
                 columns.append(column)
-                names.append(batches[batch_index].schema.names[field_index])
         if columns:
-            if self.schema is not None and len(columns) == len(self.schema):
-                return pa.RecordBatch.from_arrays(columns, schema=self.schema)
-            return pa.RecordBatch.from_arrays(columns, names)
+            return pa.RecordBatch.from_arrays(columns, schema=self.schema)
         return None
 
     def close(self) -> None:

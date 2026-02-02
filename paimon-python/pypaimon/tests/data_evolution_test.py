@@ -634,3 +634,21 @@ class DataEvolutionTest(unittest.TestCase):
             pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
+
+    def test_from_arrays_without_schema(self):
+        schema = pa.schema([
+            ('f0', pa.int8()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
+        ])
+        batch = pa.RecordBatch.from_pydict(
+            {'f0': [1], '_ROW_ID': [0], '_SEQUENCE_NUMBER': [1]},
+            schema=schema
+        )
+        self.assertFalse(batch.schema.field('_ROW_ID').nullable)
+        self.assertFalse(batch.schema.field('_SEQUENCE_NUMBER').nullable)
+
+        arrays = list(batch.columns)
+        rebuilt = pa.RecordBatch.from_arrays(arrays, names=batch.schema.names)
+        self.assertTrue(rebuilt.schema.field('_ROW_ID').nullable)
+        self.assertTrue(rebuilt.schema.field('_SEQUENCE_NUMBER').nullable)

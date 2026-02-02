@@ -36,30 +36,31 @@ class KeyValueDataWriter(DataWriter):
     def _add_system_fields(self, data: pa.RecordBatch) -> pa.RecordBatch:
         """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND."""
         num_rows = data.num_rows
-        
+
         new_arrays = []
-        new_names = []
-        
+        new_fields = []
+
         for pk_key in self.trimmed_primary_keys:
             if pk_key in data.schema.names:
                 key_column = data.column(pk_key)
                 new_arrays.append(key_column)
-                new_names.append(f'_KEY_{pk_key}')
-        
+                src_field = data.schema.field(pk_key)
+                new_fields.append(pa.field(f'_KEY_{pk_key}', src_field.type, nullable=src_field.nullable))
+
         sequence_column = pa.array([self.sequence_generator.next() for _ in range(num_rows)], type=pa.int64())
         new_arrays.append(sequence_column)
-        new_names.append('_SEQUENCE_NUMBER')
-        
+        new_fields.append(pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False))
+
         # TODO: support real row kind here
         value_kind_column = pa.array([0] * num_rows, type=pa.int8())
         new_arrays.append(value_kind_column)
-        new_names.append('_VALUE_KIND')
-        
+        new_fields.append(pa.field('_VALUE_KIND', pa.int8(), nullable=False))
+
         for i in range(data.num_columns):
             new_arrays.append(data.column(i))
-            new_names.append(data.schema.names[i])
-        
-        return pa.RecordBatch.from_arrays(new_arrays, names=new_names)
+            new_fields.append(data.schema.field(i))
+
+        return pa.RecordBatch.from_arrays(new_arrays, schema=pa.schema(new_fields))
 
     def _sort_by_primary_key(self, data: pa.RecordBatch) -> pa.RecordBatch:
         sort_keys = [(key, 'ascending') for key in self.trimmed_primary_keys]
