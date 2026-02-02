@@ -16,6 +16,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+import sys
+
 import pyarrow as pa
 
 from pypaimon import Schema
@@ -27,14 +29,11 @@ from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor, DynamicBucketRowKeyExtractor, \
     UnawareBucketRowKeyExtractor
 
-try:
+if sys.version_info[:2] == (3, 6):
     from pypaimon.tests.py36.pyarrow_compat import table_sort_by
-except ImportError:
-    import pyarrow.compute as pc
-
-    def table_sort_by(table: pa.Table, column_name: str) -> pa.Table:
-        indices = pc.sort_indices(table, sort_keys=[(column_name, 'ascending')])
-        return table.take(indices)
+else:
+    def table_sort_by(table: pa.Table, column_name: str, order: str = 'ascending') -> pa.Table:
+        return table.sort_by([(column_name, order)])
 
 
 class RESTSimpleTest(RESTBaseTest):
@@ -57,7 +56,7 @@ class RESTSimpleTest(RESTBaseTest):
     def test_with_shard_ao_unaware_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.rest_catalog.drop_table('default.test_with_shard_ao_unaware_bucket', True)
-        self.rest_catalog.create_table('default.test_with_shard_ao_unaware_bucket', schema, True)
+        self.rest_catalog.create_table('default.test_with_shard_ao_unaware_bucket', schema, False)
         table = self.rest_catalog.get_table('default.test_with_shard_ao_unaware_bucket')
         write_builder = table.new_batch_write_builder()
         # first write
