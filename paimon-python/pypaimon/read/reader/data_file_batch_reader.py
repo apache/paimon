@@ -135,18 +135,7 @@ class DataFileBatchReader(RecordBatchReader):
             # Create a new array that fills with max_sequence_number
             arrays[idx] = pa.repeat(self.max_sequence_number, record_batch.num_rows)
 
-        names = record_batch.schema.names
-        table = None
-        for i, name in enumerate(names):
-            field = pa.field(
-                name, arrays[i].type,
-                nullable=record_batch.schema.field(name).nullable
-            )
-            if table is None:
-                table = pa.table({name: arrays[i]}, schema=pa.schema([field]))
-            else:
-                table = table.append_column(field, arrays[i])
-        return table.to_batches()[0]
+        return pa.RecordBatch.from_arrays(arrays, schema=record_batch.schema)
 
     def close(self) -> None:
         self.format_reader.close()
