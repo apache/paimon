@@ -136,7 +136,10 @@ class DataFileBatchReader(RecordBatchReader):
             arrays[idx] = pa.repeat(self.max_sequence_number, record_batch.num_rows)
 
         names = record_batch.schema.names
-        fields = [pa.field(name, arrays[i].type, nullable=record_batch.schema.field(name).nullable) for i, name in enumerate(names)]
+        fields = [
+            pa.field(name, arrays[i].type, nullable=record_batch.schema.field(name).nullable)
+            for i, name in enumerate(names)
+        ]
         return pa.RecordBatch.from_arrays(arrays, schema=pa.schema(fields))
 
     def close(self) -> None:
