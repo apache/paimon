@@ -42,7 +42,6 @@ import java.util.Optional;
 public class LazyFilteredBTreeReader implements GlobalIndexReader {
 
     private final BTreeFileMetaSelector fileSelector;
-    private final List<GlobalIndexIOMeta> files;
     private final Map<Path, GlobalIndexReader> readerCache;
     private final KeySerializer keySerializer;
     private final CacheManager cacheManager;
@@ -58,7 +57,6 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-        this.files = files;
     }
 
     @Override

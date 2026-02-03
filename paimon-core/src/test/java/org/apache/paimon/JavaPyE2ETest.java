@@ -416,6 +416,7 @@ public class JavaPyE2ETest {
         testBtreeIndexWriteInt();
         testBtreeIndexWriteBigInt();
         testBtreeIndexWriteLarge();
+        testBtreeIndexWriteNull();
     }
 
     private void testBtreeIndexWriteString() throws Exception {
@@ -436,7 +437,7 @@ public class JavaPyE2ETest {
                 DataTypes.BIGINT(), "test_btree_index_bigint", 1000L, 2000L, 3000L);
     }
 
-    private <T> void testBtreeIndexWriteGeneric(
+    private void testBtreeIndexWriteGeneric(
             DataType keyType, String tableName, Object key1, Object key2, Object key3)
             throws Exception {
         // create table
@@ -567,6 +568,74 @@ public class JavaPyE2ETest {
                 .createReader(readBuilder.newScan().plan())
                 .forEachRemaining(r -> result.add(r.getString(1).toString()));
         assertThat(result).containsOnly("v2");
+    }
+
+    private void testBtreeIndexWriteNull() throws Exception {
+        // create table
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        Options options = new Options();
+        Path tablePath = new Path(warehouse.toString() + "/default.db/test_btree_index_null");
+        options.set(PATH, tablePath.toString());
+        options.set(ROW_TRACKING_ENABLED, true);
+        options.set(DATA_EVOLUTION_ENABLED, true);
+        options.set(GLOBAL_INDEX_ENABLED, true);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                options.toMap(),
+                                ""));
+        AppendOnlyFileStoreTable table =
+                new AppendOnlyFileStoreTable(
+                        FileIOFinder.find(tablePath),
+                        tablePath,
+                        tableSchema,
+                        CatalogEnvironment.empty());
+
+        // write data
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.write(
+                    GenericRow.of(BinaryString.fromString("k1"), BinaryString.fromString("v1")));
+            write.write(
+                    GenericRow.of(BinaryString.fromString("k2"), BinaryString.fromString("v2")));
+            write.write(GenericRow.of(null, BinaryString.fromString("v3")));
+            write.write(
+                    GenericRow.of(BinaryString.fromString("k4"), BinaryString.fromString("v4")));
+            write.write(GenericRow.of(null, BinaryString.fromString("v5")));
+            commit.commit(write.prepareCommit());
+        }
+
+        // build index
+        BTreeGlobalIndexBuilder builder =
+                new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+        }
+
+        // assert index
+        List<IndexManifestEntry> indexEntries =
+                table.indexManifestFileReader().read(table.latestSnapshot().get().indexManifest);
+        assertThat(indexEntries)
+                .singleElement()
+                .matches(entry -> entry.indexFile().rowCount() == 5);
+
+        // read index is null
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicateBuilder.isNull(0));
+        List<String> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(r -> result.add(r.getString(1).toString()));
+        assertThat(result).containsExactlyInAnyOrder("v3", "v5");
     }
 
     // Helper method from TableTestBase
