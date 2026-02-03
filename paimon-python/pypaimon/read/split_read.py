@@ -25,6 +25,7 @@ from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import ApplyDeletionVectorReader
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
+from pypaimon.globalindex import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
@@ -44,7 +45,7 @@ from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
 from pypaimon.read.reader.iface.record_batch_reader import (RecordBatchReader,
-                                                            RowPositionReader)
+                                                            RowPositionReader, EmptyRecordBatchReader)
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
@@ -592,14 +593,19 @@ class DataEvolutionSplitRead(SplitRead):
 
     def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> Optional[RecordReader]:
         """Create a file reader for a single file."""
-        record_reader = self.file_reader_supplier(
-            file=file,
-            for_merge_read=False,
-            read_fields=read_fields,
-            row_tracking_enabled=True)
+        def create_record_reader():
+            return self.file_reader_supplier(
+                file=file,
+                for_merge_read=False,
+                read_fields=read_fields,
+                row_tracking_enabled=True)
         if self.row_ranges is None:
-            return record_reader
-        return RowIdFilterRecordBatchReader(record_reader, file.first_row_id, self.row_ranges)
+            return create_record_reader()
+        file_range = Range(file.first_row_id, file.first_row_id + file.row_count - 1)
+        row_ranges = Range.and_(self.row_ranges, [file_range])
+        if len(row_ranges) == 0:
+            return EmptyRecordBatchReader()
+        return RowIdFilterRecordBatchReader(create_record_reader(), file.first_row_id, row_ranges)
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
         """Split files into field bunches."""
