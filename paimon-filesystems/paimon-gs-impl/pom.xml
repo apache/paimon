@@ -55,6 +55,11 @@
                         <groupId>jdk.tools</groupId>
                         <artifactId>jdk.tools</artifactId>
                     </exclusion>
+                    <exclusion>
+                        <!-- Hadoop 3.4+ uses pjfanning fork of jersey-json which contains GPL-referencing files -->
+                        <groupId>com.github.pjfanning</groupId>
+                        <artifactId>jersey-json</artifactId>
+                    </exclusion>
                 </exclusions>
             </dependency>
 
@@ -99,6 +104,11 @@
                 </exclusion>
                 <exclusion>
                     <groupId>com.sun.jersey</groupId>
+                    <artifactId>jersey-json</artifactId>
+                </exclusion>
+                <exclusion>
+                    <!-- Hadoop 3.4+ uses pjfanning fork of jersey-json which contains GPL-referencing files -->
+                    <groupId>com.github.pjfanning</groupId>
                     <artifactId>jersey-json</artifactId>
                 </exclusion>
                 <exclusion>
