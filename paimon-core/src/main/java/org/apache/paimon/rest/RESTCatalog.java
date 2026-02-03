@@ -73,7 +73,6 @@ import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -772,8 +771,7 @@ public class RESTCatalog implements Catalog {
     @Override
     public void alterFunction(
             Identifier identifier, List<FunctionChange> changes, boolean ignoreIfNotExists)
-            throws FunctionNotExistException,
-                    DefinitionAlreadyExistException,
+            throws FunctionNotExistException, DefinitionAlreadyExistException,
                     DefinitionNotExistException {
         try {
             api.alterFunction(identifier, changes);
