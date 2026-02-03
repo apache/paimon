@@ -592,27 +592,14 @@ class DataEvolutionSplitRead(SplitRead):
 
     def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> Optional[RecordReader]:
         """Create a file reader for a single file."""
-        def create_record_reader():
-            record_reader = self.file_reader_supplier(
-                file=file,
-                for_merge_read=False,
-                read_fields=read_fields,
-                row_tracking_enabled=True)
-            if self.row_ranges is not None:
-                record_reader = RowIdFilterRecordBatchReader(record_reader, file.first_row_id, self.row_ranges)
+        record_reader = self.file_reader_supplier(
+            file=file,
+            for_merge_read=False,
+            read_fields=read_fields,
+            row_tracking_enabled=True)
+        if self.row_ranges is None:
             return record_reader
-
-        shard_file_idx_map = (
-            self.split.shard_file_idx_map() if isinstance(self.split, SlicedSplit) else {}
-        )
-        if file.file_name in shard_file_idx_map:
-            (begin_pos, end_pos) = shard_file_idx_map[file.file_name]
-            if (begin_pos, end_pos) == (-1, -1):
-                return None
-            else:
-                return ShardBatchReader(create_record_reader(), begin_pos, end_pos)
-        else:
-            return create_record_reader()
+        return RowIdFilterRecordBatchReader(record_reader, file.first_row_id, self.row_ranges)
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
         """Split files into field bunches."""
