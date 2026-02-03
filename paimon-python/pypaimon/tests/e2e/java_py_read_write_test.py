@@ -325,6 +325,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_generic("test_btree_index_int", 200, pa.int32())
         self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
         self._test_read_btree_index_large()
+        self._test_read_btree_index_null()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -359,5 +360,37 @@ class JavaPyReadWriteTest(unittest.TestCase):
         expected = pa.Table.from_pydict({
             'k': ["k2"],
             'v': ["v2"]
+        })
+        self.assertEqual(expected, actual)
+
+    def _test_read_btree_index_null(self):
+        table = self.catalog.get_table('default.test_btree_index_null')
+
+        # read is null index
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.is_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': [None, None],
+            'v': ["v3", "v5"]
+        }, schema=pa.schema([
+            ("k", pa.string()),
+            ("v", pa.string())
+        ]))
+        self.assertEqual(expected, actual)
+
+        # read is not null index
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.is_not_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k1", "k2", "k4"],
+            'v': ["v1", "v2", "v4"]
         })
         self.assertEqual(expected, actual)

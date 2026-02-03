@@ -42,9 +42,9 @@ public class MutableObjectIteratorAdapter<I extends E, E> implements Iterator<E>
 
     private final MutableObjectIterator<I> delegate;
     private final I instance;
+
     private E nextElement;
-    private boolean hasNext = false;
-    private boolean initialized = false;
+    private boolean prefetched = false;
 
     /**
      * Creates a new adapter wrapping the given {@link MutableObjectIterator}.
@@ -58,10 +58,10 @@ public class MutableObjectIteratorAdapter<I extends E, E> implements Iterator<E>
 
     @Override
     public boolean hasNext() {
-        if (!initialized) {
+        if (!prefetched) {
             prefetch();
         }
-        return hasNext;
+        return nextElement != null;
     }
 
     @Override
@@ -69,22 +69,15 @@ public class MutableObjectIteratorAdapter<I extends E, E> implements Iterator<E>
         if (!hasNext()) {
             throw new NoSuchElementException();
         }
-        E result = nextElement;
-        prefetch();
-        return result;
+        prefetched = false;
+        return nextElement;
     }
 
-    /**
-     * Prefetches the next element from the delegate iterator.
-     *
-     * <p>This method reads ahead one element to support the {@link #hasNext()} check required by
-     * the standard {@link Iterator} interface.
-     */
+    /** Prefetches the next element from the delegate iterator. */
     private void prefetch() {
         try {
             nextElement = delegate.next(instance);
-            hasNext = (nextElement != null);
-            initialized = true;
+            prefetched = true;
         } catch (IOException e) {
             throw new RuntimeException("Failed to read next element from MutableObjectIterator", e);
         }
