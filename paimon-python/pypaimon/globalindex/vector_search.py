@@ -65,7 +65,7 @@ class VectorSearch:
         """
         Create a new VectorSearch with include_row_ids offset to the given range.
         """
-        from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
+        from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 
         if self.include_row_ids is not None:
             range_bitmap = RoaringBitmap64()

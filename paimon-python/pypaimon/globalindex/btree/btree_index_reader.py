@@ -33,7 +33,7 @@ from pypaimon.globalindex.btree.key_serializer import KeySerializer
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import FieldRef, GlobalIndexReader
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.sst_file_reader import SstFileReader
 from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
