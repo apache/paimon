@@ -414,6 +414,12 @@ public class JavaPyE2ETest {
         }
     }
 
+    private static final Object[][] BUCKET_TEST_KEYS = {
+        {"e2e_pk_001", "e2e_suite_001", 1},
+        {"k", "v", 0},
+        {"e2e_pk_002", "e2e_suite_002", 2},
+    };
+
     @Test
     @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
     public void testReadPkTableBucketNumCalculate() throws Exception {
@@ -422,24 +428,38 @@ public class JavaPyE2ETest {
                     identifier("mixed_test_pk_table_bucket_num_calculate_" + format);
             Table table = catalog.getTable(identifier);
             PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
-            Predicate predicate =
-                    PredicateBuilder.and(
-                            predicateBuilder.equal(0, BinaryString.fromString("e2e_pk_001")),
-                            predicateBuilder.equal(1, BinaryString.fromString("e2e_suite_001")),
-                            predicateBuilder.equal(2, 1));
-            ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-            List<String> res =
-                    getResult(
-                            readBuilder.newRead(),
-                            readBuilder.newScan().plan().splits(),
-                            row -> rowToStringWithStruct(row, table.rowType()));
-            LOG.info("Read bucket_num_calculate table {}: {} row(s)", format, res.size());
-            assertThat(res)
-                    .as(
-                            "Python wrote 1 row (pk_str_a=e2e_pk_001, pk_str_b=e2e_suite_001,"
-                                    + " pk_int=1); Java read with predicate should return it.).")
-                    .hasSize(1);
-            assertThat(res.get(0)).contains("e2e_pk_001").contains("e2e_suite_001").contains("1");
+            for (Object[] key : BUCKET_TEST_KEYS) {
+                String pkStrA = (String) key[0];
+                String pkStrB = (String) key[1];
+                int pkInt = (Integer) key[2];
+                Predicate predicate =
+                        PredicateBuilder.and(
+                                predicateBuilder.equal(0, BinaryString.fromString(pkStrA)),
+                                predicateBuilder.equal(1, BinaryString.fromString(pkStrB)),
+                                predicateBuilder.equal(2, pkInt));
+                ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+                List<String> res =
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                row -> rowToStringWithStruct(row, table.rowType()));
+                LOG.info(
+                        "Read bucket_num_calculate table {} key ({}, {}, {}): {} row(s)",
+                        format,
+                        pkStrA,
+                        pkStrB,
+                        pkInt,
+                        res.size());
+                assertThat(res)
+                        .as(
+                                "Python wrote row (pk_str_a=%s, pk_str_b=%s, pk_int=%s); "
+                                        + "Java read with predicate should return it.",
+                                pkStrA,
+                                pkStrB,
+                                pkInt)
+                        .hasSize(1);
+                assertThat(res.get(0)).contains(pkStrA).contains(pkStrB).contains(String.valueOf(pkInt));
+            }
         }
     }
 

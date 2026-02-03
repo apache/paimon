@@ -208,6 +208,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
         actual_names = set(initial_result['name'].tolist())
         self.assertEqual(actual_names, expected_names)
 
+    _BUCKET_TEST_KEYS = [
+        ('e2e_pk_001', 'e2e_suite_001', 1),
+        ('k', 'v', 0),
+        ('e2e_pk_002', 'e2e_suite_002', 2),
+    ]
+
     @parameterized.expand([('parquet',), ('orc',), ('avro',)])
     def test_py_write_read_pk_table_bucket_num_calculate(self, file_format):
         from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
@@ -232,12 +238,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
             pass
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
-        pk_key = ('e2e_pk_001', 'e2e_suite_001', 1)
+        test_keys = self._BUCKET_TEST_KEYS
         initial_data = pd.DataFrame({
-            'pk_str_a': [pk_key[0]],
-            'pk_str_b': [pk_key[1]],
-            'pk_int': [pk_key[2]],
-            'value': [100],
+            'pk_str_a': [k[0] for k in test_keys],
+            'pk_str_b': [k[1] for k in test_keys],
+            'pk_int': [k[2] for k in test_keys],
+            'value': [100 + i for i in range(len(test_keys))],
         })
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -247,15 +253,23 @@ class JavaPyReadWriteTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
         batch = pa.RecordBatch.from_pydict(
-            {'pk_str_a': [pk_key[0]], 'pk_str_b': [pk_key[1]], 'pk_int': [pk_key[2]], 'value': [100]},
-            schema=pa_schema
+            {
+                'pk_str_a': [k[0] for k in test_keys],
+                'pk_str_b': [k[1] for k in test_keys],
+                'pk_int': [k[2] for k in test_keys],
+                'value': [100 + i for i in range(len(test_keys))],
+            },
+            schema=pa_schema,
         )
         extractor = FixedBucketRowKeyExtractor(table.table_schema)
         _, buckets = extractor.extract_partition_bucket_batch(batch)
-        expected_bucket = buckets[0]
         splits = table.new_read_builder().new_scan().plan().splits()
-        self.assertEqual(len(splits), 1, "one row => one split")
-        self.assertEqual(splits[0].bucket, expected_bucket, "split bucket must match extractor hash")
+        split_buckets = {s.bucket for s in splits}
+        expected_buckets = set(buckets)
+        self.assertEqual(split_buckets, expected_buckets, "split buckets must match extractor")
+        self.assertGreaterEqual(
+            len(expected_buckets), 2,
+            "test keys should span at least 2 buckets (low-bit and high-bit hash)")
 
     @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):

@@ -15,6 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import math
 import struct
 from abc import ABC, abstractmethod
 from typing import Any, List, Tuple
@@ -78,6 +79,15 @@ def _hash_bytes_by_words(data: bytes, seed: int = _DEFAULT_SEED) -> int:
         k1 = _mix_k1(k1)
         h1 = _mix_h1(h1, k1)
     return _fmix(h1, n)
+
+
+def _bucket_from_hash(hash_unsigned: int, num_buckets: int) -> int:
+    if hash_unsigned >= 0x80000000:
+        hash_signed = hash_unsigned - 0x100000000
+    else:
+        hash_signed = hash_unsigned
+    rem = hash_signed - math.trunc(hash_signed / num_buckets) * num_buckets
+    return abs(rem)
 
 
 def _type_name_for_bucket(field_type: Any) -> str:
@@ -230,7 +240,7 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
         for row_idx in range(data.num_rows):
             row_values = tuple(col[row_idx].as_py() for col in columns)
             hashes.append(self._binary_row_hash_code(row_values))
-        return [abs(h) % self.num_buckets for h in hashes]
+        return [_bucket_from_hash(h, self.num_buckets) for h in hashes]
 
     def _binary_row_hash_code(self, row_values: Tuple[Any, ...]) -> int:
         row_bytes = _to_binary_row_bytes(self._bucket_key_type_names, row_values)
