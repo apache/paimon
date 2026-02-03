@@ -140,7 +140,10 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         columns = [data.column(i) for i in self.bucket_key_indices]
         return [
-            _bucket_from_hash(self._binary_row_hash_code(tuple(col[row_idx].as_py() for col in columns)), self.num_buckets)
+            _bucket_from_hash(
+                self._binary_row_hash_code(tuple(col[row_idx].as_py() for col in columns)),
+                self.num_buckets,
+            )
             for row_idx in range(data.num_rows)
         ]
 
