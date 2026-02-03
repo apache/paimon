@@ -20,9 +20,12 @@ package org.apache.paimon.azure;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem;
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem;
@@ -32,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,6 +63,25 @@ public class AzureFileIO extends HadoopCompliantFileIO {
     @Override
     public boolean isObjectStore() {
         return true;
+    }
+
+    @Override
+    public boolean supportsConditionalWrite() {
+        return true;
+    }
+
+    @Override
+    public boolean tryToWriteAtomicIfAbsent(Path path, String content) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        FileSystem fs = getFileSystem(hadoopPath);
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        try (FSDataOutputStream out = fs.createFile(hadoopPath).create().overwrite(false).build()) {
+            out.write(bytes);
+            return true;
+        } catch (FileAlreadyExistsException e) {
+            LOG.debug("Conditional write failed, file already exists: {}", path);
+            return false;
+        }
     }
 
     @Override
