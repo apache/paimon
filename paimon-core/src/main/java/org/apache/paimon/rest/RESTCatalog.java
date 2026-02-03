@@ -33,6 +33,7 @@ import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.ResolvingFileIO;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
@@ -72,7 +73,6 @@ import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -1126,11 +1126,11 @@ public class RESTCatalog implements Catalog {
     }
 
     private FileIO fileIOFromOptions(Path path) {
-        try {
-            return FileIO.get(path, context);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        // In some cases we only need to get the table object but won't need to access data, using
+        // ResolvingFileIO to avoid permission issue.
+        FileIO fileIO = new ResolvingFileIO();
+        fileIO.configure(context);
+        return fileIO;
     }
 
     private void createExternalTablePathIfNotExist(Schema schema) throws IOException {
