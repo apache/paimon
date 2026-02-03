@@ -236,11 +236,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         return Range(start_row_id, start_row_id), Range(end_row_id, end_row_id)
 
-    def _filter_files_by_row_ranges(
-        self,
-        partitioned_files: defaultdict,
-        row_ranges: List[Range]
-    ) -> defaultdict:
+    @staticmethod
+    def _filter_files_by_row_ranges(partitioned_files: defaultdict, row_ranges: List[Range]) -> defaultdict:
         """
         Filter files by Row ID ranges. Keep files that overlap with the given ranges.
         """
@@ -248,33 +245,20 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         for key, file_entries in partitioned_files.items():
             filtered_entries = []
-            blob_added = False
 
             for entry in file_entries:
-                if self._is_blob_file(entry.file.file_name):
-                    if blob_added:
-                        filtered_entries.append(entry)
-                    continue
-                blob_added = False
-
                 first_row_id = entry.file.first_row_id
-                if first_row_id is None:
-                    # Files without first_row_id are kept
-                    filtered_entries.append(entry)
-                    continue
-
                 file_range = Range(first_row_id, first_row_id + entry.file.row_count - 1)
 
                 # Check if file overlaps with any of the row ranges
                 overlaps = False
                 for r in row_ranges:
-                    if Range.and_([file_range], [r]):
+                    if r.overlaps(file_range):
                         overlaps = True
                         break
 
                 if overlaps:
                     filtered_entries.append(entry)
-                    blob_added = True
 
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
