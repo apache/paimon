@@ -454,11 +454,12 @@ public class JavaPyE2ETest {
                         .as(
                                 "Python wrote row (pk_str_a=%s, pk_str_b=%s, pk_int=%s); "
                                         + "Java read with predicate should return it.",
-                                pkStrA,
-                                pkStrB,
-                                pkInt)
+                                pkStrA, pkStrB, pkInt)
                         .hasSize(1);
-                assertThat(res.get(0)).contains(pkStrA).contains(pkStrB).contains(String.valueOf(pkInt));
+                assertThat(res.get(0))
+                        .contains(pkStrA)
+                        .contains(pkStrB)
+                        .contains(String.valueOf(pkInt));
             }
         }
     }
