@@ -382,15 +382,15 @@ All available procedures are listed below.
       <td>CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
-          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5')<br/><br/>
-          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5', mode => 'local')
+          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5)<br/><br/>
+          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5, mode => 'local')
       </td>
    </tr>
    <tr>
       <td>remove_unexisting_files</td>
       <td>
          -- Use named argument<br/>
-         CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier', dry_run => 'dryRun', parallelism => 'parallelism') <br/><br/>
+         CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier', dry_run => 'dryRun', parallelism => parallelism) <br/><br/>
          -- Use indexed argument<br/>
          CALL [catalog.]sys.remove_unexisting_files('identifier')<br/>
          CALL [catalog.]sys.remove_unexisting_files('identifier', 'dryRun', 'parallelism')
@@ -835,7 +835,7 @@ All available procedures are listed below.
    <tr>
       <td>rescale</td>
       <td>
-         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => 'scan_parallelism', `sink_parallelism` => 'sink_parallelism')
+         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => scan_parallelism, `sink_parallelism` => sink_parallelism)
       </td>
       <td>
          Rescale one partition of a table. Arguments:
