@@ -39,7 +39,7 @@ from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
-from pypaimon.read.reader.row_range_filter_record_reader import RowRangeFilterRecordReader
+from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
@@ -599,7 +599,7 @@ class DataEvolutionSplitRead(SplitRead):
                 read_fields=read_fields,
                 row_tracking_enabled=True)
             if self.row_ranges is not None:
-                record_reader = RowRangeFilterRecordReader(record_reader, file.first_row_id, self.row_ranges)
+                record_reader = RowIdFilterRecordBatchReader(record_reader, file.first_row_id, self.row_ranges)
             return record_reader
 
         shard_file_idx_map = (

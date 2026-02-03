@@ -17,64 +17,47 @@
 ################################################################################
 
 from typing import Optional, List
+import pyarrow
 
-from pypaimon.read.reader.iface.record_iterator import RecordIterator
-from pypaimon.read.reader.iface.record_reader import RecordReader
+from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.globalindex.range import Range
+from pyarrow import RecordBatch
 
 
-class RowRangeFilterRecordReader(RecordReader):
+class RowIdFilterRecordBatchReader(RecordBatchReader):
     """
-    A RecordReader that filters records based on row ID ranges.
+    A RecordBatchReader that filters records based on row ID ranges.
     """
 
-    def __init__(self, reader: RecordReader, first_row_id: int, row_id_ranges: List[Range]):
+    def __init__(self, reader: RecordBatchReader, first_row_id: int, row_id_ranges: List[Range]):
         self.reader = reader
         self.current_row_id = first_row_id
         self.row_id_ranges = row_id_ranges
 
-    def read_batch(self) -> Optional[RecordIterator]:
-        iterator = self.reader.read_batch()
-        if iterator is None:
-            return None
-        return RowRangeFilterIterator(iterator, self.current_row_id, self.row_id_ranges, self)
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        while True:
+            batch = self.reader.read_arrow_batch()
+            if batch is None:
+                return None
+            if batch.num_rows == 0:
+                return batch
+            import numpy as np
+            # Build mask for rows that are in allowed_row_ids
+            mask = np.zeros(batch.num_rows, dtype=bool)
+            for i in range(batch.num_rows):
+                if self._is_row_in_range(self.current_row_id + i):
+                    mask[i] = True
+
+            self.current_row_id += batch.num_rows
+
+            # Filter batch
+            if np.any(mask):
+                filtered_batch = batch.filter(pyarrow.array(mask))
+                if filtered_batch.num_rows > 0:
+                    return filtered_batch
 
     def close(self) -> None:
         self.reader.close()
-
-    def get_current_row_id(self) -> int:
-        return self.current_row_id
-
-    def update_row_id(self, row_id: int):
-        self.current_row_id = row_id
-
-
-class RowRangeFilterIterator(RecordIterator):
-    """
-    A RecordIterator that filters records based on row ID ranges.
-    """
-
-    def __init__(
-            self,
-            iterator: RecordIterator,
-            row_id_ranges: List[Range],
-            reader: RowRangeFilterRecordReader):
-        self.iterator = iterator
-        self.current_row_id = reader.get_current_row_id()
-        self.row_id_ranges = row_id_ranges
-        self.reader = reader
-
-    def next(self) -> Optional[object]:
-        while True:
-            record = self.iterator.next()
-            if record is None:
-                return None
-
-            self.current_row_id = self.current_row_id + 1
-            self.reader.update_row_id(self.current_row_id)
-
-            if self._is_row_in_range(self.current_row_id - 1):
-                return record
 
     def _is_row_in_range(self, row_id: int) -> bool:
         """Check if the given row ID is within any of the allowed ranges."""
