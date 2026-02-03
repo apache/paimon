@@ -412,31 +412,31 @@ public class JavaPyE2ETest {
                             "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
                             "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
                             "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
-        }
 
-        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
-        int[] ids = {1, 2, 3, 4, 5, 6};
-        String[] names = {"Apple", "Banana", "Carrot", "Broccoli", "Chicken", "Beef"};
-        for (int i = 0; i < ids.length; i++) {
-            int id = ids[i];
-            String expectedName = names[i];
-            Predicate predicate = predicateBuilder.equal(0, id);
-            ReadBuilder readBuilder = fileStoreTable.newReadBuilder().withFilter(predicate);
-            List<String> byKey =
-                    getResult(
-                            readBuilder.newRead(),
-                            readBuilder.newScan().plan().splits(),
-                            row -> rowToStringWithStruct(row, table.rowType()));
-            List<String> matching =
-                    byKey.stream()
-                            .filter(s -> s.trim().startsWith("+I[" + id + ", "))
-                            .collect(Collectors.toList());
-            assertThat(matching)
-                    .as(
-                            "Python wrote row id=%d; Java read with predicate id=%d should return it.",
-                            id, id)
-                    .hasSize(1);
-            assertThat(matching.get(0)).contains(String.valueOf(id)).contains(expectedName);
+            PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+            int[] ids = {1, 2, 3, 4, 5, 6};
+            String[] names = {"Apple", "Banana", "Carrot", "Broccoli", "Chicken", "Beef"};
+            for (int i = 0; i < ids.length; i++) {
+                int id = ids[i];
+                String expectedName = names[i];
+                Predicate predicate = predicateBuilder.equal(0, id);
+                ReadBuilder readBuilder = fileStoreTable.newReadBuilder().withFilter(predicate);
+                List<String> byKey =
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                row -> rowToStringWithStruct(row, table.rowType()));
+                List<String> matching =
+                        byKey.stream()
+                                .filter(s -> s.trim().startsWith("+I[" + id + ", "))
+                                .collect(Collectors.toList());
+                assertThat(matching)
+                        .as(
+                                "Python wrote row id=%d; Java read with predicate id=%d should return it.",
+                                id, id)
+                        .hasSize(1);
+                assertThat(matching.get(0)).contains(String.valueOf(id)).contains(expectedName);
+            }
         }
     }
 
