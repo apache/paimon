@@ -1070,7 +1070,7 @@ public class FlinkCatalog extends AbstractCatalog {
         return columnOptions;
     }
 
-    public static Identifier toIdentifier(ObjectPath path) {
+    public Identifier toIdentifier(ObjectPath path) {
         return new Identifier(path.getDatabaseName(), path.getObjectName());
     }
 

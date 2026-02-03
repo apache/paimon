@@ -807,7 +807,7 @@ public class FlinkCatalogTest extends FlinkCatalogTestBase {
             Map<String, String> options =
                     ((FlinkCatalog) catalog)
                             .catalog()
-                            .getTable(FlinkCatalog.toIdentifier(path))
+                            .getTable(((FlinkCatalog) catalog).toIdentifier(path))
                             .options();
             tablePath = new Path(options.get(PATH.key()));
         } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
