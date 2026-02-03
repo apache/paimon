@@ -46,6 +46,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIteratorAdapter;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
@@ -57,6 +58,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.IntStream;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
@@ -77,6 +79,8 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     private String indexType;
     private DataField indexField;
+
+    // readRowType is composed by partition fields, indexed field and _ROW_ID field
     private RowType readRowType;
     private RowIdIndexFieldsExtractor extractor;
 
@@ -92,6 +96,10 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     public BTreeGlobalIndexBuilder withIndexType(String indexType) {
         this.indexType = indexType;
+        Preconditions.checkArgument(
+                BTreeGlobalIndexerFactory.IDENTIFIER.equals(indexType),
+                "BTreeGlobalInderBuilder only supports %s index type",
+                BTreeGlobalIndexerFactory.IDENTIFIER);
         return this;
     }
 
@@ -102,15 +110,14 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                 indexField,
                 table.fullName());
         this.indexField = rowType.getField(indexField);
-        this.readRowType =
-                SpecialFields.rowTypeWithRowId(new RowType(singletonList(this.indexField)));
         List<String> readColumns = new ArrayList<>(table.partitionKeys());
-        readColumns.addAll(readRowType.getFieldNames());
+        readColumns.addAll(
+                SpecialFields.rowTypeWithRowId(new RowType(singletonList(this.indexField)))
+                        .getFieldNames());
+        this.readRowType = SpecialFields.rowTypeWithRowId(table.rowType()).project(readColumns);
         this.extractor =
                 new RowIdIndexFieldsExtractor(
-                        SpecialFields.rowTypeWithRowId(table.rowType()).project(readColumns),
-                        table.partitionKeys(),
-                        this.indexField.name());
+                        this.readRowType, table.partitionKeys(), this.indexField.name());
         return this;
     }
 
@@ -141,7 +148,8 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                 BinaryExternalSortBuffer.create(
                         ioManager,
                         readRowType,
-                        new int[] {0},
+                        // sort by <partition, indexed_field>
+                        IntStream.range(0, readRowType.getFieldCount() - 1).toArray(),
                         options.writeBufferSize(),
                         options.pageSize(),
                         options.localSortMaxNumFileHandles(),
