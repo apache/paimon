@@ -208,6 +208,55 @@ class JavaPyReadWriteTest(unittest.TestCase):
         actual_names = set(initial_result['name'].tolist())
         self.assertEqual(actual_names, expected_names)
 
+    @parameterized.expand([('parquet',), ('orc',), ('avro',)])
+    def test_py_write_read_pk_table_bucket_num_calculate(self, file_format):
+        from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+        pa_schema = pa.schema([
+            ('pk_str_a', pa.string()),
+            ('pk_str_b', pa.string()),
+            ('pk_int', pa.int32()),
+            ('value', pa.int64()),
+        ])
+        table_name = f'default.mixed_test_pk_table_bucket_num_calculate_{file_format}'
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            primary_keys=['pk_str_a', 'pk_str_b', 'pk_int'],
+            options={'bucket': '4', 'file.format': file_format},
+        )
+        try:
+            existing = self.catalog.get_table(table_name)
+            table_path = self.catalog.get_table_path(existing.identifier)
+            if self.catalog.file_io.exists(table_path):
+                self.catalog.file_io.delete(table_path, recursive=True)
+        except Exception:
+            pass
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+        pk_key = ('e2e_pk_001', 'e2e_suite_001', 1)
+        initial_data = pd.DataFrame({
+            'pk_str_a': [pk_key[0]],
+            'pk_str_b': [pk_key[1]],
+            'pk_int': [pk_key[2]],
+            'value': [100],
+        })
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_pandas(initial_data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+        batch = pa.RecordBatch.from_pydict(
+            {'pk_str_a': [pk_key[0]], 'pk_str_b': [pk_key[1]], 'pk_int': [pk_key[2]], 'value': [100]},
+            schema=pa_schema
+        )
+        extractor = FixedBucketRowKeyExtractor(table.table_schema)
+        _, buckets = extractor.extract_partition_bucket_batch(batch)
+        expected_bucket = buckets[0]
+        splits = table.new_read_builder().new_scan().plan().splits()
+        self.assertEqual(len(splits), 1, "one row => one split")
+        self.assertEqual(splits[0].bucket, expected_bucket, "split bucket must match extractor hash")
+
     @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):
         # Skip ORC format for Python < 3.8 due to pyarrow limitation with TIMESTAMP_INSTANT
