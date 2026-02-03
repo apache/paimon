@@ -280,8 +280,8 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         first triggers partition evolution issues that break some query engines.
 
         Strategy based on partition field position:
-        Position 0: Creates empty schema first (partition evolution unavoidable)
-        Position > 0: Creates dummy schema with offset fields and gap filling to preserve the partition spec
+        - fieldId = 0: Creates empty schema first, partition evolution unavoidable
+        - fieldId > 0: Creates dummy schema with offset fields and gap filling to preserve the partition spec
         */
         PartitionSpec spec = newMetadata.spec();
         boolean isPartitionedWithZeroFieldId =
@@ -289,13 +289,13 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         if (spec.isUnpartitioned() || isPartitionedWithZeroFieldId) {
             if (isPartitionedWithZeroFieldId) {
                 LOG.info(
-                        "When the partition field has a fieldId of 0, the Iceberg REST committer will use partition evolution in order to support Iceberg compatibility with the Paimon schema. If you want to avoid this, use a non-zero field ID as the partition");
+                        "Partition fieldId = 0. The Iceberg REST committer will use partition evolution to support Iceberg compatibility with the Paimon schema. If you want to avoid this, use a non-zero fieldId partition field");
             }
             Schema emptySchema = new Schema();
             return restCatalog.createTable(icebergTableIdentifier, emptySchema);
         } else {
             LOG.info(
-                    "In order to support schema compatibility between Paimon and Iceberg REST, a dummy schema will be created first");
+                    "Partition fieldId > 0. In order to avoid partition evlolution, dummy schema will be created first");
 
             int size =
                     spec.fields().stream().mapToInt(PartitionField::sourceId).max().orElseThrow();
