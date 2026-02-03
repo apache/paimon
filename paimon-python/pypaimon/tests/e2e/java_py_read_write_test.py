@@ -363,6 +363,28 @@ class JavaPyReadWriteTest(unittest.TestCase):
         })
         self.assertEqual(expected, actual)
 
+        # read between index
+        read_builder.with_filter(predicate_builder.between('k', 'k990', 'k995'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k990", "k991", "k992", "k993", "k994", "k995"],
+            'v': ["v990", "v991", "v992", "v993", "v994", "v995"]
+        })
+        self.assertEqual(expected, actual)
+
+        # read in index
+        read_builder.with_filter(predicate_builder.is_in('k', ['k990', 'k995']))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k990", "k995"],
+            'v': ["v990", "v995"]
+        })
+        self.assertEqual(expected, actual)
+
     def _test_read_btree_index_null(self):
         table = self.catalog.get_table('default.test_btree_index_null')
 

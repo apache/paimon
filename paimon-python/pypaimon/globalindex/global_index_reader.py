@@ -102,6 +102,10 @@ class GlobalIndexReader(ABC):
         """Visit a like predicate."""
         return None
 
+    def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> Optional['GlobalIndexResult']:
+        """Visit a between predicate."""
+        return None
+
     @abstractmethod
     def close(self) -> None:
         """Close the reader and release resources."""

@@ -406,6 +406,17 @@ class BTreeIndexReader(GlobalIndexReader):
         
         return GlobalIndexResult.create(supplier)
 
+    def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> Optional[GlobalIndexResult]:
+        """Visit a between predicate."""
+
+        def supplier():
+            try:
+                return self._range_query(min_v, max_v, True, True)
+            except Exception as e:
+                raise RuntimeError("fail to read btree index file.", e)
+
+        return GlobalIndexResult.create(supplier)
+
     def close(self) -> None:
         """Close the reader and release resources."""
         if self.input_stream is not None:
