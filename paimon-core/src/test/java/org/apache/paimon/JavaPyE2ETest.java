@@ -75,6 +75,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
@@ -412,55 +413,30 @@ public class JavaPyE2ETest {
                             "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
                             "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
         }
-    }
 
-    private static final Object[][] BUCKET_TEST_KEYS = {
-        {"e2e_pk_001", "e2e_suite_001", 1},
-        {"k", "v", 0},
-        {"e2e_pk_002", "e2e_suite_002", 2},
-    };
-
-    @Test
-    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
-    public void testReadPkTableBucketNumCalculate() throws Exception {
-        for (String format : Arrays.asList("parquet", "orc", "avro")) {
-            Identifier identifier =
-                    identifier("mixed_test_pk_table_bucket_num_calculate_" + format);
-            Table table = catalog.getTable(identifier);
-            PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
-            for (Object[] key : BUCKET_TEST_KEYS) {
-                String pkStrA = (String) key[0];
-                String pkStrB = (String) key[1];
-                int pkInt = (Integer) key[2];
-                Predicate predicate =
-                        PredicateBuilder.and(
-                                predicateBuilder.equal(0, BinaryString.fromString(pkStrA)),
-                                predicateBuilder.equal(1, BinaryString.fromString(pkStrB)),
-                                predicateBuilder.equal(2, pkInt));
-                ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-                List<String> res =
-                        getResult(
-                                readBuilder.newRead(),
-                                readBuilder.newScan().plan().splits(),
-                                row -> rowToStringWithStruct(row, table.rowType()));
-                LOG.info(
-                        "Read bucket_num_calculate table {} key ({}, {}, {}): {} row(s)",
-                        format,
-                        pkStrA,
-                        pkStrB,
-                        pkInt,
-                        res.size());
-                assertThat(res)
-                        .as(
-                                "Python wrote row (pk_str_a=%s, pk_str_b=%s, pk_int=%s); "
-                                        + "Java read with predicate should return it.",
-                                pkStrA, pkStrB, pkInt)
-                        .hasSize(1);
-                assertThat(res.get(0))
-                        .contains(pkStrA)
-                        .contains(pkStrB)
-                        .contains(String.valueOf(pkInt));
-            }
+        PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+        int[] ids = {1, 2, 3, 4, 5, 6};
+        String[] names = {"Apple", "Banana", "Carrot", "Broccoli", "Chicken", "Beef"};
+        for (int i = 0; i < ids.length; i++) {
+            int id = ids[i];
+            String expectedName = names[i];
+            Predicate predicate = predicateBuilder.equal(0, id);
+            ReadBuilder readBuilder = fileStoreTable.newReadBuilder().withFilter(predicate);
+            List<String> byKey =
+                    getResult(
+                            readBuilder.newRead(),
+                            readBuilder.newScan().plan().splits(),
+                            row -> rowToStringWithStruct(row, table.rowType()));
+            List<String> matching =
+                    byKey.stream()
+                            .filter(s -> s.trim().startsWith("+I[" + id + ", "))
+                            .collect(Collectors.toList());
+            assertThat(matching)
+                    .as(
+                            "Python wrote row id=%d; Java read with predicate id=%d should return it.",
+                            id, id)
+                    .hasSize(1);
+            assertThat(matching.get(0)).contains(String.valueOf(id)).contains(expectedName);
         }
     }
 

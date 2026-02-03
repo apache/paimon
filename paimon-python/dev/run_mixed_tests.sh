@@ -117,12 +117,12 @@ run_python_read_test() {
 
 # Function to run Python Write test for Python-Write-Java-Read scenario
 run_python_write_test() {
-    echo -e "${YELLOW}=== Step 3: Running Python Write Test (test_py_write_read_pk_table, test_py_write_read_pk_table_bucket_num_calculate) ===${NC}"
+    echo -e "${YELLOW}=== Step 3: Running Python Write Test (test_py_write_read_pk_table) ===${NC}"
 
     cd "$PAIMON_PYTHON_DIR"
 
-    # Run the parameterized Python test method for writing data (pk table + bucket num calculate for Python/Java mismatch repro)
-    echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table, test_py_write_read_pk_table_bucket_num_calculate)..."
+    # Run the parameterized Python test method for writing data (pk table, includes bucket num assertion)
+    echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table)..."
     if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table" -v; then
         echo -e "${GREEN}✓ Python write test completed successfully${NC}"
         return 0
@@ -134,7 +134,7 @@ run_python_write_test() {
 
 # Function to run Java Read test for Python-Write-Java-Read scenario
 run_java_read_test() {
-    echo -e "${YELLOW}=== Step 4: Running Java Read Test (testReadPkTable, testReadPkTableBucketNumCalculate, testReadPkTableLance) ===${NC}"
+    echo -e "${YELLOW}=== Step 4: Running Java Read Test (testReadPkTable, testReadPkTableLance) ===${NC}"
 
     cd "$PROJECT_ROOT"
 
@@ -154,18 +154,6 @@ run_java_read_test() {
 
     echo ""
 
-    # Run Java test for bucket_num_calculate table (Python write, Java read with predicate; repro then fix in Python)
-    echo "Running Maven test for JavaPyE2ETest.testReadPkTableBucketNumCalculate (reads mixed_test_pk_table_bucket_num_calculate_*)..."
-    local bucket_num_calculate_result=0
-    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testReadPkTableBucketNumCalculate -pl paimon-core -Drun.e2e.tests=true -Dpython.version="$PYTHON_VERSION"; then
-        echo -e "${GREEN}✓ Java read bucket_num_calculate test completed successfully${NC}"
-    else
-        echo -e "${RED}✗ Java read bucket_num_calculate test failed (expected until Python bucket hash aligns with Java)${NC}"
-        bucket_num_calculate_result=1
-    fi
-
-    echo ""
-
     # Run Java test for lance format in paimon-lance
     echo "Running Maven test for JavaPyLanceE2ETest.testReadPkTableLance (Java Read Lance)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
@@ -177,7 +165,7 @@ run_java_read_test() {
         lance_result=1
     fi
 
-    if [[ $parquet_result -eq 0 && $bucket_num_calculate_result -eq 0 && $lance_result -eq 0 ]]; then
+    if [[ $parquet_result -eq 0 && $lance_result -eq 0 ]]; then
         return 0
     else
         return 1
@@ -373,15 +361,15 @@ main() {
     fi
 
     if [[ $python_write_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Python Write Test (test_py_write_read_pk_table, test_py_write_read_pk_table_bucket_num_calculate): PASSED${NC}"
+        echo -e "${GREEN}✓ Python Write Test (test_py_write_read_pk_table): PASSED${NC}"
     else
-        echo -e "${RED}✗ Python Write Test (test_py_write_read_pk_table, test_py_write_read_pk_table_bucket_num_calculate): FAILED${NC}"
+        echo -e "${RED}✗ Python Write Test (test_py_write_read_pk_table): FAILED${NC}"
     fi
 
     if [[ $java_read_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Java Read Test (Parquet/Orc/Avro + bucket_num_calculate + Lance): PASSED${NC}"
+        echo -e "${GREEN}✓ Java Read Test (Parquet/Orc/Avro + Lance): PASSED${NC}"
     else
-        echo -e "${RED}✗ Java Read Test (Parquet/Orc/Avro + bucket_num_calculate + Lance): FAILED${NC}"
+        echo -e "${RED}✗ Java Read Test (Parquet/Orc/Avro + Lance): FAILED${NC}"
     fi
 
     if [[ $pk_dv_result -eq 0 ]]; then

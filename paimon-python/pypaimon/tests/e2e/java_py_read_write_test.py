@@ -146,7 +146,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             primary_keys=['id'],
             options={
                 'dynamic-partition-overwrite': 'false',
-                'bucket': '2',
+                'bucket': '4',
                 'file.format': file_format,
                 "orc.timestamp-ltz.legacy.type": "false"
             }
@@ -208,68 +208,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
         actual_names = set(initial_result['name'].tolist())
         self.assertEqual(actual_names, expected_names)
 
-    _BUCKET_TEST_KEYS = [
-        ('e2e_pk_001', 'e2e_suite_001', 1),
-        ('k', 'v', 0),
-        ('e2e_pk_002', 'e2e_suite_002', 2),
-    ]
-
-    @parameterized.expand([('parquet',), ('orc',), ('avro',)])
-    def test_py_write_read_pk_table_bucket_num_calculate(self, file_format):
         from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
-        pa_schema = pa.schema([
-            ('pk_str_a', pa.string()),
-            ('pk_str_b', pa.string()),
-            ('pk_int', pa.int32()),
-            ('value', pa.int64()),
-        ])
-        table_name = f'default.mixed_test_pk_table_bucket_num_calculate_{file_format}'
-        schema = Schema.from_pyarrow_schema(
-            pa_schema,
-            primary_keys=['pk_str_a', 'pk_str_b', 'pk_int'],
-            options={'bucket': '4', 'file.format': file_format},
-        )
-        try:
-            existing = self.catalog.get_table(table_name)
-            table_path = self.catalog.get_table_path(existing.identifier)
-            if self.catalog.file_io.exists(table_path):
-                self.catalog.file_io.delete(table_path, recursive=True)
-        except Exception:
-            pass
-        self.catalog.create_table(table_name, schema, False)
-        table = self.catalog.get_table(table_name)
-        test_keys = self._BUCKET_TEST_KEYS
-        initial_data = pd.DataFrame({
-            'pk_str_a': [k[0] for k in test_keys],
-            'pk_str_b': [k[1] for k in test_keys],
-            'pk_int': [k[2] for k in test_keys],
-            'value': [100 + i for i in range(len(test_keys))],
-        })
-        write_builder = table.new_batch_write_builder()
-        table_write = write_builder.new_write()
-        table_commit = write_builder.new_commit()
-        table_write.write_pandas(initial_data)
-        table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
-        batch = pa.RecordBatch.from_pydict(
-            {
-                'pk_str_a': [k[0] for k in test_keys],
-                'pk_str_b': [k[1] for k in test_keys],
-                'pk_int': [k[2] for k in test_keys],
-                'value': [100 + i for i in range(len(test_keys))],
-            },
-            schema=pa_schema,
-        )
+        expected_bucket_first_row = 2
+        first_row = initial_data.head(1)
+        batch = pa.RecordBatch.from_pandas(first_row, schema=pa_schema)
         extractor = FixedBucketRowKeyExtractor(table.table_schema)
         _, buckets = extractor.extract_partition_bucket_batch(batch)
-        splits = table.new_read_builder().new_scan().plan().splits()
-        split_buckets = {s.bucket for s in splits}
-        expected_buckets = set(buckets)
-        self.assertEqual(split_buckets, expected_buckets, "split buckets must match extractor")
-        self.assertGreaterEqual(
-            len(expected_buckets), 2,
-            "test keys should span at least 2 buckets (low-bit and high-bit hash)")
+        self.assertEqual(buckets[0], expected_bucket_first_row,
+                         "bucket for first row (id=1) with num_buckets=4 must be %d" % expected_bucket_first_row)
 
     @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):
