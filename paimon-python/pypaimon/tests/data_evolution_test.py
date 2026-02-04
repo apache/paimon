@@ -94,6 +94,76 @@ class DataEvolutionTest(unittest.TestCase):
         self.assertEqual(0, manifest.min_row_id)
         self.assertEqual(1, manifest.max_row_id)
 
+    def test_merge_reader(self):
+        from pypaimon.read.reader.concat_batch_reader import MergeAllBatchReader
+
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string()),
+            ('f2', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            simple_pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'read.batch-size': '4096',
+            },
+        )
+        self.catalog.create_table('default.test_merge_reader_batch_sizes', schema, False)
+        table = self.catalog.get_table('default.test_merge_reader_batch_sizes')
+
+        write_builder = table.new_batch_write_builder()
+        size = 5000
+        w0 = write_builder.new_write().with_write_type(['f0', 'f1'])
+        w1 = write_builder.new_write().with_write_type(['f2'])
+        c = write_builder.new_commit()
+        d0 = pa.Table.from_pydict(
+            {'f0': list(range(size)), 'f1': [f'a{i}' for i in range(size)]},
+            schema=pa.schema([('f0', pa.int32()), ('f1', pa.string())]),
+        )
+        d1 = pa.Table.from_pydict(
+            {'f2': [f'b{i}' for i in range(size)]},
+            schema=pa.schema([('f2', pa.string())]),
+        )
+        w0.write_arrow(d0)
+        w1.write_arrow(d1)
+        cmts = w0.prepare_commit() + w1.prepare_commit()
+        for msg in cmts:
+            for nf in msg.new_files:
+                nf.first_row_id = 0
+        c.commit(cmts)
+        w0.close()
+        w1.close()
+        c.close()
+
+        original_merge_all = MergeAllBatchReader
+        call_count = [0]
+
+        def patched_merge_all(reader_suppliers, batch_size=1024):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                batch_size = 999
+            return original_merge_all(reader_suppliers, batch_size=batch_size)
+
+        import pypaimon.read.split_read as split_read_module
+        split_read_module.MergeAllBatchReader = patched_merge_all
+        try:
+            read_builder = table.new_read_builder()
+            table_scan = read_builder.new_scan()
+            table_read = read_builder.new_read()
+            splits = table_scan.plan().splits()
+            actual_data = table_read.to_arrow(splits)
+            expect_data = pa.Table.from_pydict({
+                'f0': list(range(size)),
+                'f1': [f'a{i}' for i in range(size)],
+                'f2': [f'b{i}' for i in range(size)],
+            }, schema=simple_pa_schema)
+            self.assertEqual(actual_data.num_rows, size)
+            self.assertEqual(actual_data, expect_data)
+        finally:
+            split_read_module.MergeAllBatchReader = original_merge_all
+
     def test_with_slice(self):
         pa_schema = pa.schema([
             ("id", pa.int64()),
