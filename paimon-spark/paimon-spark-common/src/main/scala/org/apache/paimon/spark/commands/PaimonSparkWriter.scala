@@ -123,7 +123,9 @@ case class PaimonSparkWriter(
     val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
       if (postponeBatchWriteFixedBucket) {
         val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-        val defaultPostponeNumBuckets = withInitBucketCol.rdd.getNumPartitions
+        val defaultPostponeNumBuckets = Math.min(
+          withInitBucketCol.rdd.getNumPartitions,
+          table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
         Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
       } else {
         None

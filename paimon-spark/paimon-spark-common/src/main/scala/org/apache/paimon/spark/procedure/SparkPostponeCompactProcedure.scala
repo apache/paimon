@@ -62,9 +62,12 @@ case class SparkPostponeCompactProcedure(
   // Create bucket computer to determine bucket count for each partition
   private lazy val postponePartitionBucketComputer = {
     val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-    val defaultBucketNum = Math.min(
-      spark.sparkContext.defaultParallelism,
-      table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
+    val defaultBucketNum =
+      if (table.coreOptions.toConfiguration.contains(CoreOptions.POSTPONE_DEFAULT_BUCKET_NUM)) {
+        table.coreOptions.postponeDefaultBucketNum
+      } else {
+        spark.sparkContext.defaultParallelism
+      }
     (p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultBucketNum)
   }
 
