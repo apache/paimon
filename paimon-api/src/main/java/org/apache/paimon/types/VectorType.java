@@ -49,8 +49,6 @@ public class VectorType extends DataType {
 
     public VectorType(boolean isNullable, int length, DataType elementType) {
         super(isNullable, DataTypeRoot.VECTOR);
-        // TODO: should we support nullable for vector type?
-        // Preconditions.checkArgument(!isNullable, "Nullable is not supported for VectorType.");
         this.elementType =
                 Preconditions.checkNotNull(elementType, "Element type must not be null.");
         Preconditions.checkArgument(
@@ -65,7 +63,7 @@ public class VectorType extends DataType {
     }
 
     public VectorType(int length, DataType elementType) {
-        this(false, length, elementType); // For vector type we prefer NOT NULL
+        this(true, length, elementType);
     }
 
     public int getLength() {

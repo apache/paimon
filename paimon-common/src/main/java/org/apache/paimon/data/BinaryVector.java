@@ -370,24 +370,46 @@ public final class BinaryVector extends BinarySection implements InternalVector,
     }
 
     public static BinaryVector fromInternalArray(InternalArray array, DataType elementType) {
+        final BinaryVector vector;
         switch (elementType.getTypeRoot()) {
             case BOOLEAN:
-                return BinaryVector.fromPrimitiveArray(array.toBooleanArray());
+                vector = BinaryVector.fromPrimitiveArray(array.toBooleanArray());
+                break;
             case TINYINT:
-                return BinaryVector.fromPrimitiveArray(array.toByteArray());
+                vector = BinaryVector.fromPrimitiveArray(array.toByteArray());
+                break;
             case SMALLINT:
-                return BinaryVector.fromPrimitiveArray(array.toShortArray());
+                vector = BinaryVector.fromPrimitiveArray(array.toShortArray());
+                break;
             case INTEGER:
-                return BinaryVector.fromPrimitiveArray(array.toIntArray());
+                vector = BinaryVector.fromPrimitiveArray(array.toIntArray());
+                break;
             case BIGINT:
-                return BinaryVector.fromPrimitiveArray(array.toLongArray());
+                vector = BinaryVector.fromPrimitiveArray(array.toLongArray());
+                break;
             case FLOAT:
-                return BinaryVector.fromPrimitiveArray(array.toFloatArray());
+                vector = BinaryVector.fromPrimitiveArray(array.toFloatArray());
+                break;
             case DOUBLE:
-                return BinaryVector.fromPrimitiveArray(array.toDoubleArray());
+                vector = BinaryVector.fromPrimitiveArray(array.toDoubleArray());
+                break;
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported element type for vector " + elementType);
         }
+
+        // Elements in BinaryVector must be not null.
+        if ((array instanceof BinaryArray) || (array instanceof GenericArray)) {
+            // For some implements the check can be skipped here since
+            // it has already been done in previous toPrimitiveArray methods.
+            return vector;
+        }
+        final int size = array.size();
+        for (int i = 0; i < size; ++i) {
+            if (array.isNullAt(i)) {
+                throw new UnsupportedOperationException("BinaryVector refuse null elements.");
+            }
+        }
+        return vector;
     }
 }

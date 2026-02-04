@@ -68,5 +68,10 @@ class DataTypeChecksTest {
         DataType vectorType = DataTypes.VECTOR(4, DataTypes.FLOAT());
         assertThat(DataTypeChecks.getNestedTypes(vectorType)).containsExactly(DataTypes.FLOAT());
         assertThat(DataTypeChecks.getLength(vectorType)).isEqualTo(4);
+
+        vectorType = DataTypes.VECTOR(5, DataTypes.BIGINT().notNull());
+        assertThat(DataTypeChecks.getNestedTypes(vectorType))
+                .containsExactly(DataTypes.BIGINT().notNull());
+        assertThat(DataTypeChecks.getLength(vectorType)).isEqualTo(5);
     }
 }

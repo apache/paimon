@@ -18,11 +18,14 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.data.columnar.ColumnarArray;
+import org.apache.paimon.data.columnar.heap.HeapFloatVector;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link BinaryVector}. */
 public class BinaryVectorTest {
@@ -104,6 +107,34 @@ public class BinaryVectorTest {
         // Assert that the copied vector has the same values as the original vector
         assertThat(copied.toFloatArray()).isEqualTo(values);
         assertThat(copied.equals(vector)).isTrue();
+    }
+
+    @Test
+    public void testRefuseArrayWithNullElements() {
+        float[] values = new float[] {1.0f, -2.0f, 3.5f};
+
+        // From binary array with nulls
+        BinaryArray binaryArray = BinaryArray.fromPrimitiveArray(values);
+        binaryArray.setNullAt(2);
+        try {
+            BinaryVector vector = BinaryVector.fromInternalArray(binaryArray, DataTypes.FLOAT());
+            fail("Should throw exception when array has null elements");
+        } catch (Exception e) {
+            assertThat(e).hasMessageContaining("Primitive array must not contain a null value.");
+        }
+
+        // From columnar array with nulls
+        HeapFloatVector heapFloats = new HeapFloatVector(3);
+        heapFloats.setFloat(0, values[0]);
+        heapFloats.setFloat(1, values[1]);
+        heapFloats.setNullAt(2);
+        ColumnarArray columnarArray = new ColumnarArray(heapFloats, 0, 3);
+        try {
+            BinaryVector vector = BinaryVector.fromInternalArray(columnarArray, DataTypes.FLOAT());
+            fail("Should throw exception when array has null elements");
+        } catch (Exception e) {
+            assertThat(e).hasMessageContaining("BinaryVector refuse null elements.");
+        }
     }
 
     @Test
