@@ -318,7 +318,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     statsCollectorFactories,
                     fileIndexOptions,
                     FileSource.APPEND,
-                    asyncFileWrite,
+                    // blob write does not need async write
+                    false,
                     statsDenseStore,
                     blobConsumer);
         }
