@@ -182,8 +182,7 @@ class MergeAllBatchReader(RecordBatchReader):
 class DataEvolutionMergeReader(RecordBatchReader):
     """
     Union reader with multiple inner readers (each wrapped with ForceSingleBatchReader).
-    Merges one batch per reader row-by-row, aligned with Java DataEvolutionFileReader +
-    ForceSingleBatchReader + DataEvolutionIterator.
+    Merges one batch per reader row-by-row.
 
     For example, if rowOffsets is {0, 2, 0, 1, 2, 1} and fieldOffsets is {0, 0, 1, 1, 1, 0}, it means:
      - The first field comes from batch0, and it is at offset 0 in batch0.

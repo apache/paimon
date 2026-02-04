@@ -582,9 +582,6 @@ class DataEvolutionSplitRead(SplitRead):
                                 read_fields=read_field_names) for file in bunch.files()
                     ]
                     inner = MergeAllBatchReader(suppliers, batch_size=batch_size)
-                # Align with Java: wrap with ForceSingleBatchReader so each inner
-                # reader exposes one batch (all rows); DataEvolutionMergeReader
-                # then merges row-by-row without buffer/min_rows logic.
                 file_record_readers[i] = ForceSingleBatchReader(inner)
                 self.read_fields = table_fields
 
