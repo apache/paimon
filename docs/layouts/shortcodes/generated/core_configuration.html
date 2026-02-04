@@ -153,12 +153,6 @@ under the License.
             <td>Fields that are ignored for comparison while generating -U, +U changelog for the same record. This configuration is only valid for the changelog-producer.row-deduplicate is true.</td>
         </tr>
         <tr>
-            <td><h5>table-read.sequence-number.enabled</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
-        </tr>
-        <tr>
             <td><h5>changelog.num-retained.max</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -1032,6 +1026,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether to write the data into fixed bucket for batch writing a postpone bucket table.</td>
         </tr>
         <tr>
+            <td><h5>postpone.batch-write-fixed-bucket.max-parallelism</h5></td>
+            <td style="word-wrap: break-word;">2048</td>
+            <td>Integer</td>
+            <td>The number of partitions for global index.</td>
+        </tr>
+        <tr>
             <td><h5>postpone.default-bucket-num</h5></td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
@@ -1313,6 +1313,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>The delay duration of stream read when scan incremental snapshots.</td>
+        </tr>
+        <tr>
+            <td><h5>table-read.sequence-number.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
         </tr>
         <tr>
             <td><h5>tag.automatic-completion</h5></td>
