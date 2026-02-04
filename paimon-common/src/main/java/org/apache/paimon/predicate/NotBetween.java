@@ -27,22 +27,25 @@ import java.util.Optional;
 
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
-/** The {@link LeafFunction} to eval between. */
-public class Between extends LeafTernaryFunction {
+/**
+ * The {@link LeafFunction} for not between. Now this is just an internal function as the negation
+ * of {@link Between}.
+ */
+public class NotBetween extends LeafTernaryFunction {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String NAME = "BETWEEN";
+    public static final String NAME = "NOT_BETWEEN";
 
-    public static final Between INSTANCE = new Between();
+    public static final NotBetween INSTANCE = new NotBetween();
 
     @JsonCreator
-    public Between() {}
+    public NotBetween() {}
 
     @Override
     public boolean test(DataType type, Object field, Object literal1, Object literal2) {
-        return compareLiteral(type, literal1, field) <= 0
-                && compareLiteral(type, literal2, field) >= 0;
+        return compareLiteral(type, literal1, field) > 0
+                || compareLiteral(type, literal2, field) < 0;
     }
 
     @Override
@@ -54,17 +57,16 @@ public class Between extends LeafTernaryFunction {
             Long nullCount,
             Object literal1,
             Object literal2) {
-        // true if [min, max] and [l(0), l(1)] have intersection
-        return compareLiteral(type, literal1, max) <= 0 && compareLiteral(type, literal2, min) >= 0;
+        return compareLiteral(type, literal1, min) > 0 || compareLiteral(type, literal2, max) < 0;
     }
 
     @Override
     public Optional<LeafFunction> negate() {
-        return Optional.of(NotBetween.INSTANCE);
+        return Optional.of(Between.INSTANCE);
     }
 
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
-        return visitor.visitBetween(fieldRef, literals.get(0), literals.get(1));
+        return visitor.visitNotBetween(fieldRef, literals.get(0), literals.get(1));
     }
 }

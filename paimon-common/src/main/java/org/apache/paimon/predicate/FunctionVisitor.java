@@ -87,6 +87,11 @@ public interface FunctionVisitor<T> extends PredicateVisitor<T> {
                 Arrays.asList(visitGreaterOrEqual(fieldRef, from), visitLessOrEqual(fieldRef, to)));
     }
 
+    default T visitNotBetween(FieldRef fieldRef, Object from, Object to) {
+        return visitOr(
+                Arrays.asList(visitLessThan(fieldRef, from), visitGreaterThan(fieldRef, to)));
+    }
+
     // ----------------- Compound functions ------------------------
 
     T visitAnd(List<T> children);
