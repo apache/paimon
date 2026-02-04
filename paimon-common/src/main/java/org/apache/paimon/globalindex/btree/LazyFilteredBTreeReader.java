@@ -249,6 +249,20 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
         return createUnionReader(selected).visitNotIn(fieldRef, literals);
     }
 
+    @Override
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        Optional<List<GlobalIndexIOMeta>> selectedOpt =
+                fileSelector.visitBetween(fieldRef, from, to);
+        if (!selectedOpt.isPresent()) {
+            return Optional.empty();
+        }
+        List<GlobalIndexIOMeta> selected = selectedOpt.get();
+        if (selected.isEmpty()) {
+            return Optional.of(GlobalIndexResult.createEmpty());
+        }
+        return createUnionReader(selected).visitBetween(fieldRef, from, to);
+    }
+
     /**
      * Create a Union Reader for given files. The union reader is composed by readers from reader
      * cache, so please do not close it.

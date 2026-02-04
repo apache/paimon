@@ -228,20 +228,19 @@ public class PredicateBuilder {
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {
-        return new CompoundPredicate(
-                And.INSTANCE,
-                Arrays.asList(
-                        greaterOrEqual(idx, includedLowerBound),
-                        lessOrEqual(idx, includedUpperBound)));
+        DataField field = rowType.getFields().get(idx);
+        return new LeafPredicate(
+                Between.INSTANCE,
+                field.type(),
+                idx,
+                field.name(),
+                Arrays.asList(includedLowerBound, includedUpperBound));
     }
 
     public Predicate between(
             Transform transform, Object includedLowerBound, Object includedUpperBound) {
-        return new CompoundPredicate(
-                And.INSTANCE,
-                Arrays.asList(
-                        greaterOrEqual(transform, includedLowerBound),
-                        lessOrEqual(transform, includedUpperBound)));
+        return new LeafPredicate(
+                transform, Between.INSTANCE, Arrays.asList(includedLowerBound, includedUpperBound));
     }
 
     public static Predicate and(Predicate... predicates) {
