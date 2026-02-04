@@ -275,6 +275,27 @@ class FileStoreCommit:
             partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
             if not all(count == 0 for count in partition_null_counts):
                 raise RuntimeError("Partition value should not be null")
+
+            # Calculate min_row_id and max_row_id from commit_entries
+            min_row_id = None
+            max_row_id = None
+            has_null_first_row_id = False
+            for entry in commit_entries:
+                if entry.file.first_row_id is None:
+                    has_null_first_row_id = True
+                    break
+                entry_min = entry.file.first_row_id
+                entry_max = entry.file.first_row_id + entry.file.row_count - 1
+                if min_row_id is None or entry_min < min_row_id:
+                    min_row_id = entry_min
+                if max_row_id is None or entry_max > max_row_id:
+                    max_row_id = entry_max
+
+            # If any file has first_row_id as None, set both min_row_id and max_row_id to None
+            if has_null_first_row_id:
+                min_row_id = None
+                max_row_id = None
+
             manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
             new_manifest_file_meta = ManifestFileMeta(
                 file_name=new_manifest_file,
@@ -293,6 +314,8 @@ class FileStoreCommit:
                     null_counts=partition_null_counts,
                 ),
                 schema_id=self.table.table_schema.id,
+                min_row_id=min_row_id,
+                max_row_id=max_row_id,
             )
             self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
 

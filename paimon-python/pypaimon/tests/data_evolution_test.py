@@ -22,6 +22,8 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class DataEvolutionTest(unittest.TestCase):
@@ -84,6 +86,13 @@ class DataEvolutionTest(unittest.TestCase):
             ('f1', pa.int16()),
         ]))
         self.assertEqual(actual_data, expect_data)
+
+        # assert manifest file meta contains min and max row id
+        manifest_list_manager = ManifestListManager(table)
+        snapshot_manager = SnapshotManager(table)
+        manifest = manifest_list_manager.read(snapshot_manager.get_latest_snapshot().delta_manifest_list)[0]
+        self.assertEqual(0, manifest.min_row_id)
+        self.assertEqual(1, manifest.max_row_id)
 
     def test_with_slice(self):
         pa_schema = pa.schema([
