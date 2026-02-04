@@ -17,13 +17,15 @@
 ################################################################################
 
 import collections
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional
 
 import pyarrow as pa
 import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+
+_MIN_BATCH_SIZE_TO_REFILL = 1024
 
 
 class ConcatBatchReader(RecordBatchReader):
@@ -162,27 +164,29 @@ class DataEvolutionMergeReader(RecordBatchReader):
         self.field_offsets = field_offsets
         self.readers = readers
         self.schema = schema
-        self._buffers: List[Optional[Tuple[RecordBatch, int]]] = [None] * len(readers)
+        self._buffers: List[Optional[RecordBatch]] = [None] * len(readers)
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         batches: List[Optional[RecordBatch]] = [None] * len(self.readers)
         for i, reader in enumerate(self.readers):
             if reader is not None:
                 if self._buffers[i] is not None:
-                    batch, offset = self._buffers[i]
+                    remainder = self._buffers[i]
                     self._buffers[i] = None
-                    remainder = batch.slice(offset, batch.num_rows - offset)
-                    new_batch = reader.read_arrow_batch()
-                    if new_batch is not None and new_batch.num_rows > 0:
-                        combined_arrays = [
-                            pa.concat_arrays([remainder.column(j), new_batch.column(j)])
-                            for j in range(remainder.num_columns)
-                        ]
-                        batches[i] = pa.RecordBatch.from_arrays(
-                            combined_arrays, schema=remainder.schema
-                        )
-                    else:
+                    if remainder.num_rows >= _MIN_BATCH_SIZE_TO_REFILL:
                         batches[i] = remainder
+                    else:
+                        new_batch = reader.read_arrow_batch()
+                        if new_batch is not None and new_batch.num_rows > 0:
+                            combined_arrays = [
+                                pa.concat_arrays([remainder.column(j), new_batch.column(j)])
+                                for j in range(remainder.num_columns)
+                            ]
+                            batches[i] = pa.RecordBatch.from_arrays(
+                                combined_arrays, schema=remainder.schema
+                            )
+                        else:
+                            batches[i] = remainder
                 else:
                     batch = reader.read_arrow_batch()
                     if batch is None:
@@ -210,12 +214,13 @@ class DataEvolutionMergeReader(RecordBatchReader):
 
         for i in range(len(self.readers)):
             if batches[i] is not None and batches[i].num_rows > min_rows:
-                self._buffers[i] = (batches[i], min_rows)
+                self._buffers[i] = batches[i].slice(min_rows, batches[i].num_rows - min_rows)
 
         return pa.RecordBatch.from_arrays(columns, schema=self.schema)
 
     def close(self) -> None:
         try:
+            self._buffers = [None] * len(self.readers)
             for reader in self.readers:
                 if reader is not None:
                     reader.close()
