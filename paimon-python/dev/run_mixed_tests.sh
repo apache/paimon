@@ -117,12 +117,12 @@ run_python_read_test() {
 
 # Function to run Python Write test for Python-Write-Java-Read scenario
 run_python_write_test() {
-    echo -e "${YELLOW}=== Step 3: Running Python Write Test (JavaPyReadWriteTest.test_py_write_read_pk_table) ===${NC}"
+    echo -e "${YELLOW}=== Step 3: Running Python Write Test (test_py_write_read_pk_table) ===${NC}"
 
     cd "$PAIMON_PYTHON_DIR"
 
-    # Run the parameterized Python test method for writing data (runs for both Parquet/Orc/Avro and Lance)
-    echo "Running Python test for JavaPyReadWriteTest.test_py_write_read_pk_table (Python Write)..."
+    # Run the parameterized Python test method for writing data (pk table, includes bucket num assertion)
+    echo "Running Python test for JavaPyReadWriteTest (test_py_write_read_pk_table)..."
     if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_py_write_read_pk_table" -v; then
         echo -e "${GREEN}✓ Python write test completed successfully${NC}"
         return 0
@@ -134,7 +134,7 @@ run_python_write_test() {
 
 # Function to run Java Read test for Python-Write-Java-Read scenario
 run_java_read_test() {
-    echo -e "${YELLOW}=== Step 4: Running Java Read Test (JavaPyE2ETest.testReadPkTable for Parquet/Orc/Avro, JavaPyLanceE2ETest.testReadPkTableLance for Lance) ===${NC}"
+    echo -e "${YELLOW}=== Step 4: Running Java Read Test (testReadPkTable, testReadPkTableLance) ===${NC}"
 
     cd "$PROJECT_ROOT"
 
@@ -361,9 +361,9 @@ main() {
     fi
 
     if [[ $python_write_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ Python Write Test (JavaPyReadWriteTest.test_py_write_read_pk_table): PASSED${NC}"
+        echo -e "${GREEN}✓ Python Write Test (test_py_write_read_pk_table): PASSED${NC}"
     else
-        echo -e "${RED}✗ Python Write Test (JavaPyReadWriteTest.test_py_write_read_pk_table): FAILED${NC}"
+        echo -e "${RED}✗ Python Write Test (test_py_write_read_pk_table): FAILED${NC}"
     fi
 
     if [[ $java_read_result -eq 0 ]]; then

@@ -34,6 +34,7 @@ import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -62,6 +63,8 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -72,6 +75,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
@@ -87,6 +91,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Mixed language overwrite test for Java and Python interoperability. */
 public class JavaPyE2ETest {
+
+    private static final Logger LOG = LoggerFactory.getLogger(JavaPyE2ETest.class);
 
     java.nio.file.Path tempDir = Paths.get("../paimon-python/pypaimon/tests/e2e").toAbsolutePath();
 
@@ -131,7 +137,7 @@ public class JavaPyE2ETest {
                             read,
                             splits,
                             row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
-            System.out.println(res);
+            LOG.info("Read append table: {} row(s)", res.size());
         }
     }
 
@@ -391,7 +397,7 @@ public class JavaPyE2ETest {
             TableRead read = fileStoreTable.newRead();
             List<String> res =
                     getResult(read, splits, row -> rowToStringWithStruct(row, table.rowType()));
-            System.out.println("Result for " + format + " : " + res);
+            LOG.info("Result for {}: {} row(s)", format, res.size());
             assertThat(table.rowType().getFieldTypes().get(4)).isEqualTo(DataTypes.TIMESTAMP());
             assertThat(table.rowType().getFieldTypes().get(5))
                     .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
@@ -406,6 +412,31 @@ public class JavaPyE2ETest {
                             "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
                             "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
                             "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
+
+            PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
+            int[] ids = {1, 2, 3, 4, 5, 6};
+            String[] names = {"Apple", "Banana", "Carrot", "Broccoli", "Chicken", "Beef"};
+            for (int i = 0; i < ids.length; i++) {
+                int id = ids[i];
+                String expectedName = names[i];
+                Predicate predicate = predicateBuilder.equal(0, id);
+                ReadBuilder readBuilder = fileStoreTable.newReadBuilder().withFilter(predicate);
+                List<String> byKey =
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                row -> rowToStringWithStruct(row, table.rowType()));
+                List<String> matching =
+                        byKey.stream()
+                                .filter(s -> s.trim().startsWith("+I[" + id + ", "))
+                                .collect(Collectors.toList());
+                assertThat(matching)
+                        .as(
+                                "Python wrote row id=%d; Java read with predicate id=%d should return it.",
+                                id, id)
+                        .hasSize(1);
+                assertThat(matching.get(0)).contains(String.valueOf(id)).contains(expectedName);
+            }
         }
     }
 
