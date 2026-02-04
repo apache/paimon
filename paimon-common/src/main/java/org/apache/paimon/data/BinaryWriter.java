@@ -142,6 +142,7 @@ public interface BinaryWriter {
                 break;
             case BINARY:
             case VARBINARY:
+            case BLOB_REF:
                 byte[] bytes = (byte[]) o;
                 writer.writeBinary(pos, bytes, 0, bytes.length);
                 break;
@@ -175,6 +176,7 @@ public interface BinaryWriter {
                 return (writer, pos, value) -> writer.writeBoolean(pos, (boolean) value);
             case BINARY:
             case VARBINARY:
+            case BLOB_REF:
                 return (writer, pos, value) -> {
                     byte[] bytes = (byte[]) value;
                     writer.writeBinary(pos, bytes, 0, bytes.length);

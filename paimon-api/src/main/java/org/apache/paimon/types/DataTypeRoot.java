@@ -57,6 +57,8 @@ public enum DataTypeRoot {
 
     VARBINARY(DataTypeFamily.PREDEFINED, DataTypeFamily.BINARY_STRING),
 
+    BLOB_REF(DataTypeFamily.PREDEFINED, DataTypeFamily.BINARY_STRING),
+
     DECIMAL(DataTypeFamily.PREDEFINED, DataTypeFamily.NUMERIC, DataTypeFamily.EXACT_NUMERIC),
 
     TINYINT(

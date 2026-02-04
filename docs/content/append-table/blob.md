@@ -585,3 +585,111 @@ CREATE TABLE partitioned_blob_table (
     'blob-field' = 'image'
 );
 ```
+
+## Blob References (BLOB_REF)
+
+Sometimes you want to **reuse the same blob across multiple tables** without copying/re-writing the blob bytes again. For example, table `A` stores the blob data in Paimon's `.blob` files, and table `B` only needs to store a reference to that existing blob.
+
+Paimon provides a dedicated logical type **`BLOB_REF`** for this purpose:
+
+- **Physical representation**: `byte[]` (stored the same as `BYTES/VARBINARY` in file formats).
+- **Write semantics**: the bytes you write **must be a serialized `BlobDescriptor`** (URI + offset + length). Paimon validates the bytes when writing and will fail the write if the value is not a valid `BlobDescriptor`.
+- **Read semantics**: values are returned as **regular binary bytes** (no special handling on read). You can deserialize the bytes into `BlobDescriptor` and fetch the referenced blob when needed.
+
+This is different from `blob-as-descriptor`:
+
+- `blob-as-descriptor`: you provide a `BlobDescriptor`, and **Paimon copies** the referenced bytes into this table’s `.blob` files (streaming for memory efficiency).
+- `BLOB_REF`: you provide a `BlobDescriptor`, and **Paimon does not copy** any blob bytes. The table only stores the reference bytes.
+
+Example (Java API):
+
+```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.UriReader;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class BlobRefExample {
+
+    public static void writeAndReadBlobRef(Catalog catalog) throws Exception {
+        // 1) Create a blob table and write a blob, capturing its descriptor
+        Identifier blobTableId = Identifier.create("my_db", "blob_table");
+        Schema blobSchema = Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .column("name", DataTypes.STRING())
+                .column("payload", DataTypes.BLOB())
+                .option("row-tracking.enabled", "true")
+                .option("data-evolution.enabled", "true")
+                .build();
+        catalog.createTable(blobTableId, blobSchema, true);
+
+        FileStoreTable blobTable = (FileStoreTable) catalog.getTable(blobTableId);
+        List<BlobDescriptor> descriptors = new ArrayList<>();
+
+        BatchWriteBuilder blobWriteBuilder = blobTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = blobWriteBuilder.newWrite();
+             BatchTableCommit commit = blobWriteBuilder.newCommit()) {
+            write.withBlobConsumer((field, desc) -> {
+                descriptors.add(desc);
+                return true;
+            });
+            write.write(GenericRow.of(1, BinaryString.fromString("a"), new BlobData(new byte[] {1, 2, 3})));
+            commit.commit(write.prepareCommit());
+        }
+
+        BlobDescriptor descriptor = descriptors.get(0);
+        byte[] refBytes = descriptor.serialize();
+
+        // 2) Store the descriptor bytes into another table using BLOB_REF
+        Identifier refTableId = Identifier.create("my_db", "ref_table");
+        Schema refSchema = Schema.newBuilder()
+                .column("id", DataTypes.INT())
+                .column("name", DataTypes.STRING())
+                .column("ref", DataTypes.BLOB_REF())
+                .build();
+        catalog.createTable(refTableId, refSchema, true);
+
+        FileStoreTable refTable = (FileStoreTable) catalog.getTable(refTableId);
+        BatchWriteBuilder refWriteBuilder = refTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = refWriteBuilder.newWrite();
+             BatchTableCommit commit = refWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, BinaryString.fromString("b"), refBytes));
+            commit.commit(write.prepareCommit());
+        }
+
+        // 3) Read BLOB_REF bytes and fetch the referenced blob on demand
+        ReadBuilder readBuilder = refTable.newReadBuilder();
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        UriReader uriReader = UriReader.fromFile(blobTable.fileIO());
+
+        reader.forEachRemaining(row -> {
+            byte[] bytes = row.getBinary(2);
+            BlobDescriptor d = BlobDescriptor.deserialize(bytes);
+            byte[] blob = Blob.fromDescriptor(uriReader, d).toData();
+            // use blob bytes...
+        });
+    }
+}
+```
+
+**Notes:**
+
+- `BLOB_REF` is meant for **references**. You must ensure the referenced URI remains accessible and the underlying files are retained as long as the references are needed.
+- Because `BLOB_REF` is stored as raw bytes, **projection and filtering treat it like a normal binary column**.

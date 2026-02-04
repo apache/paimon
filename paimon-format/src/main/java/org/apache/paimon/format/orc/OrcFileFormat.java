@@ -178,6 +178,7 @@ public class OrcFileFormat extends FileFormat {
         switch (type.getTypeRoot()) {
             case BINARY:
             case VARBINARY:
+            case BLOB_REF:
                 // OrcSplitReaderUtil#DataTypeToOrcType() only supports the DataTypes.BYTES()
                 // logical type for BINARY and VARBINARY.
                 return DataTypes.BYTES();
