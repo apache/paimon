@@ -32,13 +32,13 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
     """
 
     def __init__(
-            self,
-            table,
-            target_split_size: int,
-            open_file_cost: int,
-            deletion_files_map=None,
-            row_ranges: Optional[List] = None,
-            score_getter=None
+        self,
+        table,
+        target_split_size: int,
+        open_file_cost: int,
+        deletion_files_map=None,
+        row_ranges: Optional[List] = None,
+        score_getter=None
     ):
         super().__init__(table, target_split_size, open_file_cost, deletion_files_map)
         self.row_ranges = row_ranges
@@ -48,7 +48,6 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         """
         Create splits for data evolution tables.
         """
-
         def sort_key(manifest_entry: ManifestEntry) -> tuple:
             first_row_id = (
                 manifest_entry.file.first_row_id
@@ -121,10 +120,10 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         return splits
 
     def _build_split_from_pack_for_data_evolution(
-            self,
-            flatten_packed_files: List[List[DataFileMeta]],
-            packed_files: List[List[List[DataFileMeta]]],
-            file_entries: List[ManifestEntry]
+        self,
+        flatten_packed_files: List[List[DataFileMeta]],
+        packed_files: List[List[List[DataFileMeta]]],
+        file_entries: List[ManifestEntry]
     ) -> List[Split]:
         """
         Build splits from packed files for data evolution tables.
@@ -296,7 +295,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
     @staticmethod
     def _divide_ranges(
-            sorted_ranges: List[Range], sub_task_id: int, total_tasks: int
+        sorted_ranges: List[Range], sub_task_id: int, total_tasks: int
     ) -> Tuple[Optional[Range], Optional[Range]]:
         if not sorted_ranges:
             return None, None
@@ -318,8 +317,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         else:
             num_ranges_for_task = base_ranges_per_task
             start_idx = (
-                    remainder * (base_ranges_per_task + 1) +
-                    (sub_task_id - remainder) * base_ranges_per_task
+                remainder * (base_ranges_per_task + 1) +
+                (sub_task_id - remainder) * base_ranges_per_task
             )
         end_idx = start_idx + num_ranges_for_task - 1
         return sorted_ranges[start_idx], sorted_ranges[end_idx]
@@ -369,11 +368,11 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         return split_by_row_id
 
     def _compute_slice_split_file_idx_map(
-            self,
-            plan_start_pos: int,
-            plan_end_pos: int,
-            split: Split,
-            file_end_pos: int
+        self,
+        plan_start_pos: int,
+        plan_end_pos: int,
+        split: Split,
+        file_end_pos: int
     ) -> Dict[str, Tuple[int, int]]:
         """
         Compute file index map for a split, determining which rows to read from each file.
