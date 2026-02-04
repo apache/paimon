@@ -318,7 +318,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     statsCollectorFactories,
                     fileIndexOptions,
                     FileSource.APPEND,
-                    // blob write does not need async write
+                    // blob write does not need async write, cause blob write is I/O-intensive, not
+                    // CPU-intensive process.
+                    // Async write will cost 64MB more memory per write task, blob writes get low
+                    // benefit from async write, but cost a lot.
                     false,
                     statsDenseStore,
                     blobConsumer);
