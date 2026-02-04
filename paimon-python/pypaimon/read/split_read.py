@@ -31,9 +31,7 @@ from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
 from pypaimon.read.push_down_utils import trim_predicate_by_fields
 from pypaimon.read.reader.concat_batch_reader import (ConcatBatchReader,
-                                                      DataEvolutionMergeReader,
-                                                      ForceSingleBatchReader,
-                                                      MergeAllBatchReader)
+                                                      MergeAllBatchReader, DataEvolutionMergeReader)
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
 
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
@@ -574,15 +572,14 @@ class DataEvolutionSplitRead(SplitRead):
                     suppliers = [lambda r=self._create_file_reader(
                         bunch.files()[0], read_field_names
                     ): r]
-                    inner = MergeAllBatchReader(suppliers, batch_size=batch_size)
+                    file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 else:
                     # Create concatenated reader for multiple files
                     suppliers = [
                         partial(self._create_file_reader, file=file,
                                 read_fields=read_field_names) for file in bunch.files()
                     ]
-                    inner = MergeAllBatchReader(suppliers, batch_size=batch_size)
-                file_record_readers[i] = ForceSingleBatchReader(inner)
+                    file_record_readers[i] = MergeAllBatchReader(suppliers, batch_size=batch_size)
                 self.read_fields = table_fields
 
         # Validate that all required fields are found
