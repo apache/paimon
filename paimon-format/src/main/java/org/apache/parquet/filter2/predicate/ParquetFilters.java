@@ -288,7 +288,7 @@ public class ParquetFilters {
                 return timestamp.getMillisecond();
             } else if (precision <= 6) {
                 // microseconds
-                return timestamp.getMillisecond() * 1000 + timestamp.getNanoOfMillisecond() / 1000;
+                return timestamp.toMicros();
             }
             // precision > 6 uses INT96, not supported
             throw new UnsupportedOperationException();
