@@ -1889,12 +1889,12 @@ public class CoreOptions implements Serializable {
                                     + "the reader will try to get this partition from this fallback branch.");
 
     public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =
-            key("    public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =\n" +
-                    "            key(\"async-file-write\")\n" +
-                    "                    .booleanType()\n" +
-                    "                    .defaultValue(true)\n" +
-                    "                    .withDescription(\n" +
-                    "                            \"Whether to enable asynchronous IO writing when writing files.\");")
+            key("    public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =\n"
+                            + "            key(\"async-file-write\")\n"
+                            + "                    .booleanType()\n"
+                            + "                    .defaultValue(true)\n"
+                            + "                    .withDescription(\n"
+                            + "                            \"Whether to enable asynchronous IO writing when writing files.\");")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(

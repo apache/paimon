@@ -24,7 +24,7 @@ import org.apache.paimon.annotation.Public;
  * Data type of a blob reference.
  *
  * <p>The physical representation is {@code byte[]}. The bytes must conform to the serialization
- * format of {@link org.apache.paimon.data.BlobDescriptor}.
+ * format of BlobDescriptor.
  *
  * @since 1.5.0
  */
