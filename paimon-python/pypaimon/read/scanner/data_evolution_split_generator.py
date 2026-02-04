@@ -69,11 +69,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         if self.start_pos_of_this_subtask is not None:
             # Calculate Row ID range for slice-based filtering
             slice_row_ranges = self._calculate_slice_row_ranges(partitioned_files)
-            if slice_row_ranges:
-                # Filter files by Row ID range
-                partitioned_files = self._filter_files_by_row_ranges(partitioned_files, slice_row_ranges)
-            else:
-                partitioned_files = defaultdict(list)
+            # Filter files by Row ID range
+            partitioned_files = self._filter_files_by_row_ranges(partitioned_files, slice_row_ranges)
         elif self.idx_of_this_subtask is not None:
             partitioned_files = self._filter_by_shard(
                 partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks
