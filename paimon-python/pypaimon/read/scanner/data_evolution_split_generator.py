@@ -72,6 +72,9 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             if slice_row_ranges:
                 # Filter files by Row ID range
                 partitioned_files = self._filter_files_by_row_ranges(partitioned_files, slice_row_ranges)
+            else:
+                # Slice is out of bounds: return no splits
+                partitioned_files = defaultdict(list)
         elif self.idx_of_this_subtask is not None:
             partitioned_files = self._filter_by_shard(
                 partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks
