@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.BigIntType;
@@ -26,7 +27,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
@@ -406,6 +409,176 @@ class ParquetFiltersTest {
                         + v2.toUnscaledLong()
                         + ")), noteq(decimal1, "
                         + v3.toUnscaledLong()
+                        + "))",
+                true);
+    }
+
+    @Test
+    public void testTimestampMillis() {
+        // precision <= 3 uses milliseconds (INT64)
+        int precision = 3;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "ts1", new TimestampType(precision)))));
+
+        Timestamp value = Timestamp.fromEpochMillis(1704067200000L); // 2024-01-01 00:00:00
+        long expectedMillis = value.getMillisecond();
+
+        test(builder.isNull(0), "eq(ts1, null)", true);
+        test(builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
+        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
+        test(builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
+        test(builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMillis + ")", true);
+        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
+        test(builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMillis + ")", true);
+    }
+
+    @Test
+    public void testTimestampMicros() {
+        // 3 < precision <= 6 uses microseconds (INT64)
+        int precision = 6;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "ts1", new TimestampType(precision)))));
+
+        Timestamp value = Timestamp.fromEpochMillis(1704067200123L, 456000); // with nanos
+        long expectedMicros = value.getMillisecond() * 1000 + value.getNanoOfMillisecond() / 1000;
+
+        test(builder.isNull(0), "eq(ts1, null)", true);
+        test(builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
+        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
+        test(builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
+        test(builder.lessOrEqual(0, value), "lteq(ts1, " + expectedMicros + ")", true);
+        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
+        test(builder.greaterOrEqual(0, value), "gteq(ts1, " + expectedMicros + ")", true);
+    }
+
+    @Test
+    public void testLocalZonedTimestampMillis() {
+        // precision <= 3 uses milliseconds (INT64)
+        int precision = 3;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "ts1",
+                                                new LocalZonedTimestampType(precision)))));
+
+        Timestamp value = Timestamp.fromEpochMillis(1704067200000L);
+        long expectedMillis = value.getMillisecond();
+
+        test(builder.isNull(0), "eq(ts1, null)", true);
+        test(builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(builder.equal(0, value), "eq(ts1, " + expectedMillis + ")", true);
+        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMillis + ")", true);
+        test(builder.lessThan(0, value), "lt(ts1, " + expectedMillis + ")", true);
+        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMillis + ")", true);
+    }
+
+    @Test
+    public void testLocalZonedTimestampMicros() {
+        // 3 < precision <= 6 uses microseconds (INT64)
+        int precision = 6;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(
+                                                0,
+                                                "ts1",
+                                                new LocalZonedTimestampType(precision)))));
+
+        Timestamp value = Timestamp.fromEpochMillis(1704067200123L, 456000);
+        long expectedMicros = value.getMillisecond() * 1000 + value.getNanoOfMillisecond() / 1000;
+
+        test(builder.isNull(0), "eq(ts1, null)", true);
+        test(builder.isNotNull(0), "noteq(ts1, null)", true);
+        test(builder.equal(0, value), "eq(ts1, " + expectedMicros + ")", true);
+        test(builder.notEqual(0, value), "noteq(ts1, " + expectedMicros + ")", true);
+        test(builder.lessThan(0, value), "lt(ts1, " + expectedMicros + ")", true);
+        test(builder.greaterThan(0, value), "gt(ts1, " + expectedMicros + ")", true);
+    }
+
+    @Test
+    public void testInFilterTimestampMillis() {
+        int precision = 3;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "ts1", new TimestampType(precision)))));
+
+        Timestamp v1 = Timestamp.fromEpochMillis(1704067200000L);
+        Timestamp v2 = Timestamp.fromEpochMillis(1704153600000L);
+        Timestamp v3 = Timestamp.fromEpochMillis(1704240000000L);
+
+        test(
+                builder.in(0, Arrays.asList(v1, v2, v3)),
+                "or(or(eq(ts1, "
+                        + v1.getMillisecond()
+                        + "), eq(ts1, "
+                        + v2.getMillisecond()
+                        + ")), eq(ts1, "
+                        + v3.getMillisecond()
+                        + "))",
+                true);
+
+        test(
+                builder.notIn(0, Arrays.asList(v1, v2, v3)),
+                "and(and(noteq(ts1, "
+                        + v1.getMillisecond()
+                        + "), noteq(ts1, "
+                        + v2.getMillisecond()
+                        + ")), noteq(ts1, "
+                        + v3.getMillisecond()
+                        + "))",
+                true);
+    }
+
+    @Test
+    public void testInFilterTimestampMicros() {
+        int precision = 6;
+        PredicateBuilder builder =
+                new PredicateBuilder(
+                        new RowType(
+                                Collections.singletonList(
+                                        new DataField(0, "ts1", new TimestampType(precision)))));
+
+        Timestamp v1 = Timestamp.fromEpochMillis(1704067200000L, 123000);
+        Timestamp v2 = Timestamp.fromEpochMillis(1704153600000L, 456000);
+        Timestamp v3 = Timestamp.fromEpochMillis(1704240000000L, 789000);
+
+        long micros1 = v1.getMillisecond() * 1000 + v1.getNanoOfMillisecond() / 1000;
+        long micros2 = v2.getMillisecond() * 1000 + v2.getNanoOfMillisecond() / 1000;
+        long micros3 = v3.getMillisecond() * 1000 + v3.getNanoOfMillisecond() / 1000;
+
+        test(
+                builder.in(0, Arrays.asList(v1, v2, v3)),
+                "or(or(eq(ts1, "
+                        + micros1
+                        + "), eq(ts1, "
+                        + micros2
+                        + ")), eq(ts1, "
+                        + micros3
+                        + "))",
+                true);
+
+        test(
+                builder.notIn(0, Arrays.asList(v1, v2, v3)),
+                "and(and(noteq(ts1, "
+                        + micros1
+                        + "), noteq(ts1, "
+                        + micros2
+                        + ")), noteq(ts1, "
+                        + micros3
                         + "))",
                 true);
     }
