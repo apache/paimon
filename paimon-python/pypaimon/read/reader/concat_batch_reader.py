@@ -186,8 +186,9 @@ class DataEvolutionMergeReader(RecordBatchReader):
                 else:
                     batch = reader.read_arrow_batch()
                     if batch is None:
-                        return None
-                    batches[i] = batch
+                        batches[i] = None
+                    else:
+                        batches[i] = batch
             else:
                 batches[i] = None
 
