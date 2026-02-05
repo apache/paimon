@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.utils.IOUtils;
+
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
@@ -38,7 +40,7 @@ public class BlobDescriptorTest {
         BlobDescriptor descriptor3 = new BlobDescriptor(uri2, 100L, 200L);
         BlobDescriptor descriptor4 = new BlobDescriptor(uri1, 150L, 200L);
         BlobDescriptor descriptor5 = new BlobDescriptor(uri1, 100L, 250L);
-        BlobDescriptor descriptor6 = createDescriptorWithVersion((byte) 2, uri1, 100L, 200L);
+        BlobDescriptor descriptor6 = createDescriptorWithVersion((byte) 3, uri1, 100L, 200L);
         assertThat(descriptor1).isEqualTo(descriptor2);
         assertThat(descriptor1).isNotEqualTo(descriptor3);
         assertThat(descriptor1).isNotEqualTo(descriptor4);
@@ -64,7 +66,7 @@ public class BlobDescriptorTest {
         BlobDescriptor descriptor = new BlobDescriptor(uri, 100L, 200L);
 
         String toString = descriptor.toString();
-        assertThat(toString).contains("version=1");
+        assertThat(toString).contains("version=2");
         assertThat(toString).contains("uri='/test/path'");
         assertThat(toString).contains("offset=100");
         assertThat(toString).contains("length=200");
@@ -90,10 +92,26 @@ public class BlobDescriptorTest {
     public void testDeserializeWithUnsupportedVersion() {
         String uri = "/test/path";
         byte[] serialized = new BlobDescriptor(uri, 1, 1).serialize();
-        serialized[0] = 2;
+        serialized[0] = 3;
         assertThatThrownBy(() -> BlobDescriptor.deserialize(serialized))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Expecting BlobDescriptor version to be 1, but found 2.");
+                .hasMessageContaining(
+                        "Expecting BlobDescriptor version to be less than or equal to 2, but found 3.");
+    }
+
+    @Test
+    public void testBlobVersionCompatible() throws Exception {
+        byte[] serialized =
+                IOUtils.readFully(
+                        BlobDescriptorTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatible/blob_descriptor_v1"),
+                        true);
+
+        BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(serialized);
+        assertThat(blobDescriptor.uri()).isEqualTo("/test/path");
+        assertThat(blobDescriptor.offset()).isEqualTo(100L);
+        assertThat(blobDescriptor.length()).isEqualTo(200L);
     }
 
     private BlobDescriptor createDescriptorWithVersion(

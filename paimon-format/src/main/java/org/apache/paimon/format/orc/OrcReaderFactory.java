@@ -38,6 +38,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
 import org.apache.paimon.utils.RoaringBitmap32;
+import org.apache.paimon.utils.UriReader;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
@@ -101,7 +102,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 context instanceof OrcFormatReaderContext
                         ? ((OrcFormatReaderContext) context).poolSize()
                         : 1;
-        Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(context.filePath(), poolSize);
+        UriReader uriReader = UriReader.fromFile(context.fileIO());
+        Pool<OrcReaderBatch> poolOfBatches =
+                createPoolOfBatches(context.filePath(), poolSize, uriReader);
 
         RecordReader orcReader =
                 createRecordReader(
@@ -123,7 +126,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * conversion from the ORC representation to the result format.
      */
     public OrcReaderBatch createReaderBatch(
-            Path filePath, VectorizedRowBatch orcBatch, Pool.Recycler<OrcReaderBatch> recycler) {
+            Path filePath,
+            VectorizedRowBatch orcBatch,
+            Pool.Recycler<OrcReaderBatch> recycler,
+            UriReader uriReader) {
         List<String> tableFieldNames = tableType.getFieldNames();
         List<DataType> tableFieldTypes = tableType.getFieldTypes();
 
@@ -139,17 +145,20 @@ public class OrcReaderFactory implements FormatReaderFactory {
                             type,
                             legacyTimestampLtzType);
         }
-        return new OrcReaderBatch(filePath, orcBatch, new VectorizedColumnBatch(vectors), recycler);
+        return new OrcReaderBatch(
+                filePath, orcBatch, new VectorizedColumnBatch(vectors), recycler, uriReader);
     }
 
     // ------------------------------------------------------------------------
 
-    private Pool<OrcReaderBatch> createPoolOfBatches(Path filePath, int numBatches) {
+    private Pool<OrcReaderBatch> createPoolOfBatches(
+            Path filePath, int numBatches, UriReader uriReader) {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
 
         for (int i = 0; i < numBatches; i++) {
             final VectorizedRowBatch orcBatch = createBatchWrapper(schema, batchSize / numBatches);
-            final OrcReaderBatch batch = createReaderBatch(filePath, orcBatch, pool.recycler());
+            final OrcReaderBatch batch =
+                    createReaderBatch(filePath, orcBatch, pool.recycler(), uriReader);
             pool.add(batch);
         }
 
@@ -170,13 +179,14 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 final Path filePath,
                 final VectorizedRowBatch orcVectorizedRowBatch,
                 final VectorizedColumnBatch paimonColumnBatch,
-                final Pool.Recycler<OrcReaderBatch> recycler) {
+                final Pool.Recycler<OrcReaderBatch> recycler,
+                final UriReader uriReader) {
             this.orcVectorizedRowBatch = checkNotNull(orcVectorizedRowBatch);
             this.recycler = checkNotNull(recycler);
             this.paimonColumnBatch = paimonColumnBatch;
             this.result =
                     new VectorizedRowIterator(
-                            filePath, new ColumnarRow(paimonColumnBatch), this::recycle);
+                            filePath, new ColumnarRow(paimonColumnBatch, uriReader), this::recycle);
         }
 
         /**

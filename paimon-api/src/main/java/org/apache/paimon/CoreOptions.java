@@ -2146,6 +2146,15 @@ public class CoreOptions implements Serializable {
                             "Specifies column names that should be stored as blob type. "
                                     + "This is used when you want to treat a BYTES column as a BLOB.");
 
+    @Immutable
+    public static final ConfigOption<String> BLOB_STORED_DESCRIPTOR_FIELDS =
+            key("blob.stored-descriptor-fields")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated BLOB field names to store as serialized BlobDescriptor "
+                                    + "bytes inline in data files.");
+
     public static final ConfigOption<Boolean> BLOB_AS_DESCRIPTOR =
             key("blob-as-descriptor")
                     .booleanType()
@@ -2708,6 +2717,22 @@ public class CoreOptions implements Serializable {
     public boolean blobSplitByFileSize() {
         return options.getOptional(BLOB_SPLIT_BY_FILE_SIZE)
                 .orElse(!options.get(BLOB_AS_DESCRIPTOR));
+    }
+
+    /**
+     * Resolve blob fields that should be stored as serialized descriptor bytes in data files.
+     *
+     * <p>If this option is not set, all blob fields are stored in '.blob' files by default.
+     */
+    public Set<String> blobStoredDescriptorFields() {
+        return options.getOptional(BLOB_STORED_DESCRIPTOR_FIELDS)
+                .map(
+                        s ->
+                                Arrays.stream(s.split(","))
+                                        .map(String::trim)
+                                        .filter(str -> !str.isEmpty())
+                                        .collect(Collectors.toSet()))
+                .orElse(Collections.emptySet());
     }
 
     public long compactionFileSize(boolean hasPrimaryKey) {

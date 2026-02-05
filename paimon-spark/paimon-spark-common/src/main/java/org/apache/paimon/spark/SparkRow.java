@@ -62,24 +62,17 @@ public class SparkRow implements InternalRow, Serializable {
     private final RowType type;
     private final Row row;
     private final RowKind rowKind;
-    private final boolean blobAsDescriptor;
     private final UriReaderFactory uriReaderFactory;
 
     public SparkRow(RowType type, Row row) {
-        this(type, row, RowKind.INSERT, false, null);
+        this(type, row, RowKind.INSERT, null);
     }
 
-    public SparkRow(
-            RowType type,
-            Row row,
-            RowKind rowkind,
-            boolean blobAsDescriptor,
-            CatalogContext catalogContext) {
+    public SparkRow(RowType type, Row row, RowKind rowkind, CatalogContext catalogContext) {
         this.type = type;
         this.row = row;
         this.rowKind = rowkind;
-        this.blobAsDescriptor = blobAsDescriptor;
-        this.uriReaderFactory = blobAsDescriptor ? new UriReaderFactory(catalogContext) : null;
+        this.uriReaderFactory = new UriReaderFactory(catalogContext);
     }
 
     @Override
@@ -168,12 +161,14 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public Blob getBlob(int i) {
-        if (blobAsDescriptor) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(row.getAs(i));
+        byte[] bytes = row.getAs(i);
+        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
+        if (blobDes) {
+            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
             UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
             return Blob.fromDescriptor(uriReader, blobDescriptor);
         } else {
-            return new BlobData(row.getAs(i));
+            return new BlobData(bytes);
         }
     }
 

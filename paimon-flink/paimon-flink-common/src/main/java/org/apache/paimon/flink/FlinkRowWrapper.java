@@ -47,19 +47,14 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 public class FlinkRowWrapper implements InternalRow {
 
     private final org.apache.flink.table.data.RowData row;
-    private final boolean blobAsDescriptor;
     private final UriReaderFactory uriReaderFactory;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
-        this(row, false, null);
+        this(row, null);
     }
 
-    public FlinkRowWrapper(
-            org.apache.flink.table.data.RowData row,
-            boolean blobAsDescriptor,
-            CatalogContext catalogContext) {
+    public FlinkRowWrapper(org.apache.flink.table.data.RowData row, CatalogContext catalogContext) {
         this.row = row;
-        this.blobAsDescriptor = blobAsDescriptor;
         this.uriReaderFactory = new UriReaderFactory(catalogContext);
     }
 
@@ -147,12 +142,14 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
-        if (blobAsDescriptor) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(row.getBinary(pos));
+        byte[] bytes = row.getBinary(pos);
+        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
+        if (blobDes) {
+            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
             UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
             return Blob.fromDescriptor(uriReader, blobDescriptor);
         } else {
-            return new BlobData(row.getBinary(pos));
+            return new BlobData(bytes);
         }
     }
 

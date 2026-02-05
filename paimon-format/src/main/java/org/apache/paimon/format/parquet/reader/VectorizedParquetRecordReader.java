@@ -25,6 +25,7 @@ import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
+import org.apache.paimon.utils.UriReader;
 
 import org.apache.parquet.VersionParser;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -75,6 +76,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     private ColumnarBatch columnarBatch;
 
     private final Path filePath;
+    private final UriReader uriReader;
     private final MessageType fileSchema;
     private final List<ParquetField> fields;
     private final RowIndexGenerator rowIndexGenerator;
@@ -88,7 +90,8 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             MessageType fileSchema,
             List<ParquetField> fields,
             WritableColumnVector[] vectors,
-            int batchSize)
+            int batchSize,
+            UriReader uriReader)
             throws IOException {
         this.filePath = filePath;
         this.reader = reader;
@@ -96,6 +99,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.fields = fields;
         this.totalRowCount = reader.getFilteredRecordCount();
         this.batchSize = batchSize;
+        this.uriReader = uriReader;
         this.rowIndexGenerator = new RowIndexGenerator();
 
         // fetch writer version from file metadata
@@ -120,7 +124,8 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                                 fields.stream()
                                         .map(ParquetField::getType)
                                         .collect(Collectors.toList()),
-                                vectors));
+                                vectors),
+                        uriReader);
         columnVectors = new ParquetColumnVector[fields.size()];
         for (int i = 0; i < columnVectors.length; i++) {
             columnVectors[i] =

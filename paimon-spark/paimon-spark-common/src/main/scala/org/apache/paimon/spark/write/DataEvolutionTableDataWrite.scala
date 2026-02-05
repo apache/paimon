@@ -40,7 +40,6 @@ case class DataEvolutionTableDataWrite(
     writeBuilder: BatchWriteBuilder,
     writeType: RowType,
     firstRowIdToPartitionMap: mutable.HashMap[Long, (BinaryRow, Long)],
-    blobAsDescriptor: Boolean,
     catalogContext: CatalogContext)
   extends InnerTableV1DataWrite {
 
@@ -51,7 +50,7 @@ case class DataEvolutionTableDataWrite(
   private val commitMessages = ListBuffer[CommitMessageImpl]()
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, -1, blobAsDescriptor, catalogContext)
+    SparkRowUtils.toPaimonRow(writeType, -1, catalogContext)
   }
 
   def write(row: Row): Unit = {

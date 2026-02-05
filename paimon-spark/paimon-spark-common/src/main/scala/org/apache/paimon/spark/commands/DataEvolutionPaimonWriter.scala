@@ -74,7 +74,6 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
               table.newBatchWriteBuilder(),
               writeType,
               firstRowIdToPartitionMap,
-              coreOptions.blobAsDescriptor(),
               table.catalogEnvironment().catalogContext())
             try {
               iter.foreach(row => write.write(row))
