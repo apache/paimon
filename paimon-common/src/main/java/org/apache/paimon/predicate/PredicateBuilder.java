@@ -162,14 +162,14 @@ public class PredicateBuilder {
     }
 
     public Predicate like(int idx, Object patternLiteral) {
-        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+        Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)
                         .orElse(Pair.of(Like.INSTANCE, patternLiteral));
         return leaf(optimized.getKey(), idx, optimized.getValue());
     }
 
     public Predicate like(Transform transform, Object patternLiteral) {
-        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+        Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)
                         .orElse(Pair.of(Like.INSTANCE, patternLiteral));
         return leaf(optimized.getKey(), transform, optimized.getValue());

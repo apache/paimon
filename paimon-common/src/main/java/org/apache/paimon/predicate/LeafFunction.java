@@ -25,92 +25,55 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonVal
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** Function to test a field with literals. */
 public abstract class LeafFunction implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
     @JsonCreator
     public static LeafFunction fromJson(String name) throws IOException {
-        switch (name) {
-            case Equal.NAME:
-                return Equal.INSTANCE;
-            case NotEqual.NAME:
-                return NotEqual.INSTANCE;
-            case LessThan.NAME:
-                return LessThan.INSTANCE;
-            case LessOrEqual.NAME:
-                return LessOrEqual.INSTANCE;
-            case GreaterThan.NAME:
-                return GreaterThan.INSTANCE;
-            case GreaterOrEqual.NAME:
-                return GreaterOrEqual.INSTANCE;
-            case IsNull.NAME:
-                return IsNull.INSTANCE;
-            case IsNotNull.NAME:
-                return IsNotNull.INSTANCE;
-            case StartsWith.NAME:
-                return StartsWith.INSTANCE;
-            case EndsWith.NAME:
-                return EndsWith.INSTANCE;
-            case Contains.NAME:
-                return Contains.INSTANCE;
-            case Like.NAME:
-                return Like.INSTANCE;
-            case In.NAME:
-                return In.INSTANCE;
-            case NotIn.NAME:
-                return NotIn.INSTANCE;
-            case Between.NAME:
-                return Between.INSTANCE;
-            case NotBetween.NAME:
-                return NotBetween.INSTANCE;
-            default:
-                throw new IllegalArgumentException(
-                        "Could not resolve leaf function '" + name + "'");
+        LeafFunction function = RegistryHolder.REGISTRY.get(name);
+        if (function == null) {
+            throw new IllegalArgumentException("Could not resolve leaf function '" + name + "'");
+        }
+        return function;
+    }
+
+    /** Holder class for lazy initialization of the registry to avoid class loading deadlock. */
+    private static class RegistryHolder {
+
+        private static final Map<String, LeafFunction> REGISTRY = createRegistry();
+
+        private static Map<String, LeafFunction> createRegistry() {
+            Map<String, LeafFunction> registry = new HashMap<>();
+            registry.put(Equal.NAME, Equal.INSTANCE);
+            registry.put(NotEqual.NAME, NotEqual.INSTANCE);
+            registry.put(LessThan.NAME, LessThan.INSTANCE);
+            registry.put(LessOrEqual.NAME, LessOrEqual.INSTANCE);
+            registry.put(GreaterThan.NAME, GreaterThan.INSTANCE);
+            registry.put(GreaterOrEqual.NAME, GreaterOrEqual.INSTANCE);
+            registry.put(IsNull.NAME, IsNull.INSTANCE);
+            registry.put(IsNotNull.NAME, IsNotNull.INSTANCE);
+            registry.put(StartsWith.NAME, StartsWith.INSTANCE);
+            registry.put(EndsWith.NAME, EndsWith.INSTANCE);
+            registry.put(Contains.NAME, Contains.INSTANCE);
+            registry.put(Like.NAME, Like.INSTANCE);
+            registry.put(In.NAME, In.INSTANCE);
+            registry.put(NotIn.NAME, NotIn.INSTANCE);
+            registry.put(Between.NAME, Between.INSTANCE);
+            registry.put(NotBetween.NAME, NotBetween.INSTANCE);
+            return Collections.unmodifiableMap(registry);
         }
     }
 
     @JsonValue
-    public String toJson() {
-        if (this instanceof Equal) {
-            return Equal.NAME;
-        } else if (this instanceof NotEqual) {
-            return NotEqual.NAME;
-        } else if (this instanceof LessThan) {
-            return LessThan.NAME;
-        } else if (this instanceof LessOrEqual) {
-            return LessOrEqual.NAME;
-        } else if (this instanceof GreaterThan) {
-            return GreaterThan.NAME;
-        } else if (this instanceof GreaterOrEqual) {
-            return GreaterOrEqual.NAME;
-        } else if (this instanceof IsNull) {
-            return IsNull.NAME;
-        } else if (this instanceof IsNotNull) {
-            return IsNotNull.NAME;
-        } else if (this instanceof StartsWith) {
-            return StartsWith.NAME;
-        } else if (this instanceof EndsWith) {
-            return EndsWith.NAME;
-        } else if (this instanceof Contains) {
-            return Contains.NAME;
-        } else if (this instanceof Like) {
-            return Like.NAME;
-        } else if (this instanceof In) {
-            return In.NAME;
-        } else if (this instanceof NotIn) {
-            return NotIn.NAME;
-        } else if (this instanceof Between) {
-            return Between.NAME;
-        } else if (this instanceof NotBetween) {
-            return NotBetween.NAME;
-        } else {
-            throw new IllegalArgumentException(
-                    "Unknown leaf function class for JSON serialization: " + getClass());
-        }
-    }
+    public abstract String toJson();
 
     public abstract boolean test(DataType type, Object field, List<Object> literals);
 

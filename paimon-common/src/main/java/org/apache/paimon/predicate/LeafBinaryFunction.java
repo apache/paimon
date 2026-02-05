@@ -23,7 +23,7 @@ import org.apache.paimon.types.DataType;
 import java.util.List;
 
 /** Function to test a field with a literal. */
-public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
+public abstract class LeafBinaryFunction extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 

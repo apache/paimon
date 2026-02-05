@@ -27,8 +27,8 @@ import java.util.Optional;
 
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
-/** A {@link NullFalseLeafBinaryFunction} to eval greater or equal. */
-public class GreaterOrEqual extends NullFalseLeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to eval greater or equal. */
+public class GreaterOrEqual extends LeafBinaryFunction {
 
     public static final String NAME = "GREATER_OR_EQUAL";
 
@@ -56,5 +56,10 @@ public class GreaterOrEqual extends NullFalseLeafBinaryFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitGreaterOrEqual(fieldRef, literals.get(0));
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

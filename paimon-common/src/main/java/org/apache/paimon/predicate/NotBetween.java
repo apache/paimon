@@ -69,4 +69,9 @@ public class NotBetween extends LeafTernaryFunction {
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitNotBetween(fieldRef, literals.get(0), literals.get(1));
     }
+
+    @Override
+    public String toJson() {
+        return NAME;
+    }
 }

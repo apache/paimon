@@ -67,4 +67,9 @@ public class Between extends LeafTernaryFunction {
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitBetween(fieldRef, literals.get(0), literals.get(1));
     }
+
+    @Override
+    public String toJson() {
+        return NAME;
+    }
 }

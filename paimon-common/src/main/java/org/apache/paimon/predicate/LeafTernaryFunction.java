@@ -25,6 +25,8 @@ import java.util.List;
 /** Abstract {@link LeafFunction} for ternary function. */
 public abstract class LeafTernaryFunction extends LeafFunction {
 
+    private static final long serialVersionUID = 1L;
+
     public abstract boolean test(DataType type, Object field, Object literal1, Object literal2);
 
     public abstract boolean test(
