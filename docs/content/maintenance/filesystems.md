@@ -389,6 +389,12 @@ Please refer to [Trino S3](https://trino.io/docs/current/object-storage/file-sys
 
 {{< /tabs >}}
 
+### Conditional Writes
+
+S3 supports native conditional writes, which Paimon uses automatically for atomic snapshot commits. This eliminates
+the need to configure `'lock.enabled'` when using S3 for safe concurrent writes. See
+[Concurrency Control]({{< ref "concepts/concurrency-control" >}}) for more details.
+
 ### S3 Compliant Object Stores
 
 The S3 Filesystem also support using S3 compliant object stores such as MinIO, Tencent's COS and IBM’s Cloud Object
@@ -509,6 +515,12 @@ spark-sql \
 {{< /tab >}}
 
 {{< /tabs >}}
+
+### Conditional Writes
+
+Azure ABFS supports native conditional writes, which Paimon uses automatically for atomic snapshot commits. This
+eliminates the need to configure `'lock.enabled'` when using Azure ABFS for safe concurrent writes. See
+[Concurrency Control]({{< ref "concepts/concurrency-control" >}}) for more details.
 
 ## OBS
 

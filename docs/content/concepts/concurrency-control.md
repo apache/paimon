@@ -44,8 +44,21 @@ Paimon's snapshot ID is unique, so as long as the job writes its snapshot file t
 Paimon uses the file system's renaming mechanism to commit snapshots, which is secure for HDFS as it ensures
 transactional and atomic renaming.
 
-But for object storage such as OSS and S3, their `'RENAME'` does not have atomic semantic. We need to configure Hive or
-jdbc metastore and enable `'lock.enabled'` option for the catalog. Otherwise, there may be a chance of losing the snapshot.
+For object storage, atomic commits are handled differently depending on the storage system:
+
+### S3 and Azure ABFS (Conditional Writes)
+
+S3 and Azure ABFS support native conditional writes. When using `paimon-s3` or `paimon-azure`, Paimon automatically
+uses conditional writes for snapshot commits, providing atomic write-if-absent semantics without requiring external
+locking.
+
+When using S3 or Azure ABFS, you do **not** need to configure `'lock.enabled'` for safe concurrent commits.
+
+### Other Object Stores (OSS, GCS, OBS, etc.)
+
+Paimon currently does not support conditional writes for other object storage systems such as Aliyun OSS, Google
+Cloud Storage, and Huawei OBS. You need to configure Hive or JDBC metastore and enable `'lock.enabled'` option for
+the catalog. Otherwise, there may be a chance of losing the snapshot.
 
 ## Files conflict
 
