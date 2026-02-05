@@ -59,6 +59,8 @@ import org.apache.paimon.utils.CatalogBranchManager;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.FileSystemBranchManager;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.PartitionStatisticsReporter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
@@ -465,6 +467,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TableCommitImpl newCommit(String commitUser) {
         CoreOptions options = coreOptions();
+        InternalRowPartitionComputer partitionComputer =
+                new InternalRowPartitionComputer(
+                        options.partitionDefaultName(),
+                        schema().logicalPartitionType(),
+                        partitionKeys().toArray(new String[0]),
+                        options.legacyPartitionName());
+
         return new TableCommitImpl(
                 store().newCommit(commitUser, this),
                 newExpireRunnable(),
@@ -475,7 +484,25 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 options.snapshotExpireExecutionMode(),
                 name(),
                 options.forceCreatingSnapshot(),
-                options.fileOperationThreadNum());
+                options.fileOperationThreadNum(),
+                partitionStatisticsReporter(),
+                partitionComputer);
+    }
+
+    @Nullable
+    private PartitionStatisticsReporter partitionStatisticsReporter() {
+        CoreOptions options = coreOptions();
+        if (options.toConfiguration()
+                                .get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)
+                                .toMillis()
+                        <= 0
+                || partitionKeys().isEmpty()
+                || !options.partitionedTableInMetastore()
+                || catalogEnvironment().partitionHandler() == null) {
+            return null;
+        }
+
+        return new PartitionStatisticsReporter(this, catalogEnvironment().partitionHandler());
     }
 
     @Override
