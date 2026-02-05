@@ -66,6 +66,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DataFilePathFactories;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -166,6 +167,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
 
+    private final List<CommitPreCallback> commitPreCallbacks;
+
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
             FileIO fileIO,
@@ -199,7 +202,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean discardDuplicateFiles,
             ConflictDetection.Factory conflictDetectFactory,
             @Nullable StrictModeChecker strictModeChecker,
-            @Nullable CommitRollback rollback) {
+            @Nullable CommitRollback rollback,
+            List<CommitPreCallback> commitPreCallbacks) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -241,6 +245,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.strictModeChecker = strictModeChecker;
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
+        this.commitPreCallbacks = commitPreCallbacks;
     }
 
     @Override
@@ -1005,6 +1010,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         boolean success;
+        final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
+        final List<ManifestEntry> finalDeltaFiles = deltaFiles;
+        commitPreCallbacks.forEach(
+                callback ->
+                        callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
         try {
             success = commitSnapshotImpl(newSnapshot, deltaStatistics);
         } catch (Exception e) {
@@ -1041,8 +1051,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (strictModeChecker != null) {
             strictModeChecker.update(newSnapshotId);
         }
-        final List<SimpleFileEntry> finalBaseFiles = baseDataFiles;
-        final List<ManifestEntry> finalDeltaFiles = deltaFiles;
         commitCallbacks.forEach(
                 callback ->
                         callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
@@ -1185,6 +1193,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void close() {
+        IOUtils.closeAllQuietly(commitPreCallbacks);
         IOUtils.closeAllQuietly(commitCallbacks);
         IOUtils.closeQuietly(snapshotCommit);
     }
