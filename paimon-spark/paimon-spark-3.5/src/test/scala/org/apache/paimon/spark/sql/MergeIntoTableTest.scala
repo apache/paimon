@@ -61,3 +61,43 @@ class MergeIntoAppendNonBucketedTableTest
     super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
   }
 }
+
+class V2MergeIntoPrimaryKeyBucketedTableTest
+  extends MergeIntoTableTestBase
+  with MergeIntoPrimaryKeyTableTest
+  with MergeIntoNotMatchedBySourceTest
+  with PaimonPrimaryKeyBucketedTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+  }
+}
+
+class V2MergeIntoPrimaryKeyNonBucketTableTest
+  extends MergeIntoTableTestBase
+  with MergeIntoPrimaryKeyTableTest
+  with MergeIntoNotMatchedBySourceTest
+  with PaimonPrimaryKeyNonBucketTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+  }
+}
+
+class V2MergeIntoAppendBucketedTableTest
+  extends MergeIntoTableTestBase
+  with MergeIntoAppendTableTest
+  with MergeIntoNotMatchedBySourceTest
+  with PaimonAppendBucketedTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+  }
+}
+
+class V2MergeIntoAppendNonBucketedTableTest
+  extends MergeIntoTableTestBase
+  with MergeIntoAppendTableTest
+  with MergeIntoNotMatchedBySourceTest
+  with PaimonAppendNonBucketTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
+  }
+}
