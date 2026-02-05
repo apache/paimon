@@ -62,6 +62,10 @@ public abstract class LeafFunction implements Serializable {
                 return In.INSTANCE;
             case NotIn.NAME:
                 return NotIn.INSTANCE;
+            case Between.NAME:
+                return Between.INSTANCE;
+            case NotBetween.NAME:
+                return NotBetween.INSTANCE;
             default:
                 throw new IllegalArgumentException(
                         "Could not resolve leaf function '" + name + "'");
@@ -98,6 +102,10 @@ public abstract class LeafFunction implements Serializable {
             return In.NAME;
         } else if (this instanceof NotIn) {
             return NotIn.NAME;
+        } else if (this instanceof Between) {
+            return Between.NAME;
+        } else if (this instanceof NotBetween) {
+            return NotBetween.NAME;
         } else {
             throw new IllegalArgumentException(
                     "Unknown leaf function class for JSON serialization: " + getClass());
