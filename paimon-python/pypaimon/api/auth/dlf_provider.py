@@ -33,17 +33,6 @@ from pypaimon.api.typedef import RESTAuthParameter
 
 class DLFAuthProvider(AuthProvider):
     DLF_AUTHORIZATION_HEADER_KEY = "Authorization"
-    DLF_CONTENT_MD5_HEADER_KEY = "Content-MD5"
-    DLF_CONTENT_TYPE_KEY = "Content-Type"
-    DLF_DATE_HEADER_KEY = "x-dlf-date"
-    DLF_SECURITY_TOKEN_HEADER_KEY = "x-dlf-security-token"
-    DLF_AUTH_VERSION_HEADER_KEY = "x-dlf-version"
-    DLF_CONTENT_SHA56_HEADER_KEY = "x-dlf-content-sha256"
-    DLF_CONTENT_SHA56_VALUE = "UNSIGNED-PAYLOAD"
-
-    AUTH_DATE_TIME_FORMAT = "%Y%m%dT%H%M%SZ"
-    MEDIA_TYPE = "application/json"
-
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
     def __init__(self,
