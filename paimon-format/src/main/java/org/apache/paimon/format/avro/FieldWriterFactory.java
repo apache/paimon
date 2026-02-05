@@ -19,6 +19,8 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
@@ -27,6 +29,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import org.apache.avro.AvroRuntimeException;
@@ -69,6 +72,35 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
     private static final FieldWriter DOUBLE_WRITER =
             (container, i, encoder) -> encoder.writeDouble(container.getDouble(i));
+
+    private static final FieldWriter BLOB_DESCRIPTOR_BYTES_WRITER =
+            (container, i, encoder) -> {
+                Blob blob = container.getBlob(i);
+                if (blob == null) {
+                    // Nullable handling is done by NullableWriter for UNION schemas.
+                    // For required bytes, writing null is a bug.
+                    throw new IllegalArgumentException("Null blob is not allowed.");
+                }
+                try {
+                    BlobDescriptor descriptor = blob.toDescriptor();
+                    encoder.writeBytes(descriptor.serialize());
+                } catch (Throwable t) {
+                    throw new IllegalArgumentException(
+                            "blob.stored-descriptor-fields requires blob field value to be a "
+                                    + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                            t);
+                }
+            };
+
+    @Override
+    public FieldWriter primitive(Schema primitive, DataType type) {
+        if (primitive.getType() == Schema.Type.BYTES
+                && type != null
+                && type.getTypeRoot() == DataTypeRoot.BLOB) {
+            return BLOB_DESCRIPTOR_BYTES_WRITER;
+        }
+        return AvroSchemaVisitor.super.primitive(primitive, type);
+    }
 
     @Override
     public FieldWriter visitUnion(Schema schema, DataType type) {

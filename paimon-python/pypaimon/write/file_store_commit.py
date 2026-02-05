@@ -640,7 +640,8 @@ class FileStoreCommit:
 
         row_id_assigned = []
         start = first_row_id_start
-        blob_start = first_row_id_start
+        current_data_start = first_row_id_start
+        blob_start_by_field = {}
 
         for entry in commit_entries:
             # Check if this is an append file that needs row ID assignment
@@ -649,20 +650,23 @@ class FileStoreCommit:
                     entry.file.first_row_id is None):  # No existing first_row_id
 
                 if DataFileMeta.is_blob_file(entry.file.file_name):
-                    # Handle blob files specially
-                    if blob_start >= start:
+                    # Handle blob files specially. Each blob field tracks row ids independently.
+                    if current_data_start >= start:
                         raise RuntimeError(
-                            f"This is a bug, blobStart {blob_start} should be less than start {start} "
+                            f"This is a bug, blobStart {current_data_start} should be less than start {start} "
                             f"when assigning a blob entry file."
                         )
                     row_count = entry.file.row_count
-                    row_id_assigned.append(entry.assign_first_row_id(blob_start))
-                    blob_start += row_count
+                    blob_field_key = tuple(entry.file.write_cols or [])
+                    field_blob_start = blob_start_by_field.get(blob_field_key, current_data_start)
+                    row_id_assigned.append(entry.assign_first_row_id(field_blob_start))
+                    blob_start_by_field[blob_field_key] = field_blob_start + row_count
                 else:
                     # Handle regular files
                     row_count = entry.file.row_count
                     row_id_assigned.append(entry.assign_first_row_id(start))
-                    blob_start = start
+                    current_data_start = start
+                    blob_start_by_field.clear()
                     start += row_count
             else:
                 # For compact files or files that already have first_row_id, don't assign

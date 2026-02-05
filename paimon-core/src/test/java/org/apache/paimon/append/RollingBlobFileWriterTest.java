@@ -43,6 +43,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -106,7 +107,8 @@ public class RollingBlobFileWriterTest {
                         FileSource.APPEND,
                         false, // asyncFileWrite
                         false, // statsDenseStore
-                        null);
+                        null,
+                        Collections.emptySet());
     }
 
     @Test
@@ -206,7 +208,8 @@ public class RollingBlobFileWriterTest {
                         FileSource.APPEND,
                         false, // asyncFileWrite
                         false, // statsDenseStore
-                        null);
+                        null,
+                        Collections.emptySet());
 
         // Create large blob data that will exceed the blob target file size
         byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
@@ -283,7 +286,8 @@ public class RollingBlobFileWriterTest {
                         FileSource.APPEND,
                         false, // asyncFileWrite
                         false, // statsDenseStore
-                        null);
+                        null,
+                        Collections.emptySet());
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -362,9 +366,10 @@ public class RollingBlobFileWriterTest {
                         FileSource.APPEND,
                         false, // asyncFileWrite
                         false, // statsDenseStore
-                        null);
+                        null,
+                        Collections.emptySet());
 
-        // Create blob data that will trigger rolling (non-descriptor mode: direct blob data)
+        // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
         new Random(789).nextBytes(blobData);
 
@@ -420,8 +425,8 @@ public class RollingBlobFileWriterTest {
     }
 
     @Test
-    void testSequenceNumberIncrementInBlobAsDescriptorMode() throws IOException {
-        // Write multiple rows to trigger one-by-one writing in blob-as-descriptor mode
+    void testSequenceNumberIncrementInBlobWritePath() throws IOException {
+        // Write multiple rows and verify sequence-number continuity in blob files
         int numRows = 10;
         for (int i = 0; i < numRows; i++) {
             InternalRow row =
@@ -487,9 +492,8 @@ public class RollingBlobFileWriterTest {
     }
 
     @Test
-    void testSequenceNumberIncrementInNonDescriptorMode() throws IOException {
-        // Write multiple rows as a batch to trigger batch writing in non-descriptor mode
-        // (blob-as-descriptor=false, which is the default)
+    void testSequenceNumberIncrementInBlobWritePathBatch() throws IOException {
+        // Write multiple rows as a batch and verify sequence-number continuity in blob files
         int numRows = 10;
         for (int i = 0; i < numRows; i++) {
             InternalRow row =
@@ -580,7 +584,8 @@ public class RollingBlobFileWriterTest {
                         FileSource.APPEND,
                         false, // asyncFileWrite
                         false, // statsDenseStore
-                        null);
+                        null,
+                        Collections.emptySet());
 
         // Write data
         for (int i = 0; i < 3; i++) {

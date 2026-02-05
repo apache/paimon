@@ -58,6 +58,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -85,6 +86,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private boolean forceBufferSpill = false;
     private boolean withBlob;
     private @Nullable BlobConsumer blobConsumer;
+    private final Set<String> blobStoredDescriptorFields;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -108,6 +110,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
         this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
+        this.blobStoredDescriptorFields = options.blobStoredDescriptorFields();
 
         this.fileIndexOptions = options.indexColumnsOptions();
     }
@@ -153,6 +156,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
                 blobConsumer,
+                blobStoredDescriptorFields,
                 options.dataEvolutionEnabled());
     }
 

@@ -396,6 +396,8 @@ class LocalFileIO(FileIO):
     
     def write_blob(self, path: str, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
         try:
+            # Kept for API compatibility. Write behavior is adaptive and does not depend on this flag.
+            _ = blob_as_descriptor
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
             
@@ -424,18 +426,24 @@ class LocalFileIO(FileIO):
                 for i in range(num_rows):
                     col_data = records_dict[field_name][i]
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
-                        if blob_as_descriptor:
-                            blob_descriptor = BlobDescriptor.deserialize(col_data)
-                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
-                            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
-                        elif isinstance(col_data, bytes):
-                            blob_data = BlobData(col_data)
+                        if hasattr(col_data, 'as_py'):
+                            col_data = col_data.as_py()
+                        if isinstance(col_data, str):
+                            col_data = col_data.encode('utf-8')
+                        if isinstance(col_data, bytearray):
+                            col_data = bytes(col_data)
+
+                        if isinstance(col_data, bytes):
+                            if BlobDescriptor.is_blob_descriptor(col_data):
+                                descriptor = BlobDescriptor.deserialize(col_data)
+                                uri_reader = self.uri_reader_factory.create(descriptor.uri)
+                                blob_data = Blob.from_descriptor(uri_reader, descriptor)
+                            else:
+                                blob_data = BlobData(col_data)
                         else:
-                            if hasattr(col_data, 'as_py'):
-                                col_data = col_data.as_py()
-                            if isinstance(col_data, str):
-                                col_data = col_data.encode('utf-8')
-                            blob_data = BlobData(col_data)
+                            raise RuntimeError(
+                                "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
+                            )
                         row_values = [blob_data]
                     else:
                         row_values = [col_data]

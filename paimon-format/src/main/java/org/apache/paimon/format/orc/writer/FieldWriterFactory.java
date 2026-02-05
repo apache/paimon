@@ -18,6 +18,8 @@
 
 package org.apache.paimon.format.orc.writer;
 
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -245,7 +247,21 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
 
     @Override
     public FieldWriter visit(BlobType blobType) {
-        throw new UnsupportedOperationException("Unsupported type: " + blobType);
+        return (rowId, column, getters, columnId) -> {
+            BytesColumnVector vector = (BytesColumnVector) column;
+            Blob blob = getters.getBlob(columnId);
+            try {
+                BlobDescriptor descriptor = blob.toDescriptor();
+                byte[] bytes = descriptor.serialize();
+                vector.setVal(rowId, bytes, 0, bytes.length);
+                return bytes.length;
+            } catch (Throwable t) {
+                throw new IllegalArgumentException(
+                        "blob.stored-descriptor-fields requires blob field value to be a "
+                                + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                        t);
+            }
+        };
     }
 
     @Override

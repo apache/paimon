@@ -31,10 +31,9 @@ class BlobFileWriter:
     Writes rows one by one and tracks file size.
     """
 
-    def __init__(self, file_io, file_path: Path, blob_as_descriptor: bool):
+    def __init__(self, file_io, file_path: Path):
         self.file_io = file_io
         self.file_path = file_path
-        self.blob_as_descriptor = blob_as_descriptor
         self.output_stream = file_io.new_output_stream(file_path)
         self.writer = BlobFormatWriter(self.output_stream)
         self.row_count = 0
@@ -50,30 +49,7 @@ class BlobFileWriter:
         field_name = row_data.schema[0].name
         col_data = records_dict[field_name][0]
 
-        # Convert to Blob
-        if self.blob_as_descriptor:
-            # In blob-as-descriptor mode, we need to read external file data
-            # for rolling size calculation (based on external file size)
-            if isinstance(col_data, bytes):
-                blob_descriptor = BlobDescriptor.deserialize(col_data)
-            else:
-                # Handle PyArrow types
-                if hasattr(col_data, 'as_py'):
-                    col_data = col_data.as_py()
-                if isinstance(col_data, str):
-                    col_data = col_data.encode('utf-8')
-                blob_descriptor = BlobDescriptor.deserialize(col_data)
-            # Read external file data for rolling size calculation
-            uri_reader = self.file_io.uri_reader_factory.create(blob_descriptor.uri)
-            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
-        elif isinstance(col_data, bytes):
-            blob_data = BlobData(col_data)
-        else:
-            if hasattr(col_data, 'as_py'):
-                col_data = col_data.as_py()
-            if isinstance(col_data, str):
-                col_data = col_data.encode('utf-8')
-            blob_data = BlobData(col_data)
+        blob_data = self._to_blob(col_data)
 
         # Create GenericRow
         fields = [DataField(0, field_name, PyarrowFieldParser.to_paimon_type(row_data.schema[0].type, False))]
@@ -82,6 +58,36 @@ class BlobFileWriter:
         # Write to blob format writer
         self.writer.add_element(row)
         self.row_count += 1
+
+    def _to_blob(self, col_data) -> Blob:
+        if hasattr(col_data, 'as_py'):
+            col_data = col_data.as_py()
+        if isinstance(col_data, str):
+            col_data = col_data.encode('utf-8')
+        if isinstance(col_data, bytearray):
+            col_data = bytes(col_data)
+
+        if isinstance(col_data, Blob):
+            return col_data
+
+        if isinstance(col_data, bytes):
+            if BlobDescriptor.is_blob_descriptor(col_data):
+                descriptor = BlobDescriptor.deserialize(col_data)
+                uri_reader = self.file_io.uri_reader_factory.create(descriptor.uri)
+                return Blob.from_descriptor(uri_reader, descriptor)
+            else:
+                return BlobData(col_data)
+
+        raise ValueError(
+            "Blob field value must be bytes/blob or serialized BlobDescriptor bytes, "
+            f"got {type(col_data)}."
+        )
+
+    @staticmethod
+    def _deserialize_descriptor_or_none(raw: bytes):
+        if not BlobDescriptor.is_blob_descriptor(raw):
+            return None
+        return BlobDescriptor.deserialize(raw)
 
     def reach_target_size(self, suggested_check: bool, target_size: int) -> bool:
         return self.writer.reach_target_size(suggested_check, target_size)

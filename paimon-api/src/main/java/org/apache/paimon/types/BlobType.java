@@ -23,6 +23,7 @@ import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Data type of binary large object.
@@ -67,13 +68,25 @@ public final class BlobType extends DataType {
     }
 
     public static Pair<RowType, RowType> splitBlob(RowType rowType) {
+        return splitBlob(rowType, java.util.Collections.emptySet());
+    }
+
+    /**
+     * Split row fields into normal fields and blob-file fields.
+     *
+     * <p>Blob fields contained in {@code blobStoredDescriptorFields} are treated as normal fields
+     * (stored inline as serialized descriptor bytes), while other blob fields are treated as
+     * blob-file fields.
+     */
+    public static Pair<RowType, RowType> splitBlob(
+            RowType rowType, Set<String> blobStoredDescriptorFields) {
         List<DataField> fields = rowType.getFields();
         List<DataField> normalFields = new ArrayList<>();
         List<DataField> blobFields = new ArrayList<>();
 
         for (DataField field : fields) {
             DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB) {
+            if (type == DataTypeRoot.BLOB && !blobStoredDescriptorFields.contains(field.name())) {
                 blobFields.add(field);
             } else {
                 normalFields.add(field);

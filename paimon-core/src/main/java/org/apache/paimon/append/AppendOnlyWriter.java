@@ -41,6 +41,7 @@ import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
@@ -59,10 +60,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
-
-import static org.apache.paimon.types.DataTypeRoot.BLOB;
 
 /**
  * A {@link RecordWriter} implementation that only accepts records which are always insert
@@ -95,6 +95,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
     @Nullable private final BlobConsumer blobConsumer;
+    private final Set<String> blobStoredDescriptorFields;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -125,6 +126,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             @Nullable BlobConsumer blobConsumer,
+            Set<String> blobStoredDescriptorFields,
             boolean dataEvolutionEnabled) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
@@ -153,6 +155,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.statsCollectorFactories = statsCollectorFactories;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
+        this.blobStoredDescriptorFields = blobStoredDescriptorFields;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -304,7 +307,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (writeSchema.getFieldTypes().stream().anyMatch(t -> t.is(BLOB))) {
+        if (BlobType.splitBlob(writeSchema, blobStoredDescriptorFields).getRight().getFieldCount()
+                > 0) {
             return new RollingBlobFileWriter(
                     fileIO,
                     schemaId,
@@ -324,7 +328,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     // benefit from async write, but cost a lot.
                     false,
                     statsDenseStore,
-                    blobConsumer);
+                    blobConsumer,
+                    blobStoredDescriptorFields);
         }
         return new RowDataRollingFileWriter(
                 fileIO,

@@ -421,15 +421,21 @@ class BlobTest(unittest.TestCase):
             BlobDescriptor.deserialize(b"sho")  # Only 3 bytes, need at least 5
         self.assertIn("too short", str(context.exception))
 
-        # Test with invalid version (version 0)
-        # Create valid data but with wrong version
+        # Test with unsupported version (> current version)
         valid_descriptor = BlobDescriptor("test://uri", 0, 100)
         valid_data = bytearray(valid_descriptor.serialize())
-        valid_data[0] = 0  # Set invalid version (0)
+        valid_data[0] = 3  # Set unsupported version
 
         with self.assertRaises(ValueError) as context:
             BlobDescriptor.deserialize(bytes(valid_data))
-        self.assertIn("Unsupported BlobDescriptor version", str(context.exception))
+        self.assertIn("less than or equal to 2, but found 3", str(context.exception))
+
+        # Test with invalid magic for version 2 descriptor
+        invalid_magic_data = bytearray(valid_descriptor.serialize())
+        invalid_magic_data[1:9] = b"\x00" * 8
+        with self.assertRaises(ValueError) as context:
+            BlobDescriptor.deserialize(bytes(invalid_magic_data))
+        self.assertIn("missing magic header", str(context.exception))
 
         # Test with incomplete data (missing URI bytes)
         incomplete_data = b'\x01\x00\x00\x00\x10'  # Version 1, URI length 16, but no URI bytes
@@ -486,6 +492,15 @@ class BlobTest(unittest.TestCase):
         deserialized = BlobDescriptor.deserialize(serialized)
         self.assertEqual(deserialized.version, 2)
 
+        # v1 payloads should remain deserializable for compatibility
+        descriptor_v1 = BlobDescriptor("test://uri", 0, 100, version=1)
+        serialized_v1 = descriptor_v1.serialize()
+        deserialized_v1 = BlobDescriptor.deserialize(serialized_v1)
+        self.assertEqual(deserialized_v1.version, 1)
+        self.assertEqual(deserialized_v1.uri, descriptor_v1.uri)
+        self.assertEqual(deserialized_v1.offset, descriptor_v1.offset)
+        self.assertEqual(deserialized_v1.length, descriptor_v1.length)
+
     def test_blob_descriptor_edge_cases(self):
         """Test BlobDescriptor with edge cases."""
         # Test with empty URI
@@ -532,14 +547,30 @@ class BlobTest(unittest.TestCase):
         # Check that serialized data starts with version byte
         self.assertEqual(serialized[0], BlobDescriptor.CURRENT_VERSION)
 
-        # Check minimum length (version + uri_length + uri + offset + length)
-        # 1 + 4 + len("test") + 8 + 8 = 25 bytes
-        self.assertEqual(len(serialized), 25)
+        # Check minimum length (version + magic + uri_length + uri + offset + length)
+        # 1 + 8 + 4 + len("test") + 8 + 8 = 33 bytes
+        self.assertEqual(len(serialized), 33)
 
         # Verify round-trip consistency
         deserialized = BlobDescriptor.deserialize(serialized)
         re_serialized = deserialized.serialize()
         self.assertEqual(serialized, re_serialized)
+
+    def test_blob_descriptor_detection(self):
+        import struct
+
+        descriptor_v2 = BlobDescriptor("test://uri", 1, 2)
+        descriptor_v1 = BlobDescriptor("test://uri", 1, 2, version=1)
+        random_bytes = b"not-a-descriptor"
+        fake_v1_prefix = b"\x01not-a-descriptor"
+        v2_magic_only = bytes([2]) + struct.pack('<Q', BlobDescriptor.MAGIC)
+
+        self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v2.serialize()))
+        self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v1.serialize()))
+        self.assertTrue(BlobDescriptor.is_blob_descriptor(v2_magic_only))
+        self.assertFalse(BlobDescriptor.is_blob_descriptor(random_bytes))
+        self.assertFalse(BlobDescriptor.is_blob_descriptor(fake_v1_prefix))
+        self.assertFalse(BlobDescriptor.is_blob_descriptor(b"tiny"))
 
 
 class BlobEndToEndTest(unittest.TestCase):
@@ -996,6 +1027,34 @@ class BlobEndToEndTest(unittest.TestCase):
             file_io.write_blob(null_file_url, null_table, False)
         self.assertIn("null values", str(context.exception))
 
+    def test_blob_write_with_raw_bytes_starting_with_v1_prefix(self):
+        file_io = LocalFileIO(self.temp_dir, Options({}))
+        raw_bytes = b"\x01not-a-blob-descriptor-payload"
+
+        blob_file_path = Path(self.temp_dir) / "raw_prefix_bytes.blob"
+        blob_file_url = _to_url(blob_file_path)
+        schema = pa.schema([pa.field("payload", pa.large_binary())])
+        table = pa.table([[raw_bytes]], schema=schema)
+
+        # Should be treated as plain bytes instead of descriptor bytes.
+        file_io.write_blob(blob_file_url, table, False)
+
+        fields = [DataField(0, "payload", AtomicType("BLOB"))]
+        reader = FormatBlobReader(
+            file_io=file_io,
+            file_path=str(blob_file_path),
+            read_fields=["payload"],
+            full_fields=fields,
+            push_down_predicate=None,
+            blob_as_descriptor=False
+        )
+        try:
+            batch = reader.read_arrow_batch()
+            self.assertIsNotNone(batch)
+            self.assertEqual(batch.column(0)[0].as_py(), raw_bytes)
+        finally:
+            reader.close()
+
     def test_blob_end_to_end_with_descriptor(self):
         # Set up file I/O
         file_io = LocalFileIO(self.temp_dir, Options({}))
@@ -1030,7 +1089,7 @@ class BlobEndToEndTest(unittest.TestCase):
         schema = pa.schema([pa.field(blob_field_name, pa.large_binary())])
         table = pa.table([[descriptor_bytes]], schema=schema)
 
-        # Write the blob file with blob_as_descriptor=True
+        # Write the blob file. The write path adaptively handles descriptor bytes.
         blob_file_path = Path(self.temp_dir) / "descriptor_blob.blob"
         blob_file_url = _to_url(blob_file_path)
         file_io.write_blob(blob_file_url, table, blob_as_descriptor=True)
@@ -1051,7 +1110,7 @@ class BlobEndToEndTest(unittest.TestCase):
             blob_as_descriptor=True
         )
 
-        # Read the data with blob_as_descriptor=True (should return a descriptor)
+        # Read with blob_as_descriptor=True (read output as descriptor bytes)
         batch = reader.read_arrow_batch()
         self.assertIsNotNone(batch)
         self.assertEqual(batch.num_rows, 1)
@@ -1083,7 +1142,7 @@ class BlobEndToEndTest(unittest.TestCase):
         self.assertEqual(batch_content.num_rows, 1)
         read_content_bytes = batch_content.column(0)[0].as_py()
         self.assertIsInstance(read_content_bytes, bytes)
-        # When blob_as_descriptor=False, we should get the actual file content
+        # With blob_as_descriptor=False, we should get the actual blob content
         self.assertEqual(read_content_bytes, test_content)
         reader_content.close()
 

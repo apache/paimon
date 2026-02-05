@@ -20,6 +20,8 @@ package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
@@ -105,6 +107,8 @@ public class ParquetRowDataWriter {
                 case BINARY:
                 case VARBINARY:
                     return new BinaryWriter();
+                case BLOB:
+                    return new BlobDescriptorWriter();
                 case DECIMAL:
                     DecimalType decimalType = (DecimalType) t;
                     return createDecimalWriter(decimalType.getPrecision(), decimalType.getScale());
@@ -310,6 +314,33 @@ public class ParquetRowDataWriter {
 
         private void writeBinary(byte[] value) {
             recordConsumer.addBinary(Binary.fromReusedByteArray(value));
+        }
+    }
+
+    /** Writes BLOB as serialized {@link BlobDescriptor} bytes for descriptor-stored fields. */
+    private class BlobDescriptorWriter implements FieldWriter {
+
+        @Override
+        public void write(InternalRow row, int ordinal) {
+            writeBlob(row.getBlob(ordinal));
+        }
+
+        @Override
+        public void write(InternalArray arrayData, int ordinal) {
+            // Currently we don't support BLOB inside arrays/maps.
+            throw new UnsupportedOperationException("BLOB in array is not supported.");
+        }
+
+        private void writeBlob(Blob blob) {
+            try {
+                BlobDescriptor descriptor = blob.toDescriptor();
+                recordConsumer.addBinary(Binary.fromReusedByteArray(descriptor.serialize()));
+            } catch (Throwable t) {
+                throw new IllegalArgumentException(
+                        "blob.stored-descriptor-fields requires blob field value to be a "
+                                + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                        t);
+            }
         }
     }
 

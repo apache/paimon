@@ -25,13 +25,14 @@ import org.apache.paimon.fs.Path;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.net.URI;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /** A factory to create and cache {@link UriReader}. */
-public class UriReaderFactory {
+public class UriReaderFactory implements Serializable {
 
     private final CatalogContext context;
     private final Map<UriKey, UriReader> readers;

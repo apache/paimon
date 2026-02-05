@@ -18,7 +18,7 @@
 
 import logging
 import uuid
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 import pyarrow as pa
@@ -38,8 +38,9 @@ class DataBlobWriter(DataWriter):
     A rolling file writer that handles both normal data and blob data. This writer creates separate
     files for normal columns and blob columns, managing their lifecycle independently.
 
-    For example, given a table schema with normal columns (id INT, name STRING) and a blob column
-    (data BLOB), this writer will create separate files for (id, name) and (data).
+    For example, given a table schema with normal columns (id INT, name STRING) and blob columns
+    (pic1 BLOB, pic2 BLOB), this writer will create separate files for normal columns and each
+    blob-file column.
 
     Key features:
     - Blob data can roll independently when normal data doesn't need rolling
@@ -79,13 +80,31 @@ class DataBlobWriter(DataWriter):
     def __init__(self, table, partition: Tuple, bucket: int, max_seq_number: int, options: CoreOptions = None):
         super().__init__(table, partition, bucket, max_seq_number, options)
 
-        # Determine blob column from table schema
-        self.blob_column_name = self._get_blob_columns_from_schema()
+        # Determine blob columns from table schema
+        self.blob_column_names = self._get_blob_columns_from_schema()
+        self.blob_stored_descriptor_fields = CoreOptions.blob_stored_descriptor_fields(self.options)
 
-        # Split schema into normal and blob columns
+        unknown_descriptor_fields = self.blob_stored_descriptor_fields.difference(
+            set(self.blob_column_names)
+        )
+        if unknown_descriptor_fields:
+            raise ValueError(
+                "Fields in 'blob.stored-descriptor-fields' must be blob fields in schema. "
+                f"Unknown fields: {sorted(unknown_descriptor_fields)}"
+            )
+
+        # Blob fields that should still be written to `.blob` files.
+        self.blob_file_column_names = [
+            col for col in self.blob_column_names if col not in self.blob_stored_descriptor_fields
+        ]
+
         all_column_names = self.table.field_names
-        self.normal_column_names = [col for col in all_column_names if col != self.blob_column_name]
-        self.normal_columns = [field for field in self.table.table_schema.fields if field.name != self.blob_column_name]
+        self.normal_column_names = [
+            col for col in all_column_names if col not in self.blob_file_column_names
+        ]
+        self.normal_columns = [
+            field for field in self.table.table_schema.fields if field.name in self.normal_column_names
+        ]
         self.write_cols = self.normal_column_names
 
         # State management for blob writer
@@ -95,33 +114,37 @@ class DataBlobWriter(DataWriter):
         # Track pending data for normal data only
         self.pending_normal_data: Optional[pa.Table] = None
 
-        # Initialize blob writer with blob column name
+        # Initialize blob writers for each blob-file column.
         from pypaimon.write.writer.blob_writer import BlobWriter
-        self.blob_writer = BlobWriter(
-            table=self.table,
-            partition=self.partition,
-            bucket=self.bucket,
-            max_seq_number=max_seq_number,
-            blob_column=self.blob_column_name,
-            options=options
+        self.blob_writers: Dict[str, BlobWriter] = {}
+        for blob_column in self.blob_file_column_names:
+            self.blob_writers[blob_column] = BlobWriter(
+                table=self.table,
+                partition=self.partition,
+                bucket=self.bucket,
+                max_seq_number=max_seq_number,
+                blob_column=blob_column,
+                options=options
+            )
+
+        logger.info(
+            "Initialized DataBlobWriter with blob columns: %s, blob file columns: %s, descriptor "
+            "stored columns: %s",
+            self.blob_column_names,
+            self.blob_file_column_names,
+            sorted(self.blob_stored_descriptor_fields),
         )
 
-        logger.info(f"Initialized DataBlobWriter with blob column: {self.blob_column_name}")
-
-    def _get_blob_columns_from_schema(self) -> str:
+    def _get_blob_columns_from_schema(self) -> List[str]:
         blob_columns = []
         for field in self.table.table_schema.fields:
             type_str = str(field.type).lower()
             if 'blob' in type_str:
                 blob_columns.append(field.name)
 
-        # Validate blob column count (matching Java constraint)
         if len(blob_columns) == 0:
             raise ValueError("No blob field found in table schema.")
-        elif len(blob_columns) > 1:
-            raise ValueError("Limit exactly one blob field in one paimon table yet.")
-
-        return blob_columns[0]  # Return single blob column name
+        return blob_columns
 
     def _process_data(self, data: pa.RecordBatch) -> pa.RecordBatch:
         normal_data, _ = self._split_data(data)
@@ -133,7 +156,8 @@ class DataBlobWriter(DataWriter):
     def write(self, data: pa.RecordBatch):
         try:
             # Split data into normal and blob parts
-            normal_data, blob_data = self._split_data(data)
+            normal_data, blob_data_map = self._split_data(data)
+            self._validate_descriptor_stored_fields_input(data)
 
             # Process and accumulate normal data
             processed_normal = self._process_normal_data(normal_data)
@@ -142,10 +166,10 @@ class DataBlobWriter(DataWriter):
             else:
                 self.pending_normal_data = self._merge_normal_data(self.pending_normal_data, processed_normal)
 
-            # Write blob data directly to blob writer (handles its own rolling)
-            if blob_data is not None and blob_data.num_rows > 0:
-                # Write blob data directly to blob writer
-                self.blob_writer.write(blob_data)
+            # Write blob-file columns to dedicated blob writers.
+            for blob_column, blob_data in blob_data_map.items():
+                if blob_data is not None and blob_data.num_rows > 0:
+                    self.blob_writers[blob_column].write(blob_data)
 
             self.record_count += data.num_rows
 
@@ -181,21 +205,51 @@ class DataBlobWriter(DataWriter):
 
     def abort(self):
         """Abort all writers and clean up resources."""
-        self.blob_writer.abort()
+        for blob_writer in self.blob_writers.values():
+            blob_writer.abort()
         self.pending_normal_data = None
         self.committed_files.clear()
 
-    def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, pa.RecordBatch]:
+    def _split_data(self, data: pa.RecordBatch) -> Tuple[pa.RecordBatch, Dict[str, pa.RecordBatch]]:
         """Split data into normal and blob parts based on column names."""
-        # Use the pre-computed column names
-        normal_columns = self.normal_column_names
-        blob_columns = [self.blob_column_name]  # Single blob column
+        normal_data = data.select(self.normal_column_names) if self.normal_column_names else None
+        blob_data_map = {
+            blob_column: data.select([blob_column]) for blob_column in self.blob_file_column_names
+        }
+        return normal_data, blob_data_map
 
-        # Create projected batches
-        normal_data = data.select(normal_columns) if normal_columns else None
-        blob_data = data.select(blob_columns) if blob_columns else None
+    def _validate_descriptor_stored_fields_input(self, data: pa.RecordBatch):
+        if not self.blob_stored_descriptor_fields:
+            return
 
-        return normal_data, blob_data
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        for field_name in self.blob_stored_descriptor_fields:
+            if field_name not in data.schema.names:
+                continue
+            values = data.column(data.schema.get_field_index(field_name)).to_pylist()
+            for value in values:
+                if value is None:
+                    continue
+                if hasattr(value, 'as_py'):
+                    value = value.as_py()
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                if not isinstance(value, (bytes, bytearray)):
+                    raise ValueError(
+                        "blob.stored-descriptor-fields requires blob field value to be a serialized "
+                        "BlobDescriptor."
+                    )
+                try:
+                    descriptor_bytes = bytes(value)
+                    descriptor = BlobDescriptor.deserialize(descriptor_bytes)
+                    if descriptor.serialize() != descriptor_bytes:
+                        raise ValueError("Descriptor payload contains trailing bytes.")
+                except Exception as e:
+                    raise ValueError(
+                        "blob.stored-descriptor-fields requires blob field value to be a serialized "
+                        "BlobDescriptor."
+                    ) from e
 
     @staticmethod
     def _process_normal_data(data: pa.RecordBatch) -> pa.Table:
@@ -228,11 +282,11 @@ class DataBlobWriter(DataWriter):
         # Close normal writer and get metadata
         normal_meta = self._write_normal_data_to_file(self.pending_normal_data)
 
-        # Fetch blob metadata from blob writer
-        blob_metas = self.blob_writer.prepare_commit()
-
-        # Validate consistency between normal and blob files (Java behavior)
-        self._validate_consistency(normal_meta, blob_metas)
+        blob_metas = []
+        for blob_column in self.blob_file_column_names:
+            writer_metas = self.blob_writers[blob_column].prepare_commit()
+            self._validate_consistency(normal_meta, writer_metas, blob_column)
+            blob_metas.extend(writer_metas)
 
         # Add normal file metadata first
         self.committed_files.append(normal_meta)
@@ -301,7 +355,8 @@ class DataBlobWriter(DataWriter):
             file_path=file_path,
             write_cols=self.write_cols)
 
-    def _validate_consistency(self, normal_meta: DataFileMeta, blob_metas: List[DataFileMeta]):
+    def _validate_consistency(
+            self, normal_meta: DataFileMeta, blob_metas: List[DataFileMeta], blob_column: str):
         if normal_meta is None:
             return
 
@@ -312,5 +367,6 @@ class DataBlobWriter(DataWriter):
             raise RuntimeError(
                 f"This is a bug: The row count of main file and blob files does not match. "
                 f"Main file: {normal_meta.file_name} (row count: {normal_row_count}), "
+                f"blob field: {blob_column}, "
                 f"blob files: {[meta.file_name for meta in blob_metas]} (total row count: {blob_row_count})"
             )

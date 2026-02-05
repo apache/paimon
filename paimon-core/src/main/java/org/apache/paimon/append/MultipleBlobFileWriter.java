@@ -42,6 +42,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
@@ -61,8 +62,10 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             long targetFileSize,
-            @Nullable BlobConsumer blobConsumer) {
-        RowType blobRowType = BlobType.splitBlob(writeSchema).getRight();
+            @Nullable BlobConsumer blobConsumer,
+            Set<String> blobStoredDescriptorFields) {
+        RowType blobRowType =
+                BlobType.splitBlob(writeSchema, blobStoredDescriptorFields).getRight();
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
             BlobFileFormat blobFileFormat = new BlobFileFormat();

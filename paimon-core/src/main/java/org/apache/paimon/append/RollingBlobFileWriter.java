@@ -48,6 +48,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -83,6 +84,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             writerFactory;
     private final Supplier<MultipleBlobFileWriter> blobWriterFactory;
     private final long targetFileSize;
+    private final Set<String> blobStoredDescriptorFields;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -109,11 +111,13 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             FileSource fileSource,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable BlobConsumer blobConsumer) {
+            @Nullable BlobConsumer blobConsumer,
+            Set<String> blobStoredDescriptorFields) {
         // Initialize basic fields
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
+        this.blobStoredDescriptorFields = blobStoredDescriptorFields;
 
         // Initialize writer factory for normal data
         this.writerFactory =
@@ -121,7 +125,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                         fileIO,
                         schemaId,
                         fileFormat,
-                        BlobType.splitBlob(writeSchema).getLeft(),
+                        BlobType.splitBlob(writeSchema, blobStoredDescriptorFields).getLeft(),
                         writeSchema,
                         pathFactory,
                         seqNumCounterSupplier,
@@ -145,7 +149,8 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                                 asyncFileWrite,
                                 statsDenseStore,
                                 blobTargetFileSize,
-                                blobConsumer);
+                                blobConsumer,
+                                this.blobStoredDescriptorFields);
     }
 
     /** Creates a factory for normal data writers. */

@@ -133,6 +133,9 @@ class SplitRead(ABC):
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
+        blob_as_descriptor = CoreOptions.blob_as_descriptor(self.table.options)
+        blob_stored_descriptor_fields = CoreOptions.blob_stored_descriptor_fields(self.table.options)
+
         index_mapping = self.create_index_mapping()
         partition_info = self._create_partition_info()
         system_fields = SpecialFields.find_system_fields(self.read_fields)
@@ -150,7 +153,10 @@ class SplitRead(ABC):
                 file.max_sequence_number,
                 file.first_row_id,
                 row_tracking_enabled,
-                system_fields)
+                system_fields,
+                blob_as_descriptor=blob_as_descriptor,
+                blob_stored_descriptor_fields=blob_stored_descriptor_fields,
+                file_io=self.table.file_io)
         else:
             return DataFileBatchReader(
                 format_reader,
@@ -161,7 +167,10 @@ class SplitRead(ABC):
                 file.max_sequence_number,
                 file.first_row_id,
                 row_tracking_enabled,
-                system_fields)
+                system_fields,
+                blob_as_descriptor=blob_as_descriptor,
+                blob_stored_descriptor_fields=blob_stored_descriptor_fields,
+                file_io=self.table.file_io)
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))

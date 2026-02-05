@@ -218,7 +218,12 @@ class FileIO(ABC):
         raise NotImplementedError("write_lance must be implemented by FileIO subclasses")
 
     def write_blob(self, path: str, data, blob_as_descriptor: bool, **kwargs):
-        """Write Blob format file. Must be implemented by subclasses."""
+        """
+        Write Blob format file.
+
+        NOTE: blob_as_descriptor is kept only for compatibility with existing callers.
+        Blob write behavior is adaptive and does not depend on this flag.
+        """
         raise NotImplementedError("write_blob must be implemented by FileIO subclasses")
     
     def close(self):
