@@ -50,7 +50,9 @@ public class FileStoreTableFactory {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        return create(fileIO, context.options());
+        CatalogEnvironment catalogEnvironment =
+                new CatalogEnvironment(null, null, null, null, null, context, false);
+        return create(fileIO, context.options(), catalogEnvironment);
     }
 
     public static FileStoreTable create(FileIO fileIO, Path path) {
@@ -60,6 +62,11 @@ public class FileStoreTableFactory {
     }
 
     public static FileStoreTable create(FileIO fileIO, Options options) {
+        return create(fileIO, options, CatalogEnvironment.empty());
+    }
+
+    public static FileStoreTable create(
+            FileIO fileIO, Options options, CatalogEnvironment catalogEnvironment) {
         Path tablePath = CoreOptions.path(options);
         String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema =
@@ -72,7 +79,7 @@ public class FileStoreTableFactory {
                                                         + tablePath
                                                         + ". Please create table first."));
 
-        return create(fileIO, tablePath, tableSchema, options, CatalogEnvironment.empty());
+        return create(fileIO, tablePath, tableSchema, options, catalogEnvironment);
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
