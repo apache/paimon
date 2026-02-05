@@ -59,7 +59,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     private final BucketedDvMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
     private final int minFileNum;
-    private final long targetFileSize;
+    private final long compactionFileSize;
     private final boolean forceRewriteAllFiles;
     private final CompactRewriter rewriter;
 
@@ -72,7 +72,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             List<DataFileMeta> restored,
             @Nullable BucketedDvMaintainer dvMaintainer,
             int minFileNum,
-            long targetFileSize,
+            long compactionFileSize,
             boolean forceRewriteAllFiles,
             CompactRewriter rewriter,
             @Nullable CompactionMetrics.Reporter metricsReporter) {
@@ -81,7 +81,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         this.toCompact = new PriorityQueue<>(Comparator.comparing(DataFileMeta::minSequenceNumber));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
-        this.targetFileSize = targetFileSize;
+        this.compactionFileSize = compactionFileSize;
         this.forceRewriteAllFiles = forceRewriteAllFiles;
         this.rewriter = rewriter;
         this.metricsReporter = metricsReporter;
@@ -117,7 +117,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                         new FullCompactTask(
                                 dvMaintainer,
                                 toCompact,
-                                targetFileSize,
+                                compactionFileSize,
                                 forceRewriteAllFiles,
                                 rewriter,
                                 metricsReporter));
@@ -188,7 +188,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 // if the last compacted file is still small,
                 // add it back to the head
                 DataFileMeta lastFile = compactResult.after().get(compactResult.after().size() - 1);
-                if (lastFile.fileSize() < targetFileSize) {
+                if (lastFile.fileSize() < compactionFileSize) {
                     toCompact.add(lastFile);
                 }
             }
@@ -214,7 +214,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             fileNum++;
             if (fileNum >= minFileNum) {
                 return Optional.of(candidates);
-            } else if (totalFileSize >= targetFileSize) {
+            } else if (totalFileSize >= compactionFileSize) {
                 // let pointer shift one pos to right
                 DataFileMeta removed = candidates.pollFirst();
                 assert removed != null;
@@ -243,21 +243,21 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
 
         private final BucketedDvMaintainer dvMaintainer;
         private final LinkedList<DataFileMeta> toCompact;
-        private final long targetFileSize;
+        private final long compactionFileSize;
         private final boolean forceRewriteAllFiles;
         private final CompactRewriter rewriter;
 
         public FullCompactTask(
                 BucketedDvMaintainer dvMaintainer,
                 Collection<DataFileMeta> inputs,
-                long targetFileSize,
+                long compactionFileSize,
                 boolean forceRewriteAllFiles,
                 CompactRewriter rewriter,
                 @Nullable CompactionMetrics.Reporter metricsReporter) {
             super(metricsReporter);
             this.dvMaintainer = dvMaintainer;
             this.toCompact = new LinkedList<>(inputs);
-            this.targetFileSize = targetFileSize;
+            this.compactionFileSize = compactionFileSize;
             this.forceRewriteAllFiles = forceRewriteAllFiles;
             this.rewriter = rewriter;
         }
@@ -268,7 +268,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             while (!forceRewriteAllFiles && !toCompact.isEmpty()) {
                 DataFileMeta file = toCompact.peekFirst();
                 // the data file with deletion file always need to be compacted.
-                if (file.fileSize() >= targetFileSize && !hasDeletionFile(file)) {
+                if (file.fileSize() >= compactionFileSize && !hasDeletionFile(file)) {
                     toCompact.poll();
                     continue;
                 }
@@ -284,7 +284,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
                 int big = 0;
                 int small = 0;
                 for (DataFileMeta file : toCompact) {
-                    if (file.fileSize() >= targetFileSize) {
+                    if (file.fileSize() >= compactionFileSize) {
                         big++;
                     } else {
                         small++;

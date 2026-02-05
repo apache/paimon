@@ -120,7 +120,7 @@ public class BucketedAppendFileStoreWrite extends BaseAppendFileStoreWrite {
                     restoredFiles,
                     dvMaintainer,
                     options.compactionMinFileNum(),
-                    options.targetFileSize(false),
+                    options.compactionFileSize(false),
                     options.forceRewriteAllFiles(),
                     files -> compactRewrite(partition, bucket, dvFactory, files),
                     compactionMetrics == null
