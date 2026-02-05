@@ -43,8 +43,8 @@ import scala.collection.mutable
  * Note: The [[pushedPartitionFilters]] and [[pushedDataFilters]] are intentionally set to empty
  * because file-level filtering is handled through Spark's runtime V2 filtering mechanism.
  *
- * When Spark's runtime filter is not applied (e.g., when NOT MATCHED is present in MergeInto which
- * requires FULL OUTER JOIN), this scan will read all data from the table.
+ * When Spark's runtime filter is not applied (e.g., when NOT MATCHED BY SOURCE is present in
+ * MergeInto), this scan will read all data from the table.
  */
 case class PaimonCopyOnWriteScan(
     table: FileStoreTable,
