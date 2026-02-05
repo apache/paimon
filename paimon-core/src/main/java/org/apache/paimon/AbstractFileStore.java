@@ -48,7 +48,6 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
-import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -291,12 +290,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 newIndexFileHandler(),
                                 snapshotManager,
                                 scanner);
-        StrictModeChecker strictModeChecker =
-                StrictModeChecker.create(
-                        snapshotManager,
-                        commitUser,
-                        this::newScan,
-                        options.commitStrictModeLastSafeSnapshot().orElse(null));
         CommitRollback rollback = null;
         TableRollback tableRollback = catalogEnvironment.catalogTableRollback();
         if (tableRollback != null) {
@@ -310,32 +303,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 commitUser,
                 partitionType,
                 options,
-                options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager,
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),
-                newScan(),
-                options.bucket(),
-                options.manifestTargetSize(),
-                options.manifestFullCompactionThresholdSize(),
-                options.manifestMergeMinCount(),
-                partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
-                options.branch(),
+                this::newScan,
                 newStatsFileHandler(),
                 bucketMode(),
-                options.scanManifestParallelism(),
                 createCommitPreCallbacks(table),
                 createCommitCallbacks(commitUser, table),
-                options.commitMaxRetries(),
-                options.commitTimeout(),
-                options.commitMinRetryWait(),
-                options.commitMaxRetryWait(),
-                options.rowTrackingEnabled(),
-                options.commitDiscardDuplicateFiles(),
                 conflictDetectFactory,
-                strictModeChecker,
                 rollback);
     }
 
