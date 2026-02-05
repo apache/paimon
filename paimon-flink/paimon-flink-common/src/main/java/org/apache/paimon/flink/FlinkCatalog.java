@@ -386,7 +386,6 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         try {
-            Table table = null;
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
