@@ -20,9 +20,13 @@ package org.apache.paimon.azure;
 
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
+import org.apache.hadoop.fs.FSDataOutputStreamBuilder;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.azure.NativeAzureFileSystem;
 import org.apache.hadoop.fs.azurebfs.AzureBlobFileSystem;
@@ -32,6 +36,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -64,6 +69,33 @@ public class AzureFileIO extends HadoopCompliantFileIO {
     @Override
     public void configure(CatalogContext context) {
         this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromContext(context));
+    }
+
+    /**
+     * Write content atomically using Azure conditional writes.
+     *
+     * @param path the target file path
+     * @param content the content to write
+     * @return true if write succeeded, false if file already exists
+     * @throws IOException on I/O errors
+     */
+    @Override
+    public boolean tryToWriteAtomic(Path path, String content) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        FileSystem fs = getFileSystem(hadoopPath);
+
+        byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+
+        FSDataOutputStreamBuilder builder = fs.createFile(hadoopPath);
+        builder.must("fs.option.create.conditional.overwrite", true);
+
+        try (FSDataOutputStream out = builder.create().overwrite(false).build()) {
+            out.write(contentBytes);
+            return true;
+        } catch (FileAlreadyExistsException e) {
+            LOG.debug("Conditional write failed, file already exists: {}", path);
+            return false;
+        }
     }
 
     // add additional config entries from the IO config to the Hadoop config
