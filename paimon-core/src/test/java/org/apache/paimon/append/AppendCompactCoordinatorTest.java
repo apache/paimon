@@ -23,6 +23,7 @@ import org.apache.paimon.deletionvectors.append.AppendDeleteFileMaintainer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -40,10 +41,13 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.COMPACTION_MIN_FILE_NUM;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
+import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -239,5 +243,26 @@ public class AppendCompactCoordinatorTest {
             files.add(newFile(fileSize));
         }
         return files;
+    }
+
+    private DataFileMeta newFile(long fileSize) {
+        return DataFileMeta.create(
+                UUID.randomUUID().toString(),
+                fileSize,
+                100,
+                row(0),
+                row(0),
+                newSimpleStats(0, 1),
+                newSimpleStats(0, 1),
+                0,
+                0,
+                0,
+                0,
+                0L,
+                null,
+                FileSource.APPEND,
+                null,
+                null,
+                null);
     }
 }
