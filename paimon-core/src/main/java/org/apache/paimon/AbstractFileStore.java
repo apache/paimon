@@ -326,6 +326,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 newStatsFileHandler(),
                 bucketMode(),
                 options.scanManifestParallelism(),
+                createCommitPreCallbacks(table),
                 createCommitCallbacks(commitUser, table),
                 options.commitMaxRetries(),
                 options.commitTimeout(),
@@ -335,8 +336,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.commitDiscardDuplicateFiles(),
                 conflictDetectFactory,
                 strictModeChecker,
-                rollback,
-                createCommitPreCallbacks(commitUser, table));
+                rollback);
     }
 
     @Override
@@ -395,6 +395,14 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.legacyPartitionName());
     }
 
+    private List<CommitPreCallback> createCommitPreCallbacks(FileStoreTable table) {
+        List<CommitPreCallback> callbacks = new ArrayList<>();
+        if (options.isChainTable()) {
+            callbacks.add(new ChainTableCommitPreCallback(table));
+        }
+        return callbacks;
+    }
+
     private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
         List<CommitCallback> callbacks = new ArrayList<>();
 
@@ -431,15 +439,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
-        return callbacks;
-    }
-
-    private List<CommitPreCallback> createCommitPreCallbacks(
-            String commitUser, FileStoreTable table) {
-        List<CommitPreCallback> callbacks = new ArrayList<>();
-        if (options.isChainTable()) {
-            callbacks.add(new ChainTableCommitPreCallback(table));
-        }
         return callbacks;
     }
 

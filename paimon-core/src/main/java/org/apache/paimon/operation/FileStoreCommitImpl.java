@@ -150,6 +150,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final boolean dynamicPartitionOverwrite;
     private final String branchName;
     @Nullable private final Integer manifestReadParallelism;
+    private final List<CommitPreCallback> commitPreCallbacks;
     private final List<CommitCallback> commitCallbacks;
     private final StatsFileHandler statsFileHandler;
     private final BucketMode bucketMode;
@@ -166,8 +167,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
-
-    private final List<CommitPreCallback> commitPreCallbacks;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -193,6 +192,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             StatsFileHandler statsFileHandler,
             BucketMode bucketMode,
             @Nullable Integer manifestReadParallelism,
+            List<CommitPreCallback> commitPreCallbacks,
             List<CommitCallback> commitCallbacks,
             int commitMaxRetries,
             long commitTimeout,
@@ -202,8 +202,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             boolean discardDuplicateFiles,
             ConflictDetection.Factory conflictDetectFactory,
             @Nullable StrictModeChecker strictModeChecker,
-            @Nullable CommitRollback rollback,
-            List<CommitPreCallback> commitPreCallbacks) {
+            @Nullable CommitRollback rollback) {
         this.snapshotCommit = snapshotCommit;
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -226,6 +225,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.branchName = branchName;
         this.manifestReadParallelism = manifestReadParallelism;
+        this.commitPreCallbacks = commitPreCallbacks;
         this.commitCallbacks = commitCallbacks;
         this.commitMaxRetries = commitMaxRetries;
         this.commitTimeout = commitTimeout;
@@ -245,7 +245,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.strictModeChecker = strictModeChecker;
         this.conflictDetection = conflictDetectFactory.create(scanner);
         this.commitCleaner = new CommitCleaner(manifestList, manifestFile, indexManifestFile);
-        this.commitPreCallbacks = commitPreCallbacks;
     }
 
     @Override
