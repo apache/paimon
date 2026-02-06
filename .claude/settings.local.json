@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export DOCKER_HOST=unix:///var/run/docker.sock)",
+      "Bash(env:*)",
+      "Bash(mvn help:system:*)",
+      "Bash(git log:*)"
+    ]
+  }
+}
