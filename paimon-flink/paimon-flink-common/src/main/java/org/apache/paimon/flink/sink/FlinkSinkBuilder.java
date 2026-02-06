@@ -34,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.utils.BlobDescriptorUtils;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -207,12 +208,14 @@ public class FlinkSinkBuilder {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
         boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
+        CatalogContext contextForDescriptor =
+                BlobDescriptorUtils.getCatalogContext(
+                        table.catalogEnvironment().catalogContext(),
+                        table.coreOptions().toConfiguration());
+
         DataStream<InternalRow> input =
                 mapToInternalRow(
-                        this.input,
-                        table.rowType(),
-                        blobAsDescriptor,
-                        table.catalogEnvironment().catalogContext());
+                        this.input, table.rowType(), blobAsDescriptor, contextForDescriptor);
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
