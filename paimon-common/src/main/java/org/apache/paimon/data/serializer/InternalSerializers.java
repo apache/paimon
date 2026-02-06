@@ -53,6 +53,7 @@ public final class InternalSerializers {
                 return BooleanSerializer.INSTANCE;
             case BINARY:
             case VARBINARY:
+            case BLOB_REF:
                 return BinarySerializer.INSTANCE;
             case DECIMAL:
                 return new DecimalSerializer(getPrecision(type), getScale(type));

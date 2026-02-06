@@ -22,6 +22,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BlobConsumer;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.BundleRecords;
@@ -33,6 +34,7 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.operation.WriteRestore;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Restorable;
@@ -40,6 +42,7 @@ import org.apache.paimon.utils.RowKindFilter;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
@@ -62,6 +65,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private boolean batchCommitted = false;
     private RowType writeType;
     private int[] notNullFieldIndex;
+    private int[] blobRefFieldIndex;
+    private String[] blobRefFieldName;
 
     private final @Nullable DefaultValueRow defaultValueRow;
 
@@ -85,6 +90,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                         .map(DataField::name)
                         .collect(Collectors.toList());
         this.notNullFieldIndex = rowType.getFieldIndices(notNullColumnNames);
+        initBlobRefFields(rowType);
         this.defaultValueRow = DefaultValueRow.create(rowType);
     }
 
@@ -120,6 +126,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                         .map(DataField::name)
                         .collect(Collectors.toList());
         this.notNullFieldIndex = writeType.getFieldIndices(notNullColumnNames);
+        initBlobRefFields(writeType);
         return this;
     }
 
@@ -183,6 +190,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
         checkNullability(row);
         row = wrapDefaultValue(row);
+        checkBlobRef(row);
         RowKind rowKind = RowKindGenerator.getRowKind(rowKindGenerator, row);
         if (rowKindFilter != null && !rowKindFilter.test(rowKind)) {
             return null;
@@ -190,6 +198,63 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         SinkRecord record = bucket == -1 ? toSinkRecord(row) : toSinkRecord(row, bucket);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record, rowKind));
         return record;
+    }
+
+    private void initBlobRefFields(RowType rowType) {
+        List<DataField> fields = rowType.getFields();
+        int count = 0;
+        for (int i = 0; i < fields.size(); i++) {
+            if (fields.get(i).type().is(DataTypeRoot.BLOB_REF)) {
+                count++;
+            }
+        }
+        if (count == 0) {
+            this.blobRefFieldIndex = new int[0];
+            this.blobRefFieldName = new String[0];
+            return;
+        }
+        int[] index = new int[count];
+        String[] name = new String[count];
+        int j = 0;
+        for (int i = 0; i < fields.size(); i++) {
+            if (fields.get(i).type().is(DataTypeRoot.BLOB_REF)) {
+                index[j] = i;
+                name[j] = fields.get(i).name();
+                j++;
+            }
+        }
+        this.blobRefFieldIndex = index;
+        this.blobRefFieldName = name;
+    }
+
+    private void checkBlobRef(InternalRow row) {
+        for (int i = 0; i < blobRefFieldIndex.length; i++) {
+            int idx = blobRefFieldIndex[i];
+            if (row.isNullAt(idx)) {
+                continue;
+            }
+
+            byte[] bytes = row.getBinary(idx);
+            try {
+                BlobDescriptor descriptor = BlobDescriptor.deserialize(bytes);
+                // Ensure exact/canonical encoding, also rejects trailing bytes.
+                if (!Arrays.equals(descriptor.serialize(), bytes)) {
+                    throw new IllegalArgumentException(
+                            "BlobRef bytes is not canonical (contains trailing bytes or is malformed).");
+                }
+                if (descriptor.offset() < 0 || descriptor.length() < 0) {
+                    throw new IllegalArgumentException(
+                            "BlobRef descriptor offset/length must be non-negative.");
+                }
+            } catch (Throwable t) {
+                String columnName = blobRefFieldName[i];
+                throw new RuntimeException(
+                        String.format(
+                                "Invalid BlobRef bytes for column '%s': must follow BlobDescriptor serialization.",
+                                columnName),
+                        t);
+            }
+        }
     }
 
     private void checkNullability(InternalRow row) {

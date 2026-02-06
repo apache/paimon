@@ -75,6 +75,9 @@ public class OrcTypeUtil {
                     throw new UnsupportedOperationException(
                             "Not support other binary type: " + type);
                 }
+            case BLOB_REF:
+                return TypeDescription.createBinary()
+                        .setAttribute(PAIMON_ORC_FIELD_ID_KEY, String.valueOf(fieldId));
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) type;
                 return TypeDescription.createDecimal()

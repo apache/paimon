@@ -159,6 +159,10 @@ public class DataTypes {
         return new BlobType();
     }
 
+    public static BlobRefType BLOB_REF() {
+        return new BlobRefType();
+    }
+
     public static OptionalInt getPrecision(DataType dataType) {
         return dataType.accept(PRECISION_EXTRACTOR);
     }

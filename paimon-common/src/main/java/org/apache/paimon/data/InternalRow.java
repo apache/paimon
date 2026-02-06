@@ -126,6 +126,7 @@ public interface InternalRow extends DataGetters {
                 return Boolean.class;
             case BINARY:
             case VARBINARY:
+            case BLOB_REF:
                 return byte[].class;
             case DECIMAL:
                 return Decimal.class;
@@ -178,6 +179,7 @@ public interface InternalRow extends DataGetters {
                 break;
             case BINARY:
             case VARBINARY:
+            case BLOB_REF:
                 fieldGetter = row -> row.getBinary(fieldPos);
                 break;
             case DECIMAL:

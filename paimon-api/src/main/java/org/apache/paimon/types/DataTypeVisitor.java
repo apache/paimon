@@ -66,6 +66,10 @@ public interface DataTypeVisitor<R> {
 
     R visit(BlobType blobType);
 
+    default R visit(BlobRefType blobRefType) {
+        return visit(new VarBinaryType(blobRefType.isNullable(), VarBinaryType.MAX_LENGTH));
+    }
+
     R visit(ArrayType arrayType);
 
     R visit(MultisetType multisetType);

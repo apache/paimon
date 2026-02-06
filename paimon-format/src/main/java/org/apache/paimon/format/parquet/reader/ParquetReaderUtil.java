@@ -100,6 +100,7 @@ public class ParquetReaderUtil {
             case CHAR:
             case VARCHAR:
             case VARBINARY:
+            case BLOB_REF:
                 return new HeapBytesVector(batchSize);
             case BINARY:
                 return new HeapBytesVector(batchSize);
