@@ -25,7 +25,7 @@ import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -51,12 +51,13 @@ public class AddPartitionCommitCallback implements CommitCallback {
                     .softValues()
                     .build();
 
-    private final PartitionHandler partitionHandler;
+    private final PartitionModification partitionModification;
     private final InternalRowPartitionComputer partitionComputer;
 
     public AddPartitionCommitCallback(
-            PartitionHandler partitionHandler, InternalRowPartitionComputer partitionComputer) {
-        this.partitionHandler = partitionHandler;
+            PartitionModification partitionModification,
+            InternalRowPartitionComputer partitionComputer) {
+        this.partitionModification = partitionModification;
         this.partitionComputer = partitionComputer;
     }
 
@@ -92,7 +93,7 @@ public class AddPartitionCommitCallback implements CommitCallback {
                 }
             }
             if (!newPartitions.isEmpty()) {
-                partitionHandler.createPartitions(
+                partitionModification.createPartitions(
                         newPartitions.stream()
                                 .map(partitionComputer::generatePartValues)
                                 .collect(Collectors.toList()));
@@ -105,6 +106,6 @@ public class AddPartitionCommitCallback implements CommitCallback {
 
     @Override
     public void close() throws Exception {
-        partitionHandler.close();
+        partitionModification.close();
     }
 }

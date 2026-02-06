@@ -282,6 +282,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsPartitionModification() {
+        return wrapped.supportsPartitionModification();
+    }
+
+    @Override
     public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         wrapped.createPartitions(identifier, partitions);

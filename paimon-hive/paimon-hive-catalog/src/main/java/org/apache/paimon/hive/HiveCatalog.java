@@ -353,6 +353,11 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
+    @Override
+    public boolean supportsPartitionModification() {
+        return true;
+    }
+
     private boolean metastorePartitioned(TableSchema schema) {
         CoreOptions options = CoreOptions.fromMap(schema.options());
         return (!schema.partitionKeys().isEmpty() && options.partitionedTableInMetastore())

@@ -20,7 +20,8 @@ package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionMarkDone;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Closeable;
@@ -57,13 +58,13 @@ public interface PartitionMarkDoneAction extends Closeable {
                                 case DONE_PARTITION:
                                     instance =
                                             new AddDonePartitionAction(
-                                                    createPartitionHandler(
+                                                    createPartitionModification(
                                                             fileStoreTable, options));
                                     break;
                                 case MARK_EVENT:
                                     instance =
                                             new MarkPartitionDoneEventAction(
-                                                    createPartitionHandler(
+                                                    createPartitionMarkDone(
                                                             fileStoreTable, options));
                                     break;
                                 case HTTP_REPORT:
@@ -100,18 +101,36 @@ public interface PartitionMarkDoneAction extends Closeable {
         }
     }
 
-    static PartitionHandler createPartitionHandler(FileStoreTable table, CoreOptions options) {
-        PartitionHandler partitionHandler = table.catalogEnvironment().partitionHandler();
+    static PartitionModification createPartitionModification(
+            FileStoreTable table, CoreOptions options) {
+        PartitionModification partitionModification =
+                table.catalogEnvironment().partitionModification();
 
         if (options.toConfiguration().get(PARTITION_MARK_DONE_ACTION).contains("done-partition")) {
             checkNotNull(
-                    partitionHandler, "Cannot mark done partition for table without metastore.");
+                    partitionModification,
+                    "Cannot mark done partition for table without metastore.");
             checkArgument(
                     options.partitionedTableInMetastore(),
                     "Table should enable %s",
                     METASTORE_PARTITIONED_TABLE.key());
         }
 
-        return partitionHandler;
+        return partitionModification;
+    }
+
+    static PartitionMarkDone createPartitionMarkDone(FileStoreTable table, CoreOptions options) {
+        PartitionMarkDone partitionMarkDone = table.catalogEnvironment().partitionMarkDone();
+
+        if (options.toConfiguration().get(PARTITION_MARK_DONE_ACTION).contains("mark-event")) {
+            checkNotNull(
+                    partitionMarkDone, "Cannot mark done partition for table without metastore.");
+            checkArgument(
+                    options.partitionedTableInMetastore(),
+                    "Table should enable %s",
+                    METASTORE_PARTITIONED_TABLE.key());
+        }
+
+        return partitionMarkDone;
     }
 }

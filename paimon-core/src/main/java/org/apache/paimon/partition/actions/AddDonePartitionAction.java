@@ -19,7 +19,7 @@
 package org.apache.paimon.partition.actions;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -33,10 +33,10 @@ import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFro
 /** A {@link PartitionMarkDoneAction} which add ".done" partition. */
 public class AddDonePartitionAction implements PartitionMarkDoneAction {
 
-    private final PartitionHandler partitionHandler;
+    private final PartitionModification partitionModification;
 
-    public AddDonePartitionAction(PartitionHandler partitionHandler) {
-        this.partitionHandler = partitionHandler;
+    public AddDonePartitionAction(PartitionModification partitionModification) {
+        this.partitionModification = partitionModification;
     }
 
     @Override
@@ -44,7 +44,7 @@ public class AddDonePartitionAction implements PartitionMarkDoneAction {
         LinkedHashMap<String, String> doneSpec = extractPartitionSpecFromPath(new Path(partition));
         Map.Entry<String, String> lastField = tailEntry(doneSpec);
         doneSpec.put(lastField.getKey(), lastField.getValue() + ".done");
-        partitionHandler.createPartitions(Collections.singletonList(doneSpec));
+        partitionModification.createPartitions(Collections.singletonList(doneSpec));
     }
 
     private Map.Entry<String, String> tailEntry(LinkedHashMap<String, String> partitionSpec) {
@@ -54,7 +54,7 @@ public class AddDonePartitionAction implements PartitionMarkDoneAction {
     @Override
     public void close() throws IOException {
         try {
-            partitionHandler.close();
+            partitionModification.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
