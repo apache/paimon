@@ -162,14 +162,14 @@ public class PredicateBuilder {
     }
 
     public Predicate like(int idx, Object patternLiteral) {
-        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+        Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)
                         .orElse(Pair.of(Like.INSTANCE, patternLiteral));
         return leaf(optimized.getKey(), idx, optimized.getValue());
     }
 
     public Predicate like(Transform transform, Object patternLiteral) {
-        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+        Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)
                         .orElse(Pair.of(Like.INSTANCE, patternLiteral));
         return leaf(optimized.getKey(), transform, optimized.getValue());
@@ -181,7 +181,7 @@ public class PredicateBuilder {
     }
 
     private Predicate leaf(LeafFunction function, Transform transform, Object literal) {
-        return TransformPredicate.of(transform, function, singletonList(literal));
+        return LeafPredicate.of(transform, function, singletonList(literal));
     }
 
     private Predicate leaf(LeafUnaryFunction function, int idx) {
@@ -191,7 +191,7 @@ public class PredicateBuilder {
     }
 
     private Predicate leaf(LeafFunction function, Transform transform) {
-        return TransformPredicate.of(transform, function, Collections.emptyList());
+        return LeafPredicate.of(transform, function, Collections.emptyList());
     }
 
     public Predicate in(int idx, List<Object> literals) {
@@ -213,7 +213,7 @@ public class PredicateBuilder {
         // In the IN predicate, 20 literals are critical for performance.
         // If there are more than 20 literals, the performance will decrease.
         if (literals.size() > 20) {
-            return TransformPredicate.of(transform, In.INSTANCE, literals);
+            return LeafPredicate.of(transform, In.INSTANCE, literals);
         }
 
         List<Predicate> equals = new ArrayList<>(literals.size());
@@ -228,20 +228,19 @@ public class PredicateBuilder {
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {
-        return new CompoundPredicate(
-                And.INSTANCE,
-                Arrays.asList(
-                        greaterOrEqual(idx, includedLowerBound),
-                        lessOrEqual(idx, includedUpperBound)));
+        DataField field = rowType.getFields().get(idx);
+        return new LeafPredicate(
+                Between.INSTANCE,
+                field.type(),
+                idx,
+                field.name(),
+                Arrays.asList(includedLowerBound, includedUpperBound));
     }
 
     public Predicate between(
             Transform transform, Object includedLowerBound, Object includedUpperBound) {
-        return new CompoundPredicate(
-                And.INSTANCE,
-                Arrays.asList(
-                        greaterOrEqual(transform, includedLowerBound),
-                        lessOrEqual(transform, includedUpperBound)));
+        return new LeafPredicate(
+                transform, Between.INSTANCE, Arrays.asList(includedLowerBound, includedUpperBound));
     }
 
     public static Predicate and(Predicate... predicates) {
@@ -410,6 +409,45 @@ public class PredicateBuilder {
         }
     }
 
+    public static Object convertToJavaObject(DataType dataType, Object o) {
+        if (o == null) {
+            return null;
+        }
+        switch (dataType.getTypeRoot()) {
+            case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+                return o;
+            case CHAR:
+            case VARCHAR:
+                return o instanceof BinaryString ? o.toString() : String.valueOf(o);
+            case DATE:
+                return LocalDate.ofEpochDay(((Number) o).intValue());
+            case TIME_WITHOUT_TIME_ZONE:
+                long millisOfDay = ((Number) o).intValue();
+                return LocalTime.ofNanoOfDay(millisOfDay * 1_000_000L);
+            case DECIMAL:
+                return ((Decimal) o).toBigDecimal();
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return ((Timestamp) o).toLocalDateTime();
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                Timestamp ts = (Timestamp) o;
+                long millisecond = ts.getMillisecond();
+                int nanoOfMillisecond = ts.getNanoOfMillisecond();
+                long epochSecond = Math.floorDiv(millisecond, 1000L);
+                int milliOfSecond = (int) Math.floorMod(millisecond, 1000L);
+                long nanoAdjustment = milliOfSecond * 1_000_000L + nanoOfMillisecond;
+                return Instant.ofEpochSecond(epochSecond, nanoAdjustment);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported type " + dataType.getTypeRoot().name());
+        }
+    }
+
     public static List<Predicate> pickTransformFieldMapping(
             List<Predicate> predicates, List<String> inputFields, List<String> pickedFields) {
         return pickTransformFieldMapping(
@@ -441,9 +479,9 @@ public class PredicateBuilder {
                 }
             }
             return Optional.of(new CompoundPredicate(compoundPredicate.function(), children));
-        } else if (predicate instanceof TransformPredicate) {
-            TransformPredicate transformPredicate = (TransformPredicate) predicate;
-            List<Object> inputs = transformPredicate.transform.inputs();
+        } else if (predicate instanceof LeafPredicate) {
+            LeafPredicate leafPredicate = (LeafPredicate) predicate;
+            List<Object> inputs = leafPredicate.transform().inputs();
             List<Object> newInputs = new ArrayList<>(inputs.size());
             for (Object input : inputs) {
                 if (input instanceof FieldRef) {
@@ -458,7 +496,7 @@ public class PredicateBuilder {
                     newInputs.add(input);
                 }
             }
-            return Optional.of(transformPredicate.copyWithNewInputs(newInputs));
+            return Optional.of(leafPredicate.copyWithNewInputs(newInputs));
         } else {
             return Optional.empty();
         }
@@ -473,8 +511,8 @@ public class PredicateBuilder {
             }
             return false;
         } else {
-            TransformPredicate transformPredicate = (TransformPredicate) predicate;
-            return fields.containsAll(transformPredicate.fieldNames());
+            LeafPredicate leafPredicate = (LeafPredicate) predicate;
+            return fields.containsAll(leafPredicate.fieldNames());
         }
     }
 

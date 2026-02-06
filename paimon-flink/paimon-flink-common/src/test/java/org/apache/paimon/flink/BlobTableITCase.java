@@ -49,7 +49,8 @@ public class BlobTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS blob_table (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')",
-                "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')");
+                "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
+                "CREATE TABLE IF NOT EXISTS multiple_blob_table (id INT, data STRING, pic1 BYTES, pic2 BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pic1,pic2')");
     }
 
     @Test
@@ -62,6 +63,25 @@ public class BlobTableITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT picture FROM blob_table"))
                 .containsExactlyInAnyOrder(Row.of(new byte[] {72, 101, 108, 108, 111}));
         assertThat(batchSql("SELECT file_path FROM `blob_table$files`").size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testMultipleBlobs() {
+        batchSql("SELECT * FROM multiple_blob_table");
+        batchSql("INSERT INTO multiple_blob_table VALUES (1, 'paimon', X'48656C6C6F', X'5945')");
+        assertThat(batchSql("SELECT * FROM multiple_blob_table"))
+                .containsExactlyInAnyOrder(
+                        Row.of(
+                                1,
+                                "paimon",
+                                new byte[] {72, 101, 108, 108, 111},
+                                new byte[] {89, 69}));
+        assertThat(batchSql("SELECT pic1 FROM multiple_blob_table"))
+                .containsExactlyInAnyOrder(Row.of(new byte[] {72, 101, 108, 108, 111}));
+        assertThat(batchSql("SELECT pic2 FROM multiple_blob_table"))
+                .containsExactlyInAnyOrder(Row.of(new byte[] {89, 69}));
+        assertThat(batchSql("SELECT file_path FROM `multiple_blob_table$files`").size())
+                .isEqualTo(3);
     }
 
     @Test

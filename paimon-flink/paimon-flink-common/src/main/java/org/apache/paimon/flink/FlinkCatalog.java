@@ -386,7 +386,6 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         try {
-            Table table = null;
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
@@ -1012,8 +1011,8 @@ public class FlinkCatalog extends AbstractCatalog {
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
-        String blobName = options.get(CoreOptions.BLOB_FIELD.key());
-        if (blobName != null) {
+        List<String> blobFields = CoreOptions.blobField(options);
+        if (!blobFields.isEmpty()) {
             checkArgument(
                     options.containsKey(CoreOptions.DATA_EVOLUTION_ENABLED.key()),
                     "When setting '"
@@ -1041,7 +1040,7 @@ public class FlinkCatalog extends AbstractCatalog {
                         field ->
                                 schemaBuilder.column(
                                         field.getName(),
-                                        field.getName().equals(blobName)
+                                        blobFields.contains(field.getName())
                                                 ? toBlobType(field.getType())
                                                 : toDataType(field.getType()),
                                         columnComments.get(field.getName())));

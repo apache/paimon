@@ -68,6 +68,15 @@ public class CommitScanner {
         return entries;
     }
 
+    public List<ManifestEntry> readIncrementalEntries(
+            Snapshot snapshot, List<BinaryRow> changedPartitions) {
+        return scan.withSnapshot(snapshot)
+                .withKind(ScanMode.DELTA)
+                .withPartitionFilter(changedPartitions)
+                .plan()
+                .files();
+    }
+
     public List<SimpleFileEntry> readAllEntriesFromChangedPartitions(
             Snapshot snapshot, List<BinaryRow> changedPartitions) {
         try {

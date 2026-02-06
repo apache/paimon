@@ -18,17 +18,22 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils$;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.UriReader;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
@@ -41,43 +46,43 @@ import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.types.TimestampNTZType;
 import org.apache.spark.sql.types.TimestampType;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Wrapper to fetch value from the spark internal row. */
+/**
+ * An {@link InternalRow} wraps spark {@link org.apache.spark.sql.catalyst.InternalRow} for v2
+ * write.
+ */
 public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
-    private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
-    private final int length;
-    private final int rowKindIdx;
     private final StructType tableSchema;
-    private int[] fieldIndexMap = null;
+    private final int length;
+    private final boolean blobAsDescriptor;
+    @Nullable private final UriReaderFactory uriReaderFactory;
+    @Nullable private final int[] fieldIndexMap;
+
+    private transient org.apache.spark.sql.catalyst.InternalRow internalRow;
+
+    public SparkInternalRowWrapper(StructType tableSchema, int length) {
+        this(tableSchema, length, null, false, null);
+    }
 
     public SparkInternalRowWrapper(
-            org.apache.spark.sql.catalyst.InternalRow internalRow,
-            int rowKindIdx,
             StructType tableSchema,
-            int length) {
-        this.internalRow = internalRow;
-        this.rowKindIdx = rowKindIdx;
-        this.length = length;
+            int length,
+            StructType dataSchema,
+            boolean blobAsDescriptor,
+            CatalogContext catalogContext) {
         this.tableSchema = tableSchema;
-    }
-
-    public SparkInternalRowWrapper(int rowKindIdx, StructType tableSchema, int length) {
-        this.rowKindIdx = rowKindIdx;
         this.length = length;
-        this.tableSchema = tableSchema;
-    }
-
-    public SparkInternalRowWrapper(
-            int rowKindIdx, StructType tableSchema, StructType dataSchema, int length) {
-        this.rowKindIdx = rowKindIdx;
-        this.length = length;
-        this.tableSchema = tableSchema;
-        this.fieldIndexMap = buildFieldIndexMap(tableSchema, dataSchema);
+        this.fieldIndexMap =
+                dataSchema != null ? buildFieldIndexMap(tableSchema, dataSchema) : null;
+        this.blobAsDescriptor = blobAsDescriptor;
+        this.uriReaderFactory = blobAsDescriptor ? new UriReaderFactory(catalogContext) : null;
     }
 
     public SparkInternalRowWrapper replace(org.apache.spark.sql.catalyst.InternalRow internalRow) {
@@ -128,12 +133,6 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public RowKind getRowKind() {
-        if (rowKindIdx != -1) {
-            int actualPos = getActualFieldPosition(rowKindIdx);
-            if (actualPos != -1) {
-                return RowKind.fromByteValue(internalRow.getByte(actualPos));
-            }
-        }
         return RowKind.INSERT;
     }
 
@@ -244,7 +243,13 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(internalRow.getBinary(pos));
+        if (blobAsDescriptor) {
+            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(internalRow.getBinary(pos));
+            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
+            return Blob.fromDescriptor(uriReader, blobDescriptor);
+        } else {
+            return new BlobData(internalRow.getBinary(pos));
+        }
     }
 
     @Override
@@ -256,6 +261,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         return new SparkInternalArray(
                 internalRow.getArray(actualPos),
                 ((ArrayType) (tableSchema.fields()[pos].dataType())).elementType());
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        throw new UnsupportedOperationException("Not support VectorType yet.");
     }
 
     @Override
@@ -276,10 +286,8 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
             return null;
         }
         return new SparkInternalRowWrapper(
-                internalRow.getStruct(actualPos, numFields),
-                -1,
-                (StructType) tableSchema.fields()[actualPos].dataType(),
-                numFields);
+                        (StructType) tableSchema.fields()[actualPos].dataType(), numFields)
+                .replace(internalRow.getStruct(actualPos, numFields));
     }
 
     private static Timestamp convertToTimestamp(DataType dataType, long micros) {
@@ -426,6 +434,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         }
 
         @Override
+        public InternalVector getVector(int pos) {
+            throw new UnsupportedOperationException("Not support VectorType yet.");
+        }
+
+        @Override
         public InternalMap getMap(int pos) {
             MapType mapType = (MapType) elementType;
             return new SparkInternalMap(
@@ -434,8 +447,8 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
 
         @Override
         public InternalRow getRow(int pos, int numFields) {
-            return new SparkInternalRowWrapper(
-                    arrayData.getStruct(pos, numFields), -1, (StructType) elementType, numFields);
+            return new SparkInternalRowWrapper((StructType) elementType, numFields)
+                    .replace(arrayData.getStruct(pos, numFields));
         }
     }
 

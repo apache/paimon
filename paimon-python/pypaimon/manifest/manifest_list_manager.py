@@ -17,7 +17,7 @@
 ################################################################################
 
 from io import BytesIO
-from typing import List
+from typing import List, Optional
 
 import fastavro
 
@@ -40,7 +40,9 @@ class ManifestListManager:
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
 
-    def read_all(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+    def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
+        if snapshot is None:
+            return []
         manifest_files = []
         base_manifests = self.read(snapshot.base_manifest_list)
         manifest_files.extend(base_manifests)
@@ -79,6 +81,8 @@ class ManifestListManager:
                 num_deleted_files=record['_NUM_DELETED_FILES'],
                 partition_stats=partition_stats,
                 schema_id=record['_SCHEMA_ID'],
+                min_row_id=record['_MIN_ROW_ID'],
+                max_row_id=record['_MAX_ROW_ID'],
             )
             manifest_files.append(manifest_file_meta)
 
@@ -99,6 +103,8 @@ class ManifestListManager:
                     "_NULL_COUNTS": meta.partition_stats.null_counts,
                 },
                 "_SCHEMA_ID": meta.schema_id,
+                "_MIN_ROW_ID": meta.min_row_id,
+                "_MAX_ROW_ID": meta.max_row_id,
             }
             avro_records.append(avro_record)
 

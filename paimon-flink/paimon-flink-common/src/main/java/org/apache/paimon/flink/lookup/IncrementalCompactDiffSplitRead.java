@@ -24,7 +24,7 @@ import org.apache.paimon.operation.MergeFileSplitRead;
 import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.splitread.IncrementalDiffSplitRead;
 
@@ -41,39 +41,31 @@ public class IncrementalCompactDiffSplitRead extends IncrementalDiffSplitRead {
 
     @Override
     public RecordReader<InternalRow> createReader(Split split) throws IOException {
-        DataSplit dataSplit = (DataSplit) split;
-        if (dataSplit.beforeFiles().stream().noneMatch(file -> file.level() == 0)) {
+        IncrementalSplit incrementalSplit = (IncrementalSplit) split;
+        if (incrementalSplit.beforeFiles().stream().noneMatch(file -> file.level() == 0)) {
             return new EmptyRecordReader<>();
         }
-        return super.createReader(filterLevel0Files(dataSplit));
+        return super.createReader(filterLevel0Files(incrementalSplit));
     }
 
-    private DataSplit filterLevel0Files(DataSplit split) {
+    private IncrementalSplit filterLevel0Files(IncrementalSplit split) {
         List<DataFileMeta> beforeFiles =
                 split.beforeFiles().stream()
                         .filter(file -> file.level() > 0)
                         .collect(Collectors.toList());
         List<DataFileMeta> afterFiles =
-                split.dataFiles().stream()
+                split.afterFiles().stream()
                         .filter(file -> file.level() > 0)
                         .collect(Collectors.toList());
-        DataSplit.Builder builder =
-                new DataSplit.Builder()
-                        .withSnapshot(split.snapshotId())
-                        .withPartition(split.partition())
-                        .withBucket(split.bucket())
-                        .withBucketPath(split.bucketPath())
-                        .withBeforeFiles(beforeFiles)
-                        .withDataFiles(afterFiles)
-                        .isStreaming(split.isStreaming())
-                        .rawConvertible(split.rawConvertible());
-
-        if (split.beforeDeletionFiles().isPresent()) {
-            builder.withBeforeDeletionFiles(split.beforeDeletionFiles().get());
-        }
-        if (split.deletionFiles().isPresent()) {
-            builder.withDataDeletionFiles(split.deletionFiles().get());
-        }
-        return builder.build();
+        return new IncrementalSplit(
+                split.snapshotId(),
+                split.partition(),
+                split.bucket(),
+                split.totalBuckets(),
+                beforeFiles,
+                null,
+                afterFiles,
+                null,
+                split.isStreaming());
     }
 }

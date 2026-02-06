@@ -21,7 +21,9 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
+import org.apache.paimon.data.variant.VariantPathSegment;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.VectorizedParquetRecordReader;
 import org.apache.paimon.format.parquet.type.ParquetField;
@@ -36,10 +38,8 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.ParquetReadOptions;
-import org.apache.parquet.conf.PlainParquetConfiguration;
 import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.ParquetFileReader;
-import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.io.ColumnIOFactory;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.schema.ConversionPatterns;
@@ -55,14 +55,16 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
+import static org.apache.paimon.data.variant.VariantMetadataUtils.path;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.buildFieldsList;
 import static org.apache.paimon.format.parquet.reader.ParquetReaderUtil.createWritableColumnVector;
-import static org.apache.parquet.hadoop.UnmaterializableRecordCounter.BAD_RECORD_THRESHOLD_CONF_KEY;
 
 /**
  * Parquet {@link FormatReaderFactory} that reads data from the file to {@link
@@ -72,39 +74,26 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(ParquetReaderFactory.class);
 
-    private static final String ALLOCATION_SIZE = "parquet.read.allocation.size";
-
     private final Options conf;
     private final DataField[] readFields;
     private final int batchSize;
     @Nullable private final FilterCompat.Filter filter;
-    @Nullable private final VariantAccessInfo[] variantAccess;
 
     public ParquetReaderFactory(
             Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
-        this(conf, readType, batchSize, filter, null);
-    }
-
-    public ParquetReaderFactory(
-            Options conf,
-            RowType readType,
-            int batchSize,
-            @Nullable FilterCompat.Filter filter,
-            @Nullable VariantAccessInfo[] variantAccess) {
         this.conf = conf;
         this.readFields = readType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
-        this.variantAccess = variantAccess;
     }
 
     @Override
     public FileRecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
         ParquetReadOptions.Builder builder =
-                ParquetReadOptions.builder(new PlainParquetConfiguration())
+                ParquetUtil.getParquetReadOptionsBuilder(conf)
+                        .withRecordFilter(filter)
                         .withRange(0, context.fileSize());
-        setReadOptions(builder);
 
         ParquetFileReader reader =
                 new ParquetFileReader(
@@ -124,38 +113,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         reader.setRequestedSchema(requestedSchema);
-        RowType[] shreddingSchemas =
-                VariantUtils.extractShreddingSchemasFromParquetSchema(readFields, fileSchema);
-        List<List<VariantAccessInfo.VariantField>> variantFields =
-                VariantUtils.buildVariantFields(readFields, variantAccess);
-        WritableColumnVector[] writableVectors = createWritableVectors(variantFields);
+        WritableColumnVector[] writableVectors = createWritableVectors();
 
         MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields =
-                buildFieldsList(readFields, columnIO, shreddingSchemas, variantFields);
+        List<ParquetField> fields = buildFieldsList(readFields, columnIO, requestedSchema);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
-    }
-
-    private void setReadOptions(ParquetReadOptions.Builder builder) {
-        builder.useSignedStringMinMax(
-                conf.getBoolean("parquet.strings.signed-min-max.enabled", false));
-        builder.useDictionaryFilter(
-                conf.getBoolean(ParquetInputFormat.DICTIONARY_FILTERING_ENABLED, true));
-        builder.useStatsFilter(conf.getBoolean(ParquetInputFormat.STATS_FILTERING_ENABLED, true));
-        builder.useRecordFilter(conf.getBoolean(ParquetInputFormat.RECORD_FILTERING_ENABLED, true));
-        builder.useColumnIndexFilter(
-                conf.getBoolean(ParquetInputFormat.COLUMN_INDEX_FILTERING_ENABLED, true));
-        builder.usePageChecksumVerification(
-                conf.getBoolean(ParquetInputFormat.PAGE_VERIFY_CHECKSUM_ENABLED, false));
-        builder.useBloomFilter(conf.getBoolean(ParquetInputFormat.BLOOM_FILTERING_ENABLED, true));
-        builder.withMaxAllocationInBytes(conf.getInteger(ALLOCATION_SIZE, 8388608));
-        String badRecordThresh = conf.getString(BAD_RECORD_THRESHOLD_CONF_KEY, null);
-        if (badRecordThresh != null) {
-            builder.set(BAD_RECORD_THRESHOLD_CONF_KEY, badRecordThresh);
-        }
-        builder.withRecordFilter(filter);
     }
 
     /** Clips `parquetSchema` according to `fieldNames`. */
@@ -183,6 +147,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         switch (readType.getTypeRoot()) {
             case ROW:
                 RowType rowType = (RowType) readType;
+                if (VariantMetadataUtils.isVariantRowType(rowType)) {
+                    return clipVariantType(rowType, parquetType.asGroupType());
+                }
                 GroupType rowGroup = (GroupType) parquetType;
                 List<Type> rowGroupFields = new ArrayList<>();
                 for (DataField field : rowType.getFields()) {
@@ -223,8 +190,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 int level = arrayGroup.getType(0) instanceof GroupType ? 3 : 2;
                 Type elementType =
                         clipParquetType(
-                                arrayType.getElementType(),
-                                parquetListElementType(arrayGroup, level));
+                                arrayType.getElementType(), parquetListElementType(arrayGroup));
 
                 if (level == 3) {
                     // In case that the name in middle level is not "list".
@@ -250,13 +216,62 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private WritableColumnVector[] createWritableVectors(
-            List<List<VariantAccessInfo.VariantField>> variantFields) {
+    private Type clipVariantType(RowType variantRowType, GroupType parquetType) {
+        // If there is no typed_value field, return the original parquetType.
+        if (!parquetType.containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME)) {
+            return parquetType;
+        }
+
+        boolean canClip = true;
+        Set<String> fieldsToRead = new HashSet<>();
+        for (DataField field : variantRowType.getFields()) {
+            String path = path(field.description());
+            VariantPathSegment[] pathSegments = VariantPathSegment.parse(path);
+            if (pathSegments.length < 1) {
+                canClip = false;
+                break;
+            }
+
+            // todo: support nested column pruning
+            VariantPathSegment pathSegment = pathSegments[0];
+            if (pathSegment instanceof VariantPathSegment.ObjectExtraction) {
+                fieldsToRead.add(((VariantPathSegment.ObjectExtraction) pathSegment).getKey());
+            } else {
+                canClip = false;
+                break;
+            }
+        }
+
+        if (!canClip) {
+            return parquetType;
+        }
+
+        List<Type> typedFieldsToRead = new ArrayList<>();
+        GroupType typedValue =
+                parquetType.getType(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME).asGroupType();
+        for (Type field : typedValue.getFields()) {
+            if (fieldsToRead.contains(field.getName())) {
+                typedFieldsToRead.add(field);
+                fieldsToRead.remove(field.getName());
+            }
+        }
+
+        List<Type> rowGroupFields = new ArrayList<>();
+        rowGroupFields.add(parquetType.getType(PaimonShreddingUtils.METADATA_FIELD_NAME));
+        // If there are fields to read not in the `typed_value`, add the `value` field.
+        if (!fieldsToRead.isEmpty()) {
+            rowGroupFields.add(parquetType.getType(PaimonShreddingUtils.VARIANT_VALUE_FIELD_NAME));
+        }
+        if (!typedFieldsToRead.isEmpty()) {
+            rowGroupFields.add(typedValue.withNewFields(typedFieldsToRead));
+        }
+        return parquetType.withNewFields(rowGroupFields);
+    }
+
+    private WritableColumnVector[] createWritableVectors() {
         WritableColumnVector[] columns = new WritableColumnVector[readFields.length];
         for (int i = 0; i < readFields.length; i++) {
-            columns[i] =
-                    createWritableColumnVector(
-                            batchSize, readFields[i].type(), variantFields.get(i));
+            columns[i] = createWritableColumnVector(batchSize, readFields[i].type());
         }
         return columns;
     }

@@ -19,21 +19,25 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -212,6 +216,20 @@ public class TypeUtils {
                     throw new RuntimeException(
                             String.format("Failed to parse Json String %s", s), e);
                 }
+            case VECTOR:
+                // Step 1: parse the string to an array
+                VectorType vectorType = (VectorType) type;
+                DataType vectorElementType = vectorType.getElementType();
+                Object vectorArrayObject =
+                        castFromStringInternal(s, DataTypes.ARRAY(vectorElementType), isCdcValue);
+                if (!(vectorArrayObject instanceof InternalArray)) {
+                    throw new RuntimeException(
+                            "Unexpected parsed type during building a vector: "
+                                    + vectorArrayObject.getClass());
+                }
+                // Step 2: build a vector
+                return BinaryVector.fromInternalArray(
+                        (InternalArray) vectorArrayObject, vectorElementType);
             case MAP:
                 MapType mapType = (MapType) type;
                 DataType keyType = mapType.getKeyType();
@@ -333,6 +351,7 @@ public class TypeUtils {
 
         switch (t1.getTypeRoot()) {
             case ARRAY:
+            case VECTOR:
             case MAP:
             case MULTISET:
             case ROW:

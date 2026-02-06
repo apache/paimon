@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.write.commit_message import CommitMessage
@@ -79,6 +79,10 @@ class TableCommit:
 class BatchTableCommit(TableCommit):
     def commit(self, commit_messages: List[CommitMessage]):
         self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
+
+    def truncate_partitions(self, partitions: List[Dict[str, str]]) -> None:
+        self._check_committed()
+        self.file_store_commit.drop_partitions(partitions, BATCH_COMMIT_IDENTIFIER)
 
 
 class StreamTableCommit(TableCommit):

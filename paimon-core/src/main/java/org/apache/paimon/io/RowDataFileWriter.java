@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.io.DataFilePathFactory.dataFileToFileIndexPath;
 
@@ -58,7 +59,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             Path path,
             RowType writeSchema,
             long schemaId,
-            LongCounter seqNumCounter,
+            Supplier<LongCounter> seqNumCounterSupplier,
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
@@ -67,7 +68,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             @Nullable List<String> writeCols) {
         super(fileIO, context, path, Function.identity(), writeSchema, asyncFileWrite);
         this.schemaId = schemaId;
-        this.seqNumCounter = seqNumCounter;
+        this.seqNumCounter = seqNumCounterSupplier.get();
         this.isExternalPath = isExternalPath;
         this.statsArraySerializer = new SimpleStatsConverter(writeSchema, statsDenseStore);
         this.dataFileIndexWriter =

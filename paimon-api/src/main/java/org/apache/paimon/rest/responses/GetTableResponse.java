@@ -31,6 +31,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 public class GetTableResponse extends AuditRESTResponse implements RESTResponse {
 
     private static final String FIELD_ID = "id";
+    private static final String FIELD_DATABASE = "database";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_PATH = "path";
     private static final String FIELD_IS_EXTERNAL = "isExternal";
@@ -39,6 +40,9 @@ public class GetTableResponse extends AuditRESTResponse implements RESTResponse 
 
     @JsonProperty(FIELD_ID)
     private final String id;
+
+    @JsonProperty(FIELD_DATABASE)
+    private final String database;
 
     @JsonProperty(FIELD_NAME)
     private final String name;
@@ -58,6 +62,7 @@ public class GetTableResponse extends AuditRESTResponse implements RESTResponse 
     @JsonCreator
     public GetTableResponse(
             @JsonProperty(FIELD_ID) String id,
+            @JsonProperty(FIELD_DATABASE) String database,
             @JsonProperty(FIELD_NAME) String name,
             @JsonProperty(FIELD_PATH) String path,
             @JsonProperty(FIELD_IS_EXTERNAL) boolean isExternal,
@@ -70,6 +75,7 @@ public class GetTableResponse extends AuditRESTResponse implements RESTResponse 
             @JsonProperty(FIELD_UPDATED_BY) String updatedBy) {
         super(owner, createdAt, createdBy, updatedAt, updatedBy);
         this.id = id;
+        this.database = database;
         this.name = name;
         this.path = path;
         this.isExternal = isExternal;
@@ -80,6 +86,11 @@ public class GetTableResponse extends AuditRESTResponse implements RESTResponse 
     @JsonGetter(FIELD_ID)
     public String getId() {
         return this.id;
+    }
+
+    @JsonGetter(FIELD_DATABASE)
+    public String getDatabase() {
+        return this.database;
     }
 
     @JsonGetter(FIELD_NAME)

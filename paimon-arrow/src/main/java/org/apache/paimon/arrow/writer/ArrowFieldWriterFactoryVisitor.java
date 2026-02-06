@@ -41,6 +41,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.complex.ListVector;
@@ -145,7 +146,8 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
 
     @Override
     public ArrowFieldWriterFactory visit(VariantType variantType) {
-        throw new UnsupportedOperationException("Doesn't support VariantType.");
+        return (fieldVector, isNullable) ->
+                new ArrowFieldWriters.VariantWriter(fieldVector, isNullable, null);
     }
 
     @Override
@@ -162,6 +164,11 @@ public class ArrowFieldWriterFactoryVisitor implements DataTypeVisitor<ArrowFiel
                         elementWriterFactory.create(
                                 ((ListVector) fieldVector).getDataVector(), isNullable),
                         isNullable);
+    }
+
+    @Override
+    public ArrowFieldWriterFactory visit(VectorType vectorType) {
+        throw new UnsupportedOperationException("Doesn't support VectorType.");
     }
 
     @Override

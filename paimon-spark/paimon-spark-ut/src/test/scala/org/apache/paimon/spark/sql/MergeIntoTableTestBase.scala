@@ -528,7 +528,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
-      val error = intercept[RuntimeException] {
+      val error = intercept[Exception] {
         spark.sql(s"""
                      |MERGE INTO target
                      |USING source
@@ -539,7 +539,11 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |THEN INSERT (a, b, c) values (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("match more than one source rows"))
+      // V1 path: "match more than one source rows"
+      // V2 path: "MERGE_CARDINALITY_VIOLATION"
+      assert(
+        error.contains("match more than one source rows") ||
+          error.contains("MERGE_CARDINALITY_VIOLATION"))
     }
   }
 

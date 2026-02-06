@@ -162,11 +162,11 @@ public class ExternalBuffer implements RowBuffer {
                                 : segment.size();
                 channelWriterOutputView.write(segment, 0, bufferSize);
             }
+            channelWriterOutputView.close();
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
                     inMemoryBuffer.size(),
                     channelWriterOutputView.getWriteBytes());
-            channelWriterOutputView.close();
         } catch (IOException e) {
             channelWriterOutputView.closeAndDelete();
             throw e;

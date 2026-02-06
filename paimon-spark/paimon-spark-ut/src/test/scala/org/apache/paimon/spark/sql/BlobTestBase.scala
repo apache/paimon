@@ -19,14 +19,14 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.catalog.CatalogContext
-import org.apache.paimon.data.Blob
-import org.apache.paimon.data.BlobDescriptor
+import org.apache.paimon.data.{Blob, BlobDescriptor}
 import org.apache.paimon.fs.Path
 import org.apache.paimon.fs.local.LocalFileIO
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.utils.UriReaderFactory
 
+import org.apache.spark.SparkConf
 import org.apache.spark.sql.Row
 
 import java.util
@@ -35,6 +35,10 @@ import java.util.Random
 class BlobTestBase extends PaimonSparkTestBase {
 
   private val RANDOM = new Random
+
+  override def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
 
   test("Blob: test basic") {
     withTable("t") {
@@ -45,6 +49,29 @@ class BlobTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
         Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 1))
+      )
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(2))
+      )
+    }
+  }
+
+  test("Blob: test multiple blobs") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRING, pic1 BINARY, pic2 BINARY) TBLPROPERTIES (" +
+        "'row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='pic1,pic2')")
+      sql("INSERT INTO t VALUES (1, 'paimon', X'48656C6C6F', X'5945')")
+
+      checkAnswer(
+        sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t"),
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), Array[Byte](89, 69), 0, 1))
+      )
+
+      checkAnswer(
+        sql("SELECT COUNT(*) FROM `t$files`"),
+        Seq(Row(3))
       )
     }
   }
@@ -156,6 +183,11 @@ class BlobTestBase extends PaimonSparkTestBase {
       val blob = Blob.fromDescriptor(uriReaderFactory.create(newBlobDescriptor.uri), blobDescriptor)
       assert(util.Arrays.equals(blobData, blob.toData))
 
+      checkAnswer(
+        sql("SELECT sys.descriptor_to_string(content) FROM t"),
+        Seq(Row(newBlobDescriptor.toString))
+      )
+
       sql("ALTER TABLE t SET TBLPROPERTIES ('blob-as-descriptor'='false')")
       checkAnswer(
         sql("SELECT id, name, content, _ROW_ID, _SEQUENCE_NUMBER FROM t WHERE id = 1"),
@@ -177,14 +209,14 @@ class BlobTestBase extends PaimonSparkTestBase {
         sql("SELECT COUNT(*) FROM `t$files`"),
         Seq(Row(22))
       )
-      sql("CALL paimon.sys.compact('t')")
+      sql("CALL paimon.sys.compact('t')").collect()
       checkAnswer(
         sql("SELECT COUNT(*) FROM `t$files`"),
         Seq(Row(12))
       )
       checkAnswer(
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t LIMIT 1"),
-        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 12))
+        Seq(Row(1, "paimon", Array[Byte](72, 101, 108, 108, 111), 0, 11))
       )
     }
   }
@@ -193,11 +225,17 @@ class BlobTestBase extends PaimonSparkTestBase {
 
   def bytesToHex(bytes: Array[Byte]): String = {
     val hexChars = new Array[Char](bytes.length * 2)
-    for (j <- 0 until bytes.length) {
+    for (j <- bytes.indices) {
       val v = bytes(j) & 0xff
       hexChars(j * 2) = HEX_ARRAY(v >>> 4)
       hexChars(j * 2 + 1) = HEX_ARRAY(v & 0x0f)
     }
     new String(hexChars)
+  }
+}
+
+class BlobTestWithV2Write extends BlobTestBase {
+  override def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "true")
   }
 }

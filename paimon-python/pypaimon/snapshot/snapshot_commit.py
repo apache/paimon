@@ -39,11 +39,12 @@ class PartitionStatistics:
     file_size_in_bytes: int = json_field("fileSizeInBytes", default=0)
     file_count: int = json_field("fileCount", default=0)
     last_file_creation_time: int = json_field("lastFileCreationTime", default_factory=lambda: int(time.time() * 1000))
+    total_buckets: int = json_field("totalBuckets", default=0)
 
     @classmethod
     def create(cls, partition_spec: Dict[str, str] = None, record_count: int = 0,
                file_count: int = 0, file_size_in_bytes: int = 0,
-               last_file_creation_time: int = None) -> 'PartitionStatistics':
+               last_file_creation_time: int = None, total_buckets: int = 0) -> 'PartitionStatistics':
         """
         Factory method to create PartitionStatistics with backward compatibility.
 
@@ -53,6 +54,7 @@ class PartitionStatistics:
             file_count: Number of files
             file_size_in_bytes: Total file size in bytes
             last_file_creation_time: Last file creation time in milliseconds
+            total_buckets: Total number of buckets in the partition
 
         Returns:
             PartitionStatistics instance
@@ -62,7 +64,8 @@ class PartitionStatistics:
             record_count=record_count,
             file_count=file_count,
             file_size_in_bytes=file_size_in_bytes,
-            last_file_creation_time=last_file_creation_time or int(time.time() * 1000)
+            last_file_creation_time=last_file_creation_time or int(time.time() * 1000),
+            total_buckets=total_buckets
         )
 
 

@@ -19,8 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.variant.VariantAccessInfo;
-import org.apache.paimon.data.variant.VariantAccessInfoUtils;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -64,7 +62,6 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Filter<Integer> bucketFilter;
 
     private @Nullable RowType readType;
-    private @Nullable VariantAccessInfo[] variantAccessInfo;
     private @Nullable List<Range> rowRanges;
     private @Nullable VectorSearch vectorSearch;
 
@@ -83,13 +80,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public RowType readType() {
-        RowType finalReadType = readType != null ? readType : table.rowType();
-        // When variantAccessInfo is not null, replace the variant with the actual readType.
-        if (variantAccessInfo != null) {
-            finalReadType =
-                    VariantAccessInfoUtils.buildReadRowType(finalReadType, variantAccessInfo);
-        }
-        return finalReadType;
+        return readType != null ? readType : table.rowType();
     }
 
     @Override
@@ -123,12 +114,6 @@ public class ReadBuilderImpl implements ReadBuilder {
     @Override
     public ReadBuilder withReadType(RowType readType) {
         this.readType = readType;
-        return this;
-    }
-
-    @Override
-    public ReadBuilder withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
-        this.variantAccessInfo = variantAccessInfo;
         return this;
     }
 
@@ -252,9 +237,6 @@ public class ReadBuilderImpl implements ReadBuilder {
         }
         if (limit != null) {
             read.withLimit(limit);
-        }
-        if (variantAccessInfo != null) {
-            read.withVariantAccess(variantAccessInfo);
         }
         return read;
     }

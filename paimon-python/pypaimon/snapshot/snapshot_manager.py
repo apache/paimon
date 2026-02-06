@@ -35,6 +35,12 @@ class SnapshotManager:
         self.latest_file = f"{self.snapshot_dir}/LATEST"
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
+        snapshot_json = self.get_latest_snapshot_json()
+        if snapshot_json is None:
+            return None
+        return JSON.from_json(snapshot_json, Snapshot)
+
+    def get_latest_snapshot_json(self) -> Optional[str]:
         if not self.file_io.exists(self.latest_file):
             return None
 
@@ -45,8 +51,7 @@ class SnapshotManager:
         if not self.file_io.exists(snapshot_file):
             return None
 
-        snapshot_content = self.file_io.read_file_utf8(snapshot_file)
-        return JSON.from_json(snapshot_content, Snapshot)
+        return self.file_io.read_file_utf8(snapshot_file)
 
     def read_latest_file(self, max_retries: int = 5):
         """

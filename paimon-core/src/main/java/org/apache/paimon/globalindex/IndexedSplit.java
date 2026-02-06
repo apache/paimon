@@ -35,6 +35,7 @@ import java.io.ObjectOutputStream;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /** Indexed split for global index. */
 public class IndexedSplit implements Split {
@@ -69,6 +70,11 @@ public class IndexedSplit implements Split {
     @Override
     public long rowCount() {
         return rowRanges.stream().mapToLong(r -> r.to - r.from + 1).sum();
+    }
+
+    @Override
+    public OptionalLong mergedRowCount() {
+        return OptionalLong.of(rowCount());
     }
 
     @Override

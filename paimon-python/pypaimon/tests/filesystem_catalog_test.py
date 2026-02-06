@@ -1,5 +1,4 @@
 # Licensed to the Apache Software Foundation (ASF) under one
-# Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership.  The ASF licenses this file
@@ -18,6 +17,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import MagicMock
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
@@ -171,3 +171,30 @@ class FileSystemCatalogTest(unittest.TestCase):
         )
         table = catalog.get_table(identifier)
         self.assertEqual(len(table.fields), 2)
+
+    def test_get_database_propagates_exists_error(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+
+        with self.assertRaises(DatabaseNotExistException):
+            catalog.get_database("nonexistent_db")
+
+        catalog.create_database("test_db", False)
+
+        # FileSystemCatalog has file_io attribute
+        from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
+        self.assertIsInstance(catalog, FileSystemCatalog)
+        filesystem_catalog = catalog  # type: FileSystemCatalog
+        
+        original_exists = filesystem_catalog.file_io.exists
+        filesystem_catalog.file_io.exists = MagicMock(side_effect=OSError("Permission denied"))
+
+        # Now get_database should propagate OSError, not DatabaseNotExistException
+        with self.assertRaises(OSError) as context:
+            catalog.get_database("test_db")
+        self.assertIn("Permission denied", str(context.exception))
+        self.assertNotIsInstance(context.exception, DatabaseNotExistException)
+        
+        # Restore original method
+        filesystem_catalog.file_io.exists = original_exists

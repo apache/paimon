@@ -19,8 +19,8 @@
 package org.apache.paimon.spark.globalindex.btree;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.spark.SparkRow;
@@ -31,10 +31,8 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.Range;
 
@@ -53,6 +51,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+
+import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.calcRowRange;
 
 /** The {@link GlobalIndexTopologyBuilder} for BTree index. */
 public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
@@ -73,16 +73,18 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             DataField indexField,
             Options options)
             throws IOException {
-
         // 1. read the whole dataset of target partitions
-        SnapshotReader snapshotReader = table.newSnapshotReader();
+        BTreeGlobalIndexBuilder indexBuilder =
+                new BTreeGlobalIndexBuilder(table)
+                        .withIndexType(indexType)
+                        .withIndexField(indexField.name());
         if (partitionPredicate != null) {
-            snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
+            indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
         }
 
-        List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
-        Range range = calcRowRange(dataSplits);
-        if (dataSplits.isEmpty() || range == null) {
+        List<DataSplit> splits = indexBuilder.scan();
+        Range range = calcRowRange(splits);
+        if (splits.isEmpty() || range == null) {
             return Collections.emptyList();
         }
 
@@ -95,7 +97,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 PaimonUtils.createDataset(
                         spark,
                         ScanPlanHelper$.MODULE$.createNewScanPlan(
-                                dataSplits.toArray(new DataSplit[0]), relation));
+                                splits.toArray(new DataSplit[0]), relation));
 
         Dataset<Row> selected =
                 source.select(selectedColumns.stream().map(functions::col).toArray(Column[]::new));
@@ -124,10 +126,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         .sortWithinPartitions(sortFields);
 
         // 3. write index for each partition & range
-        final byte[] builderBytes =
-                InstantiationUtil.serializeObject(
-                        new BTreeGlobalIndexBuilder(
-                                table, readType, indexField, indexType, range, options));
+        final byte[] serializedBuilder = InstantiationUtil.serializeObject(indexBuilder);
         final RowType rowType =
                 SpecialFields.rowTypeWithRowId(table.rowType()).project(selectedColumns);
         JavaRDD<byte[]> written =
@@ -136,52 +135,19 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                         .map(row -> (InternalRow) (new SparkRow(rowType, row)))
                         .mapPartitions(
                                 (FlatMapFunction<Iterator<InternalRow>, byte[]>)
-                                        iter -> {
-                                            CommitMessageSerializer commitMessageSerializer =
-                                                    new CommitMessageSerializer();
-                                            BTreeGlobalIndexBuilder builder =
-                                                    InstantiationUtil.deserializeObject(
-                                                            builderBytes,
-                                                            BTreeGlobalIndexBuilder.class
-                                                                    .getClassLoader());
-                                            List<CommitMessage> commitMessages =
-                                                    builder.build(
-                                                            CloseableIterator.adapterForIterator(
-                                                                    iter));
-                                            List<byte[]> messageBytes = new ArrayList<>();
-
-                                            for (CommitMessage commitMessage : commitMessages) {
-                                                messageBytes.add(
-                                                        commitMessageSerializer.serialize(
-                                                                commitMessage));
-                                            }
-
-                                            return messageBytes.iterator();
-                                        });
+                                        iter -> buildBTreeIndex(iter, serializedBuilder, range));
 
         // 4. collect all commit messages and return
         List<byte[]> commitBytes = written.collect();
-        List<CommitMessage> result = new ArrayList<>();
-        CommitMessageSerializer commitMessageSerializer = new CommitMessageSerializer();
-        for (byte[] commitByte : commitBytes) {
-            result.add(
-                    commitMessageSerializer.deserialize(
-                            commitMessageSerializer.getVersion(), commitByte));
-        }
-
-        return result;
+        return CommitMessageSerializer.deserializeAll(commitBytes);
     }
 
-    private Range calcRowRange(List<DataSplit> dataSplits) {
-        long start = Long.MAX_VALUE;
-        long end = Long.MIN_VALUE;
-        for (DataSplit dataSplit : dataSplits) {
-            for (DataFileMeta file : dataSplit.dataFiles()) {
-                long firstRowId = file.nonNullFirstRowId();
-                start = Math.min(start, firstRowId);
-                end = Math.max(end, firstRowId + file.rowCount());
-            }
-        }
-        return start == Long.MAX_VALUE ? null : new Range(start, end);
+    private static Iterator<byte[]> buildBTreeIndex(
+            Iterator<InternalRow> input, byte[] serializedBuilder, Range range)
+            throws IOException, ClassNotFoundException {
+        BTreeGlobalIndexBuilder builder =
+                InstantiationUtil.deserializeObject(
+                        serializedBuilder, BTreeGlobalIndexBuilder.class.getClassLoader());
+        return CommitMessageSerializer.serializeAll(builder.build(range, input)).iterator();
     }
 }

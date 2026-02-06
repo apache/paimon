@@ -23,7 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.PartitionPathUtils.extractPartitionSpecFromPath;
 
@@ -45,14 +46,15 @@ public class PartitionStatisticsReporter implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(PartitionStatisticsReporter.class);
 
-    private final PartitionHandler partitionHandler;
+    private final PartitionModification partitionModification;
     private final SnapshotReader snapshotReader;
     private final SnapshotManager snapshotManager;
 
-    public PartitionStatisticsReporter(FileStoreTable table, PartitionHandler partitionHandler) {
-        this.partitionHandler =
+    public PartitionStatisticsReporter(
+            FileStoreTable table, PartitionModification partitionModification) {
+        this.partitionModification =
                 Preconditions.checkNotNull(
-                        partitionHandler, "the partition handler factory is null");
+                        partitionModification, "the partition handler factory is null");
         this.snapshotReader = table.newSnapshotReader();
         this.snapshotManager = table.snapshotManager();
     }
@@ -73,6 +75,7 @@ public class PartitionStatisticsReporter implements Closeable {
             long rowCount = 0;
             long totalSize = 0;
             long fileCount = 0;
+            int totalBuckets = 0;
             for (DataSplit split : splits) {
                 List<DataFileMeta> fileMetas = split.dataFiles();
                 fileCount += fileMetas.size();
@@ -80,20 +83,26 @@ public class PartitionStatisticsReporter implements Closeable {
                     rowCount += fileMeta.rowCount();
                     totalSize += fileMeta.fileSize();
                 }
+                totalBuckets = Optional.ofNullable(split.totalBuckets()).orElse(0);
             }
 
             PartitionStatistics partitionStats =
                     new PartitionStatistics(
-                            partitionSpec, rowCount, totalSize, fileCount, modifyTimeMillis);
+                            partitionSpec,
+                            rowCount,
+                            totalSize,
+                            fileCount,
+                            modifyTimeMillis,
+                            totalBuckets);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
-            partitionHandler.alterPartitions(Collections.singletonList(partitionStats));
+            partitionModification.alterPartitions(Collections.singletonList(partitionStats));
         }
     }
 
     @Override
     public void close() throws IOException {
         try {
-            partitionHandler.close();
+            partitionModification.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

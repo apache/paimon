@@ -186,8 +186,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public Identifier identifier() {
         Identifier identifier = catalogEnvironment.identifier();
         return identifier == null
-                ? SchemaManager.identifierFromPath(
-                        location().toUri().toString(), true, currentBranch())
+                ? SchemaManager.identifierFromPath(location().toString(), true, currentBranch())
                 : identifier;
     }
 

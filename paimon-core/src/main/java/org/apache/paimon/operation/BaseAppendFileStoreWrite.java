@@ -24,6 +24,7 @@ import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.append.cluster.Sorter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -59,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
 import static org.apache.paimon.types.DataTypeRoot.BLOB;
@@ -82,6 +84,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private @Nullable List<String> writeCols;
     private boolean forceBufferSpill = false;
     private boolean withBlob;
+    private @Nullable BlobConsumer blobConsumer;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -107,6 +110,12 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
 
         this.fileIndexOptions = options.indexColumnsOptions();
+    }
+
+    @Override
+    public BaseAppendFileStoreWrite withBlobConsumer(BlobConsumer blobConsumer) {
+        this.blobConsumer = blobConsumer;
+        return this;
     }
 
     @Override
@@ -142,7 +151,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.writeBufferSpillDiskSize(),
                 fileIndexOptions,
                 options.asyncFileWrite(),
-                options.statsDenseStore());
+                options.statsDenseStore(),
+                blobConsumer,
+                options.dataEvolutionEnabled());
     }
 
     @Override
@@ -182,7 +193,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         Exception collectedExceptions = null;
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
-                        partition, bucket, new LongCounter(toCompact.get(0).minSequenceNumber()));
+                        partition,
+                        bucket,
+                        () -> new LongCounter(toCompact.get(0).minSequenceNumber()));
         Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = null;
         if (dvFactory != null) {
             dvFactories = new HashMap<>();
@@ -217,7 +230,9 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         Sorter sorter = Sorter.getSorter(reader, ioManager, rowType, options);
         RowDataRollingFileWriter rewriter =
                 createRollingFileWriter(
-                        partition, bucket, new LongCounter(toCluster.get(0).minSequenceNumber()));
+                        partition,
+                        bucket,
+                        () -> new LongCounter(toCluster.get(0).minSequenceNumber()));
         try {
             MutableObjectIterator<BinaryRow> sorted = sorter.sort();
             BinaryRow binaryRow = new BinaryRow(sorter.arity());
@@ -244,7 +259,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     }
 
     private RowDataRollingFileWriter createRollingFileWriter(
-            BinaryRow partition, int bucket, LongCounter seqNumCounter) {
+            BinaryRow partition, int bucket, Supplier<LongCounter> seqNumCounterSupplier) {
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
@@ -252,7 +267,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.targetFileSize(false),
                 writeType,
                 pathFactory.createDataFilePathFactory(partition, bucket),
-                seqNumCounter,
+                seqNumCounterSupplier,
                 options.fileCompression(),
                 statsCollectors(),
                 fileIndexOptions,

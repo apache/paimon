@@ -22,6 +22,8 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class DataEvolutionTest(unittest.TestCase):
@@ -84,6 +86,156 @@ class DataEvolutionTest(unittest.TestCase):
             ('f1', pa.int16()),
         ]))
         self.assertEqual(actual_data, expect_data)
+
+        # assert manifest file meta contains min and max row id
+        manifest_list_manager = ManifestListManager(table)
+        snapshot_manager = SnapshotManager(table)
+        manifest = manifest_list_manager.read(snapshot_manager.get_latest_snapshot().delta_manifest_list)[0]
+        self.assertEqual(0, manifest.min_row_id)
+        self.assertEqual(1, manifest.max_row_id)
+
+    def test_merge_reader(self):
+        from pypaimon.read.reader.concat_batch_reader import MergeAllBatchReader
+
+        simple_pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string()),
+            ('f2', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            simple_pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'read.batch-size': '4096',
+            },
+        )
+        self.catalog.create_table('default.test_merge_reader_batch_sizes', schema, False)
+        table = self.catalog.get_table('default.test_merge_reader_batch_sizes')
+
+        write_builder = table.new_batch_write_builder()
+        size = 5000
+        w0 = write_builder.new_write().with_write_type(['f0', 'f1'])
+        w1 = write_builder.new_write().with_write_type(['f2'])
+        c = write_builder.new_commit()
+        d0 = pa.Table.from_pydict(
+            {'f0': list(range(size)), 'f1': [f'a{i}' for i in range(size)]},
+            schema=pa.schema([('f0', pa.int32()), ('f1', pa.string())]),
+        )
+        d1 = pa.Table.from_pydict(
+            {'f2': [f'b{i}' for i in range(size)]},
+            schema=pa.schema([('f2', pa.string())]),
+        )
+        w0.write_arrow(d0)
+        w1.write_arrow(d1)
+        cmts = w0.prepare_commit() + w1.prepare_commit()
+        for msg in cmts:
+            for nf in msg.new_files:
+                nf.first_row_id = 0
+        c.commit(cmts)
+        w0.close()
+        w1.close()
+        c.close()
+
+        original_merge_all = MergeAllBatchReader
+        call_count = [0]
+
+        def patched_merge_all(reader_suppliers, batch_size=1024):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                batch_size = 999
+            return original_merge_all(reader_suppliers, batch_size=batch_size)
+
+        import pypaimon.read.split_read as split_read_module
+        split_read_module.MergeAllBatchReader = patched_merge_all
+        try:
+            read_builder = table.new_read_builder()
+            table_scan = read_builder.new_scan()
+            table_read = read_builder.new_read()
+            splits = table_scan.plan().splits()
+            actual_data = table_read.to_arrow(splits)
+            expect_data = pa.Table.from_pydict({
+                'f0': list(range(size)),
+                'f1': [f'a{i}' for i in range(size)],
+                'f2': [f'b{i}' for i in range(size)],
+            }, schema=simple_pa_schema)
+            self.assertEqual(actual_data.num_rows, size)
+            self.assertEqual(actual_data, expect_data)
+        finally:
+            split_read_module.MergeAllBatchReader = original_merge_all
+
+    def test_with_slice(self):
+        pa_schema = pa.schema([
+            ("id", pa.int64()),
+            ("b", pa.int32()),
+            ("c", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+                "source.split.target-size": "512m",
+            },
+        )
+        table_name = "default.test_with_slice_data_evolution"
+        self.catalog.create_table(table_name, schema, ignore_if_exists=True)
+        table = self.catalog.get_table(table_name)
+
+        for batch in [
+            {"id": [1, 2], "b": [10, 20], "c": [100, 200]},
+            {"id": [1001, 2001], "b": [1011, 2011], "c": [1001, 2001]},
+            {"id": [-1, -2], "b": [-10, -20], "c": [-100, -200]},
+        ]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write()
+            tc = wb.new_commit()
+            tw.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        rb = table.new_read_builder()
+        full_splits = rb.new_scan().plan().splits()
+        full_result = rb.new_read().to_pandas(full_splits)
+        self.assertEqual(
+            len(full_result),
+            6,
+            "Full scan should return 6 rows",
+        )
+        self.assertEqual(
+            sorted(full_result["id"].tolist()),
+            [-2, -1, 1, 2, 1001, 2001],
+            "Full set ids mismatch",
+        )
+
+        # with_slice(1, 4) -> row indices [1, 2, 3] -> 3 rows with id in (2, 1001, 2001)
+        scan = rb.new_scan().with_slice(1, 4)
+        splits = scan.plan().splits()
+        result = rb.new_read().to_pandas(splits)
+        self.assertEqual(
+            len(result),
+            3,
+            "with_slice(1, 4) should return 3 rows (indices 1,2,3). "
+            "Bug: DataEvolutionSplitGenerator returns 2 when split has multiple data files.",
+        )
+        ids = result["id"].tolist()
+        self.assertEqual(
+            sorted(ids),
+            [2, 1001, 2001],
+            "with_slice(1, 4) should return id in (2, 1001, 2001). Got ids=%s" % ids,
+        )
+
+        # Out-of-bounds slice: 6 rows total, slice(10, 12) should return 0 rows
+        scan_oob = rb.new_scan().with_slice(10, 12)
+        splits_oob = scan_oob.plan().splits()
+        result_oob = rb.new_read().to_pandas(splits_oob)
+        self.assertEqual(
+            len(result_oob),
+            0,
+            "with_slice(10, 12) on 6 rows should return 0 rows (out of bounds), got %d"
+            % len(result_oob),
+        )
 
     def test_multiple_appends(self):
         simple_pa_schema = pa.schema([
@@ -421,6 +573,20 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=simple_pa_schema)
         self.assertEqual(actual, expect)
 
+        read_builder = table.new_read_builder()
+        read_builder.with_projection(['f0', 'f1', 'f2', '_ROW_ID', '_SEQUENCE_NUMBER'])
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        actual_with_meta = table_read.to_arrow(table_scan.plan().splits())
+        self.assertFalse(
+            actual_with_meta.schema.field('_ROW_ID').nullable,
+            '_ROW_ID must be non-nullable per SpecialFields',
+        )
+        self.assertFalse(
+            actual_with_meta.schema.field('_SEQUENCE_NUMBER').nullable,
+            '_SEQUENCE_NUMBER must be non-nullable per SpecialFields',
+        )
+
     def test_more_data(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
@@ -518,9 +684,9 @@ class DataEvolutionTest(unittest.TestCase):
             '_SEQUENCE_NUMBER': [1, 1],
         }, schema=pa.schema([
             ('f0', pa.int8()),
-            ('_ROW_ID', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
             ('f1', pa.int16()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
 
@@ -544,6 +710,8 @@ class DataEvolutionTest(unittest.TestCase):
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         actual_data = table_read.to_arrow(table_scan.plan().splits())
+        self.assertFalse(actual_data.schema.field('_ROW_ID').nullable)
+        self.assertFalse(actual_data.schema.field('_SEQUENCE_NUMBER').nullable)
         expect_data = pa.Table.from_pydict({
             'f0': [3, 4],
             'f1': [-1001, 1002],
@@ -552,7 +720,25 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=pa.schema([
             ('f0', pa.int8()),
             ('f1', pa.int16()),
-            ('_ROW_ID', pa.int64()),
-            ('_SEQUENCE_NUMBER', pa.int64()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
+
+    def test_from_arrays_without_schema(self):
+        schema = pa.schema([
+            ('f0', pa.int8()),
+            pa.field('_ROW_ID', pa.int64(), nullable=False),
+            pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
+        ])
+        batch = pa.RecordBatch.from_pydict(
+            {'f0': [1], '_ROW_ID': [0], '_SEQUENCE_NUMBER': [1]},
+            schema=schema
+        )
+        self.assertFalse(batch.schema.field('_ROW_ID').nullable)
+        self.assertFalse(batch.schema.field('_SEQUENCE_NUMBER').nullable)
+
+        arrays = list(batch.columns)
+        rebuilt = pa.RecordBatch.from_arrays(arrays, names=batch.schema.names)
+        self.assertTrue(rebuilt.schema.field('_ROW_ID').nullable)
+        self.assertTrue(rebuilt.schema.field('_SEQUENCE_NUMBER').nullable)

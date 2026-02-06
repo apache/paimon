@@ -23,7 +23,9 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.table.SpecialFields;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
@@ -47,7 +49,11 @@ public class RowTrackingCommitUtils {
     private static void assignSnapshotId(
             long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
         for (ManifestEntry entry : deltaFiles) {
-            snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            if (entry.file().minSequenceNumber() == 0L) {
+                snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            } else {
+                snapshotAssigned.add(entry);
+            }
         }
     }
 
@@ -60,7 +66,8 @@ public class RowTrackingCommitUtils {
         }
         // assign row id for new files
         long start = firstRowIdStart;
-        long blobStart = firstRowIdStart;
+        long blobStartDefault = firstRowIdStart;
+        Map<String, Long> blobStarts = new HashMap<>();
         for (ManifestEntry entry : deltaFiles) {
             Optional<FileSource> fileSource = entry.file().fileSource();
             checkArgument(
@@ -74,6 +81,8 @@ public class RowTrackingCommitUtils {
                     && !containsRowId) {
                 long rowCount = entry.file().rowCount();
                 if (isBlobFile(entry.file().fileName())) {
+                    String blobFieldName = entry.file().writeCols().get(0);
+                    long blobStart = blobStarts.getOrDefault(blobFieldName, blobStartDefault);
                     if (blobStart >= start) {
                         throw new IllegalStateException(
                                 String.format(
@@ -81,10 +90,11 @@ public class RowTrackingCommitUtils {
                                         blobStart, start));
                     }
                     rowIdAssigned.add(entry.assignFirstRowId(blobStart));
-                    blobStart += rowCount;
+                    blobStarts.put(blobFieldName, blobStart + rowCount);
                 } else {
                     rowIdAssigned.add(entry.assignFirstRowId(start));
-                    blobStart = start;
+                    blobStartDefault = start;
+                    blobStarts.clear();
                     start += rowCount;
                 }
             } else {

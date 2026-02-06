@@ -18,13 +18,25 @@
 
 package org.apache.paimon.append.dataevolution;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.ManifestsReader;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.stats.StatsTestUtils;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
@@ -35,6 +47,8 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /** Tests for {@link DataEvolutionCompactCoordinator.CompactPlanner}. */
 public class DataEvolutionCompactCoordinatorTest {
@@ -166,6 +180,76 @@ public class DataEvolutionCompactCoordinatorTest {
                         entries.get(2).file(),
                         entries.get(4).file(),
                         entries.get(5).file());
+    }
+
+    @Test
+    public void testPlanWithNullManifestRowId() {
+        FileStoreTable table = mock(FileStoreTable.class);
+        SnapshotReader snapshotReader = mock(SnapshotReader.class);
+        SnapshotManager snapshotManager = mock(SnapshotManager.class);
+        Snapshot snapshot = mock(Snapshot.class);
+        ManifestsReader manifestsReader = mock(ManifestsReader.class);
+        FileStore fileStore = mock(FileStore.class);
+        FileStoreScan scan = mock(FileStoreScan.class);
+
+        Options options = new Options();
+        options.set("target-file-size", "1 kb");
+        options.set("source.split.open-file-cost", "1 b");
+        options.set("compaction.min.file-num", "2");
+        when(table.coreOptions()).thenReturn(new CoreOptions(options));
+        when(table.newSnapshotReader()).thenReturn(snapshotReader);
+        when(snapshotReader.withPartitionFilter((PartitionPredicate) null))
+                .thenReturn(snapshotReader);
+        when(snapshotReader.snapshotManager()).thenReturn(snapshotManager);
+        when(snapshotManager.latestSnapshot()).thenReturn(snapshot);
+        when(snapshotReader.manifestsReader()).thenReturn(manifestsReader);
+        when(table.store()).thenReturn(fileStore);
+        when(fileStore.newScan()).thenReturn(scan);
+
+        ManifestFileMeta metaWithNullRowId =
+                new ManifestFileMeta(
+                        "manifest-1",
+                        1L,
+                        1L,
+                        0L,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        ManifestFileMeta metaWithRowId =
+                new ManifestFileMeta(
+                        "manifest-2",
+                        1L,
+                        1L,
+                        0L,
+                        StatsTestUtils.newEmptySimpleStats(),
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        199L);
+        List<ManifestFileMeta> metas = Arrays.asList(metaWithNullRowId, metaWithRowId);
+        when(manifestsReader.read(snapshot, ScanMode.ALL))
+                .thenReturn(new ManifestsReader.Result(snapshot, metas, metas));
+
+        ManifestEntry entry1 = makeEntry("file1.parquet", 0L, 100L, 600);
+        ManifestEntry entry2 = makeEntry("file2.parquet", 100L, 100L, 600);
+        when(scan.readFileIterator(Arrays.asList(metaWithNullRowId, metaWithRowId)))
+                .thenReturn(Arrays.asList(entry1, entry2).iterator());
+
+        DataEvolutionCompactCoordinator coordinator =
+                new DataEvolutionCompactCoordinator(table, false);
+        List<DataEvolutionCompactTask> tasks = coordinator.plan();
+
+        assertThat(tasks).hasSize(1);
+        assertThat(tasks.get(0).compactBefore().stream().map(DataFileMeta::fileName))
+                .containsExactly(entry1.file().fileName(), entry2.file().fileName());
     }
 
     private ManifestEntry makeEntry(

@@ -33,7 +33,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.format.lance.LanceUtils.toLanceSpecified;
+import static org.apache.paimon.format.lance.LanceUtils.toLanceSpecifiedForReader;
 
 /** A factory to create Lance Reader. */
 public class LanceReaderFactory implements FormatReaderFactory {
@@ -55,7 +55,7 @@ public class LanceReaderFactory implements FormatReaderFactory {
         }
 
         Pair<Path, Map<String, String>> lanceSpecified =
-                toLanceSpecified(context.fileIO(), context.filePath());
+                toLanceSpecifiedForReader(context.fileIO(), context.filePath());
         return new LanceRecordsReader(
                 lanceSpecified.getLeft(),
                 selectionRangesArray,

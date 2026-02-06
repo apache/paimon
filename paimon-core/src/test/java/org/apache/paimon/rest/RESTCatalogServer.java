@@ -41,6 +41,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
@@ -97,6 +99,7 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -107,6 +110,7 @@ import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
@@ -116,7 +120,6 @@ import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
 import javax.annotation.Nullable;
 
@@ -185,6 +188,8 @@ public class RESTCatalogServer {
     private final List<String> noPermissionTables = new ArrayList<>();
     private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
+    private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
+    private final Map<String, Map<String, Transform>> columnMaskingAuthHandler = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
@@ -266,6 +271,14 @@ public class RESTCatalogServer {
         columnAuthHandler.put(identifier.getFullName(), select);
     }
 
+    public void setRowFilterAuth(Identifier identifier, List<Predicate> rowFilters) {
+        rowFilterAuthHandler.put(identifier.getFullName(), rowFilters);
+    }
+
+    public void setColumnMaskingAuth(Identifier identifier, Map<String, Transform> columnMasking) {
+        columnMaskingAuthHandler.put(identifier.getFullName(), columnMasking);
+    }
+
     public RESTToken getDataToken(Identifier identifier) {
         return DataTokenStore.getDataToken(warehouse, identifier.getFullName());
     }
@@ -311,10 +324,14 @@ public class RESTCatalogServer {
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
-                    } else if (resourcePaths.renameTable().equals(request.getPath())) {
+                    } else if ("POST".equals(request.getMethod())
+                            && resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
                         return renameViewHandle(restAuthParameter.data());
+                    } else if ("GET".equals(request.getMethod())
+                            && isTableByIdRequest(request.getPath())) {
+                        return tableByIdHandle(request.getPath());
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.tables())) {
                         return tablesHandle(parameters);
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
@@ -829,7 +846,33 @@ public class RESTCatalogServer {
                         }
                     });
         }
-        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        List<Predicate> rowFilters = rowFilterAuthHandler.get(identifier.getFullName());
+        Map<String, Transform> columnMasking =
+                columnMaskingAuthHandler.get(identifier.getFullName());
+
+        // Convert Predicate list to JSON string list
+        List<String> filterJsonList = null;
+        if (rowFilters != null) {
+            filterJsonList =
+                    rowFilters.stream().map(JsonSerdeUtil::toFlatJson).collect(Collectors.toList());
+        }
+
+        // Convert Transform map to JSON string map
+        Map<String, String> columnMaskingJsonMap = null;
+        if (columnMasking != null) {
+            columnMaskingJsonMap =
+                    columnMasking.entrySet().stream()
+                            .collect(
+                                    Collectors.toMap(
+                                            Map.Entry::getKey,
+                                            entry -> JsonSerdeUtil.toFlatJson(entry.getValue())));
+        }
+
+        AuthTableQueryResponse response =
+                new AuthTableQueryResponse(filterJsonList, columnMaskingJsonMap);
+        if (response == null) {
+            response = new AuthTableQueryResponse(Collections.emptyList(), ImmutableMap.of());
+        }
         return mockResponse(response, 200);
     }
 
@@ -1463,6 +1506,7 @@ public class RESTCatalogServer {
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
+                                identifier.getDatabaseName(),
                                 identifier.getTableName(),
                                 entry.getValue().schema().options().get(PATH.key()),
                                 entry.getValue().isExternal(),
@@ -1525,6 +1569,27 @@ public class RESTCatalogServer {
         return Options.fromMap(schema.options()).get(TYPE) == OBJECT_TABLE;
     }
 
+    private boolean isTableByIdRequest(String requestPath) {
+        String tableByIdPath = StringUtils.substringBeforeLast(resourcePaths.table("mock_id"), "/");
+        String tableByIdPathPrefix = tableByIdPath + "/";
+        return requestPath.startsWith(tableByIdPathPrefix);
+    }
+
+    private MockResponse tableByIdHandle(String requestPath) throws Exception {
+        String tableId = StringUtils.substringAfterLast(requestPath, "/");
+        for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
+            TableMetadata tableMetadata = entry.getValue();
+            if (tableId.equals(tableMetadata.uuid())) {
+                Identifier identifier = Identifier.fromString(entry.getKey());
+                return tableHandle("GET", "", identifier);
+            }
+        }
+        return mockResponse(
+                new ErrorResponse(
+                        ErrorResponse.RESOURCE_TYPE_TABLE, tableId, "Table not exist.", 404),
+                404);
+    }
+
     private MockResponse tableHandle(String method, String data, Identifier identifier)
             throws Exception {
         RESTResponse response;
@@ -1547,6 +1612,7 @@ public class RESTCatalogServer {
                 response =
                         new GetTableResponse(
                                 tableMetadata.uuid(),
+                                identifier.getDatabaseName(),
                                 identifier.getObjectName(),
                                 path,
                                 tableMetadata.isExternal(),
@@ -2405,6 +2471,7 @@ public class RESTCatalogServer {
                                                                                 .lastFileCreationTime(),
                                                                         stats
                                                                                 .lastFileCreationTime()),
+                                                                stats.totalBuckets(),
                                                                 oldPartition.done(),
                                                                 oldPartition.createdAt(),
                                                                 oldPartition.createdBy(),
@@ -2522,6 +2589,7 @@ public class RESTCatalogServer {
                         catalog.lockFactory().orElse(null),
                         catalog.lockContext().orElse(null),
                         catalogContext,
+                        false,
                         false);
         Path path = new Path(schema.options().get(PATH.key()));
         FileIO dataFileIO = catalog.fileIO();
@@ -2630,6 +2698,7 @@ public class RESTCatalogServer {
                 stats.fileSizeInBytes(),
                 stats.fileCount(),
                 stats.lastFileCreationTime(),
+                stats.totalBuckets(),
                 false,
                 System.currentTimeMillis(),
                 "created",

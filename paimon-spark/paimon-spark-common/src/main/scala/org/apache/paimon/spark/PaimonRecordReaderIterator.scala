@@ -81,7 +81,7 @@ case class PaimonRecordReaderIterator(
     try {
       if (currentIterator != null) {
         currentIterator.releaseBatch()
-        currentResult == null
+        currentResult = null
       }
     } finally {
       reader.close()
@@ -96,7 +96,7 @@ case class PaimonRecordReaderIterator(
     iter match {
       case fileRecordIterator: FileRecordIterator[_] =>
         if (lastFilePath != fileRecordIterator.filePath()) {
-          PaimonUtils.setInputFileName(fileRecordIterator.filePath().toUri.toString)
+          PaimonUtils.setInputFileName(fileRecordIterator.filePath().toString)
           lastFilePath = fileRecordIterator.filePath()
         }
       case i =>
@@ -157,7 +157,7 @@ case class PaimonRecordReaderIterator(
           case PaimonMetadataColumn.ROW_INDEX_COLUMN =>
             metadataRow.setField(index, fileRecordIterator.returnedPosition())
           case PaimonMetadataColumn.FILE_PATH_COLUMN =>
-            metadataRow.setField(index, BinaryString.fromString(lastFilePath.toUri.toString))
+            metadataRow.setField(index, BinaryString.fromString(lastFilePath.toString))
           case PaimonMetadataColumn.PARTITION_COLUMN =>
             metadataRow.setField(index, split.asInstanceOf[DataSplit].partition())
           case PaimonMetadataColumn.BUCKET_COLUMN =>

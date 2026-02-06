@@ -99,14 +99,14 @@ public class RollingBlobFileWriterTest {
                         TARGET_FILE_SIZE,
                         SCHEMA,
                         pathFactory,
-                        seqNumCounter,
+                        () -> seqNumCounter,
                         COMPRESSION,
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
     }
 
     @Test
@@ -199,14 +199,14 @@ public class RollingBlobFileWriterTest {
                                 false,
                                 null,
                                 null),
-                        new LongCounter(),
+                        () -> new LongCounter(),
                         COMPRESSION,
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Create large blob data that will exceed the blob target file size
         byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
@@ -276,14 +276,14 @@ public class RollingBlobFileWriterTest {
                         blobTargetFileSize,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
-                        new LongCounter(),
+                        () -> new LongCounter(),
                         COMPRESSION,
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -355,14 +355,14 @@ public class RollingBlobFileWriterTest {
                         blobTargetFileSize,
                         SCHEMA,
                         pathFactory, // Use the same pathFactory to ensure shared UUID
-                        new LongCounter(),
+                        () -> new LongCounter(),
                         COMPRESSION,
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Create blob data that will trigger rolling (non-descriptor mode: direct blob data)
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -573,14 +573,14 @@ public class RollingBlobFileWriterTest {
                         TARGET_FILE_SIZE,
                         customSchema, // Use custom schema
                         pathFactory,
-                        seqNumCounter,
+                        () -> seqNumCounter,
                         COMPRESSION,
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false, // asyncFileWrite
-                        false // statsDenseStore
-                        );
+                        false, // statsDenseStore
+                        null);
 
         // Write data
         for (int i = 0; i < 3; i++) {

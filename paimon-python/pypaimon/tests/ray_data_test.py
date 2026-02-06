@@ -155,7 +155,7 @@ class RayDataTest(unittest.TestCase):
         ds = from_arrow(test_data)
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
-        writer.write_raydata(ds, parallelism=2)
+        writer.write_ray(ds, concurrency=2)
         # Read using Ray Data
         read_builder = table.new_read_builder()
         table_read = read_builder.new_read()

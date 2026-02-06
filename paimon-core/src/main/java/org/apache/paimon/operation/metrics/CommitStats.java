@@ -24,7 +24,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -38,8 +37,8 @@ import java.util.stream.Collectors;
 public class CommitStats {
     private final long duration;
     private final int attempts;
-    private final long tableFilesAdded;
     private final long tableFilesAppended;
+    private final long tableFilesAdded;
     private final long tableFilesDeleted;
     private final long changelogFilesAppended;
     private final long compactionInputFileSize;
@@ -63,19 +62,29 @@ public class CommitStats {
             long commitDuration,
             int generatedSnapshots,
             int attempts) {
-        List<ManifestEntry> addedTableFiles = new ArrayList<>(appendTableFiles);
+        List<ManifestEntry> addedTableFiles =
+                appendTableFiles.stream()
+                        .filter(f -> FileKind.ADD.equals(f.kind()))
+                        .collect(Collectors.toList());
+        List<ManifestEntry> deletedTableFiles =
+                appendTableFiles.stream()
+                        .filter(f -> FileKind.DELETE.equals(f.kind()))
+                        .collect(Collectors.toList());
+
         List<ManifestEntry> compactAfterFiles =
                 compactTableFiles.stream()
                         .filter(f -> FileKind.ADD.equals(f.kind()))
                         .collect(Collectors.toList());
         addedTableFiles.addAll(compactAfterFiles);
-        List<ManifestEntry> deletedTableFiles =
+
+        List<ManifestEntry> compactionInputFiles =
                 compactTableFiles.stream()
                         .filter(f -> FileKind.DELETE.equals(f.kind()))
                         .collect(Collectors.toList());
+        deletedTableFiles.addAll(compactionInputFiles);
 
         this.compactionInputFileSize =
-                deletedTableFiles.stream()
+                compactionInputFiles.stream()
                         .map(ManifestEntry::file)
                         .map(DataFileMeta::fileSize)
                         .reduce(Long::sum)
@@ -86,8 +95,8 @@ public class CommitStats {
                         .map(DataFileMeta::fileSize)
                         .reduce(Long::sum)
                         .orElse(0L);
-        this.tableFilesAdded = addedTableFiles.size();
         this.tableFilesAppended = appendTableFiles.size();
+        this.tableFilesAdded = addedTableFiles.size();
         this.tableFilesDeleted = deletedTableFiles.size();
         this.tableFilesCompacted = compactTableFiles.size();
         this.changelogFilesAppended = appendChangelogFiles.size();

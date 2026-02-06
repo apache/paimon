@@ -20,7 +20,7 @@ import logging
 import random
 import time
 import uuid
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
@@ -28,7 +28,7 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.read.scanner.full_starting_scanner import FullStartingScanner
+from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
                                                SnapshotCommit)
@@ -140,6 +140,44 @@ class FileStoreCommit:
                 snapshot, partition_filter, commit_messages)
         )
 
+    def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+
+        partition_keys_set = set(self.table.partition_keys)
+        for part in partitions:
+            for key in part:
+                if key not in partition_keys_set:
+                    raise ValueError(
+                        f"Partition spec key '{key}' is not a partition column. "
+                        f"Partition keys are: {list(self.table.partition_keys)}."
+                    )
+
+        # Use full table fields so FullStartingScanner's trim_and_transform_predicate
+        # maps indices correctly (full schema index -> partition index).
+        predicate_builder = PredicateBuilder(self.table.fields)
+        partition_predicates = []
+        for part in partitions:
+            sub_predicates = [
+                predicate_builder.equal(key, value)
+                for key, value in part.items()
+            ]
+            if sub_predicates:
+                pred = predicate_builder.and_predicates(sub_predicates)
+                if pred is not None:
+                    partition_predicates.append(pred)
+        if not partition_predicates:
+            raise RuntimeError("Failed to build partition filter for drop_partitions.")
+
+        partition_filter = predicate_builder.or_predicates(partition_predicates)
+
+        self._try_commit(
+            commit_kind="OVERWRITE",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                snapshot, partition_filter, [])
+        )
+
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan):
         import threading
 
@@ -150,6 +188,11 @@ class FileStoreCommit:
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
             commit_entries = commit_entries_plan(latest_snapshot)
+
+            # No entries to commit (e.g. drop_partitions with no matching data): skip commit
+            # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
+            if not commit_entries:
+                break
 
             result = self._try_commit_once(
                 retry_result=retry_result,
@@ -195,9 +238,6 @@ class FileStoreCommit:
 
         # process new_manifest
         new_manifest_file = f"manifest-{str(uuid.uuid4())}-0"
-        added_file_count = 0
-        deleted_file_count = 0
-        delta_record_count = 0
         # process snapshot
         new_snapshot_id = latest_snapshot.id + 1 if latest_snapshot else 1
 
@@ -216,41 +256,9 @@ class FileStoreCommit:
             # Assign row IDs to new files and get the next row ID for the snapshot
             commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
 
-        for entry in commit_entries:
-            if entry.kind == 0:
-                added_file_count += 1
-                delta_record_count += entry.file.row_count
-            else:
-                deleted_file_count += 1
-                delta_record_count -= entry.file.row_count
         try:
-            self.manifest_file_manager.write(new_manifest_file, commit_entries)
             # TODO: implement noConflictsOrFail logic
-            partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
-            partition_min_stats = [min(col) for col in partition_columns]
-            partition_max_stats = [max(col) for col in partition_columns]
-            partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
-            if not all(count == 0 for count in partition_null_counts):
-                raise RuntimeError("Partition value should not be null")
-            manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
-            new_manifest_file_meta = ManifestFileMeta(
-                file_name=new_manifest_file,
-                file_size=self.table.file_io.get_file_size(manifest_file_path),
-                num_added_files=added_file_count,
-                num_deleted_files=deleted_file_count,
-                partition_stats=SimpleStats(
-                    min_values=GenericRow(
-                        values=partition_min_stats,
-                        fields=self.table.partition_keys_fields
-                    ),
-                    max_values=GenericRow(
-                        values=partition_max_stats,
-                        fields=self.table.partition_keys_fields
-                    ),
-                    null_counts=partition_null_counts,
-                ),
-                schema_id=self.table.table_schema.id,
-            )
+            new_manifest_file_meta = self._write_manifest_file(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
 
             # process existing_manifest
@@ -263,6 +271,13 @@ class FileStoreCommit:
             else:
                 existing_manifest_files = []
             self.manifest_list_manager.write(base_manifest_list, existing_manifest_files)
+
+            delta_record_count = 0
+            for entry in commit_entries:
+                if entry.kind == 0:
+                    delta_record_count += entry.file.row_count
+                else:
+                    delta_record_count -= entry.file.row_count
 
             total_record_count += delta_record_count
             snapshot_data = Snapshot(
@@ -306,6 +321,66 @@ class FileStoreCommit:
         )
         return SuccessResult()
 
+    def _write_manifest_file(self, commit_entries, new_manifest_file):
+        # Write new manifest file
+        self.manifest_file_manager.write(new_manifest_file, commit_entries)
+
+        # Calculate file count & record count statistics
+        added_file_count = 0
+        deleted_file_count = 0
+        for entry in commit_entries:
+            if entry.kind == 0:
+                added_file_count += 1
+            else:
+                deleted_file_count += 1
+
+        # Calculate partition statistics
+        partition_columns = list(zip(*(entry.partition.values for entry in commit_entries)))
+        partition_min_stats = [min(col) for col in partition_columns]
+        partition_max_stats = [max(col) for col in partition_columns]
+        partition_null_counts = [sum(value == 0 for value in col) for col in partition_columns]
+        if not all(count == 0 for count in partition_null_counts):
+            raise RuntimeError("Partition value should not be null")
+
+        # Calculate min_row_id and max_row_id from commit_entries
+        min_row_id = None
+        max_row_id = None
+        for entry in commit_entries:
+            if entry.file.first_row_id is None:
+                # If any file has first_row_id as None, set both min_row_id and max_row_id to None
+                min_row_id = None
+                max_row_id = None
+                break
+            entry_min = entry.file.first_row_id
+            entry_max = entry.file.first_row_id + entry.file.row_count - 1
+            if min_row_id is None or entry_min < min_row_id:
+                min_row_id = entry_min
+            if max_row_id is None or entry_max > max_row_id:
+                max_row_id = entry_max
+
+        # return new ManifestFileMeta
+        manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
+        return ManifestFileMeta(
+            file_name=new_manifest_file,
+            file_size=self.table.file_io.get_file_size(manifest_file_path),
+            num_added_files=added_file_count,
+            num_deleted_files=deleted_file_count,
+            partition_stats=SimpleStats(
+                min_values=GenericRow(
+                    values=partition_min_stats,
+                    fields=self.table.partition_keys_fields
+                ),
+                max_values=GenericRow(
+                    values=partition_max_stats,
+                    fields=self.table.partition_keys_fields
+                ),
+                null_counts=partition_null_counts,
+            ),
+            schema_id=self.table.table_schema.id,
+            min_row_id=min_row_id,
+            max_row_id=max_row_id,
+        )
+
     def _is_duplicate_commit(self, retry_result, latest_snapshot, commit_identifier, commit_kind) -> bool:
         if retry_result is not None and latest_snapshot is not None:
             start_check_snapshot_id = 1  # Snapshot.FIRST_SNAPSHOT_ID
@@ -328,7 +403,7 @@ class FileStoreCommit:
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
         current_entries = [] if latestSnapshot is None \
-            else (FullStartingScanner(self.table, partition_filter, None).
+            else (FileScanner(self.table, lambda: [], partition_filter).
                   read_manifest_entries(self.manifest_list_manager.read_all(latestSnapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE
@@ -450,7 +525,8 @@ class FileStoreCommit:
                     'record_count': 0,
                     'file_count': 0,
                     'file_size_in_bytes': 0,
-                    'last_file_creation_time': 0
+                    'last_file_creation_time': 0,
+                    'total_buckets': entry.total_buckets
                 }
 
             # Following Java implementation: PartitionEntry.fromDataFile()
@@ -485,7 +561,8 @@ class FileStoreCommit:
                 record_count=stats['record_count'],
                 file_count=stats['file_count'],
                 file_size_in_bytes=stats['file_size_in_bytes'],
-                last_file_creation_time=stats['last_file_creation_time']
+                last_file_creation_time=stats['last_file_creation_time'],
+                total_buckets=stats['total_buckets']
             )
             for stats in partition_stats.values()
         ]

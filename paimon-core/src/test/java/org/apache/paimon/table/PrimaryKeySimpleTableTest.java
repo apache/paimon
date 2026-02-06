@@ -1711,18 +1711,19 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             options.set("partial-update.remove-record-on-sequence-group", "seq2");
                         },
                         rowType);
-        FileStoreTable wrongTable =
-                createFileStoreTable(
-                        options -> {
-                            options.set("merge-engine", "partial-update");
-                            options.set("fields.seq1.sequence-group", "b");
-                            options.set("fields.seq2.sequence-group", "c,d");
-                            options.set("partial-update.remove-record-on-sequence-group", "b");
-                        },
-                        rowType);
-        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
 
-        assertThatThrownBy(() -> wrongTable.newWrite(""))
+        assertThatThrownBy(
+                        () ->
+                                createFileStoreTable(
+                                        options -> {
+                                            options.set("merge-engine", "partial-update");
+                                            options.set("fields.seq1.sequence-group", "b");
+                                            options.set("fields.seq2.sequence-group", "c,d");
+                                            options.set(
+                                                    "partial-update.remove-record-on-sequence-group",
+                                                    "b");
+                                        },
+                                        rowType))
                 .hasMessageContaining(
                         "field 'b' defined in 'partial-update.remove-record-on-sequence-group' option must be part of sequence groups");
 
@@ -1730,6 +1731,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+
         // 1. Inserts
         write.write(GenericRow.of(1, 1, 10, 1, 20, 20, 1));
         write.write(GenericRow.of(1, 1, 11, 2, 25, 25, 0));

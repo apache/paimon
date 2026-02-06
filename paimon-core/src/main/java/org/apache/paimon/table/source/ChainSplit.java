@@ -35,6 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /**
  * A split describes chain table read scope. It follows DataSplit's custom serialization pattern and
@@ -85,6 +86,11 @@ public class ChainSplit implements Split {
             sum += file.rowCount();
         }
         return sum;
+    }
+
+    @Override
+    public OptionalLong mergedRowCount() {
+        return OptionalLong.empty();
     }
 
     @Override

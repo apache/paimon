@@ -55,8 +55,12 @@ public class BlobFileMeta {
         long[] blobOffsets = new long[blobLengths.length];
         long offset = 0;
         for (int i = 0; i < blobLengths.length; i++) {
-            blobOffsets[i] = offset;
-            offset += blobLengths[i];
+            if (blobLengths[i] == -1) {
+                blobOffsets[i] = -1;
+            } else {
+                blobOffsets[i] = offset;
+                offset += blobLengths[i];
+            }
         }
 
         int[] returnedPositions = null;
@@ -79,6 +83,10 @@ public class BlobFileMeta {
         this.returnedPositions = returnedPositions;
         this.blobLengths = blobLengths;
         this.blobOffsets = blobOffsets;
+    }
+
+    public boolean isNull(int i) {
+        return blobLengths[i] == -1;
     }
 
     public long blobLength(int i) {

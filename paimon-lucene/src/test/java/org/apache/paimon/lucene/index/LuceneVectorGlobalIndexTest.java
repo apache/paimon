@@ -93,13 +93,8 @@ public class LuceneVectorGlobalIndexTest {
     private GlobalIndexFileReader createFileReader(Path path) {
         return new GlobalIndexFileReader() {
             @Override
-            public SeekableInputStream getInputStream(String fileName) throws IOException {
-                return fileIO.newInputStream(new Path(path, fileName));
-            }
-
-            @Override
-            public Path filePath(String fileName) {
-                return new Path(path, fileName);
+            public SeekableInputStream getInputStream(GlobalIndexIOMeta meta) throws IOException {
+                return fileIO.newInputStream(new Path(path, meta.filePath()));
             }
         };
     }
@@ -131,7 +126,7 @@ public class LuceneVectorGlobalIndexTest {
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(metricIndexPath, result.fileName()),
                             fileIO.getFileSize(new Path(metricIndexPath, result.fileName())),
                             result.meta()));
 
@@ -168,7 +163,7 @@ public class LuceneVectorGlobalIndexTest {
             List<GlobalIndexIOMeta> metas = new ArrayList<>();
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(dimIndexPath, result.fileName()),
                             fileIO.getFileSize(new Path(dimIndexPath, result.fileName())),
                             result.meta()));
 
@@ -225,7 +220,7 @@ public class LuceneVectorGlobalIndexTest {
         for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(indexPath, result.fileName()),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
                             result.meta()));
         }
@@ -233,9 +228,8 @@ public class LuceneVectorGlobalIndexTest {
         try (LuceneVectorGlobalIndexReader reader =
                 new LuceneVectorGlobalIndexReader(fileReader, metas, vectorType)) {
             VectorSearch vectorSearch = new VectorSearch(vectors[0], 1, fieldName);
-            LuceneVectorSearchGlobalIndexResult result =
-                    (LuceneVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            LuceneScoredGlobalIndexResult result =
+                    (LuceneScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(1);
             long expectedRowId = 0;
             assertThat(containsRowId(result, expectedRowId)).isTrue();
@@ -245,16 +239,12 @@ public class LuceneVectorGlobalIndexTest {
             filterResults.add(expectedRowId);
             vectorSearch =
                     new VectorSearch(vectors[0], 1, fieldName).withIncludeRowIds(filterResults);
-            result =
-                    (LuceneVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            result = (LuceneScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(containsRowId(result, expectedRowId)).isTrue();
 
             float[] queryVector = new float[] {0.85f, 0.15f};
             vectorSearch = new VectorSearch(queryVector, 2, fieldName);
-            result =
-                    (LuceneVectorSearchGlobalIndexResult)
-                            reader.visitVectorSearch(vectorSearch).get();
+            result = (LuceneScoredGlobalIndexResult) reader.visitVectorSearch(vectorSearch).get();
             assertThat(result.results().getLongCardinality()).isEqualTo(2);
             long rowId1 = 1;
             long rowId2 = 3;
@@ -293,7 +283,7 @@ public class LuceneVectorGlobalIndexTest {
         for (ResultEntry result : results) {
             metas.add(
                     new GlobalIndexIOMeta(
-                            result.fileName(),
+                            new Path(indexPath, result.fileName()),
                             fileIO.getFileSize(new Path(indexPath, result.fileName())),
                             result.meta()));
         }

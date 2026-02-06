@@ -148,7 +148,7 @@ class UriReaderFactory:
             # Import FileIO here to avoid circular imports
             from pypaimon.common.file_io import FileIO
             uri_string = parsed_uri.geturl()
-            file_io = FileIO(uri_string, self.catalog_options)
+            file_io = FileIO.get(uri_string, self.catalog_options)
             return UriReader.from_file(file_io)
         except Exception as e:
             raise RuntimeError(f"Failed to create reader for URI {parsed_uri.geturl()}") from e

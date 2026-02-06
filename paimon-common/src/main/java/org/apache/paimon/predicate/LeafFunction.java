@@ -20,12 +20,60 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonValue;
+
+import java.io.IOException;
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /** Function to test a field with literals. */
 public abstract class LeafFunction implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    @JsonCreator
+    public static LeafFunction fromJson(String name) throws IOException {
+        LeafFunction function = RegistryHolder.REGISTRY.get(name);
+        if (function == null) {
+            throw new IllegalArgumentException("Could not resolve leaf function '" + name + "'");
+        }
+        return function;
+    }
+
+    /** Holder class for lazy initialization of the registry to avoid class loading deadlock. */
+    private static class RegistryHolder {
+
+        private static final Map<String, LeafFunction> REGISTRY = createRegistry();
+
+        private static Map<String, LeafFunction> createRegistry() {
+            Map<String, LeafFunction> registry = new HashMap<>();
+            registry.put(Equal.NAME, Equal.INSTANCE);
+            registry.put(NotEqual.NAME, NotEqual.INSTANCE);
+            registry.put(LessThan.NAME, LessThan.INSTANCE);
+            registry.put(LessOrEqual.NAME, LessOrEqual.INSTANCE);
+            registry.put(GreaterThan.NAME, GreaterThan.INSTANCE);
+            registry.put(GreaterOrEqual.NAME, GreaterOrEqual.INSTANCE);
+            registry.put(IsNull.NAME, IsNull.INSTANCE);
+            registry.put(IsNotNull.NAME, IsNotNull.INSTANCE);
+            registry.put(StartsWith.NAME, StartsWith.INSTANCE);
+            registry.put(EndsWith.NAME, EndsWith.INSTANCE);
+            registry.put(Contains.NAME, Contains.INSTANCE);
+            registry.put(Like.NAME, Like.INSTANCE);
+            registry.put(In.NAME, In.INSTANCE);
+            registry.put(NotIn.NAME, NotIn.INSTANCE);
+            registry.put(Between.NAME, Between.INSTANCE);
+            registry.put(NotBetween.NAME, NotBetween.INSTANCE);
+            return Collections.unmodifiableMap(registry);
+        }
+    }
+
+    @JsonValue
+    public abstract String toJson();
 
     public abstract boolean test(DataType type, Object field, List<Object> literals);
 

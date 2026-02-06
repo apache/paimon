@@ -42,6 +42,10 @@ from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.table.format.format_table import FormatTable, Format
+
+
+FORMAT_TABLE_TYPE = "format-table"
 
 
 class RESTCatalog(Catalog):
@@ -180,7 +184,7 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(database_name) from e
 
-    def get_table(self, identifier: Union[str, Identifier]) -> FileStoreTable:
+    def get_table(self, identifier: Union[str, Identifier]):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         return self.load_table(
@@ -209,6 +213,27 @@ class RESTCatalog(Catalog):
                 raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
+
+    def drop_partitions(
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+        table = self.get_table(identifier)
+        if isinstance(table, FormatTable):
+            raise ValueError(
+                "drop_partitions is not supported for format tables. "
+                "Only Paimon (FileStore) tables support partition drop."
+            )
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.truncate_partitions(partitions)
+        finally:
+            commit.close()
 
     def alter_table(
         self,
@@ -252,7 +277,7 @@ class RESTCatalog(Catalog):
         )
 
     def file_io_from_options(self, table_path: str) -> FileIO:
-        return FileIO(table_path, self.context.options)
+        return FileIO.get(table_path, self.context.options)
 
     def file_io_for_data(self, table_path: str, identifier: Identifier):
         return RESTTokenFileIO(identifier, table_path, self.context.options) \
@@ -263,9 +288,12 @@ class RESTCatalog(Catalog):
                    internal_file_io: Callable[[str], Any],
                    external_file_io: Callable[[str], Any],
                    metadata_loader: Callable[[Identifier], TableMetadata],
-                   ) -> FileStoreTable:
+                   ):
         metadata = metadata_loader(identifier)
         schema = metadata.schema
+        table_type = schema.options.get(CoreOptions.TYPE.key(), "").strip().lower()
+        if table_type == FORMAT_TABLE_TYPE:
+            return self._create_format_table(identifier, metadata, internal_file_io, external_file_io)
         data_file_io = external_file_io if metadata.is_external else internal_file_io
         catalog_env = CatalogEnvironment(
             identifier=identifier,
@@ -280,6 +308,30 @@ class RESTCatalog(Catalog):
                             schema,
                             catalog_env)
         return table
+
+    def _create_format_table(self,
+                             identifier: Identifier,
+                             metadata: TableMetadata,
+                             internal_file_io: Callable[[str], Any],
+                             external_file_io: Callable[[str], Any],
+                             ) -> FormatTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        if not location:
+            raise ValueError("Format table schema must have path option")
+        data_file_io = external_file_io if metadata.is_external else internal_file_io
+        file_io = data_file_io(location)
+        file_format = schema.options.get(CoreOptions.FILE_FORMAT.key(), "parquet")
+        fmt = Format.parse(file_format)
+        return FormatTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            format=fmt,
+            options=dict(schema.options),
+            comment=schema.comment,
+        )
 
     @staticmethod
     def create(file_io: FileIO,

@@ -103,14 +103,14 @@ under the License.
         <spotless.version>2.13.0</spotless.version>
         <spotless.delimiter>package</spotless.delimiter>
         <target.java.version>1.8</target.java.version>
-        <assertj.version>3.23.1</assertj.version>
+        <assertj.version>3.27.7</assertj.version>
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
         <iceberg.version>1.6.1</iceberg.version>
         <hudi.version>0.15.0</hudi.version>
-        <parquet.version>1.15.2</parquet.version>
+        <parquet.version>1.16.0</parquet.version>
         <orc.version>1.9.2</orc.version>
         <protobuf-java.version>3.19.6</protobuf-java.version>
         <roaringbitmap.version>1.2.1</roaringbitmap.version>
@@ -127,7 +127,7 @@ under the License.
 
         <!-- spark profile properties-->
         <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
-        <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
+        <paimon-spark-common.spark.version>3.5.8</paimon-spark-common.spark.version>
         <test.spark.main.version>3.3</test.spark.main.version>
         <test.spark.version>3.3.0</test.spark.version>
 
@@ -407,7 +407,7 @@ under the License.
             <properties>
                 <scala.binary.version>2.12</scala.binary.version>
                 <scala.version>${scala212.version}</scala.version>
-                <paimon-spark-common.spark.version>3.5.7</paimon-spark-common.spark.version>
+                <paimon-spark-common.spark.version>3.5.8</paimon-spark-common.spark.version>
                 <paimon-sparkx-common>paimon-spark3-common_${scala.binary.version}</paimon-sparkx-common>
                 <!-- todo: support the latest spark in paimon e2e test2 -->
                 <test.spark.main.version>3.3</test.spark.main.version>
@@ -637,6 +637,7 @@ under the License.
                         <exclude>paimon-common/src/main/antlr4/**</exclude>
                         <exclude>paimon-core/src/test/resources/compatibility/**</exclude>
                         <exclude>paimon-faiss/paimon-faiss-jni/build/**</exclude>
+                        <exclude>paimon-python/pypaimon/sample/data/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>

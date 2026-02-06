@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex.btree;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
@@ -41,8 +42,7 @@ import java.util.Optional;
 public class LazyFilteredBTreeReader implements GlobalIndexReader {
 
     private final BTreeFileMetaSelector fileSelector;
-    private final List<GlobalIndexIOMeta> files;
-    private final Map<String, GlobalIndexReader> readerCache;
+    private final Map<Path, GlobalIndexReader> readerCache;
     private final KeySerializer keySerializer;
     private final CacheManager cacheManager;
     private final GlobalIndexFileReader fileReader;
@@ -57,7 +57,6 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-        this.files = files;
     }
 
     @Override
@@ -250,6 +249,20 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
         return createUnionReader(selected).visitNotIn(fieldRef, literals);
     }
 
+    @Override
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        Optional<List<GlobalIndexIOMeta>> selectedOpt =
+                fileSelector.visitBetween(fieldRef, from, to);
+        if (!selectedOpt.isPresent()) {
+            return Optional.empty();
+        }
+        List<GlobalIndexIOMeta> selected = selectedOpt.get();
+        if (selected.isEmpty()) {
+            return Optional.of(GlobalIndexResult.createEmpty());
+        }
+        return createUnionReader(selected).visitBetween(fieldRef, from, to);
+    }
+
     /**
      * Create a Union Reader for given files. The union reader is composed by readers from reader
      * cache, so please do not close it.
@@ -259,7 +272,7 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
         for (GlobalIndexIOMeta meta : files) {
             readers.add(
                     readerCache.computeIfAbsent(
-                            meta.fileName(),
+                            meta.filePath(),
                             name -> {
                                 try {
                                     return new BTreeIndexReader(
@@ -276,7 +289,7 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
     @Override
     public void close() throws IOException {
         IOException exception = null;
-        for (Map.Entry<String, GlobalIndexReader> entry : this.readerCache.entrySet()) {
+        for (Map.Entry<Path, GlobalIndexReader> entry : this.readerCache.entrySet()) {
             try {
                 entry.getValue().close();
             } catch (IOException ioe) {

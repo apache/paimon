@@ -38,8 +38,10 @@ import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.http.message.BasicHeader;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 import static org.apache.paimon.rest.HttpClientUtils.DEFAULT_HTTP_CLIENT;
@@ -89,19 +91,14 @@ public class HttpClient implements RESTClient {
             RESTRequest body,
             Class<T> responseType,
             RESTAuthFunction restAuthFunction) {
-        try {
-            String bodyStr = RESTApi.toJson(body);
-            Header[] authHeaders = getHeaders(path, "POST", bodyStr, restAuthFunction);
-            HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
-            httpPost.setHeaders(authHeaders);
-            String encodedBody = RESTUtil.encodedBody(body);
-            if (encodedBody != null) {
-                httpPost.setEntity(new StringEntity(encodedBody));
-            }
-            return exec(httpPost, responseType);
-        } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build post request failed.");
+        HttpPost httpPost = new HttpPost(getRequestUrl(path, null));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpPost.setEntity(new StringEntity(encodedBody));
         }
+        Header[] authHeaders = getHeaders(path, "POST", encodedBody, restAuthFunction);
+        httpPost.setHeaders(authHeaders);
+        return exec(httpPost, responseType);
     }
 
     @Override
@@ -112,19 +109,14 @@ public class HttpClient implements RESTClient {
     @Override
     public <T extends RESTResponse> T delete(
             String path, RESTRequest body, RESTAuthFunction restAuthFunction) {
-        try {
-            String bodyStr = RESTApi.toJson(body);
-            Header[] authHeaders = getHeaders(path, "DELETE", bodyStr, restAuthFunction);
-            HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
-            httpDelete.setHeaders(authHeaders);
-            String encodedBody = RESTUtil.encodedBody(body);
-            if (encodedBody != null) {
-                httpDelete.setEntity(new StringEntity(encodedBody));
-            }
-            return exec(httpDelete, null);
-        } catch (JsonProcessingException e) {
-            throw new RESTException(e, "build delete request failed.");
+        HttpDelete httpDelete = new HttpDelete(getRequestUrl(path, null));
+        String encodedBody = RESTUtil.encodedBody(body);
+        if (encodedBody != null) {
+            httpDelete.setEntity(new StringEntity(encodedBody));
         }
+        Header[] authHeaders = getHeaders(path, "DELETE", encodedBody, restAuthFunction);
+        httpDelete.setHeaders(authHeaders);
+        return exec(httpDelete, null);
     }
 
     @VisibleForTesting
@@ -152,7 +144,7 @@ public class HttpClient implements RESTClient {
                                                         : "response body is null",
                                                 response.getCode());
                             }
-                            errorHandler.accept(error, getRequestId(response));
+                            errorHandler.accept(error, extractRequestId(response));
                         }
                         if (responseType != null && responseBodyStr != null) {
                             return RESTApi.fromJson(responseBodyStr, responseType);
@@ -194,9 +186,22 @@ public class HttpClient implements RESTClient {
         return uri;
     }
 
-    private static String getRequestId(ClassicHttpResponse response) {
+    private static String extractRequestId(ClassicHttpResponse response) {
         Header header = response.getFirstHeader(LoggingInterceptor.REQUEST_ID_KEY);
-        return header != null ? header.getValue() : LoggingInterceptor.DEFAULT_REQUEST_ID;
+        if (header != null && header.getValue() != null) {
+            return header.getValue();
+        }
+
+        // look for any header containing "request-id"
+        return Arrays.stream(response.getHeaders())
+                .filter(
+                        h ->
+                                h.getName() != null
+                                        && h.getName().toLowerCase().contains("request-id"))
+                .map(Header::getValue)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(LoggingInterceptor.DEFAULT_REQUEST_ID);
     }
 
     private static Header[] getHeaders(

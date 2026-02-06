@@ -78,11 +78,17 @@ public class BlobFileFormatTest {
 
         // write
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
-        List<byte[]> blobs = Arrays.asList("hello".getBytes(), "world".getBytes());
+        List<byte[]> blobs =
+                Arrays.asList("hello".getBytes(), null, "world".getBytes(), new byte[0]);
         try (PositionOutputStream out = fileIO.newOutputStream(file, false)) {
             FormatWriter formatWriter = writerFactory.create(out, null);
             for (byte[] bytes : blobs) {
-                formatWriter.addElement(GenericRow.of(new BlobData(bytes)));
+                if (bytes == null) {
+                    formatWriter.addElement(GenericRow.of((Object) null));
+                    continue;
+                } else {
+                    formatWriter.addElement(GenericRow.of(new BlobData(bytes)));
+                }
             }
             formatWriter.close();
         }
@@ -96,13 +102,17 @@ public class BlobFileFormatTest {
                 .createReader(context)
                 .forEachRemaining(
                         row -> {
-                            Blob blob = row.getBlob(0);
-                            if (blobAsDescriptor) {
-                                assertThat(blob).isInstanceOf(BlobRef.class);
+                            if (row.isNullAt(0)) {
+                                result.add(null);
                             } else {
-                                assertThat(blob).isInstanceOf(BlobData.class);
+                                Blob blob = row.getBlob(0);
+                                if (blobAsDescriptor) {
+                                    assertThat(blob).isInstanceOf(BlobRef.class);
+                                } else {
+                                    assertThat(blob).isInstanceOf(BlobData.class);
+                                }
+                                result.add(blob.toData());
                             }
-                            result.add(blob.toData());
                         });
 
         // assert
@@ -110,7 +120,7 @@ public class BlobFileFormatTest {
 
         // read with selection
         RoaringBitmap32 selection = new RoaringBitmap32();
-        selection.add(1);
+        selection.add(2);
         context = new FormatReaderContext(fileIO, file, fileIO.getFileSize(file), selection);
         result.clear();
         readerFactory
@@ -118,6 +128,6 @@ public class BlobFileFormatTest {
                 .forEachRemaining(row -> result.add(row.getBlob(0).toData()));
 
         // assert
-        assertThat(result).containsOnly(blobs.get(1));
+        assertThat(result).containsOnly(blobs.get(2));
     }
 }

@@ -42,6 +42,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
@@ -78,6 +79,7 @@ public class IcebergDataField {
     @JsonIgnore private DataType dataType;
 
     @JsonProperty(FIELD_DOC)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String doc;
 
     public IcebergDataField(DataField dataField) {

@@ -213,6 +213,9 @@ public interface InternalRow extends DataGetters {
             case ARRAY:
                 fieldGetter = row -> row.getArray(fieldPos);
                 break;
+            case VECTOR:
+                fieldGetter = row -> row.getVector(fieldPos);
+                break;
             case MULTISET:
             case MAP:
                 fieldGetter = row -> row.getMap(fieldPos);

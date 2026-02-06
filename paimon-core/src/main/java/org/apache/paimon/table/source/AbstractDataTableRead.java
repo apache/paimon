@@ -18,17 +18,25 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ListUtils;
+import org.apache.paimon.utils.ProjectedRow;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 
 /** A {@link InnerTableRead} for data table. */
 public abstract class AbstractDataTableRead implements InnerTableRead {
@@ -43,8 +51,6 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     public abstract void applyReadType(RowType readType);
-
-    public abstract void applyVariantAccess(VariantAccessInfo[] variantAccess);
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 
@@ -83,18 +89,53 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
     }
 
     @Override
-    public InnerTableRead withVariantAccess(VariantAccessInfo[] variantAccessInfo) {
-        applyVariantAccess(variantAccessInfo);
-        return this;
-    }
-
-    @Override
     public final RecordReader<InternalRow> createReader(Split split) throws IOException {
-        RecordReader<InternalRow> reader = reader(split);
+        TableQueryAuthResult authResult = null;
+        if (split instanceof QueryAuthSplit) {
+            QueryAuthSplit authSplit = (QueryAuthSplit) split;
+            split = authSplit.split();
+            authResult = authSplit.authResult();
+        }
+        RecordReader<InternalRow> reader;
+        if (authResult == null) {
+            reader = reader(split);
+        } else {
+            reader = authedReader(split, authResult);
+        }
         if (executeFilter) {
             reader = executeFilter(reader);
         }
 
+        return reader;
+    }
+
+    private RecordReader<InternalRow> authedReader(Split split, TableQueryAuthResult authResult)
+            throws IOException {
+        RecordReader<InternalRow> reader;
+        RowType tableType = schema.logicalRowType();
+        RowType readType = this.readType == null ? tableType : this.readType;
+        Predicate authPredicate = authResult.extractPredicate();
+        ProjectedRow backRow = null;
+        if (authPredicate != null) {
+            Set<String> authFields = collectFieldNames(authPredicate);
+            List<String> readFields = readType.getFieldNames();
+            List<String> authAddNames = new ArrayList<>();
+            Set<String> readFieldSet = new HashSet<>(readFields);
+            for (String field : tableType.getFieldNames()) {
+                if (authFields.contains(field) && !readFieldSet.contains(field)) {
+                    authAddNames.add(field);
+                }
+            }
+            if (!authAddNames.isEmpty()) {
+                readType = tableType.project(ListUtils.union(readFields, authAddNames));
+                withReadType(readType);
+                backRow = ProjectedRow.from(readType.projectIndexes(readFields));
+            }
+        }
+        reader = authResult.doAuth(reader(split), readType);
+        if (backRow != null) {
+            reader = reader.transform(backRow::replaceRow);
+        }
         return reader;
     }
 

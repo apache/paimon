@@ -41,6 +41,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamDataTableScan;
@@ -64,6 +65,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static java.util.Collections.emptyList;
 import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
 import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
 import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
@@ -181,7 +183,7 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.emptyList();
+        return emptyList();
     }
 
     @Override
@@ -238,19 +240,28 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            if (!(split instanceof DataSplit)) {
+            FileChange change;
+            if (split instanceof DataSplit) {
+                DataSplit dataSplit = (DataSplit) split;
+                change =
+                        new FileChange(
+                                dataSplit.snapshotId(),
+                                dataSplit.partition(),
+                                dataSplit.bucket(),
+                                emptyList(),
+                                dataSplit.dataFiles());
+            } else if (split instanceof IncrementalSplit) {
+                IncrementalSplit incrementalSplit = (IncrementalSplit) split;
+                change =
+                        new FileChange(
+                                incrementalSplit.snapshotId(),
+                                incrementalSplit.partition(),
+                                incrementalSplit.bucket(),
+                                incrementalSplit.beforeFiles(),
+                                incrementalSplit.afterFiles());
+            } else {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-
-            DataSplit dataSplit = (DataSplit) split;
-
-            FileChange change =
-                    new FileChange(
-                            dataSplit.snapshotId(),
-                            dataSplit.partition(),
-                            dataSplit.bucket(),
-                            dataSplit.beforeFiles(),
-                            dataSplit.dataFiles());
 
             return new IteratorRecordReader<>(Collections.singletonList(toRow(change)).iterator());
         }

@@ -157,8 +157,9 @@ trait PaimonRowLevelCommand
       sparkSession: SparkSession): Dataset[SparkDeletionVector] = {
     import sparkSession.implicits._
     // convert to a serializable map
-    val dataFileToPartitionAndBucket = dataFilePathToMeta.map {
-      case (k, v) => k -> (v.bucketPath, v.partition, v.bucket)
+    val dataFileNameToPartitionAndBucket = dataFilePathToMeta.map {
+      case (k, v) =>
+        new Path(k).getName -> (v.bucketPath, v.partition, v.bucket, k)
     }
 
     val my_table = table
@@ -175,12 +176,13 @@ trait PaimonRowLevelCommand
             dv.delete(iter.next()._2)
           }
 
-          val (bucketPath, partition, bucket) = dataFileToPartitionAndBucket.apply(filePath)
+          val (bucketPath, partition, bucket, dataFilePath) =
+            dataFileNameToPartitionAndBucket.apply(new Path(filePath).getName)
           SparkDeletionVector(
             bucketPath,
             SerializationUtils.serializeBinaryRow(partition),
             bucket,
-            filePath,
+            dataFilePath,
             DeletionVector.serializeToBytes(dv)
           )
       }

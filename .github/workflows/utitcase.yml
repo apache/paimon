@@ -29,6 +29,7 @@ on:
       - 'paimon-lucene/**'
       - 'paimon-faiss/**'
       - '.github/workflows/faiss-vector-index-tests.yml'
+      - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
 
 env:
   JDK_VERSION: 8
@@ -40,28 +41,10 @@ concurrency:
 
 jobs:
   build_native:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up JDK ${{ env.JDK_VERSION }}
-        uses: actions/setup-java@v5
-        with:
-          java-version: ${{ env.JDK_VERSION }}
-          distribution: 'temurin'
-
-      - name: Build FAISS native library
-        uses: ./.github/actions/build-faiss-native
-        with:
-          platform: linux-amd64
-
-      - name: Upload native library artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: faiss-native-linux-amd64
-          path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
-          retention-days: 1
+    uses: ./.github/workflows/build-faiss-native.yml
+    with:
+      platform: linux-amd64
+      jdk-version: '8'
 
   build_test:
     runs-on: ubuntu-latest
@@ -91,7 +74,7 @@ jobs:
       - name: Build Others
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3,paimon-faiss
+          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3,paimon-faiss
 
       - name: Test Others
         timeout-minutes: 60
@@ -105,6 +88,6 @@ jobs:
             TEST_MODULES+="!org.apache.paimon:paimon-spark-${suffix}_2.12,"
           done
           TEST_MODULES="${TEST_MODULES%,}"
-          mvn -T 2C -B clean install -pl "${TEST_MODULES}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B -ntp clean install -pl "${TEST_MODULES}" -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2

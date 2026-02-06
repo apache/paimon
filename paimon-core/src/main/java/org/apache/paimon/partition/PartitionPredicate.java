@@ -35,6 +35,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -56,10 +57,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * A special predicate to filter partition only, just like {@link Predicate}.
+ * A special predicate to filter partition only, just like {@link Predicate}, this should be thread
+ * safe.
  *
  * @since 1.3.0
  */
+@ThreadSafe
 public interface PartitionPredicate extends Serializable {
 
     /**

@@ -31,8 +31,8 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldPrimaryKeyAggF
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ArrayUtils;
-import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
@@ -133,44 +133,31 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     public static MergeFunctionFactory<KeyValue> factory(
-            Options conf,
-            List<String> fieldNames,
-            List<DataType> fieldTypes,
-            List<String> primaryKeys) {
-        return new Factory(conf, fieldNames, fieldTypes, primaryKeys);
+            Options conf, RowType rowType, List<String> primaryKeys) {
+        return new Factory(conf, rowType, primaryKeys);
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
 
         private final CoreOptions options;
-        private final List<String> fieldNames;
-        private final List<DataType> fieldTypes;
+        private final RowType rowType;
         private final List<String> primaryKeys;
         private final boolean removeRecordOnDelete;
 
-        private Factory(
-                Options conf,
-                List<String> fieldNames,
-                List<DataType> fieldTypes,
-                List<String> primaryKeys) {
+        private Factory(Options conf, RowType rowType, List<String> primaryKeys) {
             this.options = new CoreOptions(conf);
-            this.fieldNames = fieldNames;
-            this.fieldTypes = fieldTypes;
+            this.rowType = rowType;
             this.primaryKeys = primaryKeys;
             this.removeRecordOnDelete = options.aggregationRemoveRecordOnDelete();
         }
 
         @Override
-        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            List<String> fieldNames = this.fieldNames;
-            List<DataType> fieldTypes = this.fieldTypes;
-            if (projection != null) {
-                Projection project = Projection.of(projection);
-                fieldNames = project.project(fieldNames);
-                fieldTypes = project.project(fieldTypes);
-            }
+        public MergeFunction<KeyValue> create(@Nullable RowType readType) {
+            RowType targetType = readType != null ? readType : rowType;
+            List<String> fieldNames = targetType.getFieldNames();
+            List<DataType> fieldTypes = targetType.getFieldTypes();
 
             FieldAggregator[] fieldAggregators = new FieldAggregator[fieldNames.size()];
             List<String> sequenceFields = options.sequenceField();

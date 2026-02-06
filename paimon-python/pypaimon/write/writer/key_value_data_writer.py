@@ -36,26 +36,35 @@ class KeyValueDataWriter(DataWriter):
     def _add_system_fields(self, data: pa.RecordBatch) -> pa.RecordBatch:
         """Add system fields: _KEY_{pk_key}, _SEQUENCE_NUMBER, _VALUE_KIND."""
         num_rows = data.num_rows
-        enhanced_table = data
 
-        for pk_key in reversed(self.trimmed_primary_keys):
-            if pk_key in data.column_names:
+        new_arrays = []
+        new_fields = []
+
+        for pk_key in self.trimmed_primary_keys:
+            if pk_key in data.schema.names:
                 key_column = data.column(pk_key)
-                enhanced_table = enhanced_table.add_column(0, f'_KEY_{pk_key}', key_column)
+                new_arrays.append(key_column)
+                src_field = data.schema.field(pk_key)
+                new_fields.append(pa.field(f'_KEY_{pk_key}', src_field.type, nullable=src_field.nullable))
 
         sequence_column = pa.array([self.sequence_generator.next() for _ in range(num_rows)], type=pa.int64())
-        enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_keys), '_SEQUENCE_NUMBER', sequence_column)
+        new_arrays.append(sequence_column)
+        new_fields.append(pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False))
 
         # TODO: support real row kind here
         value_kind_column = pa.array([0] * num_rows, type=pa.int8())
-        enhanced_table = enhanced_table.add_column(len(self.trimmed_primary_keys) + 1, '_VALUE_KIND',
-                                                   value_kind_column)
+        new_arrays.append(value_kind_column)
+        new_fields.append(pa.field('_VALUE_KIND', pa.int8(), nullable=False))
 
-        return enhanced_table
+        for i in range(data.num_columns):
+            new_arrays.append(data.column(i))
+            new_fields.append(data.schema.field(i))
+
+        return pa.RecordBatch.from_arrays(new_arrays, schema=pa.schema(new_fields))
 
     def _sort_by_primary_key(self, data: pa.RecordBatch) -> pa.RecordBatch:
         sort_keys = [(key, 'ascending') for key in self.trimmed_primary_keys]
-        if '_SEQUENCE_NUMBER' in data.column_names:
+        if '_SEQUENCE_NUMBER' in data.schema.names:
             sort_keys.append(('_SEQUENCE_NUMBER', 'ascending'))
 
         sorted_indices = pc.sort_indices(data, sort_keys=sort_keys)

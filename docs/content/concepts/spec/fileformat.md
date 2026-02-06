@@ -225,7 +225,7 @@ The following table lists the type mapping from Paimon type to Avro type.
     <tr>
       <td><code>TIMESTAMP_LOCAL_ZONE</code></td>
       <td>P <= 3: long, P <= 6: long, P > 6: unsupported</td>
-      <td>P <= 3: timestampMillis, P <= 6: timestampMicros, P > 6: unsupported</td>
+      <td>P <= 3: localTimestampMillis, P <= 6: localTimestampMicros, P > 6: unsupported</td>
     </tr>
     <tr>
       <td><code>ARRAY</code></td>
@@ -251,6 +251,8 @@ The following table lists the type mapping from Paimon type to Avro type.
     </tr>
     </tbody>
 </table>
+
+Note: 
 
 In addition to the types listed above, for nullable types. Paimon maps nullable types to Avro `union(something, null)`,
 where `something` is the Avro type converted from Paimon type.
@@ -788,4 +790,4 @@ Limitations:
 2. BLOB format does not support predicate pushdown.
 3. Statistics collection is not supported for BLOB columns.
 
-For usage details, configuration options, and examples, see [Blob Type]({{< ref "concepts/spec/blob" >}}).
+For usage details, configuration options, and examples, see [Blob Type]({{< ref "append-table/data-evolution#blob-type" >}}).

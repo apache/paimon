@@ -88,7 +88,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
 
     private Predicate removeRowIdFilter(Predicate filter) {
         if (filter instanceof LeafPredicate
-                && ROW_ID.name().equals(((LeafPredicate) filter).fieldName())) {
+                && ((LeafPredicate) filter).fieldNames().contains(ROW_ID.name())) {
             return null;
         } else if (filter instanceof CompoundPredicate) {
             CompoundPredicate compoundPredicate = (CompoundPredicate) filter;
@@ -228,8 +228,8 @@ public class DataEvolutionBatchScan implements DataTableScan {
             if (indexResult.isPresent()) {
                 GlobalIndexResult result = indexResult.get();
                 rowRanges = result.results().toRangeList();
-                if (result instanceof VectorSearchGlobalIndexResult) {
-                    scoreGetter = ((VectorSearchGlobalIndexResult) result).scoreGetter();
+                if (result instanceof ScoredGlobalIndexResult) {
+                    scoreGetter = ((ScoredGlobalIndexResult) result).scoreGetter();
                 }
             }
         }

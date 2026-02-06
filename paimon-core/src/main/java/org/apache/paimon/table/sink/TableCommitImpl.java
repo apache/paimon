@@ -165,6 +165,12 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
+        commit.rowIdCheckConflict(rowIdCheckFromSnapshot);
+        return this;
+    }
+
+    @Override
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;

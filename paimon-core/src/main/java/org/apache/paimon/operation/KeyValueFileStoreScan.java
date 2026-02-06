@@ -21,6 +21,8 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FilteredManifestEntry;
@@ -41,12 +43,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MergeEngine.AGGREGATE;
@@ -205,33 +207,64 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     @Override
     protected boolean postFilterManifestEntriesEnabled() {
+        return wholeBucketFilterEnabled() || limitPushdownEnabled();
+    }
+
+    private boolean wholeBucketFilterEnabled() {
         return valueFilter != null && scanMode == ScanMode.ALL;
+    }
+
+    @VisibleForTesting
+    public boolean limitPushdownEnabled() {
+        if (limit == null || limit <= 0) {
+            return false;
+        }
+
+        return mergeEngine != PARTIAL_UPDATE && mergeEngine != AGGREGATE && !deletionVectorsEnabled;
     }
 
     @Override
     protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> files) {
-        // We group files by bucket here, and filter them by the whole bucket filter.
-        // Why do this: because in primary key table, we can't just filter the value
-        // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
-        // but we can do this by filter the whole bucket files
-        return files.stream()
-                .collect(
-                        Collectors.groupingBy(
-                                // we use LinkedHashMap to avoid disorder
-                                file -> Pair.of(file.partition(), file.bucket()),
-                                LinkedHashMap::new,
-                                Collectors.toList()))
-                .values()
-                .stream()
-                .map(this::doFilterWholeBucketByStats)
-                .flatMap(Collection::stream)
-                .collect(Collectors.toList());
+        Map<Pair<BinaryRow, Integer>, List<ManifestEntry>> buckets = groupByBucket(files);
+        List<ManifestEntry> result = new ArrayList<>();
+        AtomicLong currentRowCount = new AtomicLong(0);
+        for (List<ManifestEntry> entries : buckets.values()) {
+            boolean noOverlapping = noOverlapping(entries);
+            if (wholeBucketFilterEnabled()) {
+                entries =
+                        noOverlapping
+                                ? filterWholeBucketPerFile(entries)
+                                : filterWholeBucketAllFiles(entries);
+            }
+
+            if (limitPushdownEnabled() && noOverlapping) {
+                if (currentRowCount.get() >= limit) {
+                    break;
+                }
+                entries = applyLimitWhenNoOverlapping(entries, currentRowCount);
+            }
+            result.addAll(entries);
+        }
+        return result;
     }
 
-    private List<ManifestEntry> doFilterWholeBucketByStats(List<ManifestEntry> entries) {
-        return noOverlapping(entries)
-                ? filterWholeBucketPerFile(entries)
-                : filterWholeBucketAllFiles(entries);
+    private List<ManifestEntry> applyLimitWhenNoOverlapping(
+            List<ManifestEntry> entries, AtomicLong currentRowCount) {
+        List<ManifestEntry> result = new ArrayList<>();
+        for (ManifestEntry entry : entries) {
+            boolean hasDeleteRows =
+                    entry.file().deleteRowCount().map(count -> count > 0L).orElse(false);
+            if (hasDeleteRows) {
+                return entries;
+            }
+            result.add(entry);
+            long fileRowCount = entry.file().rowCount();
+            currentRowCount.addAndGet(fileRowCount);
+            if (currentRowCount.get() >= limit) {
+                break;
+            }
+        }
+        return result;
     }
 
     private List<ManifestEntry> filterWholeBucketPerFile(List<ManifestEntry> entries) {
@@ -315,5 +348,17 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         }
 
         return true;
+    }
+
+    /** Group manifest entries by (partition, bucket) while preserving order. */
+    private Map<Pair<BinaryRow, Integer>, List<ManifestEntry>> groupByBucket(
+            List<ManifestEntry> entries) {
+        return entries.stream()
+                .collect(
+                        Collectors.groupingBy(
+                                // we use LinkedHashMap to avoid disorder
+                                file -> Pair.of(file.partition(), file.bucket()),
+                                LinkedHashMap::new,
+                                Collectors.toList()));
     }
 }

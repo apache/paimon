@@ -21,28 +21,45 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.InternalRowUtils.get;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Transform that extracts a field from a row. */
 public class FieldTransform implements Transform {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "FIELD_REF";
+
     private final FieldRef fieldRef;
 
-    public FieldTransform(FieldRef fieldRef) {
+    public static final String FIELD_FIELD_REF = "fieldRef";
+
+    @JsonCreator
+    public FieldTransform(@JsonProperty(FIELD_FIELD_REF) FieldRef fieldRef) {
         this.fieldRef = fieldRef;
     }
 
+    @Override
+    public String name() {
+        return NAME;
+    }
+
+    @JsonProperty(FIELD_FIELD_REF)
     public FieldRef fieldRef() {
         return fieldRef;
     }
 
     @Override
+    @JsonIgnore
     public List<Object> inputs() {
         return Collections.singletonList(fieldRef);
     }
@@ -59,7 +76,7 @@ public class FieldTransform implements Transform {
 
     @Override
     public Transform copyWithNewInputs(List<Object> inputs) {
-        assert inputs.size() == 1;
+        checkArgument(inputs.size() == 1);
         return new FieldTransform((FieldRef) inputs.get(0));
     }
 
@@ -75,5 +92,10 @@ public class FieldTransform implements Transform {
     @Override
     public int hashCode() {
         return Objects.hashCode(fieldRef);
+    }
+
+    @Override
+    public String toString() {
+        return fieldRef.name();
     }
 }

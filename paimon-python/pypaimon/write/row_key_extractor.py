@@ -16,8 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-import hashlib
-import json
+import math
+import struct
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
@@ -26,6 +26,56 @@ import pyarrow as pa
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
+from pypaimon.table.row.generic_row import GenericRow, GenericRowSerializer
+from pypaimon.table.row.internal_row import RowKind
+
+_MURMUR_C1 = 0xCC9E2D51
+_MURMUR_C2 = 0x1B873593
+_DEFAULT_SEED = 42
+
+
+def _mix_k1(k1: int) -> int:
+    k1 = (k1 * _MURMUR_C1) & 0xFFFFFFFF
+    k1 = ((k1 << 15) | (k1 >> 17)) & 0xFFFFFFFF
+    k1 = (k1 * _MURMUR_C2) & 0xFFFFFFFF
+    return k1
+
+
+def _mix_h1(h1: int, k1: int) -> int:
+    h1 = (h1 ^ k1) & 0xFFFFFFFF
+    h1 = ((h1 << 13) | (h1 >> 19)) & 0xFFFFFFFF
+    h1 = (h1 * 5 + 0xE6546B64) & 0xFFFFFFFF
+    return h1
+
+
+def _fmix(h1: int, length: int) -> int:
+    h1 = (h1 ^ length) & 0xFFFFFFFF
+    h1 ^= h1 >> 16
+    h1 = (h1 * 0x85EBCA6B) & 0xFFFFFFFF
+    h1 ^= h1 >> 13
+    h1 = (h1 * 0xC2B2AE35) & 0xFFFFFFFF
+    h1 ^= h1 >> 16
+    return h1
+
+
+def _hash_bytes_by_words(data: bytes, seed: int = _DEFAULT_SEED) -> int:
+    n = len(data)
+    length_aligned = n - (n % 4)
+    h1 = seed
+    for i in range(0, length_aligned, 4):
+        k1 = struct.unpack_from("<I", data, i)[0]
+        k1 = _mix_k1(k1)
+        h1 = _mix_h1(h1, k1)
+    return _fmix(h1, n)
+
+
+def _bucket_from_hash(hash_unsigned: int, num_buckets: int) -> int:
+    if hash_unsigned >= 0x80000000:
+        hash_signed = hash_unsigned - 0x100000000
+    else:
+        hash_signed = hash_unsigned
+    rem = hash_signed - math.trunc(hash_signed / num_buckets) * num_buckets
+    return abs(rem)
 
 
 class RowKeyExtractor(ABC):
@@ -82,19 +132,25 @@ class FixedBucketRowKeyExtractor(RowKeyExtractor):
                                 if pk not in table_schema.partition_keys]
 
         self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
+        field_map = {f.name: f for f in table_schema.fields}
+        self._bucket_key_fields = [
+            field_map[name] for name in self.bucket_keys if name in field_map
+        ]
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         columns = [data.column(i) for i in self.bucket_key_indices]
-        hashes = []
-        for row_idx in range(data.num_rows):
-            row_values = tuple(col[row_idx].as_py() for col in columns)
-            hashes.append(self.hash(row_values))
-        return [abs(hash_val) % self.num_buckets for hash_val in hashes]
+        return [
+            _bucket_from_hash(
+                self._binary_row_hash_code(tuple(col[row_idx].as_py() for col in columns)),
+                self.num_buckets,
+            )
+            for row_idx in range(data.num_rows)
+        ]
 
-    @staticmethod
-    def hash(data) -> int:
-        data_json = json.dumps(data)
-        return int(hashlib.md5(data_json.encode()).hexdigest(), 16)
+    def _binary_row_hash_code(self, row_values: Tuple) -> int:
+        row = GenericRow(list(row_values), self._bucket_key_fields, RowKind.INSERT)
+        serialized = GenericRowSerializer.to_bytes(row)
+        return _hash_bytes_by_words(serialized[4:])
 
 
 class UnawareBucketRowKeyExtractor(RowKeyExtractor):
@@ -126,7 +182,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 f"Only 'bucket' = '-1' is allowed for 'DynamicBucketRowKeyExtractor', but found: {num_buckets}"
             )
 
-    def _extract_buckets_batch(self, data: pa.RecordBatch) -> int:
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         raise ValueError("Can't extract bucket from row in dynamic bucket mode")
 
 

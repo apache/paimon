@@ -162,7 +162,7 @@ public class RescaleProcedure extends BaseProcedure {
         if (partitionPredicate != null) {
             snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
         }
-        List<DataSplit> dataSplits = snapshotReader.read().dataSplits();
+        List<DataSplit> dataSplits = snapshotReader.onlyReadRealBuckets().read().dataSplits();
 
         if (dataSplits.isEmpty()) {
             LOG.info("No data splits found for the specified partition. No need to rescale.");

@@ -42,13 +42,22 @@ public class PredicateProjectionConverter implements PredicateVisitor<Optional<P
 
     @Override
     public Optional<Predicate> visit(LeafPredicate predicate) {
-        int index = predicate.index();
-        Integer adjusted = reversed.get(index);
-        if (adjusted == null) {
-            return Optional.empty();
+        List<Object> inputs = predicate.transform().inputs();
+        List<Object> newInputs = new ArrayList<>(inputs.size());
+        for (Object input : inputs) {
+            if (input instanceof FieldRef) {
+                FieldRef fieldRef = (FieldRef) input;
+                Integer mappedIndex = reversed.get(fieldRef.index());
+                if (mappedIndex != null) {
+                    newInputs.add(new FieldRef(mappedIndex, fieldRef.name(), fieldRef.type()));
+                } else {
+                    return Optional.empty();
+                }
+            } else {
+                newInputs.add(input);
+            }
         }
-
-        return Optional.of(predicate.copyWithNewIndex(adjusted));
+        return Optional.of(predicate.copyWithNewInputs(newInputs));
     }
 
     @Override
@@ -66,25 +75,5 @@ public class PredicateProjectionConverter implements PredicateVisitor<Optional<P
             }
         }
         return Optional.of(new CompoundPredicate(predicate.function(), converted));
-    }
-
-    @Override
-    public Optional<Predicate> visit(TransformPredicate predicate) {
-        List<Object> inputs = predicate.transform.inputs();
-        List<Object> newInputs = new ArrayList<>(inputs.size());
-        for (Object input : inputs) {
-            if (input instanceof FieldRef) {
-                FieldRef fieldRef = (FieldRef) input;
-                Integer mappedIndex = reversed.get(fieldRef.index());
-                if (mappedIndex != null) {
-                    newInputs.add(new FieldRef(mappedIndex, fieldRef.name(), fieldRef.type()));
-                } else {
-                    return Optional.empty();
-                }
-            } else {
-                newInputs.add(input);
-            }
-        }
-        return Optional.of(predicate.copyWithNewInputs(newInputs));
     }
 }

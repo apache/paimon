@@ -18,8 +18,9 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
-import org.apache.paimon.data.variant.VariantAccessInfo;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -27,13 +28,11 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.Type;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 
 import static org.apache.paimon.data.variant.Variant.METADATA;
@@ -42,91 +41,53 @@ import static org.apache.paimon.data.variant.Variant.VALUE;
 /** Utils for variant. */
 public class VariantUtils {
 
-    /** For reader, extract shredding schemas from each parquet file's schema. */
-    public static RowType[] extractShreddingSchemasFromParquetSchema(
-            DataField[] readFields, MessageType fileSchema) {
-        RowType[] shreddingSchemas = new RowType[readFields.length];
-        for (int i = 0; i < readFields.length; i++) {
-            DataField field = readFields[i];
-            if (field.type() instanceof VariantType) {
-                boolean isShredded =
-                        fileSchema
-                                .getType(field.name())
-                                .asGroupType()
-                                .containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME);
-                if (isShredded) {
-                    shreddingSchemas[i] =
-                            (RowType)
-                                    ParquetSchemaConverter.convertToPaimonField(
-                                                    fileSchema.getType(field.name()))
-                                            .type();
-                } else {
-                    List<DataField> dataFields = new ArrayList<>();
-                    dataFields.add(new DataField(0, VALUE, DataTypes.BYTES()));
-                    dataFields.add(new DataField(1, METADATA, DataTypes.BYTES()));
-                    shreddingSchemas[i] = new RowType(dataFields);
-                }
-            }
-        }
-        return shreddingSchemas;
-    }
-
-    @Nullable
-    public static RowType shreddingFields(Configuration conf) {
-        String shreddingSchema =
-                conf.get(ParquetOptions.PARQUET_VARIANT_SHREDDING_SCHEMA.key(), "");
-        if (shreddingSchema.isEmpty()) {
-            return null;
+    /** For reader, extract variant file schema from each parquet file. */
+    public static RowType variantFileType(Type fileType) {
+        boolean isShredded =
+                fileType.asGroupType().containsField(PaimonShreddingUtils.TYPED_VALUE_FIELD_NAME);
+        if (isShredded) {
+            return (RowType) ParquetSchemaConverter.convertToPaimonField(fileType).type();
         } else {
-            return (RowType) JsonSerdeUtil.fromJson(shreddingSchema, DataType.class);
+            List<DataField> dataFields = new ArrayList<>();
+            dataFields.add(new DataField(0, VALUE, DataTypes.BYTES().notNull()));
+            dataFields.add(new DataField(1, METADATA, DataTypes.BYTES().notNull()));
+            return new RowType(dataFields);
         }
     }
 
     /** For writer, extract shredding schemas from conf. */
     @Nullable
-    public static RowType extractShreddingSchemaFromConf(Configuration conf, String fieldName) {
-        RowType shreddingFields = shreddingFields(conf);
-        if (shreddingFields != null && shreddingFields.containsField(fieldName)) {
-            return PaimonShreddingUtils.variantShreddingSchema(
-                    (RowType) shreddingFields.getField(fieldName).type());
-        } else {
+    public static RowType shreddingSchemasFromOptions(Options options) {
+        if (!options.contains(CoreOptions.VARIANT_SHREDDING_SCHEMA)) {
             return null;
         }
+
+        String shreddingSchema = options.get(CoreOptions.VARIANT_SHREDDING_SCHEMA);
+        RowType rowType = (RowType) JsonSerdeUtil.fromJson(shreddingSchema, DataType.class);
+        ArrayList<DataField> fields = new ArrayList<>();
+        for (DataField field : rowType.getFields()) {
+            fields.add(field.newType(PaimonShreddingUtils.variantShreddingSchema(field.type())));
+        }
+        return new RowType(fields);
     }
 
-    public static RowType replaceWithShreddingType(Configuration conf, RowType rowType) {
-        RowType shreddingFields = shreddingFields(conf);
-        if (shreddingFields == null) {
+    public static RowType replaceWithShreddingType(
+            RowType rowType, @Nullable RowType shreddingSchemas) {
+        if (shreddingSchemas == null) {
             return rowType;
         }
 
         List<DataField> newFields = new ArrayList<>();
         for (DataField field : rowType.getFields()) {
+            // todo: support nested variant.
             if (field.type() instanceof VariantType
-                    && shreddingFields.containsField(field.name())) {
-                RowType shreddingSchema =
-                        PaimonShreddingUtils.variantShreddingSchema(
-                                (RowType) shreddingFields.getField(field.name()).type());
+                    && shreddingSchemas.containsField(field.name())) {
+                RowType shreddingSchema = (RowType) shreddingSchemas.getField(field.name()).type();
                 newFields.add(field.newType(shreddingSchema));
             } else {
                 newFields.add(field);
             }
         }
         return new RowType(rowType.isNullable(), newFields);
-    }
-
-    public static List<List<VariantAccessInfo.VariantField>> buildVariantFields(
-            DataField[] readFields, @Nullable VariantAccessInfo[] variantAccess) {
-        HashMap<String, List<VariantAccessInfo.VariantField>> map = new HashMap<>();
-        if (variantAccess != null) {
-            for (VariantAccessInfo accessInfo : variantAccess) {
-                map.put(accessInfo.columnName(), accessInfo.variantFields());
-            }
-        }
-        List<List<VariantAccessInfo.VariantField>> variantFields = new ArrayList<>();
-        for (DataField readField : readFields) {
-            variantFields.add(map.getOrDefault(readField.name(), null));
-        }
-        return variantFields;
     }
 }

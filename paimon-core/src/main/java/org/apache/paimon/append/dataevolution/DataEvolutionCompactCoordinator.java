@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -42,7 +43,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.TreeMap;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -70,7 +70,8 @@ public class DataEvolutionCompactCoordinator {
 
         this.scanner =
                 new CompactScanner(
-                        table.newSnapshotReader().withPartitionFilter(partitionPredicate));
+                        table.newSnapshotReader().withPartitionFilter(partitionPredicate),
+                        table.store().newScan());
         this.planner =
                 new CompactPlanner(compactBlob, targetFileSize, openFileCost, compactMinFileNum);
     }
@@ -89,31 +90,35 @@ public class DataEvolutionCompactCoordinator {
     /** Scanner to generate sorted ManifestEntries. */
     static class CompactScanner {
 
-        private final SnapshotReader snapshotReader;
+        private final FileStoreScan scan;
         private final Queue<List<ManifestFileMeta>> metas;
 
-        private CompactScanner(SnapshotReader snapshotReader) {
-            this.snapshotReader = snapshotReader;
+        private CompactScanner(SnapshotReader snapshotReader, FileStoreScan scan) {
+            this.scan = scan;
             Snapshot snapshot = snapshotReader.snapshotManager().latestSnapshot();
 
             List<ManifestFileMeta> manifestFileMetas =
                     snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
-            RangeHelper<ManifestFileMeta> rangeHelper =
-                    new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
-            this.metas = new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
+
+            boolean allManifestMetaContainsRowId =
+                    manifestFileMetas.stream()
+                            .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null);
+            if (allManifestMetaContainsRowId) {
+                RangeHelper<ManifestFileMeta> rangeHelper =
+                        new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
+                this.metas =
+                        new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
+            } else {
+                this.metas = new ArrayDeque<>(Collections.singletonList(manifestFileMetas));
+            }
         }
 
         List<ManifestEntry> scan() {
             List<ManifestEntry> result = new ArrayList<>();
             while (metas.peek() != null && result.size() < FILES_BATCH) {
                 List<ManifestFileMeta> currentMetas = metas.poll();
-                List<ManifestEntry> targetEntries =
-                        currentMetas.stream()
-                                .flatMap(meta -> snapshotReader.readManifest(meta).stream())
-                                // we don't need stats for compaction
-                                .map(ManifestEntry::copyWithoutStats)
-                                .collect(Collectors.toList());
-                result.addAll(targetEntries);
+                scan.readFileIterator(currentMetas)
+                        .forEachRemaining(entry -> result.add(entry.copyWithoutStats()));
             }
             if (result.isEmpty()) {
                 throw new EndOfScanException();

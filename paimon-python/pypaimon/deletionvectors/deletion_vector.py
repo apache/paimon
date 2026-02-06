@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.roaring_bitmap import RoaringBitmap
 
 
 class DeletionVector(ABC):
@@ -28,7 +29,7 @@ class DeletionVector(ABC):
     """
 
     @abstractmethod
-    def bit_map(self):
+    def bit_map(self) -> RoaringBitmap:
         """
         Returns the bitmap of the DeletionVector.
         """

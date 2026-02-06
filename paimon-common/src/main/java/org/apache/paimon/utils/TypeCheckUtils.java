@@ -33,6 +33,7 @@ import static org.apache.paimon.types.DataTypeRoot.ROW;
 import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
 import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE;
 import static org.apache.paimon.types.DataTypeRoot.VARIANT;
+import static org.apache.paimon.types.DataTypeRoot.VECTOR;
 
 /** Utils for type. */
 public class TypeCheckUtils {
@@ -85,6 +86,10 @@ public class TypeCheckUtils {
         return type.getTypeRoot() == ARRAY;
     }
 
+    public static boolean isVector(DataType type) {
+        return type.getTypeRoot() == VECTOR;
+    }
+
     public static boolean isMap(DataType type) {
         return type.getTypeRoot() == MAP;
     }
@@ -110,6 +115,7 @@ public class TypeCheckUtils {
                 && !isMultiset(type)
                 && !isRow(type)
                 && !isArray(type)
+                && !isVector(type)
                 && !isVariant(type)
                 && !isBlob(type);
     }
@@ -120,6 +126,7 @@ public class TypeCheckUtils {
             case CHAR:
             case VARCHAR: // the internal representation of String is BinaryString which is mutable
             case ARRAY:
+            case VECTOR:
             case MULTISET:
             case MAP:
             case ROW:

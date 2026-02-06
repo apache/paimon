@@ -278,6 +278,11 @@ public class CompactProcedure extends BaseProcedure {
                                 table, partitionPredicate, partitionIdleTime, javaSparkContext);
                     }
                     break;
+                case POSTPONE_MODE:
+                    SparkPostponeCompactProcedure.apply(
+                                    table, spark(), partitionPredicate, relation)
+                            .execute();
+                    break;
                 default:
                     throw new UnsupportedOperationException(
                             "Spark compact with " + bucketMode + " is not support yet.");
@@ -608,6 +613,9 @@ public class CompactProcedure extends BaseProcedure {
             List<String> sortColumns,
             DataSourceV2Relation relation,
             @Nullable PartitionPredicate partitionPredicate) {
+        if (table.coreOptions().dataEvolutionEnabled()) {
+            throw new UnsupportedOperationException("Data Evolution table cannot be sorted!");
+        }
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
             snapshotReader.withPartitionFilter(partitionPredicate);

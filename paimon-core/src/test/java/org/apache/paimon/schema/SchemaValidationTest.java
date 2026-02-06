@@ -28,11 +28,12 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
@@ -49,8 +50,8 @@ class SchemaValidationTest {
                         new DataField(1, "f1", DataTypes.INT()),
                         new DataField(2, "f2", DataTypes.INT()),
                         new DataField(3, "f3", DataTypes.STRING()));
-        List<String> partitionKeys = Collections.singletonList("f0");
-        List<String> primaryKeys = Collections.singletonList("f1");
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = singletonList("f1");
         options.put(BUCKET.key(), String.valueOf(-1));
         validateTableSchema(
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
@@ -64,8 +65,7 @@ class SchemaValidationTest {
                         new DataField(2, "f2", DataTypes.BLOB()),
                         new DataField(3, "f3", DataTypes.STRING()));
         options.put(BUCKET.key(), String.valueOf(-1));
-        validateTableSchema(
-                new TableSchema(1, fields, 10, partitions, Collections.emptyList(), options, ""));
+        validateTableSchema(new TableSchema(1, fields, 10, partitions, emptyList(), options, ""));
     }
 
     @Test
@@ -139,16 +139,65 @@ class SchemaValidationTest {
     public void testBlobTableSchema() {
         Map<String, String> options = new HashMap<>();
 
-        // 1. must set row-tracking = true and data-evolution = true
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        assertThatThrownBy(() -> validateBlobSchema(options, Collections.emptyList()))
+        assertThatThrownBy(() -> validateBlobSchema(options, emptyList()))
                 .hasMessage("Data evolution config must enabled for table with BLOB type column.");
 
-        // 2. blob column cannot be part of partition keys
         options.clear();
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        assertThatThrownBy(() -> validateBlobSchema(options, Collections.singletonList("f2")))
+        assertThatThrownBy(() -> validateBlobSchema(options, singletonList("f2")))
                 .hasMessage("The BLOB type column can not be part of partition keys.");
+
+        assertThatThrownBy(
+                        () -> {
+                            validateTableSchema(
+                                    new TableSchema(
+                                            1,
+                                            singletonList(new DataField(2, "f2", DataTypes.BLOB())),
+                                            10,
+                                            emptyList(),
+                                            emptyList(),
+                                            options,
+                                            ""));
+                        })
+                .hasMessage("Table with BLOB type column must have other normal columns.");
+    }
+
+    @Test
+    public void testPartialUpdateTableAggregateFunctionWithoutSequenceGroup() {
+        Map<String, String> options = new HashMap<>(2);
+        options.put("merge-engine", "partial-update");
+        options.put("fields.f3.aggregate-function", "max");
+        assertThatThrownBy(() -> validateTableSchemaExec(options))
+                .hasMessageContaining(
+                        "Must use sequence group for aggregation functions but not found for field");
+
+        options.put("fields.f2.sequence-group", "f3");
+        assertThatCode(() -> validateTableSchemaExec(options)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testChainTableAllowsNonDeduplicateMergeEngine() {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.CHAIN_TABLE_ENABLED.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.SEQUENCE_FIELD.key(), "f2");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_PATTERN.key(), "$f0");
+        options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyy-MM-dd");
+        options.put(CoreOptions.MERGE_ENGINE.key(), "partial-update");
+
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.STRING()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.BIGINT()),
+                        new DataField(3, "f3", DataTypes.STRING()));
+        List<String> partitionKeys = singletonList("f0");
+        List<String> primaryKeys = Arrays.asList("f0", "f1");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+
+        assertThatNoException().isThrownBy(() -> validateTableSchema(schema));
     }
 }

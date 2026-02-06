@@ -18,10 +18,12 @@
 
 package org.apache.paimon.spark.write
 
+import org.apache.paimon.CoreOptions.ChangelogProducer
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark._
 import org.apache.paimon.spark.commands.SchemaHelper
 import org.apache.paimon.spark.rowops.PaimonCopyOnWriteScan
+import org.apache.paimon.table.BucketMode.BUCKET_UNAWARE
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.internal.Logging
@@ -30,6 +32,8 @@ import org.apache.spark.sql.connector.expressions.SortOrder
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.write._
 import org.apache.spark.sql.types.StructType
+
+import scala.collection.mutable
 
 class PaimonV2Write(
     override val originTable: FileStoreTable,
@@ -62,17 +66,30 @@ class PaimonV2Write(
   }
 
   override def supportedCustomMetrics(): Array[CustomMetric] = {
-    Array(
+    val buffer = mutable.ArrayBuffer[CustomMetric](
       // write metrics
       PaimonNumWritersMetric(),
       // commit metrics
       PaimonCommitDurationMetric(),
-      PaimonAppendedTableFilesMetric(),
-      PaimonAppendedRecordsMetric(),
-      PaimonAppendedChangelogFilesMetric(),
-      PaimonPartitionsWrittenMetric(),
-      PaimonBucketsWrittenMetric()
+      PaimonAddedTableFilesMetric()
     )
+    if (copyOnWriteScan.isEmpty) {
+      // todo: support record metrics for row level ops
+      buffer += PaimonInsertedRecordsMetric()
+    }
+    if (copyOnWriteScan.nonEmpty) {
+      buffer += PaimonDeletedTableFilesMetric()
+    }
+    if (!coreOptions.changelogProducer().equals(ChangelogProducer.NONE)) {
+      buffer += PaimonAppendedChangelogFilesMetric()
+    }
+    if (!table.partitionKeys().isEmpty) {
+      buffer += PaimonPartitionsWrittenMetric()
+    }
+    if (!table.bucketMode().equals(BUCKET_UNAWARE)) {
+      buffer += PaimonBucketsWrittenMetric()
+    }
+    buffer.toArray
   }
 
   override def toString: String = {

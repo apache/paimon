@@ -60,7 +60,13 @@ under the License.
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Specify the blob field.</td>
+            <td>Specifies column names that should be stored as blob type. This is used when you want to treat a BYTES column as a BLOB.</td>
+        </tr>
+        <tr>
+            <td><h5>blob.split-by-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Boolean</td>
+            <td>Whether to consider blob file size as a factor when performing scan splitting.</td>
         </tr>
         <tr>
             <td><h5>blob.target-file-size</h5></td>
@@ -597,10 +603,22 @@ under the License.
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
         </tr>
         <tr>
+            <td><h5>global-index.column-update-action</h5></td>
+            <td style="word-wrap: break-word;">THROW_ERROR</td>
+            <td><p>Enum</p></td>
+            <td>Defines the action to take when an update modifies columns that are covered by a global index.<br /><br />Possible values:<ul><li>"THROW_ERROR"</li><li>"DROP_PARTITION_INDEX"</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>global-index.enabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>Whether to enable global index for scan.</td>
+        </tr>
+        <tr>
+            <td><h5>global-index.external-path</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Global index root directory, if not set, the global index files will be stored under the &lt;table-root-directory&gt;/index.</td>
         </tr>
         <tr>
             <td><h5>global-index.row-count-per-shard</h5></td>
@@ -1008,6 +1026,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether to write the data into fixed bucket for batch writing a postpone bucket table.</td>
         </tr>
         <tr>
+            <td><h5>postpone.batch-write-fixed-bucket.max-parallelism</h5></td>
+            <td style="word-wrap: break-word;">2048</td>
+            <td>Integer</td>
+            <td>The number of partitions for global index.</td>
+        </tr>
+        <tr>
+            <td><h5>postpone.default-bucket-num</h5></td>
+            <td style="word-wrap: break-word;">1</td>
+            <td>Integer</td>
+            <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
+        </tr>
+        <tr>
             <td><h5>primary-key</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -1285,6 +1315,12 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>The delay duration of stream read when scan incremental snapshots.</td>
         </tr>
         <tr>
+            <td><h5>table-read.sequence-number.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to include the _SEQUENCE_NUMBER field when reading the audit_log or binlog system tables. This is only valid for primary key tables.</td>
+        </tr>
+        <tr>
             <td><h5>tag.automatic-completion</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -1379,6 +1415,42 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Define upsert key to do MERGE INTO when executing INSERT INTO, cannot be defined with primary key.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.inferShreddingSchema</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to automatically infer the shredding schema when writing Variant columns.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxInferBufferRow</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Integer</td>
+            <td>Maximum number of rows to buffer for schema inference.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxSchemaDepth</h5></td>
+            <td style="word-wrap: break-word;">50</td>
+            <td>Integer</td>
+            <td>Maximum traversal depth in Variant values during schema inference.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.maxSchemaWidth</h5></td>
+            <td style="word-wrap: break-word;">300</td>
+            <td>Integer</td>
+            <td>Maximum number of shredded fields allowed in an inferred schema.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shredding.minFieldCardinalityRatio</h5></td>
+            <td style="word-wrap: break-word;">0.1</td>
+            <td>Double</td>
+            <td>Minimum fraction of rows that must contain a field for it to be shredded. Fields below this threshold will remain in the un-shredded Variant binary.</td>
+        </tr>
+        <tr>
+            <td><h5>variant.shreddingSchema</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The Variant shredding schema for writing.</td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>

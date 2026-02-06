@@ -117,9 +117,7 @@ public class DataTableStreamScan extends AbstractDataTableScan implements Stream
     }
 
     @Override
-    public Plan plan() {
-        authQuery();
-
+    protected TableScan.Plan planWithoutAuth() {
         if (!initialized) {
             initScanner();
         }

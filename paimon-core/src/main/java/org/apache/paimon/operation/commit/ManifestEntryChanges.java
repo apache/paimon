@@ -20,6 +20,7 @@ package org.apache.paimon.operation.commit;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -163,9 +164,9 @@ public class ManifestEntryChanges {
     }
 
     public static List<BinaryRow> changedPartitions(
-            List<ManifestEntry> dataFileChanges, List<IndexManifestEntry> indexFileChanges) {
+            List<? extends FileEntry> dataFileChanges, List<IndexManifestEntry> indexFileChanges) {
         Set<BinaryRow> changedPartitions = new HashSet<>();
-        for (ManifestEntry file : dataFileChanges) {
+        for (FileEntry file : dataFileChanges) {
             changedPartitions.add(file.partition());
         }
         for (IndexManifestEntry file : indexFileChanges) {

@@ -27,6 +27,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils;
@@ -55,7 +56,7 @@ import java.util.Map;
 
 import scala.collection.JavaConverters;
 
-/** A {@link InternalRow} wraps spark {@link Row}. */
+/** An {@link InternalRow} wraps spark {@link Row} for v1 write. */
 public class SparkRow implements InternalRow, Serializable {
 
     private final RowType type;
@@ -78,7 +79,7 @@ public class SparkRow implements InternalRow, Serializable {
         this.row = row;
         this.rowKind = rowkind;
         this.blobAsDescriptor = blobAsDescriptor;
-        this.uriReaderFactory = new UriReaderFactory(catalogContext);
+        this.uriReaderFactory = blobAsDescriptor ? new UriReaderFactory(catalogContext) : null;
     }
 
     @Override
@@ -179,6 +180,11 @@ public class SparkRow implements InternalRow, Serializable {
     @Override
     public InternalArray getArray(int i) {
         return new PaimonArray(((ArrayType) type.getTypeAt(i)).getElementType(), row.getList(i));
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        throw new UnsupportedOperationException("Not support VectorType yet.");
     }
 
     @Override
@@ -351,6 +357,11 @@ public class SparkRow implements InternalRow, Serializable {
                             ? JavaConverters.seqAsJavaList((scala.collection.Seq<Object>) o)
                             : (List<Object>) o;
             return new PaimonArray(((ArrayType) elementType).getElementType(), array);
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            throw new UnsupportedOperationException("Not support VectorType yet.");
         }
 
         @Override

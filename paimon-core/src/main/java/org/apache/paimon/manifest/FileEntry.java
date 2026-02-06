@@ -67,11 +67,17 @@ public interface FileEntry {
 
     List<String> extraFiles();
 
+    long rowCount();
+
+    @Nullable
+    Long firstRowId();
+
     /**
      * The same {@link Identifier} indicates that the {@link ManifestEntry} refers to the same data
      * file.
      */
     class Identifier {
+
         public final BinaryRow partition;
         public final int bucket;
         public final int level;

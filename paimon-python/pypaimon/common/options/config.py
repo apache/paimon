@@ -74,6 +74,11 @@ class CatalogOptions:
         "dlf.token-ecs-role-name").string_type().no_default_value().with_description("DLF ECS role name")
     DLF_TOKEN_ECS_METADATA_URL = ConfigOptions.key(
         "dlf.token-ecs-metadata-url").string_type().no_default_value().with_description("DLF ECS metadata URL")
+    DLF_SIGNING_ALGORITHM = ConfigOptions.key(
+        "dlf.signing-algorithm").string_type().default_value("default").with_description(
+        "DLF signing algorithm. Options: 'default' (for VPC endpoint), "
+        "'openapi' (for DlfNext/2026-01-18). "
+        "If not set, will be automatically selected based on endpoint host.")
     PREFIX = ConfigOptions.key("prefix").string_type().no_default_value().with_description("Prefix")
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")

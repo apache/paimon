@@ -252,7 +252,10 @@ public class OrcFilterConverterTest {
                         (OrcFilters.ColumnPredicate) orcPredicate;
                 assertThat(
                                 OrcPredicateFunctionVisitor.toOrcType(
-                                        ((LeafPredicate) predicate).type()))
+                                        ((LeafPredicate) predicate)
+                                                .fieldRefOptional()
+                                                .get()
+                                                .type()))
                         .isEqualTo(columnPredicate.literalType);
             }
         } else {

@@ -22,12 +22,14 @@ import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.writer.ArrowFieldWriter;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VariantType;
 
 import org.apache.arrow.c.ArrowArray;
 import org.apache.arrow.c.ArrowSchema;
@@ -219,6 +221,17 @@ public class ArrowUtils {
                             Arrays.asList(keyField, valueField));
 
             children = Collections.singletonList(mapField);
+        } else if (dataType instanceof VariantType) {
+            children =
+                    Arrays.asList(
+                            new Field(
+                                    Variant.VALUE,
+                                    new FieldType(false, Types.MinorType.VARBINARY.getType(), null),
+                                    null),
+                            new Field(
+                                    Variant.METADATA,
+                                    new FieldType(false, Types.MinorType.VARBINARY.getType(), null),
+                                    null));
         } else if (dataType instanceof RowType) {
             RowType rowType = (RowType) dataType;
             children = new ArrayList<>();

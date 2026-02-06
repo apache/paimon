@@ -21,31 +21,16 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactCoordinator;
 import org.apache.paimon.append.dataevolution.DataEvolutionCompactTask;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.globalindex.DataEvolutionBatchScan;
-import org.apache.paimon.globalindex.GlobalIndexFileReadWrite;
-import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
-import org.apache.paimon.globalindex.GlobalIndexer;
-import org.apache.paimon.globalindex.GlobalIndexerFactory;
-import org.apache.paimon.globalindex.GlobalIndexerFactoryUtils;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
-import org.apache.paimon.globalindex.bitmap.BitmapGlobalIndexerFactory;
-import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.DataEvolutionFileReader;
@@ -55,18 +40,15 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.types.DataField;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
-import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -74,15 +56,14 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** Test for table with data evolution. */
-public class DataEvolutionTableTest extends TableTestBase {
+public class DataEvolutionTableTest extends DataEvolutionTestBase {
 
     @Test
     public void testBasic() throws Exception {
@@ -108,8 +89,20 @@ public class DataEvolutionTableTest extends TableTestBase {
         }
 
         ReadBuilder readBuilder = getTableDefault().newReadBuilder();
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        TableScan.Plan plan = readBuilder.newScan().plan();
+
+        // assert merged row count
+        long noMergedRowCount = plan.splits().stream().mapToLong(Split::rowCount).sum();
+        long mergedRowCount =
+                plan.splits().stream()
+                        .map(Split::mergedRowCount)
+                        .filter(OptionalLong::isPresent)
+                        .mapToLong(OptionalLong::getAsLong)
+                        .sum();
+        assertThat(noMergedRowCount).isEqualTo(2);
+        assertThat(mergedRowCount).isEqualTo(1);
+
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
         assertThat(reader).isInstanceOf(DataEvolutionFileReader.class);
         reader.forEachRemaining(
                 r -> {
@@ -126,10 +119,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                         .newRead()
                         .createReader(readBuilder.newScan().plan());
         AtomicInteger cnt = new AtomicInteger(0);
-        reader.forEachRemaining(
-                r -> {
-                    cnt.incrementAndGet();
-                });
+        reader.forEachRemaining(r -> cnt.incrementAndGet());
         assertThat(cnt.get()).isEqualTo(1);
 
         // projection with an empty read type
@@ -140,10 +130,7 @@ public class DataEvolutionTableTest extends TableTestBase {
                         .newRead()
                         .createReader(readBuilder.newScan().plan());
         AtomicInteger cnt1 = new AtomicInteger(0);
-        reader.forEachRemaining(
-                r -> {
-                    cnt1.incrementAndGet();
-                });
+        reader.forEachRemaining(r -> cnt1.incrementAndGet());
         assertThat(cnt1.get()).isEqualTo(1);
     }
 
@@ -381,23 +368,6 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(readRows.get(1).getInt(0)).isEqualTo(2);
         assertThat(readRows.get(1).getString(1).toString()).isEqualTo("c");
         assertThat(readRows.get(1).getString(2).toString()).isEqualTo("d");
-    }
-
-    private void setFirstRowId(List<CommitMessage> commitables, long firstRowId) {
-        commitables.forEach(
-                c -> {
-                    CommitMessageImpl commitMessage = (CommitMessageImpl) c;
-                    List<DataFileMeta> newFiles =
-                            new ArrayList<>(commitMessage.newFilesIncrement().newFiles());
-                    commitMessage.newFilesIncrement().newFiles().clear();
-                    commitMessage
-                            .newFilesIncrement()
-                            .newFiles()
-                            .addAll(
-                                    newFiles.stream()
-                                            .map(s -> s.assignFirstRowId(firstRowId))
-                                            .collect(Collectors.toList()));
-                });
     }
 
     @Test
@@ -830,79 +800,6 @@ public class DataEvolutionTableTest extends TableTestBase {
     }
 
     @Test
-    public void testGlobalIndex() throws Exception {
-        write(100000L);
-
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-
-        Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a100"));
-
-        RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(1);
-        Assertions.assertThat(rowIds.toRangeList()).containsExactly(new Range(100L, 100L));
-
-        Predicate predicate2 =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a400")));
-
-        rowIds = globalIndexScan(table, predicate2);
-        assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(3);
-        Assertions.assertThat(rowIds.toRangeList())
-                .containsExactlyInAnyOrder(
-                        new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
-
-        DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
-        RoaringNavigableMap64 finalRowIds = rowIds;
-        scan.withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
-
-        List<String> readF1 = new ArrayList<>();
-        table.newRead()
-                .createReader(scan.plan())
-                .forEachRemaining(
-                        row -> {
-                            readF1.add(row.getString(1).toString());
-                        });
-
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
-    }
-
-    @Test
-    public void testGlobalIndexWithCoreScan() throws Exception {
-        write(100000L);
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-
-        Predicate predicate =
-                new PredicateBuilder(table.rowType())
-                        .in(
-                                1,
-                                Arrays.asList(
-                                        BinaryString.fromString("a200"),
-                                        BinaryString.fromString("a300"),
-                                        BinaryString.fromString("a400")));
-
-        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-
-        List<String> readF1 = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(readBuilder.newScan().plan())
-                .forEachRemaining(
-                        row -> {
-                            readF1.add(row.getString(1).toString());
-                        });
-
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
-    }
-
-    @Test
     public void testCompactCoordinator() throws Exception {
         for (int i = 0; i < 10; i++) {
             write(100000L);
@@ -968,115 +865,47 @@ public class DataEvolutionTableTest extends TableTestBase {
         assertThat(entries.get(0).file().rowCount()).isEqualTo(500000L);
     }
 
-    private void write(long count) throws Exception {
+    @Test
+    public void testIndexPath() throws Exception {
         createTableDefault();
+        FileStoreTable table = getTableDefault();
+        IndexPathFactory indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
 
-        Schema schema = schemaDefault();
-        RowType writeType0 = schema.rowType().project(Arrays.asList("f0", "f1"));
-        RowType writeType1 = schema.rowType().project(Collections.singletonList("f2"));
-        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
-        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
-            for (int i = 0; i < count; i++) {
-                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
-            }
-            BatchTableCommit commit = builder.newCommit();
-            commit.commit(write0.prepareCommit());
-        }
+        Path path0 = indexPathFactory.toPath("test-file");
+        assertThat(path0.toString().contains(warehouse.toString())).isTrue();
+        String testExternalpath = "file:/external/path/test-file-dir";
+        Path path1 =
+                indexPathFactory.toPath(
+                        new IndexFileMeta(
+                                "test-type",
+                                "test-file",
+                                1024L,
+                                100L,
+                                null,
+                                testExternalpath,
+                                null));
+        assertThat(path1.toString()).isEqualTo(testExternalpath);
 
-        long rowId = getTableDefault().snapshotManager().latestSnapshot().nextRowId() - count;
-        builder = getTableDefault().newBatchWriteBuilder();
-        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
-            for (int i = 0; i < count; i++) {
-                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
-            }
-            BatchTableCommit commit = builder.newCommit();
-            List<CommitMessage> commitables = write1.prepareCommit();
-            setFirstRowId(commitables, rowId);
-            commit.commit(commitables);
-        }
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.GLOBAL_INDEX_EXTERNAL_PATH.key(), testExternalpath));
 
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        FileIO fileIO = table.fileIO();
-        ReadBuilder readBuilder =
-                table.newReadBuilder()
-                        .withReadType(
-                                SpecialFields.rowTypeWithRowTracking(
-                                        table.rowType().project("f1")));
-        RecordReader<InternalRow> reader =
-                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        indexPathFactory = table.store().pathFactory().globalIndexFileFactory();
+        Path path3 = indexPathFactory.toPath("test-file");
+        assertThat(path3.toString()).isEqualTo(testExternalpath + "/test-file");
 
-        GlobalIndexFileReadWrite indexFileReadWrite =
-                new GlobalIndexFileReadWrite(
-                        fileIO,
-                        table.store().pathFactory().indexFileFactory(BinaryRow.EMPTY_ROW, 0));
-
-        DataField indexField = table.rowType().getField("f1");
-
-        GlobalIndexerFactory globalIndexerFactory =
-                GlobalIndexerFactoryUtils.load(BitmapGlobalIndexerFactory.IDENTIFIER);
-        GlobalIndexer globalIndexer = globalIndexerFactory.create(indexField, new Options());
-        GlobalIndexSingletonWriter globaIndexBuilder =
-                (GlobalIndexSingletonWriter) globalIndexer.createWriter(indexFileReadWrite);
-
-        reader.forEachRemaining(r -> globaIndexBuilder.write(r.getString(0)));
-
-        List<ResultEntry> results = globaIndexBuilder.finish();
-
-        List<IndexFileMeta> indexFileMetaList = new ArrayList<>();
-        for (ResultEntry result : results) {
-            String fileName = result.fileName();
-            long fileSize = fileIO.getFileSize(indexFileReadWrite.filePath(fileName));
-            GlobalIndexMeta globalIndexMeta =
-                    new GlobalIndexMeta(
-                            0, result.rowCount() - 1, indexField.id(), null, result.meta());
-            indexFileMetaList.add(
-                    new IndexFileMeta(
-                            BitmapGlobalIndexerFactory.IDENTIFIER,
-                            fileName,
-                            fileSize,
-                            count,
-                            globalIndexMeta));
-        }
-
-        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetaList);
-
-        CommitMessage commitMessage =
-                new CommitMessageImpl(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        null,
-                        dataIncrement,
-                        CompactIncrement.emptyIncrement());
-
-        table.newBatchWriteBuilder().newCommit().commit(Collections.singletonList(commitMessage));
-    }
-
-    private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
-            throws Exception {
-        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
-        List<Range> ranges = indexScanBuilder.shardList();
-        GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
-        for (Range range : ranges) {
-            try (RowRangeGlobalIndexScanner scanner =
-                    indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate, null);
-                if (!globalIndexResult.isPresent()) {
-                    throw new RuntimeException("Can't find index result by scan");
-                }
-                globalFileIndexResult = globalFileIndexResult.or(globalIndexResult.get());
-            }
-        }
-
-        return globalFileIndexResult.results();
-    }
-
-    protected Schema schemaDefault() {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.column("f0", DataTypes.INT());
-        schemaBuilder.column("f1", DataTypes.STRING());
-        schemaBuilder.column("f2", DataTypes.STRING());
-        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        return schemaBuilder.build();
+        String testExternalpath2 = "file:/external/path2/test-file";
+        Path path4 =
+                indexPathFactory.toPath(
+                        new IndexFileMeta(
+                                "test-type",
+                                "test-file",
+                                1024L,
+                                100L,
+                                null,
+                                testExternalpath2,
+                                null));
+        assertThat(path4.toString()).isEqualTo(testExternalpath2);
     }
 }

@@ -113,3 +113,32 @@ class FileStorePathFactory:
 
         relative_bucket_path = self.relative_bucket_path(partition, bucket)
         return ExternalPathProvider(self.external_paths, relative_bucket_path)
+
+    def global_index_path_factory(self) -> 'IndexPathFactory':
+        return IndexPathFactory(self.index_path())
+
+
+class IndexPathFactory:
+
+    def __init__(self, index_path: str):
+        self._index_path = index_path
+        self._file_count = 0
+
+    def index_path(self) -> str:
+        """Return the base index path."""
+        return self._index_path
+
+    def to_path(self, file_name: str) -> str:
+        """Convert a file name to a full path."""
+        return f"{self._index_path}/{file_name}"
+
+    def new_path(self, prefix: str = "index-") -> str:
+        """Create a new unique index file path."""
+        import uuid
+        unique_id = str(uuid.uuid4())
+        self._file_count += 1
+        return self.to_path(f"{prefix}{unique_id}-{self._file_count}")
+
+    def is_external_path(self) -> bool:
+        """Return whether this is an external path."""
+        return False

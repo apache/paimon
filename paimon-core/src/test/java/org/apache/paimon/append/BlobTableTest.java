@@ -22,25 +22,32 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.UriReader;
 
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
 import java.io.ByteArrayInputStream;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
@@ -53,6 +60,36 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 public class BlobTableTest extends TableTestBase {
 
     private final byte[] blobBytes = randomBytes();
+
+    @Test
+    public void testBlobConsumer() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+        List<BlobDescriptor> blobs = new ArrayList<>();
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite()) {
+            write.withBlobConsumer(
+                    (blobFieldName, blobDescriptor) -> {
+                        assertThat(blobFieldName).isEqualTo("f2");
+                        blobs.add(blobDescriptor);
+                        return true;
+                    });
+            write.write(dataDefault(0, 0));
+            write.write(dataDefault(0, 0));
+            write.write(GenericRow.of(1, BinaryString.fromString("nice"), null));
+        }
+        assertThat(blobs.size()).isEqualTo(3);
+        FileIO fileIO = table.fileIO();
+        UriReader uriReader = UriReader.fromFile(fileIO);
+        for (int i = 0; i < 2; i++) {
+            BlobDescriptor blob = blobs.get(i);
+            assertThat(Blob.fromDescriptor(uriReader, blob).toData()).isEqualTo(blobBytes);
+        }
+        for (int i = 0; i < 2; i++) {
+            BlobDescriptor blob = blobs.get(i);
+            fileIO.deleteQuietly(new Path(blob.uri()));
+        }
+        assertThat(blobs.get(2)).isNull();
+    }
 
     @Test
     public void testBasic() throws Exception {

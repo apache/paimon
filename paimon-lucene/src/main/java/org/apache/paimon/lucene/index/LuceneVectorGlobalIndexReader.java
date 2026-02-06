@@ -207,7 +207,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             id2scores.put(rowId, scoredRow.score);
             roaringBitmap64.add(rowId);
         }
-        return Optional.of(new LuceneVectorSearchGlobalIndexResult(roaringBitmap64, id2scores));
+        return Optional.of(new LuceneScoredGlobalIndexResult(roaringBitmap64, id2scores));
     }
 
     /** Helper class to store row ID with its score. */
@@ -227,7 +227,7 @@ public class LuceneVectorGlobalIndexReader implements GlobalIndexReader {
             synchronized (this) {
                 if (!indicesLoaded) {
                     for (GlobalIndexIOMeta meta : files) {
-                        try (SeekableInputStream in = fileReader.getInputStream(meta.fileName())) {
+                        try (SeekableInputStream in = fileReader.getInputStream(meta)) {
                             LuceneIndexMMapDirectory directory = null;
                             IndexReader reader = null;
                             try {

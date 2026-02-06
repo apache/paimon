@@ -264,7 +264,7 @@ public class CatalogUtils {
         }
 
         if (options.type() == TableType.ICEBERG_TABLE) {
-            return toIcebergTable(identifier, schema, dataFileIO);
+            return toIcebergTable(identifier, schema, dataFileIO, metadata.uuid());
         }
 
         Identifier tableIdentifier = identifier;
@@ -284,7 +284,8 @@ public class CatalogUtils {
                         isRestCatalog ? null : lockFactory,
                         isRestCatalog ? null : lockContext,
                         catalogContext,
-                        catalog.supportsVersionManagement());
+                        catalog.supportsVersionManagement(),
+                        catalog.supportsPartitionModification());
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
@@ -443,7 +444,10 @@ public class CatalogUtils {
     }
 
     private static IcebergTable toIcebergTable(
-            Identifier identifier, TableSchema schema, Function<Path, FileIO> fileIO) {
+            Identifier identifier,
+            TableSchema schema,
+            Function<Path, FileIO> fileIO,
+            @Nullable String uuid) {
         Map<String, String> options = schema.options();
         String location = options.get(CoreOptions.PATH.key());
         return IcebergTable.builder()
@@ -454,6 +458,7 @@ public class CatalogUtils {
                 .partitionKeys(schema.partitionKeys())
                 .options(options)
                 .comment(schema.comment())
+                .uuid(uuid)
                 .build();
     }
 }

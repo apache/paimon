@@ -292,6 +292,15 @@ public class FlinkConnectorOptions {
                                     + "cache refreshing is forbidden. Blacklist format is start1->end1,start2->end2,... , "
                                     + "and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.");
 
+    public static final ConfigOption<Integer> LOOKUP_REFRESH_FULL_LOAD_THRESHOLD =
+            ConfigOptions.key("lookup.refresh.full-load-threshold")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If the pending snapshot count exceeds this threshold, lookup table will discard incremental updates "
+                                    + "and refresh the entire table from the latest snapshot. This can improve performance when there are many snapshots pending. "
+                                    + "Set to a reasonable value (e.g., 10) to enable this optimization. Default is Integer.MAX_VALUE (disabled). ");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()
@@ -437,13 +446,6 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Bounded mode for Paimon consumer. "
                                     + "By default, Paimon automatically selects bounded mode based on the mode of the Flink job.");
-
-    public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
-            key("postpone.default-bucket-num")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
     public static final ConfigOption<Boolean> SCAN_DEDICATED_SPLIT_GENERATION =
             key("scan.dedicated-split-generation")

@@ -22,7 +22,7 @@ import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.memory.MemorySlice;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
@@ -179,6 +179,22 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     }
 
     @Override
+    public Optional<List<GlobalIndexIOMeta>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return Optional.of(
+                filter(
+                        meta -> {
+                            if (meta.onlyNulls()) {
+                                return false;
+                            }
+                            Object minKey = deserialize(meta.getFirstKey());
+                            Object maxKey = deserialize(meta.getLastKey());
+                            return comparator.compare(from, maxKey) <= 0
+                                    && comparator.compare(to, minKey) >= 0;
+                        }));
+    }
+
+    @Override
     public Optional<List<GlobalIndexIOMeta>> visitAnd(
             List<Optional<List<GlobalIndexIOMeta>>> children) {
         HashSet<GlobalIndexIOMeta> result = null;
@@ -192,7 +208,7 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
                 result.retainAll(child.get());
             }
             if (result.isEmpty()) {
-                return Optional.empty();
+                break;
             }
         }
         return result == null ? Optional.empty() : Optional.of(new ArrayList<>(result));
@@ -203,13 +219,16 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
             List<Optional<List<GlobalIndexIOMeta>>> children) {
         HashSet<GlobalIndexIOMeta> result = new HashSet<>();
         for (Optional<List<GlobalIndexIOMeta>> child : children) {
+            if (!child.isPresent()) {
+                return Optional.empty();
+            }
             child.ifPresent(result::addAll);
         }
-        return result.isEmpty() ? Optional.empty() : Optional.of(new ArrayList<>(result));
+        return Optional.of(new ArrayList<>(result));
     }
 
     @Override
-    public Optional<List<GlobalIndexIOMeta>> visit(TransformPredicate predicate) {
+    public Optional<List<GlobalIndexIOMeta>> visitNonFieldLeaf(LeafPredicate predicate) {
         return Optional.empty();
     }
 

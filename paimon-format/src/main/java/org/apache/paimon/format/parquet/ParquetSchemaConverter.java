@@ -213,20 +213,32 @@ public class ParquetSchemaConverter {
                         .withId(fieldId);
             case ROW:
                 RowType rowType = (RowType) type;
-                return new GroupType(repetition, name, convertToParquetTypes(rowType))
+                Types.GroupBuilder<GroupType> groupTypeBuilder = Types.buildGroup(repetition);
+                // TODO Use Variant until all engines are upgraded to the latest Parquet
+                // if (VariantMetadataUtils.isVariantRowType(rowType)) {
+                //     groupTypeBuilder.as(
+                //            LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION));
+                // }
+                return groupTypeBuilder
+                        .addFields(convertToParquetTypes(rowType))
+                        .named(name)
                         .withId(fieldId);
             case VARIANT:
                 return Types.buildGroup(repetition)
+                        // TODO Use Variant until all engines are upgraded to the latest Parquet
+                        // .as(LogicalTypeAnnotation.variantType(Variant.VARIANT_SPEC_VERSION))
                         .addField(
                                 Types.primitive(
                                                 PrimitiveType.PrimitiveTypeName.BINARY,
                                                 Type.Repetition.REQUIRED)
-                                        .named(Variant.VALUE))
+                                        .named(Variant.VALUE)
+                                        .withId(0))
                         .addField(
                                 Types.primitive(
                                                 PrimitiveType.PrimitiveTypeName.BINARY,
                                                 Type.Repetition.REQUIRED)
-                                        .named(Variant.METADATA))
+                                        .named(Variant.METADATA)
+                                        .withId(1))
                         .named(name)
                         .withId(fieldId);
             default:
@@ -374,11 +386,9 @@ public class ParquetSchemaConverter {
         } else {
             GroupType groupType = parquetType.asGroupType();
             if (logicalType instanceof LogicalTypeAnnotation.ListLogicalTypeAnnotation) {
-                int level = groupType.getType(0) instanceof GroupType ? 3 : 2;
                 paimonDataType =
                         new ArrayType(
-                                convertToPaimonField(parquetListElementType(groupType, level))
-                                        .type());
+                                convertToPaimonField(parquetListElementType(groupType)).type());
             } else if (logicalType instanceof LogicalTypeAnnotation.MapLogicalTypeAnnotation) {
                 Pair<Type, Type> keyValueType = parquetMapKeyValueType(groupType);
                 paimonDataType =
@@ -403,7 +413,8 @@ public class ParquetSchemaConverter {
         return new DataField(parquetType.getId().intValue(), parquetType.getName(), paimonDataType);
     }
 
-    public static Type parquetListElementType(GroupType listType, int level) {
+    public static Type parquetListElementType(GroupType listType) {
+        int level = listType.getType(0) instanceof GroupType ? 3 : 2;
         if (level == 3) {
             // Level 3 representation of list type.
             // List type should only have one middle group type, which is repeated, and one element

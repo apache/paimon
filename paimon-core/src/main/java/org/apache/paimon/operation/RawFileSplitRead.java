@@ -20,7 +20,6 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.variant.VariantAccessInfo;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
@@ -46,6 +45,8 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -86,7 +87,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     @Nullable private List<Predicate> filters;
     @Nullable private TopN topN;
     @Nullable private Integer limit;
-    @Nullable private VariantAccessInfo[] variantAccess;
 
     public RawFileSplitRead(
             FileIO fileIO,
@@ -125,12 +125,6 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     }
 
     @Override
-    public SplitRead<InternalRow> withVariantAccess(VariantAccessInfo[] variantAccess) {
-        this.variantAccess = variantAccess;
-        return this;
-    }
-
-    @Override
     public RawFileSplitRead withFilter(Predicate predicate) {
         if (predicate != null) {
             this.filters = splitAnd(predicate);
@@ -152,19 +146,38 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
     @Override
     public RecordReader<InternalRow> createReader(Split s) throws IOException {
-        DataSplit split = (DataSplit) s;
-        if (!split.beforeFiles().isEmpty()) {
-            LOG.info("Ignore split before files: {}", split.beforeFiles());
+        if (s instanceof DataSplit) {
+            DataSplit split = (DataSplit) s;
+            return createReader(
+                    split.partition(),
+                    split.bucket(),
+                    split.dataFiles(),
+                    split.deletionFiles().orElse(null));
+        } else {
+            IncrementalSplit split = (IncrementalSplit) s;
+            if (!split.beforeFiles().isEmpty()) {
+                LOG.info("Ignore split before files: {}", split.beforeFiles());
+            }
+            return createReader(
+                    split.partition(),
+                    split.bucket(),
+                    split.afterFiles(),
+                    split.afterDeletionFiles());
         }
+    }
 
-        List<DataFileMeta> files = split.dataFiles();
-        DeletionVector.Factory dvFactory =
-                DeletionVector.factory(fileIO, files, split.deletionFiles().orElse(null));
+    public RecordReader<InternalRow> createReader(
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            List<DeletionFile> deletionFiles)
+            throws IOException {
+        DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         Map<String, IOExceptionSupplier<DeletionVector>> dvFactories = new HashMap<>();
         for (DataFileMeta file : files) {
             dvFactories.put(file.fileName(), () -> dvFactory.create(file.fileName()).orElse(null));
         }
-        return createReader(split.partition(), split.bucket(), split.dataFiles(), dvFactories);
+        return createReader(partition, bucket, files, dvFactories);
     }
 
     public RecordReader<InternalRow> createReader(
@@ -192,8 +205,7 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         },
                         filters,
                         topN,
-                        limit,
-                        variantAccess);
+                        limit);
 
         for (DataFileMeta file : files) {
             suppliers.add(

@@ -25,7 +25,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Projection;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
@@ -332,15 +331,15 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT());
         // the sequence field 'f4' is projected too
-        int[][] projection = new int[][] {{1}, {4}, {3}, {7}};
+        RowType readType = rowType.project("f1", "f4", "f3", "f7");
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
-        MergeFunctionFactory.AdjustedProjection adjustedProjection =
-                factory.adjustProjection(projection);
+        RowType pushdownType = factory.adjustReadType(readType);
 
-        validate(adjustedProjection, new int[] {1, 4, 3, 7, 5}, new int[] {0, 1, 2, 3});
+        assertThat(pushdownType).isNotNull();
+        assertThat(pushdownType.getFieldNames()).containsExactly("f1", "f4", "f3", "f7", "f5");
 
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(pushdownType);
         func.reset();
         // if sequence field is null, the related fields should not be updated
         add(func, 1, 1, 1, 1, 1);
@@ -364,15 +363,16 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT());
         // the sequence field 'f4' is projected too
-        int[][] projection = new int[][] {{1}, {4}, {3}, {7}};
+        RowType readType = rowType.project("f1", "f4", "f3", "f7");
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
-        MergeFunctionFactory.AdjustedProjection adjustedProjection =
-                factory.adjustProjection(projection);
+        RowType pushdownType = factory.adjustReadType(readType);
 
-        validate(adjustedProjection, new int[] {1, 4, 3, 7, 2, 5, 6}, new int[] {0, 1, 2, 3});
+        assertThat(pushdownType).isNotNull();
+        assertThat(pushdownType.getFieldNames())
+                .containsExactly("f1", "f4", "f3", "f7", "f2", "f5", "f6");
 
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(pushdownType);
         func.reset();
         // if sequence field is null, the related fields should not be updated
         add(func, 1, 1, 1, 1, 1, 1, 1);
@@ -396,18 +396,16 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT());
         // all fields are projected
-        int[][] projection = new int[][] {{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}};
+        RowType readType = rowType;
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
-        MergeFunctionFactory.AdjustedProjection adjustedProjection =
-                factory.adjustProjection(projection);
+        RowType pushdownType = factory.adjustReadType(readType);
 
-        validate(
-                adjustedProjection,
-                new int[] {0, 1, 2, 3, 4, 5, 6, 7},
-                new int[] {0, 1, 2, 3, 4, 5, 6, 7});
+        assertThat(pushdownType).isNotNull();
+        assertThat(pushdownType.getFieldNames())
+                .containsExactly("f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7");
 
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(pushdownType);
         func.reset();
         // 'f6' has no sequence group, it should not be updated by null
         add(func, 1, 1, 1, 1, 1, 1, 1, 1);
@@ -431,18 +429,16 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT());
         // all fields are projected
-        int[][] projection = new int[][] {{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}};
+        RowType readType = rowType;
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
-        MergeFunctionFactory.AdjustedProjection adjustedProjection =
-                factory.adjustProjection(projection);
+        RowType pushdownType = factory.adjustReadType(readType);
 
-        validate(
-                adjustedProjection,
-                new int[] {0, 1, 2, 3, 4, 5, 6, 7},
-                new int[] {0, 1, 2, 3, 4, 5, 6, 7});
+        assertThat(pushdownType).isNotNull();
+        assertThat(pushdownType.getFieldNames())
+                .containsExactly("f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7");
 
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(pushdownType);
         func.reset();
         // 'f6' has no sequence group, it should not be updated by null
         add(func, 1, 1, 1, 1, 1, 1, 1, 1);
@@ -465,16 +461,11 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT());
-        // set the projection = null
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
-        MergeFunctionFactory.AdjustedProjection adjustedProjection = factory.adjustProjection(null);
 
-        validate(adjustedProjection, null, null);
-
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(rowType);
         func.reset();
-        // Setting projection with null is similar with projecting all fields
         add(func, 1, 1, 1, 1, 1, 1, 1, 1);
         add(func, 4, 2, 4, 2, 2, 0, null, 3);
         validate(func, 4, 2, 4, 2, 2, 1, 1, 1);
@@ -493,15 +484,14 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT());
-        int[][] projection = new int[][] {{0}, {1}, {3}, {4}, {7}};
+        RowType readType = rowType.project("f0", "f1", "f3", "f4", "f7");
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
-        MergeFunctionFactory.AdjustedProjection adjustedProjection =
-                factory.adjustProjection(projection);
+        RowType pushdownType = factory.adjustReadType(readType);
 
-        validate(adjustedProjection, new int[] {0, 1, 3, 4, 7}, null);
+        assertThat(pushdownType).isEqualTo(readType);
 
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(pushdownType);
         func.reset();
         // Without sequence group, all the fields should not be updated by null
         add(func, 1, 1, 1, 1, 1);
@@ -526,12 +516,12 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT());
-        int[][] projection = new int[][] {{1}, {7}};
+        RowType readType = rowType.project("f1", "f7");
         assertThatThrownBy(
                         () ->
                                 PartialUpdateMergeFunction.factory(
                                                 options, rowType, ImmutableList.of("f0"))
-                                        .create(projection))
+                                        .create(readType))
                 .hasMessageContaining("Can not find new sequence field for new field.");
     }
 
@@ -734,12 +724,12 @@ public class PartialUpdateMergeFunctionTest {
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
 
-        MergeFunctionFactory.AdjustedProjection adjustedProjection =
-                factory.adjustProjection(new int[][] {{3}, {2}, {5}});
+        RowType pushdownType = factory.adjustReadType(rowType.project("f3", "f2", "f5"));
 
-        validate(adjustedProjection, new int[] {3, 2, 5, 1}, new int[] {0, 1, 2});
+        assertThat(pushdownType).isNotNull();
+        assertThat(pushdownType.getFieldNames()).containsExactly("f3", "f2", "f5", "f1");
 
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(pushdownType);
 
         func.reset();
         // f0 pk
@@ -790,12 +780,12 @@ public class PartialUpdateMergeFunctionTest {
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
 
-        MergeFunctionFactory.AdjustedProjection adjustedProjection =
-                factory.adjustProjection(new int[][] {{3}, {2}, {5}});
+        RowType pushdownType = factory.adjustReadType(rowType.project("f3", "f2", "f5"));
 
-        validate(adjustedProjection, new int[] {3, 2, 5, 1, 8}, new int[] {0, 1, 2});
+        assertThat(pushdownType).isNotNull();
+        assertThat(pushdownType.getFieldNames()).containsExactly("f3", "f2", "f5", "f1", "f8");
 
-        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        MergeFunction<KeyValue> func = factory.create(pushdownType);
 
         func.reset();
         // f0 pk
@@ -893,23 +883,5 @@ public class PartialUpdateMergeFunctionTest {
 
     private void validate(MergeFunction<KeyValue> function, Integer... f) {
         assertThat(function.getResult().value()).isEqualTo(GenericRow.of(f));
-    }
-
-    private void validate(
-            MergeFunctionFactory.AdjustedProjection projection, int[] pushdown, int[] outer) {
-        if (projection.pushdownProjection == null) {
-            assertThat(pushdown).isNull();
-        } else {
-            assertThat(pushdown)
-                    .containsExactly(
-                            Projection.of(projection.pushdownProjection).toTopLevelIndexes());
-        }
-
-        if (projection.outerProjection == null) {
-            assertThat(outer).isNull();
-        } else {
-            assertThat(outer)
-                    .containsExactly(Projection.of(projection.outerProjection).toTopLevelIndexes());
-        }
     }
 }

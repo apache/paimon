@@ -675,6 +675,7 @@ public class AppendOnlyWriterTest {
                         null,
                         MIN_FILE_NUM,
                         targetFileSize,
+                        targetFileSize / 10 * 7,
                         false,
                         compactBefore -> {
                             latch.await();
@@ -710,7 +711,9 @@ public class AppendOnlyWriterTest {
                         MemorySize.MAX_VALUE,
                         new FileIndexOptions(),
                         true,
-                        false);
+                        false,
+                        null,
+                        options.dataEvolutionEnabled());
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

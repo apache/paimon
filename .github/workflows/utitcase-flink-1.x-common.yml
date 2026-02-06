@@ -26,6 +26,7 @@ on:
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
       - 'paimon-lucene/**'
+      - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
 
 env:
   JDK_VERSION: 8
@@ -54,7 +55,7 @@ jobs:
         run: |
           COMPILE_MODULE="org.apache.paimon:paimon-flink-common"
           echo "Start compiling modules: $COMPILE_MODULE"
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3 -pl "${COMPILE_MODULE}" -am
+          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3 -pl "${COMPILE_MODULE}" -am
 
       - name: Test Flink
         run: |
@@ -63,7 +64,7 @@ jobs:
           echo "JVM timezone is set to $jvm_timezone"
           TEST_MODULE="org.apache.paimon:paimon-flink-common" 
           echo "Start testing module: $TEST_MODULE"
-          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B -ntp test verify -Pflink1,spark3 -pl "${TEST_MODULE}" -Duser.timezone=$jvm_timezone
           echo "All modules tested"
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2

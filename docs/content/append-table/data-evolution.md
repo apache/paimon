@@ -26,6 +26,8 @@ under the License.
 
 # Data Evolution
 
+## Overview
+
 Paimon supports complete Schema Evolution, allowing you to freely add, modify, or delete column schema. But how to
 backfill newly added columns or update column data.
 
@@ -55,7 +57,9 @@ CREATE TABLE target_table (id INT, b INT, c INT) TBLPROPERTIES (
 INSERT INTO target_table VALUES (1, 1, 1), (2, 2, 2);
 ```
 
-Now we could only support spark 'MERGE INTO' statement to update partial columns.
+Now we could update partial columns by spark 'MERGE INTO' statement or flink 'data_evolution_merge_into' procedure:
+
+### Spark
 
 ```sql
 CREATE TABLE source_table (id INT, b INT);
@@ -83,7 +87,36 @@ Note that:
 * Data Evolution Table does not support 'Delete', 'Update', or 'Compact' statement yet.
 * Merge Into for Data Evolution Table does not support 'WHEN NOT MATCHED BY SOURCE' clause.
 
-## Spec
+### Flink
+Since Flink does not currently support the MERGE INTO syntax, we simulate the merge-into process using the data_evolution_merge_into procedure, as shown below:
+
+```sql
+CREATE TABLE source_table (id INT, b INT);
+INSERT INTO source_table VALUES (1, 11), (2, 22), (3, 33);
+
+CALL sys.data_evolution_merge_into(
+    'my_db.target_table', 
+    '',   /* Optional target alias */
+    '',   /* Optional source sqls */
+    'source_table',
+    'source_table.id=target_table.id',
+    'b=source_table.b',
+    2     /* Specify sink parallelism */
+);
+
+SELECT * FROM source_table
++----+----+----+
+| id | b  | c  |
++----+----+----+
+| 1  | 11 | 1  |
+| 2  | 22 | 2  |
+```
+Note that:
+* Compared to Spark implementation, Flink data_evolution_merge_into procedure only supports updating/inserting new columns now. Inserting new rows is not supported yet.
+
+## File Group Spec
+
+Through the RowId metadata, files are organized into a file group.
 
 When writing: MERGE INTO clause for Data Evolution Table only updates the specified columns, and writes the updated column data to new files. The original data files remain unchanged.
 

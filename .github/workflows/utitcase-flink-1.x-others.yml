@@ -26,6 +26,7 @@ on:
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
       - 'paimon-lucene/**'
+      - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
 
 env:
   JDK_VERSION: 8
@@ -52,7 +53,7 @@ jobs:
 
       - name: Build Flink
         run: |
-          mvn -T 2C -B clean install -DskipTests -Pflink1,spark3
+          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3
 
       - name: Test Flink
         run: |
@@ -64,6 +65,6 @@ jobs:
           test_modules+="org.apache.paimon:paimon-flink-${suffix},"
           done
           test_modules="${test_modules%,}"
-          mvn -T 2C -B test verify -Pflink1,spark3 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
+          mvn -T 2C -B -ntp test verify -Pflink1,spark3 -pl "${test_modules}" -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m -XX:+UseG1GC -XX:CICompilerCount=2

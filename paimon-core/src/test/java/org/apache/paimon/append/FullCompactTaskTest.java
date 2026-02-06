@@ -71,6 +71,12 @@ public class FullCompactTaskTest {
                         newFile(3221, 3280)),
                 Collections.emptyList(),
                 Collections.emptyList());
+
+        // middle files are removed
+        innerTest(
+                Collections.singletonList(newFile(1L, 1024L / 10 * 8)),
+                Collections.emptyList(),
+                Collections.emptyList());
     }
 
     @Test
@@ -106,7 +112,7 @@ public class FullCompactTaskTest {
             List<DataFileMeta> expectBefore,
             List<DataFileMeta> expectAfter) {
         MockFullCompactTask task =
-                new MockFullCompactTask(compactFiles, TARGET_FILE_SIZE, rewriter());
+                new MockFullCompactTask(compactFiles, TARGET_FILE_SIZE / 10 * 7, rewriter());
         try {
             CompactResult actual = task.doCompact();
             assertThat(actual.before()).containsExactlyInAnyOrderElementsOf(expectBefore);

@@ -176,7 +176,8 @@ public class ManifestListTest {
                 null,
                 null,
                 CoreOptions.ExternalPathStrategy.NONE,
-                false);
+                false,
+                null);
     }
 
     private ManifestList createManifestList(String pathStr) {

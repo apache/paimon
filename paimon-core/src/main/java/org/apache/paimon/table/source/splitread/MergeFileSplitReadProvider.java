@@ -49,19 +49,13 @@ public class MergeFileSplitReadProvider implements SplitReadProvider {
 
     private SplitRead<InternalRow> create(Supplier<MergeFileSplitRead> supplier) {
         final MergeFileSplitRead read = supplier.get().withReadKeyType(RowType.of());
-        return SplitRead.convert(read, split -> unwrap(read.createReader(split)));
+        return SplitRead.convert(
+                read, split -> unwrap(read.createReader(split), read.tableSchema().options()));
     }
 
     @Override
     public boolean match(Split split, Context context) {
-        if (split instanceof DataSplit) {
-            DataSplit dataSplit = (DataSplit) split;
-            return dataSplit.beforeFiles().isEmpty();
-        } else if (split instanceof ChainSplit) {
-            return true;
-        } else {
-            return false;
-        }
+        return split instanceof DataSplit || split instanceof ChainSplit;
     }
 
     @Override

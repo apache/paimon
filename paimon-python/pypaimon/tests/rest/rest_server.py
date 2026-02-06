@@ -24,8 +24,11 @@ import uuid
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from pypaimon.catalog.rest.rest_token import RESTToken
 
 from pypaimon.api.api_request import (AlterTableRequest, CreateDatabaseRequest,
                                       CreateTableRequest, RenameTableRequest)
@@ -213,6 +216,7 @@ class RESTCatalogServer:
         self.table_partitions_store: Dict[str, List] = {}
         self.no_permission_databases: List[str] = []
         self.no_permission_tables: List[str] = []
+        self.table_token_store: Dict[str, "RESTToken"] = {}
 
         # Initialize mock catalog (simplified)
         self.data_path = data_path
@@ -469,10 +473,12 @@ class RESTCatalogServer:
             # Basic table operations (GET, DELETE, etc.)
             return self._table_handle(method, data, lookup_identifier)
         elif len(path_parts) == 4:
-            # Extended operations (e.g., commit)
+            # Extended operations (e.g., commit, token)
             operation = path_parts[3]
             if operation == "commit":
                 return self._table_commit_handle(method, data, lookup_identifier, branch_part)
+            elif operation == "token":
+                return self._table_token_handle(method, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
@@ -573,6 +579,44 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _table_token_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
+        if method != "GET":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        from pypaimon.api.api_response import GetTableTokenResponse
+
+        token_key = identifier.get_full_name()
+        if token_key in self.table_token_store:
+            rest_token = self.table_token_store[token_key]
+            response = GetTableTokenResponse(
+                token=rest_token.token,
+                expires_at_millis=rest_token.expire_at_millis
+            )
+        else:
+            default_token = {
+                "akId": "akId" + str(int(time.time() * 1000)),
+                "akSecret": "akSecret" + str(int(time.time() * 1000))
+            }
+            response = GetTableTokenResponse(
+                token=default_token,
+                expires_at_millis=int(time.time() * 1000) + 3600_000  # 1 hour from now
+            )
+
+        return self._mock_response(response, 200)
+
+    def set_table_token(self, identifier: Identifier, token: "RESTToken") -> None:
+        self.table_token_store[identifier.get_full_name()] = token
+
+    def get_table_token(self, identifier: Identifier) -> Optional["RESTToken"]:
+        return self.table_token_store.get(identifier.get_full_name())
+
+    def reset_table_token(self, identifier: Identifier) -> None:
+        if identifier.get_full_name() in self.table_token_store:
+            del self.table_token_store[identifier.get_full_name()]
 
     def _table_commit_handle(self, method: str, data: str, identifier: Identifier,
                              branch: str = None) -> Tuple[str, int]:
@@ -800,7 +844,7 @@ class RESTCatalogServer:
         from pypaimon.common.options import Options
         warehouse_path = str(Path(self.data_path) / self.warehouse)
         options = Options({"warehouse": warehouse_path})
-        return FileIO(warehouse_path, options)
+        return FileIO.get(warehouse_path, options)
 
     def _create_table_metadata(self, identifier: Identifier, schema_id: int,
                                schema: Schema, uuid_str: str, is_external: bool) -> TableMetadata:

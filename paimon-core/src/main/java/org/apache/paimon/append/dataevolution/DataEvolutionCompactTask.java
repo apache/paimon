@@ -125,6 +125,23 @@ public class DataEvolutionCompactTask {
                 writeResult.size() == 1, "Data evolution compaction should produce one file.");
 
         DataFileMeta dataFileMeta = writeResult.get(0).assignFirstRowId(firstRowId);
+        long minSequenceId =
+                compactBefore.stream()
+                        .mapToLong(DataFileMeta::minSequenceNumber)
+                        .min()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Cannot get min sequence id from compact before files."));
+        long maxSequenceId =
+                compactBefore.stream()
+                        .mapToLong(DataFileMeta::maxSequenceNumber)
+                        .max()
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Cannot get max sequence id from compact before files."));
+        dataFileMeta = dataFileMeta.assignSequenceNumber(minSequenceId, maxSequenceId);
         compactAfter.add(dataFileMeta);
 
         CompactIncrement compactIncrement =

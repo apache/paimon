@@ -18,39 +18,37 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.blob.BlobFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.FileWriterAbortExecutor;
 import org.apache.paimon.io.RollingFileWriter;
-import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
-import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A rolling file writer that handles both normal data and blob data. This writer creates separate
@@ -79,28 +77,20 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     /** Constant for checking rolling condition periodically. */
     private static final long CHECK_ROLLING_RECORD_CNT = 1000L;
 
-    /** Expected number of blob fields in a table. */
-    private static final int EXPECTED_BLOB_FIELD_COUNT = 1;
-
     // Core components
     private final Supplier<
-                    PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+                    ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             writerFactory;
-    private final Supplier<
-                    PeojectedFileWriter<
-                            RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>>
-            blobWriterFactory;
+    private final Supplier<MultipleBlobFileWriter> blobWriterFactory;
     private final long targetFileSize;
-    private final long blobTargetFileSize;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
     private final List<DataFileMeta> results;
-    private PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>
+
+    private ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>
             currentWriter;
-    private PeojectedFileWriter<
-                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
-            blobWriter;
+    private MultipleBlobFileWriter blobWriter;
     private long recordCount = 0;
     private boolean closed = false;
 
@@ -112,24 +102,18 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             long blobTargetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
-            LongCounter seqNumCounter,
+            Supplier<LongCounter> seqNumCounterSupplier,
             String fileCompression,
             StatsCollectorFactories statsCollectorFactories,
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
             boolean asyncFileWrite,
-            boolean statsDenseStore) {
-
+            boolean statsDenseStore,
+            @Nullable BlobConsumer blobConsumer) {
         // Initialize basic fields
         this.targetFileSize = targetFileSize;
-        this.blobTargetFileSize = blobTargetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
-
-        // Split schema into normal and blob parts
-        Pair<RowType, RowType> typeWithBlob = BlobType.splitBlob(writeSchema);
-        RowType normalRowType = typeWithBlob.getLeft();
-        RowType blobType = typeWithBlob.getRight();
 
         // Initialize writer factory for normal data
         this.writerFactory =
@@ -137,10 +121,10 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                         fileIO,
                         schemaId,
                         fileFormat,
-                        normalRowType,
+                        BlobType.splitBlob(writeSchema).getLeft(),
                         writeSchema,
                         pathFactory,
-                        seqNumCounter,
+                        seqNumCounterSupplier,
                         fileCompression,
                         statsCollectorFactories,
                         fileIndexOptions,
@@ -151,22 +135,22 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
         // Initialize blob writer
         this.blobWriterFactory =
                 () ->
-                        createBlobWriter(
+                        new MultipleBlobFileWriter(
                                 fileIO,
                                 schemaId,
-                                blobType,
                                 writeSchema,
                                 pathFactory,
-                                seqNumCounter,
+                                seqNumCounterSupplier,
                                 fileSource,
                                 asyncFileWrite,
                                 statsDenseStore,
-                                blobTargetFileSize);
+                                blobTargetFileSize,
+                                blobConsumer);
     }
 
     /** Creates a factory for normal data writers. */
     private static Supplier<
-                    PeojectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
+                    ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             createNormalWriterFactory(
                     FileIO fileIO,
                     long schemaId,
@@ -174,7 +158,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                     RowType normalRowType,
                     RowType writeSchema,
                     DataFilePathFactory pathFactory,
-                    LongCounter seqNumCounter,
+                    Supplier<LongCounter> seqNumCounterSupplier,
                     String fileCompression,
                     StatsCollectorFactories statsCollectorFactories,
                     FileIndexOptions fileIndexOptions,
@@ -197,65 +181,15 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                             pathFactory.newPath(),
                             normalRowType,
                             schemaId,
-                            seqNumCounter,
+                            seqNumCounterSupplier,
                             fileIndexOptions,
                             fileSource,
                             asyncFileWrite,
                             statsDenseStore,
                             pathFactory.isExternalPath(),
                             normalColumnNames);
-            return new PeojectedFileWriter<>(rowDataFileWriter, projectionNormalFields);
+            return new ProjectedFileWriter<>(rowDataFileWriter, projectionNormalFields);
         };
-    }
-
-    /** Creates a blob writer for handling blob data. */
-    private static PeojectedFileWriter<
-                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
-            createBlobWriter(
-                    FileIO fileIO,
-                    long schemaId,
-                    RowType blobType,
-                    RowType writeSchema,
-                    DataFilePathFactory pathFactory,
-                    LongCounter seqNumCounter,
-                    FileSource fileSource,
-                    boolean asyncFileWrite,
-                    boolean statsDenseStore,
-                    long targetFileSize) {
-
-        BlobFileFormat blobFileFormat = new BlobFileFormat();
-        List<String> blobNames = blobType.getFieldNames();
-
-        // Validate blob field count
-        checkArgument(
-                blobNames.size() == EXPECTED_BLOB_FIELD_COUNT,
-                "Limit exactly one blob fields in one paimon table yet.");
-
-        int[] blobProjection = writeSchema.projectIndexes(blobNames);
-        return new PeojectedFileWriter<>(
-                new RollingFileWriterImpl<>(
-                        () ->
-                                new RowDataFileWriter(
-                                        fileIO,
-                                        RollingFileWriter.createFileWriterContext(
-                                                blobFileFormat,
-                                                blobType,
-                                                new SimpleColStatsCollector.Factory[] {
-                                                    NoneSimpleColStatsCollector::new
-                                                },
-                                                "none"),
-                                        pathFactory.newBlobPath(),
-                                        blobType,
-                                        schemaId,
-                                        seqNumCounter,
-                                        new FileIndexOptions(),
-                                        fileSource,
-                                        asyncFileWrite,
-                                        statsDenseStore,
-                                        pathFactory.isExternalPath(),
-                                        blobNames),
-                        targetFileSize),
-                blobProjection);
     }
 
     /**
@@ -375,7 +309,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     /** Closes the main writer and returns its metadata. */
     private DataFileMeta closeMainWriter() throws IOException {
         currentWriter.close();
-        closedWriters.add(currentWriter.writer().abortExecutor());
+        currentWriter.writer().abortExecutor().ifPresent(closedWriters::add);
         return currentWriter.result();
     }
 
@@ -394,14 +328,21 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     private void validateFileConsistency(
             DataFileMeta mainDataFileMeta, List<DataFileMeta> blobTaggedMetas) {
         long mainRowCount = mainDataFileMeta.rowCount();
-        long blobRowCount = blobTaggedMetas.stream().mapToLong(DataFileMeta::rowCount).sum();
 
-        if (mainRowCount != blobRowCount) {
-            throw new IllegalStateException(
-                    String.format(
-                            "This is a bug: The row count of main file and blob files does not match. "
-                                    + "Main file: %s (row count: %d), blob files: %s (total row count: %d)",
-                            mainDataFileMeta, mainRowCount, blobTaggedMetas, blobRowCount));
+        Map<String, Long> blobRowCounts = new HashMap<>();
+        for (DataFileMeta file : blobTaggedMetas) {
+            long count = file.rowCount();
+            blobRowCounts.compute(file.writeCols().get(0), (k, v) -> v == null ? count : v + count);
+        }
+        for (String blobFieldName : blobRowCounts.keySet()) {
+            long blobRowCount = blobRowCounts.get(blobFieldName);
+            if (mainRowCount != blobRowCount) {
+                throw new IllegalStateException(
+                        String.format(
+                                "This is a bug: The row count of main file and blob file does not match. "
+                                        + "Main file: %s (row count: %d), blob field name: %s (row count: %d)",
+                                mainDataFileMeta, mainRowCount, blobFieldName, blobRowCount));
+            }
         }
     }
 

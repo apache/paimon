@@ -19,7 +19,7 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.TransformPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.VectorSearch;
 
 import java.io.Closeable;
@@ -40,7 +40,7 @@ public interface GlobalIndexReader extends FunctionVisitor<Optional<GlobalIndexR
     }
 
     @Override
-    default Optional<GlobalIndexResult> visit(TransformPredicate predicate) {
+    default Optional<GlobalIndexResult> visitNonFieldLeaf(LeafPredicate predicate) {
         throw new UnsupportedOperationException();
     }
 

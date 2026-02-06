@@ -45,6 +45,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.COMPACTION_MIN_FILE_NUM;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.io.DataFileTestUtils.newFile;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.stats.StatsTestUtils.newSimpleStats;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
