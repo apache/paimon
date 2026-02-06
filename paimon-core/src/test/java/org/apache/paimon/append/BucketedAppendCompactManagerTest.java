@@ -207,6 +207,7 @@ public class BucketedAppendCompactManagerTest {
                         null,
                         minFileNum,
                         targetFileSize,
+                        targetFileSize / 10 * 7,
                         false,
                         null, // not used
                         null);

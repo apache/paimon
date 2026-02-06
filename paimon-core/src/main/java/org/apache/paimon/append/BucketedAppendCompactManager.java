@@ -59,6 +59,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
     private final BucketedDvMaintainer dvMaintainer;
     private final PriorityQueue<DataFileMeta> toCompact;
     private final int minFileNum;
+    private final long targetFileSize;
     private final long compactionFileSize;
     private final boolean forceRewriteAllFiles;
     private final CompactRewriter rewriter;
@@ -72,6 +73,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             List<DataFileMeta> restored,
             @Nullable BucketedDvMaintainer dvMaintainer,
             int minFileNum,
+            long targetFileSize,
             long compactionFileSize,
             boolean forceRewriteAllFiles,
             CompactRewriter rewriter,
@@ -81,6 +83,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
         this.toCompact = new PriorityQueue<>(Comparator.comparing(DataFileMeta::minSequenceNumber));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
+        this.targetFileSize = targetFileSize;
         this.compactionFileSize = compactionFileSize;
         this.forceRewriteAllFiles = forceRewriteAllFiles;
         this.rewriter = rewriter;
@@ -214,7 +217,7 @@ public class BucketedAppendCompactManager extends CompactFutureManager {
             fileNum++;
             if (fileNum >= minFileNum) {
                 return Optional.of(candidates);
-            } else if (totalFileSize >= compactionFileSize) {
+            } else if (totalFileSize >= targetFileSize * 2) {
                 // let pointer shift one pos to right
                 DataFileMeta removed = candidates.pollFirst();
                 assert removed != null;
