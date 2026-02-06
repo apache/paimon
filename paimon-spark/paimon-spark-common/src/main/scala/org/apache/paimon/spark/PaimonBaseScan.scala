@@ -18,9 +18,8 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.annotation.VisibleForTesting
 import org.apache.paimon.spark.metric.SparkMetricRegistry
-import org.apache.paimon.spark.scan.BaseScan
+import org.apache.paimon.spark.read.{BaseScan, PaimonSupportsRuntimeFiltering}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
@@ -33,34 +32,22 @@ import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 
 import scala.collection.JavaConverters._
 
-abstract class PaimonBaseScan(table: InnerTable) extends BaseScan with SQLConfHelper {
+abstract class PaimonBaseScan(table: InnerTable)
+  extends BaseScan
+  with PaimonSupportsRuntimeFiltering
+  with SQLConfHelper {
 
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
-  // May recalculate the splits after executing runtime filter push down.
-  protected var _inputSplits: Array[Split] = _
-  protected var _inputPartitions: Seq[PaimonInputPartition] = _
-
-  @VisibleForTesting
-  def inputSplits: Array[Split] = {
-    if (_inputSplits == null) {
-      _inputSplits = readBuilder
-        .newScan()
-        .asInstanceOf[InnerTableScan]
-        .withMetricRegistry(paimonMetricsRegistry)
-        .plan()
-        .splits()
-        .asScala
-        .toArray
-    }
-    _inputSplits
-  }
-
-  final override def inputPartitions: Seq[PaimonInputPartition] = {
-    if (_inputPartitions == null) {
-      _inputPartitions = getInputPartitions(inputSplits)
-    }
-    _inputPartitions
+  protected def getInputSplits: Array[Split] = {
+    readBuilder
+      .newScan()
+      .asInstanceOf[InnerTableScan]
+      .withMetricRegistry(paimonMetricsRegistry)
+      .plan()
+      .splits()
+      .asScala
+      .toArray
   }
 
   override def toBatch: Batch = {

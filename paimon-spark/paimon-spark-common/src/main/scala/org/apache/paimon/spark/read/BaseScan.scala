@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.scan
+package org.apache.paimon.spark.read
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
@@ -55,10 +55,12 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   // Runtime push down
   val pushedRuntimePartitionFilters: ListBuffer[PartitionPredicate] = ListBuffer.empty
 
-  // Input splits
-  def inputSplits: Array[Split]
+  // Input splits and partitions
+  def inputSplits: Array[Split] = getInputSplits
   def inputPartitions: Seq[PaimonInputPartition] = getInputPartitions(inputSplits)
-  def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
+
+  protected def getInputSplits: Array[Split]
+  protected def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
     BinPackingSplits(coreOptions, readRowSizeRatio).pack(splits)
   }
 
