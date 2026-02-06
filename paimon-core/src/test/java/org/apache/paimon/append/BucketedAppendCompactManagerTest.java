@@ -45,31 +45,27 @@ public class BucketedAppendCompactManagerTest {
     public void testPickEmptyAndRelease() {
         // large file, release
         innerTest(
-                Collections.singletonList(newFile(1L, 1024L)),
+                Collections.singletonList(newFile(1L, 2048L)),
                 false,
                 Collections.emptyList(),
                 Collections.emptyList());
 
         // small file at last, release previous
         innerTest(
-                Arrays.asList(newFile(1L, 1024L), newFile(1025L, 2049L), newFile(2050L, 2100L)),
+                Arrays.asList(newFile(1L, 2048L), newFile(2049L, 2100L)),
                 false,
                 Collections.emptyList(),
-                Collections.singletonList(newFile(2050L, 2100L)));
+                Collections.singletonList(newFile(2049L, 2100L)));
         innerTest(
-                Arrays.asList(
-                        newFile(1L, 1024L),
-                        newFile(1025L, 2049L),
-                        newFile(2050L, 2100L),
-                        newFile(2101L, 2110L)),
+                Arrays.asList(newFile(1L, 2048L), newFile(2049L, 2100L), newFile(2101L, 2110L)),
                 false,
                 Collections.emptyList(),
-                Arrays.asList(newFile(2050L, 2100L), newFile(2101L, 2110L)));
+                Arrays.asList(newFile(2049L, 2100L), newFile(2101L, 2110L)));
         innerTest(
-                Arrays.asList(newFile(1L, 1024L), newFile(1025L, 2049L), newFile(2050L, 2500L)),
+                Arrays.asList(newFile(1L, 2048L), newFile(2049L, 4096L), newFile(4097L, 5000L)),
                 false,
                 Collections.emptyList(),
-                Collections.singletonList(newFile(2050L, 2500L)));
+                Collections.singletonList(newFile(4097L, 5000L)));
         innerTest(
                 Arrays.asList(
                         newFile(1L, 1024L),
@@ -81,29 +77,29 @@ public class BucketedAppendCompactManagerTest {
                         newFile(7001L, 7600L)),
                 false,
                 Collections.emptyList(),
-                Collections.singletonList(newFile(7001L, 7600L)));
+                Arrays.asList(newFile(6001L, 7000L), newFile(7001L, 7600L)));
 
         // ignore single small file (in the middle)
         innerTest(
                 Arrays.asList(
-                        newFile(1L, 1024L),
-                        newFile(1025L, 2049L),
-                        newFile(2050L, 2500L),
-                        newFile(2501L, 4096L)),
+                        newFile(1L, 2048L),
+                        newFile(2049L, 4096L),
+                        newFile(4097L, 4100L),
+                        newFile(4101L, 6150L)),
                 false,
                 Collections.emptyList(),
-                Collections.singletonList(newFile(2501L, 4096L)));
+                Collections.singletonList(newFile(4101L, 6150L)));
 
         innerTest(
                 Arrays.asList(
-                        newFile(1L, 1024L),
-                        newFile(1025L, 2049L),
-                        newFile(2050L, 2500L),
-                        newFile(2501L, 4096L),
-                        newFile(4097L, 6000L)),
+                        newFile(1L, 2048L),
+                        newFile(2049L, 4096L),
+                        newFile(4097L, 5000L),
+                        newFile(5001L, 6144L),
+                        newFile(6145L, 7048L)),
                 false,
                 Collections.emptyList(),
-                Collections.singletonList(newFile(4097L, 6000L)));
+                Collections.singletonList(newFile(6145L, 7048L)));
 
         // wait for more file
         innerTest(
@@ -113,16 +109,16 @@ public class BucketedAppendCompactManagerTest {
                 Arrays.asList(newFile(1L, 500L), newFile(501L, 1000L)));
 
         innerTest(
-                Arrays.asList(newFile(1L, 500L), newFile(501L, 1000L), newFile(1001L, 2026L)),
+                Arrays.asList(newFile(1L, 500L), newFile(501L, 1000L), newFile(1001L, 2048L)),
                 false,
                 Collections.emptyList(),
-                Arrays.asList(newFile(501L, 1000L), newFile(1001L, 2026L)));
+                Arrays.asList(newFile(501L, 1000L), newFile(1001L, 2048L)));
 
         innerTest(
-                Arrays.asList(newFile(1L, 2000L), newFile(2001L, 2005L), newFile(2006L, 2010L)),
+                Arrays.asList(newFile(1L, 2050L), newFile(2051L, 2100L), newFile(2101L, 2110L)),
                 false,
                 Collections.emptyList(),
-                Arrays.asList(newFile(2001L, 2005L), newFile(2006L, 2010L)));
+                Arrays.asList(newFile(2051L, 2100L), newFile(2101L, 2110L)));
     }
 
     @Disabled // TODO create new tests for min files only
