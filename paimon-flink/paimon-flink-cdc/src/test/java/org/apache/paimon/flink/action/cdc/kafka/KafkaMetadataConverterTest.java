@@ -39,11 +39,11 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.STRING());
-        assertThat(converter.columnName()).isEqualTo("__kafka_topic");
+        assertThat(converter.columnName()).isEqualTo("topic");
 
         // Test reading from CdcSourceRecord
         CdcSourceRecord record = new CdcSourceRecord("test-topic", null, "value");
-        assertThat(converter.read(record)).isEqualTo(null);
+        assertThat(converter.read(record)).isEqualTo("test-topic");
 
         // Test with null topic
         CdcSourceRecord recordWithNullTopic = new CdcSourceRecord(null, null, "value");
@@ -68,7 +68,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.INT());
-        assertThat(converter.columnName()).isEqualTo("__kafka_partition");
+        assertThat(converter.columnName()).isEqualTo("partition");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
@@ -88,7 +88,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.BIGINT());
-        assertThat(converter.columnName()).isEqualTo("__kafka_offset");
+        assertThat(converter.columnName()).isEqualTo("offset");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
@@ -108,7 +108,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
-        assertThat(converter.columnName()).isEqualTo("__kafka_timestamp");
+        assertThat(converter.columnName()).isEqualTo("timestamp");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();
@@ -116,7 +116,8 @@ public class KafkaMetadataConverterTest {
         CdcSourceRecord record = new CdcSourceRecord("topic", null, "value", metadata);
         String result = converter.read(record);
         assertThat(result).isNotNull();
-        assertThat(result).contains("2022-01-01");
+        // Result depends on system timezone, just verify it's a valid timestamp string
+        assertThat(result).matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}");
 
         // Test with missing timestamp metadata
         CdcSourceRecord recordWithoutTimestamp = new CdcSourceRecord("topic", null, "value");
@@ -137,7 +138,7 @@ public class KafkaMetadataConverterTest {
 
         // Test data type and column name
         assertThat(converter.dataType()).isEqualTo(DataTypes.STRING());
-        assertThat(converter.columnName()).isEqualTo("__kafka_timestamp_type");
+        assertThat(converter.columnName()).isEqualTo("timestamp_type");
 
         // Test reading from CdcSourceRecord with metadata
         Map<String, Object> metadata = new HashMap<>();

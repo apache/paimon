@@ -38,16 +38,16 @@ import java.util.TimeZone;
  */
 public class KafkaMetadataConverter implements CdcMetadataConverter {
 
-    protected static final String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
     private static final long serialVersionUID = 1L;
 
-    protected final String metadataKey; // Key to lookup in metadata map (without prefix)
-    private final String columnName; // Column name in schema (with prefix)
+    protected final String metadataKey; // Key to lookup in metadata map
+    private final String columnName; // Column name in schema (same as metadataKey)
     private final DataType dataType;
 
     public KafkaMetadataConverter(String metadataKey, DataType dataType) {
         this.metadataKey = metadataKey;
-        this.columnName = KAFKA_METADATA_COLUMN_PREFIX + metadataKey;
+        this.columnName =
+                metadataKey; // Use simple name; prefix is added by PrefixedMetadataConverter
         this.dataType = dataType;
     }
 
@@ -79,6 +79,12 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
 
         public TopicConverter() {
             super("topic", DataTypes.STRING());
+        }
+
+        @Override
+        public String read(CdcSourceRecord record) {
+            // Topic is stored in the CdcSourceRecord itself, not in metadata map
+            return record.getTopic();
         }
     }
 
