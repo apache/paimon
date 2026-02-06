@@ -20,7 +20,6 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, TopN, VectorSearch}
-import org.apache.paimon.spark.read.PaimonSupportsRuntimeFiltering
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
 
@@ -39,7 +38,6 @@ case class PaimonScan(
     override val pushedVectorSearch: Option[VectorSearch],
     bucketedScanDisabled: Boolean = false)
   extends PaimonBaseScan(table)
-  with PaimonSupportsRuntimeFiltering
   with SupportsReportPartitioning {
 
   def disableBucketedScan(): PaimonScan = {

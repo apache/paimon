@@ -20,7 +20,6 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.{Predicate, TopN, VectorSearch}
-import org.apache.paimon.spark.read.PaimonSupportsRuntimeFiltering
 import org.apache.paimon.table.InnerTable
 
 import org.apache.spark.sql.types.StructType
@@ -34,5 +33,4 @@ case class PaimonScan(
     override val pushedTopN: Option[TopN] = None,
     override val pushedVectorSearch: Option[VectorSearch] = None,
     bucketedScanDisabled: Boolean = true)
-  extends PaimonBaseScan(table)
-  with PaimonSupportsRuntimeFiltering {}
+  extends PaimonBaseScan(table) {}
