@@ -1617,18 +1617,24 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     void testPartitionExpire() throws Exception {
+        // create table
         Identifier identifier = Identifier.create("test_db", "test_partition_expire");
         Map<String, String> options = new HashMap<>();
         options.put(PARTITION_EXPIRATION_STRATEGY.key(), "update-time");
         options.put(PARTITION_EXPIRATION_TIME.key(), "1 ms");
         options.put(END_INPUT_CHECK_PARTITION_EXPIRE.key(), "TRUE");
-        options.put(COMMIT_USER_PREFIX.key(), "my_user");
+        options.put(METASTORE_PARTITIONED_TABLE.key(), "TRUE");
         createTable(identifier, options, Lists.newArrayList("col1"));
-        Table table = catalog.getTable(identifier);
+
+        // write and expire table
+        Table table =
+                catalog.getTable(identifier)
+                        .copy(singletonMap(COMMIT_USER_PREFIX.key(), "my_user"));
         batchWrite(table, Arrays.asList(1, 2, 3));
         Thread.sleep(1000);
         batchWrite(table, Arrays.asList(4, 5, 6));
         Snapshot snapshot = table.latestSnapshot().get();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
         assertThat(snapshot.commitUser()).startsWith("my_user");
     }
 
