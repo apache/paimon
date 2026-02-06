@@ -41,8 +41,8 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
     protected static final String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
     private static final long serialVersionUID = 1L;
 
-    protected final String metadataKey;  // Key to lookup in metadata map (without prefix)
-    private final String columnName;     // Column name in schema (with prefix)
+    protected final String metadataKey; // Key to lookup in metadata map (without prefix)
+    private final String columnName; // Column name in schema (with prefix)
     private final DataType dataType;
 
     public KafkaMetadataConverter(String metadataKey, DataType dataType) {

@@ -102,9 +102,12 @@ public abstract class SynchronizationActionBase extends ActionBase {
         this.metadataConverters =
                 metadataColumns.stream()
                         .map(this.syncJobHandler::provideMetadataConverter)
-                        .map(converter -> metadataColumnPrefix.isEmpty()
-                                ? converter
-                                : new PrefixedMetadataConverter(converter, metadataColumnPrefix))
+                        .map(
+                                converter ->
+                                        metadataColumnPrefix.isEmpty()
+                                                ? converter
+                                                : new PrefixedMetadataConverter(
+                                                        converter, metadataColumnPrefix))
                         .toArray(CdcMetadataConverter[]::new);
         return this;
     }
