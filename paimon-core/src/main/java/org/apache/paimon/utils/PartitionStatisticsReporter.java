@@ -23,7 +23,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -46,14 +46,15 @@ public class PartitionStatisticsReporter implements Closeable {
 
     private static final Logger LOG = LoggerFactory.getLogger(PartitionStatisticsReporter.class);
 
-    private final PartitionHandler partitionHandler;
+    private final PartitionModification partitionModification;
     private final SnapshotReader snapshotReader;
     private final SnapshotManager snapshotManager;
 
-    public PartitionStatisticsReporter(FileStoreTable table, PartitionHandler partitionHandler) {
-        this.partitionHandler =
+    public PartitionStatisticsReporter(
+            FileStoreTable table, PartitionModification partitionModification) {
+        this.partitionModification =
                 Preconditions.checkNotNull(
-                        partitionHandler, "the partition handler factory is null");
+                        partitionModification, "the partition handler factory is null");
         this.snapshotReader = table.newSnapshotReader();
         this.snapshotManager = table.snapshotManager();
     }
@@ -94,14 +95,14 @@ public class PartitionStatisticsReporter implements Closeable {
                             modifyTimeMillis,
                             totalBuckets);
             LOG.info("alter partition {} with statistic {}.", partitionSpec, partitionStats);
-            partitionHandler.alterPartitions(Collections.singletonList(partitionStats));
+            partitionModification.alterPartitions(Collections.singletonList(partitionStats));
         }
     }
 
     @Override
     public void close() throws IOException {
         try {
-            partitionHandler.close();
+            partitionModification.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

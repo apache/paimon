@@ -52,7 +52,7 @@ trait WriteHelper extends Logging {
       config.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC).toMillis <= 0 ||
       table.partitionKeys.isEmpty ||
       !coreOptions.partitionedTableInMetastore ||
-      table.catalogEnvironment.partitionHandler() == null
+      table.catalogEnvironment.partitionModification() == null
     ) {
       return
     }
@@ -65,7 +65,7 @@ trait WriteHelper extends Logging {
     )
     val hmsReporter = new PartitionStatisticsReporter(
       table,
-      table.catalogEnvironment.partitionHandler()
+      table.catalogEnvironment.partitionModification()
     )
 
     val partitions = messages.map(_.partition()).distinct

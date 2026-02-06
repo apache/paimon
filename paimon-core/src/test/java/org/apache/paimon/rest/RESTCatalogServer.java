@@ -2589,6 +2589,7 @@ public class RESTCatalogServer {
                         catalog.lockFactory().orElse(null),
                         catalog.lockContext().orElse(null),
                         catalogContext,
+                        false,
                         false);
         Path path = new Path(schema.options().get(PATH.key()));
         FileIO dataFileIO = catalog.fileIO();

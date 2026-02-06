@@ -40,7 +40,6 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.SnapshotNotExistException;
 
@@ -582,28 +581,14 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public boolean supportsPartitionModification() {
+        return false;
+    }
+
+    @Override
     public TableQueryAuthResult authTableQuery(Identifier identifier, List<String> select) {
         throw new UnsupportedOperationException();
     }
-
-    @Override
-    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {}
-
-    @Override
-    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        Table table = getTable(identifier);
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.truncatePartitions(partitions);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
-            throws TableNotExistException {}
 
     @Override
     public List<String> listFunctions(String databaseName) {

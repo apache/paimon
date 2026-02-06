@@ -56,7 +56,7 @@ import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitPreCallback;
@@ -385,10 +385,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         List<CommitCallback> callbacks = new ArrayList<>();
 
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
                 callbacks.add(
-                        new AddPartitionCommitCallback(partitionHandler, partitionComputer()));
+                        new AddPartitionCommitCallback(partitionModification, partitionComputer()));
             }
         }
 
@@ -396,12 +397,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (options.tagToPartitionField() != null
                 && tagPreview != null
                 && schema.partitionKeys().isEmpty()) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
                 TagPreviewCommitCallback callback =
                         new TagPreviewCommitCallback(
                                 new AddPartitionTagCallback(
-                                        partitionHandler, options.tagToPartitionField()),
+                                        partitionModification, options.tagToPartitionField()),
                                 tagPreview);
                 callbacks.add(callback);
             }
@@ -447,9 +449,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             Duration expirationTime,
             Duration checkInterval,
             PartitionExpireStrategy expireStrategy) {
-        PartitionHandler partitionHandler = null;
+        PartitionModification partitionModification = null;
         if (options.partitionedTableInMetastore()) {
-            partitionHandler = catalogEnvironment.partitionHandler();
+            partitionModification = catalogEnvironment.partitionModification();
         }
 
         return new PartitionExpire(
@@ -458,7 +460,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 expireStrategy,
                 newScan(),
                 newCommit(commitUser, table),
-                partitionHandler,
+                partitionModification,
                 options.endInputCheckPartitionExpire(),
                 options.partitionExpireMaxNum(),
                 options.partitionExpireBatchSize());
@@ -480,9 +482,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         String partitionField = options.tagToPartitionField();
 
         if (partitionField != null) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
-                callbacks.add(new AddPartitionTagCallback(partitionHandler, partitionField));
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
+                callbacks.add(new AddPartitionTagCallback(partitionModification, partitionField));
             }
         }
         if (options.tagCreateSuccessFile()) {
