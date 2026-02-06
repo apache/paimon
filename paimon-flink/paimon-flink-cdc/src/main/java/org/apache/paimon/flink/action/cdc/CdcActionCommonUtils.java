@@ -68,6 +68,7 @@ public class CdcActionCommonUtils {
     public static final String PRIMARY_KEYS = "primary_keys";
     public static final String COMPUTED_COLUMN = "computed_column";
     public static final String METADATA_COLUMN = "metadata_column";
+    public static final String METADATA_COLUMN_PREFIX = "metadata_column_prefix";
     public static final String MULTIPLE_TABLE_PARTITION_KEYS = "multiple_table_partition_keys";
     public static final String EAGER_INIT = "eager_init";
     public static final String SYNC_PKEYS_FROM_SOURCE_SCHEMA =

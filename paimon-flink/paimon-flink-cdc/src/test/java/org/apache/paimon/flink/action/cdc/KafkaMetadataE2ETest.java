@@ -91,12 +91,10 @@ public class KafkaMetadataE2ETest {
         org.apache.paimon.flink.sink.cdc.CdcSchema cdcSchema = richRecord.cdcSchema();
         assertThat(cdcSchema.fields()).isNotEmpty();
 
-        assertThat(cdcSchema.fields().stream().anyMatch(f -> f.name().equals("topic")))
-                .isTrue();
+        assertThat(cdcSchema.fields().stream().anyMatch(f -> f.name().equals("topic"))).isTrue();
         assertThat(cdcSchema.fields().stream().anyMatch(f -> f.name().equals("partition")))
                 .isTrue();
-        assertThat(cdcSchema.fields().stream().anyMatch(f -> f.name().equals("offset")))
-                .isTrue();
+        assertThat(cdcSchema.fields().stream().anyMatch(f -> f.name().equals("offset"))).isTrue();
         assertThat(cdcSchema.fields().stream().anyMatch(f -> f.name().equals("timestamp")))
                 .isTrue();
         assertThat(cdcSchema.fields().stream().anyMatch(f -> f.name().equals("timestamp_type")))
@@ -122,27 +120,19 @@ public class KafkaMetadataE2ETest {
 
     @Test
     public void testMetadataConverterLookup() {
-        assertThat(
-                        CdcMetadataProcessor.converter(
-                                SyncJobHandler.SourceType.KAFKA, "topic"))
+        assertThat(CdcMetadataProcessor.converter(SyncJobHandler.SourceType.KAFKA, "topic"))
                 .isNotNull()
                 .isInstanceOf(KafkaMetadataConverter.TopicConverter.class);
 
-        assertThat(
-                        CdcMetadataProcessor.converter(
-                                SyncJobHandler.SourceType.KAFKA, "partition"))
+        assertThat(CdcMetadataProcessor.converter(SyncJobHandler.SourceType.KAFKA, "partition"))
                 .isNotNull()
                 .isInstanceOf(KafkaMetadataConverter.PartitionConverter.class);
 
-        assertThat(
-                        CdcMetadataProcessor.converter(
-                                SyncJobHandler.SourceType.KAFKA, "offset"))
+        assertThat(CdcMetadataProcessor.converter(SyncJobHandler.SourceType.KAFKA, "offset"))
                 .isNotNull()
                 .isInstanceOf(KafkaMetadataConverter.OffsetConverter.class);
 
-        assertThat(
-                        CdcMetadataProcessor.converter(
-                                SyncJobHandler.SourceType.KAFKA, "timestamp"))
+        assertThat(CdcMetadataProcessor.converter(SyncJobHandler.SourceType.KAFKA, "timestamp"))
                 .isNotNull()
                 .isInstanceOf(KafkaMetadataConverter.TimestampConverter.class);
 
@@ -206,8 +196,7 @@ public class KafkaMetadataE2ETest {
                 new CdcSourceRecord(TEST_TOPIC, null, valueRecord, kafkaMetadata);
 
         DebeziumAvroRecordParser parser =
-                new DebeziumAvroRecordParser(
-                        TypeMapping.defaultMapping(), Collections.emptyList());
+                new DebeziumAvroRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
 
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         parser.flatMap(
