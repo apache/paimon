@@ -206,7 +206,7 @@ public class FlinkSinkBuilder {
     public DataStreamSink<?> build() {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
-        boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
+        boolean blobAsDescriptor = table.coreOptions().writeBlobFromDescriptor();
         DataStream<InternalRow> input =
                 mapToInternalRow(
                         this.input,

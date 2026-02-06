@@ -111,11 +111,7 @@ public class SystemTableSource extends FlinkTableSource {
                             splitAssignMode,
                             null,
                             rowData,
-                            Boolean.parseBoolean(
-                                    table.options()
-                                            .getOrDefault(
-                                                    CoreOptions.BLOB_AS_DESCRIPTOR.key(),
-                                                    "false")));
+                            CoreOptions.fromMap(table.options()).readBlobAsDescriptor());
         }
         return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,

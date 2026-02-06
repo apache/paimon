@@ -138,7 +138,7 @@ case class PaimonSparkWriter(
       writeRowTracking,
       fullCompactionDeltaCommits,
       batchId,
-      coreOptions.blobAsDescriptor(),
+      coreOptions.writeBlobFromDescriptor(),
       table.catalogEnvironment().catalogContext(),
       postponePartitionBucketComputer
     )
@@ -455,7 +455,7 @@ case class PaimonSparkWriter(
             val toPaimonRow = SparkRowUtils.toPaimonRow(
               rowType,
               rowKindColIdx,
-              table.coreOptions().blobAsDescriptor(),
+              table.coreOptions().writeBlobFromDescriptor(),
               table.catalogEnvironment().catalogContext())
 
             bootstrapIterator.asScala
