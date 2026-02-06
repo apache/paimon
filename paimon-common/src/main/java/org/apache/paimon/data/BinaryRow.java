@@ -356,6 +356,12 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        assertIndexIsValid(pos);
+        return MemorySegmentUtils.readVectorData(segments, offset, getLong(pos));
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         assertIndexIsValid(pos);
         return MemorySegmentUtils.readMapData(segments, offset, getLong(pos));

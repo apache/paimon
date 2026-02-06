@@ -27,6 +27,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils$;
@@ -263,6 +264,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        throw new UnsupportedOperationException("Not support VectorType yet.");
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         int actualPos = getActualFieldPosition(pos);
         if (actualPos == -1 || internalRow.isNullAt(actualPos)) {
@@ -425,6 +431,11 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         public InternalArray getArray(int pos) {
             return new SparkInternalArray(
                     arrayData.getArray(pos), ((ArrayType) elementType).elementType());
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            throw new UnsupportedOperationException("Not support VectorType yet.");
         }
 
         @Override
