@@ -1453,6 +1453,24 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>The Variant shredding schema for writing.</td>
         </tr>
         <tr>
+            <td><h5>vector-store.fields</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the vector store fields.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-store.format</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the vector store file format.</td>
+        </tr>
+        <tr>
+            <td><h5>vector-store.target-file-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Target size of a vector-store file. Default is 10 * TARGET_FILE_SIZE.</td>
+        </tr>
+        <tr>
             <td><h5>write-buffer-for-append</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

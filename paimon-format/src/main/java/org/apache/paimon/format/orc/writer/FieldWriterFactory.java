@@ -46,6 +46,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
@@ -291,6 +292,11 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
             }
             return totalSize;
         };
+    }
+
+    @Override
+    public FieldWriter visit(VectorType vectorType) {
+        throw new UnsupportedOperationException("Unsupported type: " + vectorType);
     }
 
     @Override

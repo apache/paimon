@@ -27,6 +27,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
@@ -161,6 +162,11 @@ public class FlinkRowWrapper implements InternalRow {
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        return new FlinkVectorWrapper(row.getArray(pos));
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         return new FlinkMapWrapper(row.getMap(pos));
     }
@@ -261,6 +267,11 @@ public class FlinkRowWrapper implements InternalRow {
         }
 
         @Override
+        public InternalVector getVector(int pos) {
+            return new FlinkVectorWrapper(array.getArray(pos));
+        }
+
+        @Override
         public InternalMap getMap(int pos) {
             return new FlinkMapWrapper(array.getMap(pos));
         }
@@ -303,6 +314,12 @@ public class FlinkRowWrapper implements InternalRow {
         @Override
         public double[] toDoubleArray() {
             return array.toDoubleArray();
+        }
+    }
+
+    private static class FlinkVectorWrapper extends FlinkArrayWrapper implements InternalVector {
+        private FlinkVectorWrapper(org.apache.flink.table.data.ArrayData array) {
+            super(array);
         }
     }
 

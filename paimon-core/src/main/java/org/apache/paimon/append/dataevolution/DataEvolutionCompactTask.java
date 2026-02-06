@@ -22,6 +22,7 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
@@ -34,7 +35,9 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.VectorStoreUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -89,11 +92,33 @@ public class DataEvolutionCompactTask {
         table = table.copy(DYNAMIC_WRITE_OPTIONS);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();
 
-        RowType readWriteType =
+        List<String> vectorStoreFieldNames = table.coreOptions().vectorStoreFieldNames();
+        boolean isVectorStoreDifferentFormat =
+                VectorStoreUtils.isDifferentFormat(
+                        FileFormat.vectorStoreFileFormat(table.coreOptions()),
+                        FileFormat.fileFormat(table.coreOptions()));
+        boolean isVectorStoreFiles =
+                VectorStoreUtils.isVectorStoreFile(compactBefore.get(0).fileName());
+
+        if (isVectorStoreFiles) {
+            // TODO: support vector-store file compaction
+            throw new UnsupportedOperationException("Vector-store task is not supported");
+        }
+
+        RowType nonBlobRowType =
                 new RowType(
                         table.rowType().getFields().stream()
                                 .filter(f -> f.type().getTypeRoot() != DataTypeRoot.BLOB)
                                 .collect(Collectors.toList()));
+        RowType readWriteType;
+        if (isVectorStoreDifferentFormat) {
+            Pair<RowType, RowType> pair =
+                    VectorStoreUtils.splitVectorStore(nonBlobRowType, vectorStoreFieldNames);
+            readWriteType = isVectorStoreFiles ? pair.getRight() : pair.getLeft();
+        } else {
+            readWriteType = nonBlobRowType;
+        }
+
         FileStorePathFactory pathFactory = table.store().pathFactory();
         AppendOnlyFileStore store = (AppendOnlyFileStore) table.store();
 

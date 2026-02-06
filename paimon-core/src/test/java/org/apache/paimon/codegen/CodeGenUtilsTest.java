@@ -30,8 +30,10 @@ import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 import static org.apache.paimon.types.DataTypes.DOUBLE;
+import static org.apache.paimon.types.DataTypes.FLOAT;
 import static org.apache.paimon.types.DataTypes.INT;
 import static org.apache.paimon.types.DataTypes.STRING;
+import static org.apache.paimon.types.DataTypes.VECTOR;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CodeGenUtilsTest {
@@ -55,6 +57,15 @@ class CodeGenUtilsTest {
     }
 
     @Test
+    public void testProjectionWithVector() {
+        assertClassEquals(
+                () ->
+                        newProjection(
+                                RowType.builder().fields(INT(), VECTOR(3, FLOAT())).build(),
+                                new int[] {1}));
+    }
+
+    @Test
     public void testNormalizedKeyComputerCodegenCache() {
         assertClassEquals(
                 () -> newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
@@ -72,6 +83,14 @@ class CodeGenUtilsTest {
     public void testRecordComparatorCodegenCache() {
         assertClassEquals(
                 () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true));
+    }
+
+    @Test
+    public void testRecordComparatorCodegenCacheWithVector() {
+        assertClassEquals(
+                () ->
+                        newRecordComparator(
+                                Arrays.asList(STRING(), VECTOR(3, INT())), new int[] {0, 1}, true));
     }
 
     @Test

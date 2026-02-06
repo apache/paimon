@@ -2204,6 +2204,29 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to try upgrading the data files after overwriting a primary key table.");
 
+    public static final ConfigOption<String> VECTOR_STORE_FORMAT =
+            key("vector-store.format")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the vector store file format.");
+
+    public static final ConfigOption<String> VECTOR_STORE_FIELDS =
+            key("vector-store.fields")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the vector store fields.");
+
+    public static final ConfigOption<MemorySize> VECTOR_STORE_TARGET_FILE_SIZE =
+            key("vector-store.target-file-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Target size of a vector-store file."
+                                                    + " Default is 10 * TARGET_FILE_SIZE.")
+                                    .build());
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3429,6 +3452,26 @@ public class CoreOptions implements Serializable {
 
     public boolean overwriteUpgrade() {
         return options.get(OVERWRITE_UPGRADE);
+    }
+
+    public String vectorStoreFileFormatString() {
+        return normalizeFileFormat(options.get(VECTOR_STORE_FORMAT));
+    }
+
+    public List<String> vectorStoreFieldNames() {
+        String vectorStoreFields = options.get(CoreOptions.VECTOR_STORE_FIELDS);
+        if (vectorStoreFields == null || vectorStoreFields.trim().isEmpty()) {
+            return new ArrayList<>();
+        } else {
+            return Arrays.asList(vectorStoreFields.split(","));
+        }
+    }
+
+    public long vectorStoreTargetFileSize() {
+        // Since vectors are large, it would be better to set a larger target size for vectors.
+        return options.getOptional(VECTOR_STORE_TARGET_FILE_SIZE)
+                .map(MemorySize::getBytes)
+                .orElse(10 * targetFileSize(false));
     }
 
     /** Specifies the merge engine for table with primary key. */

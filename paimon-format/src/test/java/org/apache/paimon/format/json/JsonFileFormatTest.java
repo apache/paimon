@@ -20,6 +20,7 @@ package org.apache.paimon.format.json;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -376,6 +377,21 @@ public class JsonFileFormatTest extends FormatReadWriteTest {
             assertThat(result.get(1).getString(1).toString()).isEqualTo("second");
             assertThat(result.get(1).getMap(2).size()).isEqualTo(2);
         }
+    }
+
+    @Test
+    public void testVectorTypeReadWrite() throws IOException {
+        RowType rowType = DataTypes.ROW(DataTypes.INT(), DataTypes.VECTOR(3, DataTypes.FLOAT()));
+
+        float[] values = new float[] {1.0f, 2.0f, 3.0f};
+        List<InternalRow> testData =
+                Arrays.asList(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values)));
+
+        List<InternalRow> result = writeThenRead(new Options(), rowType, testData, "test_vector");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getInt(0)).isEqualTo(1);
+        assertThat(result.get(0).getVector(1).toFloatArray()).isEqualTo(values);
     }
 
     @Override

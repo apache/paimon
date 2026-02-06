@@ -24,6 +24,7 @@ import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -136,6 +137,32 @@ public class ArrowFormatWriterTest {
                             .isEqualTo(fieldGetter.getFieldOrNull(expectec));
                 }
             }
+            vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testWriteVector() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "embed", DataTypes.VECTOR(3, DataTypes.FLOAT()))));
+        float[] values = new float[] {1.0f, 2.0f, 3.0f};
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values)));
+
+            writer.flush();
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+            Iterator<InternalRow> iterator = rows.iterator();
+            InternalRow row = iterator.next();
+
+            assertThat(row.getInt(0)).isEqualTo(1);
+            assertThat(row.getVector(1).toFloatArray()).isEqualTo(values);
             vectorSchemaRoot.close();
         }
     }
