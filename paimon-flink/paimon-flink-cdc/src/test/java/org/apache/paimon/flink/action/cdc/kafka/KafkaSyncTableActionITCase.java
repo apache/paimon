@@ -516,7 +516,6 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .withPartitionKeys("_year")
                         .withPrimaryKeys("_id", "_year")
                         .withComputedColumnArgs("_year=year(_date)")
-                        .withMetadataColumnPrefix("__kafka_")
                         .withMetadataColumns(
                                 "topic", "offset", "partition", "timestamp", "timestamp_type")
                         .withTableConfig(getBasicTableConfig())
@@ -565,7 +564,6 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .withPartitionKeys("_year")
                         .withPrimaryKeys("_id", "_year")
                         .withComputedColumnArgs("_year=year(_date)")
-                        .withMetadataColumnPrefix("__kafka_")
                         .withMetadataColumns(
                                 "topic", "offset", "partition", "timestamp", "timestamp_type")
                         .withTableConfig(getBasicTableConfig())

@@ -41,11 +41,13 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
     protected static final String KAFKA_METADATA_COLUMN_PREFIX = "__kafka_";
     private static final long serialVersionUID = 1L;
 
-    private final String fieldName;
+    protected final String metadataKey;  // Key to lookup in metadata map (without prefix)
+    private final String columnName;     // Column name in schema (with prefix)
     private final DataType dataType;
 
-    public KafkaMetadataConverter(String fieldName, DataType dataType) {
-        this.fieldName = fieldName;
+    public KafkaMetadataConverter(String metadataKey, DataType dataType) {
+        this.metadataKey = metadataKey;
+        this.columnName = KAFKA_METADATA_COLUMN_PREFIX + metadataKey;
         this.dataType = dataType;
     }
 
@@ -57,7 +59,7 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
 
     @Override
     public String read(CdcSourceRecord record) {
-        Object metadata = record.getMetadata(this.fieldName);
+        Object metadata = record.getMetadata(this.metadataKey);
         return metadata != null ? metadata.toString() : null;
     }
 
@@ -68,7 +70,7 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
 
     @Override
     public String columnName() {
-        return this.fieldName;
+        return this.columnName;
     }
 
     /** Converter for Kafka topic name. */
@@ -108,7 +110,7 @@ public class KafkaMetadataConverter implements CdcMetadataConverter {
 
         @Override
         public String read(CdcSourceRecord record) {
-            Object timestamp = record.getMetadata("timestamp");
+            Object timestamp = record.getMetadata(this.metadataKey);
             if (timestamp instanceof Long) {
                 return DateTimeUtils.formatTimestamp(
                         Timestamp.fromEpochMillis((Long) timestamp), TimeZone.getDefault(), 3);
