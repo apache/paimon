@@ -420,10 +420,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new ChainTableOverwriteCommitCallback(table));
         }
 
-        if (table.primaryKeys().isEmpty()) {
-            return null;
-        }
-
         if (options.visibilityCallbackEnabled() && !schema.primaryKeys().isEmpty()) {
             if (table.bucketMode() == BucketMode.POSTPONE_MODE
                     || options.deletionVectorsEnabled()) {
