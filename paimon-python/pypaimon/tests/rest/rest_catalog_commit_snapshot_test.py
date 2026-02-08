@@ -303,7 +303,7 @@ class TestRESTCommit(RESTBaseTest):
         opts = {
             'bucket': '1',
             'file.format': 'parquet',
-            'commit.max-retries': '1',
+            'commit.max-retries': '0',
             'commit.timeout': '1000',
         }
         schema = Schema.from_pyarrow_schema(
@@ -320,13 +320,13 @@ class TestRESTCommit(RESTBaseTest):
 
         real_commit = tc.file_store_commit.snapshot_commit.commit
 
-        def commit_then_raise(_, sn, br, st):
+        def commit_then_raise(sn, br, st):
             real_commit(sn, br, st)
             raise RuntimeError("simulated")
 
-        tc.file_store_commit.snapshot_commit.commit = commit_then_raise
-        with self.assertRaises(RuntimeError):
-            tc.commit(cm)
+        with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):
+            with self.assertRaises(RuntimeError):
+                tc.commit(cm)
         tw.close()
         tc.close()
 
