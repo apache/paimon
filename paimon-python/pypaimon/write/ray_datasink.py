@@ -110,7 +110,6 @@ class PaimonDatasink(_DatasinkBase):
         self, write_result: Any
     ):
         table_commit = None
-        commit_messages_to_abort = []
         try:
             # WriteResult.write_returns (Ray 2.44+); older Ray may pass list of returns
             if hasattr(write_result, "write_returns"):
@@ -146,10 +145,8 @@ class PaimonDatasink(_DatasinkBase):
             )
 
             table_commit = self._writer_builder.new_commit()
-            commit_messages_to_abort = non_empty_messages
             table_commit.commit(non_empty_messages)
 
-            commit_messages_to_abort = []
             self._pending_commit_messages = []
 
             logger.info(f"Successfully committed write job for table {self._table_name}")
@@ -158,20 +155,7 @@ class PaimonDatasink(_DatasinkBase):
                 f"Error committing write job for table {self._table_name}: {e}",
                 exc_info=e
             )
-            if table_commit is not None and commit_messages_to_abort:
-                try:
-                    table_commit.abort(commit_messages_to_abort)
-                    logger.info(
-                        f"Aborted {len(commit_messages_to_abort)} commit messages "
-                        f"for table {self._table_name}"
-                    )
-                except Exception as abort_error:
-                    logger.error(
-                        f"Error aborting commit messages: {abort_error}",
-                        exc_info=abort_error
-                    )
-                finally:
-                    self._pending_commit_messages = []
+            self._pending_commit_messages = []
             raise
         finally:
             if table_commit is not None:
