@@ -155,7 +155,8 @@ class PaimonDatasink(_DatasinkBase):
                 f"Error committing write job for table {self._table_name}: {e}",
                 exc_info=e
             )
-            self._pending_commit_messages = []
+            if table_commit is not None:
+                self._pending_commit_messages = []
             raise
         finally:
             if table_commit is not None:
