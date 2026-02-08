@@ -80,7 +80,7 @@ class ShardTableUpdatorTest(unittest.TestCase):
 
         # Step 3: Use ShardTableUpdator to compute d = c + b - a
         table_update = write_builder.new_update()
-        table_update.with_read_projection(['a', 'b', 'c'])
+        table_update.with_read_projection(['a', 'b', 'c', '_ROW_ID'])
         table_update.with_update_type(['d'])
         
         shard_updator = table_update.new_shard_updator(0, 1)
@@ -93,7 +93,13 @@ class ShardTableUpdatorTest(unittest.TestCase):
             a_values = batch.column('a').to_pylist()
             b_values = batch.column('b').to_pylist()
             c_values = batch.column('c').to_pylist()
-            
+            row_id_values = batch.column('_ROW_ID').to_pylist()
+            self.assertEqual(
+                row_id_values,
+                list(range(len(a_values))),
+                '_ROW_ID should be [0, 1, 2, ...] for sequential rows',
+            )
+
             d_values = [c + b - a for a, b, c in zip(a_values, b_values, c_values)]
             
             # Create batch with d column
@@ -315,6 +321,270 @@ class ShardTableUpdatorTest(unittest.TestCase):
 
         self.assertEqual(actual, expected)
         print("\n✅ Test passed! Column d = c + b - a computed correctly!")
+
+    def test_partial_shard_update_full_read_schema_unified(self):
+        table_schema = pa.schema([
+            ('a', pa.int32()),
+            ('b', pa.int32()),
+            ('c', pa.int32()),
+            ('d', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            table_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+        )
+        name = self._create_unique_table_name()
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+
+        # Two commits => two files (two first_row_id ranges)
+        for start, end in [(1, 10), (10, 20)]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write().with_write_type(['a', 'b', 'c'])
+            tc = wb.new_commit()
+            data = pa.Table.from_pydict({
+                'a': list(range(start, end + 1)),
+                'b': [i * 10 for i in range(start, end + 1)],
+                'c': [i * 100 for i in range(start, end + 1)],
+            }, schema=pa.schema([
+                ('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32()),
+            ]))
+            tw.write_arrow(data)
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        # Only shard 0 runs => only first file gets d
+        wb = table.new_batch_write_builder()
+        upd = wb.new_update()
+        upd.with_read_projection(['a', 'b', 'c'])
+        upd.with_update_type(['d'])
+        shard0 = upd.new_shard_updator(0, 2)
+        reader = shard0.arrow_reader()
+        for batch in iter(reader.read_next_batch, None):
+            a_ = batch.column('a').to_pylist()
+            b_ = batch.column('b').to_pylist()
+            c_ = batch.column('c').to_pylist()
+            d_ = [c + b - a for a, b, c in zip(a_, b_, c_)]
+            shard0.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+                {'d': d_}, schema=pa.schema([('d', pa.int32())]),
+            ))
+        tc = wb.new_commit()
+        tc.commit(shard0.prepare_commit())
+        tc.close()
+
+        rb = table.new_read_builder()
+        tr = rb.new_read()
+        actual = tr.to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 21)
+        d_col = actual.column('d')
+        # First 10 rows (shard 0): d = c+b-a
+        for i in range(10):
+            self.assertEqual(d_col[i].as_py(), (i + 1) * 100 + (i + 1) * 10 - (i + 1))
+        # Rows 10-20 (shard 1 not run): d is null
+        for i in range(10, 21):
+            self.assertIsNone(d_col[i].as_py())
+
+    def test_with_shard_read_after_partial_shard_update(self):
+        table_schema = pa.schema([
+            ('a', pa.int32()),
+            ('b', pa.int32()),
+            ('c', pa.int32()),
+            ('d', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            table_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+        )
+        name = self._create_unique_table_name()
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+
+        for start, end in [(1, 10), (10, 20)]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write().with_write_type(['a', 'b', 'c'])
+            tc = wb.new_commit()
+            data = pa.Table.from_pydict({
+                'a': list(range(start, end + 1)),
+                'b': [i * 10 for i in range(start, end + 1)],
+                'c': [i * 100 for i in range(start, end + 1)],
+            }, schema=pa.schema([
+                ('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32()),
+            ]))
+            tw.write_arrow(data)
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        wb = table.new_batch_write_builder()
+        upd = wb.new_update()
+        upd.with_read_projection(['a', 'b', 'c'])
+        upd.with_update_type(['d'])
+        shard0 = upd.new_shard_updator(0, 2)
+        reader = shard0.arrow_reader()
+        for batch in iter(reader.read_next_batch, None):
+            a_ = batch.column('a').to_pylist()
+            b_ = batch.column('b').to_pylist()
+            c_ = batch.column('c').to_pylist()
+            d_ = [c + b - a for a, b, c in zip(a_, b_, c_)]
+            shard0.update_by_arrow_batch(pa.RecordBatch.from_pydict(
+                {'d': d_}, schema=pa.schema([('d', pa.int32())]),
+            ))
+        tc = wb.new_commit()
+        tc.commit(shard0.prepare_commit())
+        tc.close()
+
+        rb = table.new_read_builder()
+        tr = rb.new_read()
+
+        splits_0 = rb.new_scan().with_shard(0, 2).plan().splits()
+        result_0 = tr.to_arrow(splits_0)
+        self.assertEqual(result_0.num_rows, 10)
+        d_col_0 = result_0.column('d')
+        for i in range(10):
+            self.assertEqual(
+                d_col_0[i].as_py(),
+                (i + 1) * 100 + (i + 1) * 10 - (i + 1),
+                "Shard 0 row %d: d should be c+b-a" % i,
+            )
+
+        splits_1 = rb.new_scan().with_shard(1, 2).plan().splits()
+        result_1 = tr.to_arrow(splits_1)
+        self.assertEqual(result_1.num_rows, 11)
+        d_col_1 = result_1.column('d')
+        for i in range(11):
+            self.assertIsNone(d_col_1[i].as_py(), "Shard 1 row %d: d should be null" % i)
+
+        full_splits = rb.new_scan().plan().splits()
+        full_result = tr.to_arrow(full_splits)
+        self.assertEqual(
+            result_0.num_rows + result_1.num_rows,
+            full_result.num_rows,
+            "Shard 0 + Shard 1 row count should equal full scan (21)",
+        )
+
+        rb_filter = table.new_read_builder()
+        rb_filter.with_projection(['a', 'b', 'c', 'd', '_ROW_ID'])
+        pb = rb_filter.new_predicate_builder()
+        pred_row_id = pb.is_in('_ROW_ID', [0, 1, 2, 3, 4])
+        rb_filter.with_filter(pred_row_id)
+        tr_filter = rb_filter.new_read()
+        splits_row_id = rb_filter.new_scan().plan().splits()
+        result_row_id = tr_filter.to_arrow(splits_row_id)
+        self.assertEqual(result_row_id.num_rows, 5, "Filter _ROW_ID in [0..4] should return 5 rows")
+        a_col = result_row_id.column('a')
+        d_col_r = result_row_id.column('d')
+        for i in range(5):
+            self.assertEqual(a_col[i].as_py(), i + 1)
+            self.assertEqual(
+                d_col_r[i].as_py(),
+                (i + 1) * 100 + (i + 1) * 10 - (i + 1),
+                "Filter-by-_row_id row %d: d should be c+b-a" % i,
+            )
+
+        rb_slice = table.new_read_builder()
+        tr_slice = rb_slice.new_read()
+        slice_0 = rb_slice.new_scan().with_slice(0, 10).plan().splits()
+        result_slice_0 = tr_slice.to_arrow(slice_0)
+        self.assertEqual(result_slice_0.num_rows, 10, "with_slice(0, 10) should return 10 rows")
+        d_s0 = result_slice_0.column('d')
+        for i in range(10):
+            self.assertEqual(
+                d_s0[i].as_py(),
+                (i + 1) * 100 + (i + 1) * 10 - (i + 1),
+                "Slice [0,10) row %d: d should be c+b-a" % i,
+            )
+        slice_1 = rb_slice.new_scan().with_slice(10, 21).plan().splits()
+        result_slice_1 = tr_slice.to_arrow(slice_1)
+        self.assertEqual(result_slice_1.num_rows, 11, "with_slice(10, 21) should return 11 rows")
+        d_s1 = result_slice_1.column('d')
+        for i in range(11):
+            self.assertIsNone(d_s1[i].as_py(), "Slice [10,21) row %d: d should be null" % i)
+
+        cross_slice = rb_slice.new_scan().with_slice(5, 16).plan().splits()
+        result_cross = tr_slice.to_arrow(cross_slice)
+        self.assertEqual(
+            result_cross.num_rows, 11,
+            "Cross-shard with_slice(5, 16) should return 11 rows (5 from file1 + 6 from file2)",
+        )
+        a_cross = result_cross.column('a')
+        d_cross = result_cross.column('d')
+        for i in range(5):
+            self.assertEqual(a_cross[i].as_py(), 6 + i)
+            self.assertEqual(
+                d_cross[i].as_py(),
+                (6 + i) * 100 + (6 + i) * 10 - (6 + i),
+                "Cross-shard slice row %d (from file1): d should be c+b-a" % i,
+            )
+        for i in range(5, 11):
+            self.assertEqual(a_cross[i].as_py(), 10 + (i - 5))
+            self.assertIsNone(d_cross[i].as_py(), "Cross-shard slice row %d (from file2): d null" % i)
+
+        rb_col = table.new_read_builder()
+        rb_col.with_projection(['a', 'b', 'c', 'd'])
+        pb_col = rb_col.new_predicate_builder()
+        pred_d = pb_col.is_in('d', [109, 218])  # d = c+b-a for a=1,2
+        rb_col.with_filter(pred_d)
+        tr_col = rb_col.new_read()
+        splits_d = rb_col.new_scan().plan().splits()
+        result_d = tr_col.to_arrow(splits_d)
+        self.assertEqual(result_d.num_rows, 2, "Filter d in [109, 218] should return 2 rows")
+        a_d = result_d.column('a')
+        d_d = result_d.column('d')
+        self.assertEqual(a_d[0].as_py(), 1)
+        self.assertEqual(d_d[0].as_py(), 109)
+        self.assertEqual(a_d[1].as_py(), 2)
+        self.assertEqual(d_d[1].as_py(), 218)
+
+    def test_read_projection(self):
+        table_schema = pa.schema([
+            ('a', pa.int32()),
+            ('b', pa.int32()),
+            ('c', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            table_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
+        )
+        name = self._create_unique_table_name('read_proj')
+        self.catalog.create_table(name, schema, False)
+        table = self.catalog.get_table(name)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write().with_write_type(['a', 'b', 'c'])
+        table_commit = write_builder.new_commit()
+        init_data = pa.Table.from_pydict(
+            {'a': [1, 2, 3], 'b': [10, 20, 30], 'c': [100, 200, 300]},
+            schema=pa.schema([('a', pa.int32()), ('b', pa.int32()), ('c', pa.int32())])
+        )
+        table_write.write_arrow(init_data)
+        cmts = table_write.prepare_commit()
+        for cmt in cmts:
+            for nf in cmt.new_files:
+                nf.first_row_id = 0
+        table_commit.commit(cmts)
+        table_write.close()
+        table_commit.close()
+
+        table_update = write_builder.new_update()
+        table_update.with_read_projection(['a', 'b', 'c'])
+        table_update.with_update_type(['a'])
+        shard_updator = table_update.new_shard_updator(0, 1)
+        reader = shard_updator.arrow_reader()
+
+        batch = reader.read_next_batch()
+        self.assertIsNotNone(batch, "Should have at least one batch")
+        actual_columns = set(batch.schema.names)
+
+        expected_columns = {'a', 'b', 'c'}
+        self.assertEqual(
+            actual_columns,
+            expected_columns,
+            "with_read_projection(['a','b','c']) should return only a,b,c; "
+            "got %s. _ROW_ID and _SEQUENCE_NUMBER should NOT be returned when not in projection."
+            % actual_columns
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

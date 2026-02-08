@@ -196,3 +196,8 @@ commit.close()
 - **Row order matters**: the batches you write must have the **same number of rows** as the batches you read, in the
   same order for that shard.
 - **Parallelism**: run multiple shards by calling `new_shard_updator(shard_idx, num_shards)` for each shard.
+
+## Read After Partial Shard Update
+
+- **Full table read**: rows from updated shards have the new column; rows from other shards have null for that column.
+- **Per-shard read** (`with_shard(shard_idx, num_shards)`): read only the shard(s) you need. (new column where written, null elsewhere).
