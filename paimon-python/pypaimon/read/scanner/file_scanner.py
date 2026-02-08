@@ -388,8 +388,8 @@ class FileScanner:
         else:
             if not self.predicate:
                 return True
-            from pypaimon.globalindex.data_evolution_batch_scan import DataEvolutionBatchScan
-            predicate_for_stats = DataEvolutionBatchScan.remove_row_id_filter(self.predicate)
+            from pypaimon.read.push_down_utils import remove_row_id_filter
+            predicate_for_stats = remove_row_id_filter(self.predicate)
             if predicate_for_stats is None:
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:

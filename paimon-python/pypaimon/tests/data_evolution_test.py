@@ -587,6 +587,20 @@ class DataEvolutionTest(unittest.TestCase):
             '_SEQUENCE_NUMBER must be non-nullable per SpecialFields',
         )
 
+        rb_with_row_id = table.new_read_builder().with_projection(['f0', 'f1', 'f2', '_ROW_ID'])
+        pb = rb_with_row_id.new_predicate_builder()
+        rb_eq0 = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 0))
+        result_eq0 = rb_eq0.new_read().to_arrow(rb_eq0.new_scan().plan().splits())
+        self.assertEqual(result_eq0, pa.Table.from_pydict(
+            {'f0': [1], 'f1': ['a'], 'f2': ['b']}, schema=simple_pa_schema))
+        rb_eq1 = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 1))
+        result_eq1 = rb_eq1.new_read().to_arrow(rb_eq1.new_scan().plan().splits())
+        self.assertEqual(result_eq1, pa.Table.from_pydict(
+            {'f0': [2], 'f1': ['c'], 'f2': ['d']}, schema=simple_pa_schema))
+        rb_in = table.new_read_builder().with_filter(pb.is_in('_ROW_ID', [0, 1]))
+        result_in = rb_in.new_read().to_arrow(rb_in.new_scan().plan().splits())
+        self.assertEqual(result_in, expect)
+
     def test_more_data(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
