@@ -48,7 +48,6 @@ class TableCommit:
         if not non_empty_messages:
             return
 
-        # Align with Java: no abort on commit failure.
         if self.overwrite_partition is not None:
             self.file_store_commit.overwrite(
                 overwrite_partition=self.overwrite_partition,
