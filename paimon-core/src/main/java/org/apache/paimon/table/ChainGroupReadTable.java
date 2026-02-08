@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -39,7 +40,9 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChainTableUtils;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import java.io.IOException;
@@ -50,6 +53,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -130,6 +134,9 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private final CoreOptions options;
         private final RecordComparator partitionComparator;
         private final ChainGroupReadTable chainGroupReadTable;
+        private PartitionPredicate partitionPredicate;
+        private Predicate dataPredicate;
+        private Filter<Integer> bucketFilter;
 
         public ChainTableBatchScan(
                 DataTableScan mainScan,
@@ -154,9 +161,97 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         }
 
         @Override
+        public ChainTableBatchScan withFilter(Predicate predicate) {
+            super.withFilter(predicate);
+            if (predicate != null) {
+                Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
+                        PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
+                                predicate,
+                                tableSchema.logicalRowType(),
+                                tableSchema.partitionKeys());
+                setPartitionPredicate(pair.getLeft().orElse(null));
+                dataPredicate =
+                        pair.getRight().isEmpty() ? null : PredicateBuilder.and(pair.getRight());
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withPartitionFilter(Map<String, String> partitionSpec) {
+            super.withPartitionFilter(partitionSpec);
+            if (partitionSpec != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMap(
+                                tableSchema.logicalPartitionType(),
+                                partitionSpec,
+                                options.partitionDefaultName()));
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withPartitionFilter(List<BinaryRow> partitions) {
+            super.withPartitionFilter(partitions);
+            if (partitions != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMultiple(
+                                tableSchema.logicalPartitionType(), partitions));
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withPartitionsFilter(List<Map<String, String>> partitions) {
+            super.withPartitionsFilter(partitions);
+            if (partitions != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMaps(
+                                tableSchema.logicalPartitionType(),
+                                partitions,
+                                options.partitionDefaultName()));
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+            super.withPartitionFilter(partitionPredicate);
+            if (partitionPredicate != null) {
+                setPartitionPredicate(partitionPredicate);
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withPartitionFilter(Predicate partitionPredicate) {
+            super.withPartitionFilter(partitionPredicate);
+            if (partitionPredicate != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromPredicate(
+                                tableSchema.logicalPartitionType(), partitionPredicate));
+            }
+            return this;
+        }
+
+        @Override
+        public ChainTableBatchScan withBucketFilter(Filter<Integer> bucketFilter) {
+            this.bucketFilter = bucketFilter;
+            super.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        /**
+         * Builds a plan for chain tables.
+         *
+         * <p>Partitions that exist in the snapshot branch (based on partition predicates only) are
+         * treated as complete and are read directly from snapshot, subject to row-level predicates.
+         * Partitions that exist only in the delta branch are planned as chain splits by pairing
+         * each delta partition with the latest snapshot partition at or before it (if any), so the
+         * reader sees a full partition view.
+         */
+        @Override
         public Plan plan() {
             List<Split> splits = new ArrayList<>();
-            Set<BinaryRow> completePartitions = new HashSet<>();
             PredicateBuilder builder = new PredicateBuilder(tableSchema.logicalPartitionType());
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
@@ -172,19 +267,20 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                 dataSplit.dataFiles(),
                                 fileBranchMapping,
                                 fileBucketPathMapping));
-                completePartitions.add(dataSplit.partition());
             }
-            List<BinaryRow> remainingPartitions =
-                    fallbackScan.listPartitions().stream()
-                            .filter(p -> !completePartitions.contains(p))
+
+            Set<BinaryRow> snapshotPartitions =
+                    new HashSet<>(
+                            newPartitionListingScan(true, partitionPredicate).listPartitions());
+
+            DataTableScan deltaPartitionScan = newPartitionListingScan(false, partitionPredicate);
+            List<BinaryRow> deltaPartitions =
+                    deltaPartitionScan.listPartitions().stream()
+                            .filter(p -> !snapshotPartitions.contains(p))
+                            .sorted(partitionComparator)
                             .collect(Collectors.toList());
-            if (!remainingPartitions.isEmpty()) {
-                fallbackScan.withPartitionFilter(remainingPartitions);
-                List<BinaryRow> deltaPartitions = fallbackScan.listPartitions();
-                deltaPartitions =
-                        deltaPartitions.stream()
-                                .sorted(partitionComparator)
-                                .collect(Collectors.toList());
+
+            if (!deltaPartitions.isEmpty()) {
                 BinaryRow maxPartition = deltaPartitions.get(deltaPartitions.size() - 1);
                 Predicate snapshotPredicate =
                         ChainTableUtils.createTriangularPredicate(
@@ -192,8 +288,13 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                 partitionConverter,
                                 builder::equal,
                                 builder::lessThan);
-                mainScan.withPartitionFilter(snapshotPredicate);
-                List<BinaryRow> candidateSnapshotPartitions = mainScan.listPartitions();
+                PartitionPredicate snapshotPartitionPredicate =
+                        PartitionPredicate.fromPredicate(
+                                tableSchema.logicalPartitionType(), snapshotPredicate);
+                DataTableScan snapshotPartitionsScan =
+                        newPartitionListingScan(true, snapshotPartitionPredicate);
+                List<BinaryRow> candidateSnapshotPartitions =
+                        snapshotPartitionsScan.listPartitions();
                 candidateSnapshotPartitions =
                         candidateSnapshotPartitions.stream()
                                 .sorted(partitionComparator)
@@ -202,8 +303,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                         ChainTableUtils.findFirstLatestPartitions(
                                 deltaPartitions, candidateSnapshotPartitions, partitionComparator);
                 for (Map.Entry<BinaryRow, BinaryRow> partitionParis : partitionMapping.entrySet()) {
-                    DataTableScan snapshotScan = chainGroupReadTable.newSnapshotScan();
-                    DataTableScan deltaScan = chainGroupReadTable.newDeltaScan();
+                    DataTableScan snapshotScan = newFilteredScan(true);
+                    DataTableScan deltaScan = newFilteredScan(false);
                     if (partitionParis.getValue() == null) {
                         List<Predicate> predicates = new ArrayList<>();
                         predicates.add(
@@ -292,7 +393,49 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
-            return super.listPartitionEntries();
+            DataTableScan snapshotScan = newPartitionListingScan(true, partitionPredicate);
+            DataTableScan deltaScan = newPartitionListingScan(false, partitionPredicate);
+            List<PartitionEntry> partitionEntries =
+                    new ArrayList<>(snapshotScan.listPartitionEntries());
+            Set<BinaryRow> partitions =
+                    partitionEntries.stream()
+                            .map(PartitionEntry::partition)
+                            .collect(Collectors.toSet());
+            List<PartitionEntry> fallBackPartitionEntries = deltaScan.listPartitionEntries();
+            fallBackPartitionEntries.stream()
+                    .filter(e -> !partitions.contains(e.partition()))
+                    .forEach(partitionEntries::add);
+            return partitionEntries;
+        }
+
+        private void setPartitionPredicate(PartitionPredicate predicate) {
+            this.partitionPredicate = predicate;
+        }
+
+        private DataTableScan newPartitionListingScan(
+                boolean snapshot, PartitionPredicate scanPartitionPredicate) {
+            DataTableScan scan =
+                    snapshot
+                            ? chainGroupReadTable.newSnapshotScan()
+                            : chainGroupReadTable.newDeltaScan();
+            if (scanPartitionPredicate != null) {
+                scan.withPartitionFilter(scanPartitionPredicate);
+            }
+            return scan;
+        }
+
+        private DataTableScan newFilteredScan(boolean snapshot) {
+            DataTableScan scan =
+                    snapshot
+                            ? chainGroupReadTable.newSnapshotScan()
+                            : chainGroupReadTable.newDeltaScan();
+            if (dataPredicate != null) {
+                scan.withFilter(dataPredicate);
+            }
+            if (bucketFilter != null) {
+                scan.withBucketFilter(bucketFilter);
+            }
+            return scan;
         }
     }
 
