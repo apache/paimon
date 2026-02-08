@@ -807,6 +807,47 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test(s"Paimon pushdown: parquet timestamp filter") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a TIMESTAMP, b STRING) using paimon TBLPROPERTIES
+                   |(
+                   |'file.format' = 'parquet',
+                   |'parquet.block.size' = '100',
+                   |'target-file-size' = '10g'
+                   |)
+                   |""".stripMargin)
+
+      spark.sql("""INSERT INTO T VALUES
+                  |(TIMESTAMP '2024-01-01 00:00:00', 'a'),
+                  |(TIMESTAMP '2024-01-02 12:30:00', 'b'),
+                  |(TIMESTAMP '2024-01-03 23:59:59', 'c'),
+                  |(TIMESTAMP '2024-01-01 12:00:00', 'd')
+                  |""".stripMargin)
+
+      // Test equals filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a = TIMESTAMP '2024-01-01 00:00:00'"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") :: Nil
+      )
+
+      // Test comparison filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a < TIMESTAMP '2024-01-02 00:00:00' ORDER BY a"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") ::
+          Row(java.sql.Timestamp.valueOf("2024-01-01 12:00:00"), "d") :: Nil
+      )
+
+      // Test between filter
+      checkAnswer(
+        spark.sql(
+          "SELECT * FROM T WHERE a BETWEEN TIMESTAMP '2024-01-01 00:00:00' AND TIMESTAMP '2024-01-02 00:00:00' ORDER BY a"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") ::
+          Row(java.sql.Timestamp.valueOf("2024-01-01 12:00:00"), "d") :: Nil
+      )
+    }
+  }
+
   private def getScanBuilder(tableName: String = "T"): ScanBuilder = {
     SparkTable(loadTable(tableName)).newScanBuilder(CaseInsensitiveStringMap.empty())
   }

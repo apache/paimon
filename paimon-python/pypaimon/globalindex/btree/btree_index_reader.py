@@ -33,7 +33,7 @@ from pypaimon.globalindex.btree.key_serializer import KeySerializer
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_reader import FieldRef, GlobalIndexReader
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
+from pypaimon.utils.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.btree.btree_file_footer import BTreeFileFooter
 from pypaimon.globalindex.btree.sst_file_reader import SstFileReader
 from pypaimon.globalindex.btree.memory_slice_input import MemorySliceInput
@@ -135,18 +135,17 @@ class BTreeIndexReader(GlobalIndexReader):
         # Read from the null bitmap block handle if available
         if self.footer.null_bitmap_handle is not None:
             self.input_stream.seek(self.footer.null_bitmap_handle.offset)
-            data = self.input_stream.read(self.footer.null_bitmap_handle.size)
+            data = self.input_stream.read(self.footer.null_bitmap_handle.size + 4)
+            # Read bitmap data (excluding CRC32)
+            bitmap_length = len(data) - 4
+            bitmap_bytes = data[:bitmap_length]
+            crc32_value = struct.unpack('<I', data[bitmap_length:bitmap_length + 4])[0]
 
-            if len(data) >= 4:
-                # Read bitmap data (excluding CRC32)
-                bitmap_length = len(data) - 4
-                bitmap_bytes = data[:bitmap_length]
-                crc32_value = struct.unpack('>I', data[bitmap_length:bitmap_length + 4])[0]
-
-                # Verify CRC32
-                actual_crc32 = zlib.crc32(bitmap_bytes) & 0xFFFFFFFF
-                if actual_crc32 == crc32_value:
-                    bitmap = RoaringBitmap64.deserialize(bitmap_bytes)
+            # Verify CRC32
+            actual_crc32 = zlib.crc32(bitmap_bytes) & 0xFFFFFFFF
+            if actual_crc32 != crc32_value:
+                raise ValueError(f"CRC32 mismatch: expected {crc32_value}, got {actual_crc32}")
+            bitmap = RoaringBitmap64.deserialize(bitmap_bytes)
 
         self._null_bitmap = bitmap
         return bitmap
@@ -405,6 +404,17 @@ class BTreeIndexReader(GlobalIndexReader):
             except Exception as e:
                 raise RuntimeError("fail to read btree index file.", e)
         
+        return GlobalIndexResult.create(supplier)
+
+    def visit_between(self, field_ref: FieldRef, min_v: object, max_v: object) -> Optional[GlobalIndexResult]:
+        """Visit a between predicate."""
+
+        def supplier():
+            try:
+                return self._range_query(min_v, max_v, True, True)
+            except Exception as e:
+                raise RuntimeError("fail to read btree index file.", e)
+
         return GlobalIndexResult.create(supplier)
 
     def close(self) -> None:

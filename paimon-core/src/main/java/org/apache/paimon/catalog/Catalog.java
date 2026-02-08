@@ -32,6 +32,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.utils.SnapshotNotExistException;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
@@ -870,14 +871,33 @@ public interface Catalog extends AutoCloseable {
     // ==================== Partition Modifications ==========================
 
     /**
+     * Whether this catalog supports partition modification for tables.
+     *
+     * <p>If not, following methods will do nothing:
+     *
+     * <ul>
+     *   <li>{@link #createPartitions(Identifier, List)}.
+     *   <li>{@link #alterPartitions(Identifier, List)}.
+     * </ul>
+     *
+     * <p>If not, following method will be exactly the same as directly using {@link
+     * BatchTableCommit#truncatePartitions}:
+     *
+     * <ul>
+     *   <li>{@link #dropPartitions(Identifier, List)}.
+     * </ul>
+     */
+    boolean supportsPartitionModification();
+
+    /**
      * Create partitions of the specify table. Ignore existing partitions.
      *
      * @param identifier path of the table to create partitions
      * @param partitions partitions to be created
      * @throws TableNotExistException if the table does not exist
      */
-    void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
+    default void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {}
 
     /**
      * Drop partitions of the specify table. Ignore non-existent partitions.
@@ -886,8 +906,15 @@ public interface Catalog extends AutoCloseable {
      * @param partitions partitions to be deleted
      * @throws TableNotExistException if the table does not exist
      */
-    void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException;
+    default void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.truncatePartitions(partitions);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     /**
      * Alter partitions of the specify table. For non-existent partitions, partitions will be
@@ -897,8 +924,8 @@ public interface Catalog extends AutoCloseable {
      * @param partitions partitions to be altered
      * @throws TableNotExistException if the table does not exist
      */
-    void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
-            throws TableNotExistException;
+    default void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
+            throws TableNotExistException {}
 
     // ======================= Function methods ===============================
 

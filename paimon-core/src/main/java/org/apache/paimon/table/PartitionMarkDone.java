@@ -20,45 +20,18 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.partition.PartitionStatistics;
 
 import java.util.List;
 import java.util.Map;
 
-/** Handler to handle partitions. */
-public interface PartitionHandler extends AutoCloseable {
-
-    void createPartitions(List<Map<String, String>> partitions)
-            throws Catalog.TableNotExistException;
-
-    void dropPartitions(List<Map<String, String>> partitions) throws Catalog.TableNotExistException;
-
-    void alterPartitions(List<PartitionStatistics> partitions)
-            throws Catalog.TableNotExistException;
+/** Handler to mark done partitions. */
+public interface PartitionMarkDone extends AutoCloseable {
 
     void markDonePartitions(List<Map<String, String>> partitions)
             throws Catalog.TableNotExistException;
 
-    static PartitionHandler create(Catalog catalog, Identifier identifier) {
-        return new PartitionHandler() {
-
-            @Override
-            public void createPartitions(List<Map<String, String>> partitions)
-                    throws Catalog.TableNotExistException {
-                catalog.createPartitions(identifier, partitions);
-            }
-
-            @Override
-            public void dropPartitions(List<Map<String, String>> partitions)
-                    throws Catalog.TableNotExistException {
-                catalog.dropPartitions(identifier, partitions);
-            }
-
-            @Override
-            public void alterPartitions(List<PartitionStatistics> partitions)
-                    throws Catalog.TableNotExistException {
-                catalog.alterPartitions(identifier, partitions);
-            }
+    static PartitionMarkDone create(Catalog catalog, Identifier identifier) {
+        return new PartitionMarkDone() {
 
             @Override
             public void markDonePartitions(List<Map<String, String>> partitions)

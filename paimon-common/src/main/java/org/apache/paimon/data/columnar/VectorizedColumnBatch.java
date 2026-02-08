@@ -23,6 +23,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
 import org.apache.paimon.data.variant.GenericVariant;
@@ -122,6 +123,10 @@ public class VectorizedColumnBatch implements Serializable {
 
     public InternalArray getArray(int rowId, int colId) {
         return ((ArrayColumnVector) columns[colId]).getArray(rowId);
+    }
+
+    public InternalVector getVector(int rowId, int colId) {
+        throw new UnsupportedOperationException("Unsupported type: VectorType");
     }
 
     public InternalRow getRow(int rowId, int colId) {

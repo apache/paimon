@@ -20,9 +20,13 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.predicate.Predicate
+import org.apache.paimon.spark.read.{BaseScan, PaimonSupportsRuntimeFiltering}
 import org.apache.paimon.table.FormatTable
+import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.types.StructType
+
+import scala.collection.JavaConverters._
 
 /** Scan implementation for [[FormatTable]] */
 case class PaimonFormatTableScan(
@@ -31,4 +35,15 @@ case class PaimonFormatTableScan(
     pushedPartitionFilters: Seq[PartitionPredicate],
     pushedDataFilters: Seq[Predicate],
     override val pushedLimit: Option[Int])
-  extends PaimonFormatTableBaseScan {}
+  extends BaseScan
+  with PaimonSupportsRuntimeFiltering {
+
+  protected def getInputSplits: Array[Split] = {
+    readBuilder
+      .newScan()
+      .plan()
+      .splits()
+      .asScala
+      .toArray
+  }
+}

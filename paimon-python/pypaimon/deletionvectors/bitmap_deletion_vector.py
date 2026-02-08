@@ -18,7 +18,7 @@
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 import struct
 import zlib
-from pyroaring import BitMap
+from pypaimon.utils.roaring_bitmap import RoaringBitmap
 
 
 class BitmapDeletionVector(DeletionVector):
@@ -31,14 +31,14 @@ class BitmapDeletionVector(DeletionVector):
     MAGIC_NUMBER_SIZE_BYTES = 4
     MAX_VALUE = 2147483647
 
-    def __init__(self, bitmap: BitMap = None):
+    def __init__(self, bitmap: RoaringBitmap = None):
         """
         Initialize a BitmapDeletionVector.
 
         Args:
             bitmap: Optional RoaringBitmap instance. If None, creates an empty bitmap.
         """
-        self._bitmap = bitmap if bitmap is not None else BitMap()
+        self._bitmap = bitmap if bitmap is not None else RoaringBitmap()
 
     def delete(self, position: int) -> None:
         """
@@ -121,7 +121,7 @@ class BitmapDeletionVector(DeletionVector):
         Returns:
             A BitmapDeletionVector instance.
         """
-        bitmap = BitMap.deserialize(data)
+        bitmap = RoaringBitmap.deserialize(data)
         return BitmapDeletionVector(bitmap)
 
     def bit_map(self):

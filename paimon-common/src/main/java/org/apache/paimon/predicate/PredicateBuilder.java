@@ -162,14 +162,14 @@ public class PredicateBuilder {
     }
 
     public Predicate like(int idx, Object patternLiteral) {
-        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+        Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)
                         .orElse(Pair.of(Like.INSTANCE, patternLiteral));
         return leaf(optimized.getKey(), idx, optimized.getValue());
     }
 
     public Predicate like(Transform transform, Object patternLiteral) {
-        Pair<NullFalseLeafBinaryFunction, Object> optimized =
+        Pair<LeafBinaryFunction, Object> optimized =
                 LikeOptimization.tryOptimize(patternLiteral)
                         .orElse(Pair.of(Like.INSTANCE, patternLiteral));
         return leaf(optimized.getKey(), transform, optimized.getValue());
@@ -228,20 +228,19 @@ public class PredicateBuilder {
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {
-        return new CompoundPredicate(
-                And.INSTANCE,
-                Arrays.asList(
-                        greaterOrEqual(idx, includedLowerBound),
-                        lessOrEqual(idx, includedUpperBound)));
+        DataField field = rowType.getFields().get(idx);
+        return new LeafPredicate(
+                Between.INSTANCE,
+                field.type(),
+                idx,
+                field.name(),
+                Arrays.asList(includedLowerBound, includedUpperBound));
     }
 
     public Predicate between(
             Transform transform, Object includedLowerBound, Object includedUpperBound) {
-        return new CompoundPredicate(
-                And.INSTANCE,
-                Arrays.asList(
-                        greaterOrEqual(transform, includedLowerBound),
-                        lessOrEqual(transform, includedUpperBound)));
+        return new LeafPredicate(
+                transform, Between.INSTANCE, Arrays.asList(includedLowerBound, includedUpperBound));
     }
 
     public static Predicate and(Predicate... predicates) {

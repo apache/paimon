@@ -186,6 +186,8 @@ class GlobalIndexEvaluator:
             return reader.visit_ends_with(field_ref, literals[0])
         elif method == 'contains':
             return reader.visit_contains(field_ref, literals[0])
+        elif method == 'between':
+            return reader.visit_between(field_ref, literals[0], literals[1])
         
         return None
 

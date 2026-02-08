@@ -67,12 +67,12 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
     table match {
       case fileStoreTable: FileStoreTable =>
         val partitions = toPaimonPartitions(rows).toSeq.asJava
-        val partitionHandler = fileStoreTable.catalogEnvironment().partitionHandler()
-        if (partitionHandler != null) {
+        val partitionModification = fileStoreTable.catalogEnvironment().partitionModification()
+        if (partitionModification != null) {
           try {
-            partitionHandler.dropPartitions(partitions)
+            partitionModification.dropPartitions(partitions)
           } finally {
-            partitionHandler.close()
+            partitionModification.close()
           }
         } else {
           val commit = fileStoreTable.newBatchWriteBuilder().newCommit()
@@ -151,14 +151,14 @@ trait PaimonPartitionManagement extends SupportsAtomicPartitionManagement {
     table match {
       case fileStoreTable: FileStoreTable =>
         val partitions = toPaimonPartitions(rows)
-        val partitionHandler = fileStoreTable.catalogEnvironment().partitionHandler()
-        if (partitionHandler != null) {
+        val partitionModification = fileStoreTable.catalogEnvironment().partitionModification()
+        if (partitionModification != null) {
           try {
             if (fileStoreTable.coreOptions().partitionedTableInMetastore()) {
-              partitionHandler.createPartitions(partitions.toSeq.asJava)
+              partitionModification.createPartitions(partitions.toSeq.asJava)
             }
           } finally {
-            partitionHandler.close()
+            partitionModification.close()
           }
         }
       case _ =>

@@ -27,6 +27,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
@@ -34,6 +35,8 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
@@ -55,14 +58,20 @@ import org.apache.paimon.utils.DecimalUtils;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -70,7 +79,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Common test class for BTreeIndexReader. */
-public class AbstractIndexReaderTest {
+public abstract class AbstractIndexReaderTest {
     protected static final CacheManager CACHE_MANAGER = new CacheManager(MemorySize.VALUE_8_MB);
 
     protected DataType dataType;
@@ -91,6 +100,25 @@ public class AbstractIndexReaderTest {
         this.dataNum = (Integer) args.get(1);
     }
 
+    @SuppressWarnings("unused")
+    @Parameters(name = "dataType&recordNum-{0}")
+    public static List<List<Object>> getVarSeg() {
+        return Arrays.asList(
+                Arrays.asList(new IntType(), 10000),
+                Arrays.asList(new VarCharType(VarCharType.MAX_LENGTH), 10000),
+                Arrays.asList(new CharType(100), 10000),
+                Arrays.asList(new FloatType(), 10000),
+                Arrays.asList(new DecimalType(), 10000),
+                Arrays.asList(new DoubleType(), 10000),
+                Arrays.asList(new BooleanType(), 10000),
+                Arrays.asList(new TinyIntType(), 10000),
+                Arrays.asList(new SmallIntType(), 10000),
+                Arrays.asList(new BigIntType(), 10000),
+                Arrays.asList(new DateType(), 10000),
+                Arrays.asList(new TimestampType(), 10000));
+    }
+
+    @BeforeEach
     public void setUp() throws Exception {
         fileIO = LocalFileIO.create();
         fileWriter =
@@ -125,6 +153,128 @@ public class AbstractIndexReaderTest {
         }
         data.sort((p1, p2) -> comparator.compare(p1.getKey(), p2.getKey()));
     }
+
+    @TestTemplate
+    public void testRangePredicate() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult result;
+            Random random = new Random();
+
+            for (int i = 0; i < 5; i++) {
+                int literalIdx = random.nextInt(dataNum);
+                Object literal = data.get(literalIdx).getKey();
+
+                // 1. test <= literal
+                result = reader.visitLessOrEqual(ref, literal).get();
+                assertResult(result, filter(obj -> comparator.compare(obj, literal) <= 0));
+
+                // 2. test < literal
+                result = reader.visitLessThan(ref, literal).get();
+                assertResult(result, filter(obj -> comparator.compare(obj, literal) < 0));
+
+                // 3. test >= literal
+                result = reader.visitGreaterOrEqual(ref, literal).get();
+                assertResult(result, filter(obj -> comparator.compare(obj, literal) >= 0));
+
+                // 4. test > literal
+                result = reader.visitGreaterThan(ref, literal).get();
+                assertResult(result, filter(obj -> comparator.compare(obj, literal) > 0));
+
+                // 5. test equal
+                result = reader.visitEqual(ref, literal).get();
+                assertResult(result, filter(obj -> comparator.compare(obj, literal) == 0));
+
+                // 6. test not equal
+                result = reader.visitNotEqual(ref, literal).get();
+                assertResult(result, filter(obj -> comparator.compare(obj, literal) != 0));
+
+                // 7. test between
+                int betweenOffset = random.nextInt(dataNum - literalIdx);
+                Object toLiteral = data.get(literalIdx + betweenOffset).getKey();
+                result = reader.visitBetween(ref, literal, toLiteral).get();
+                assertResult(
+                        result,
+                        filter(
+                                obj ->
+                                        comparator.compare(obj, toLiteral) <= 0
+                                                && comparator.compare(obj, literal) >= 0));
+            }
+
+            // 8. test < min
+            Object literal7 = data.get(0).getKey();
+            result = reader.visitLessThan(ref, literal7).get();
+            Assertions.assertTrue(result.results().isEmpty());
+
+            // 9. test > max
+            Object literal8 = data.get(dataNum - 1).getKey();
+            result = reader.visitGreaterThan(ref, literal8).get();
+            Assertions.assertTrue(result.results().isEmpty());
+
+            // 10. test between
+            if (dataType instanceof IntType) {
+                Integer min = (Integer) (data.get(0).getKey());
+                Integer max = (Integer) (data.get(dataNum - 1).getKey());
+
+                result = reader.visitBetween(ref, min - 100, min - 1).get();
+                Assertions.assertTrue(result.results().isEmpty());
+
+                result = reader.visitBetween(ref, max + 1, max + 100).get();
+                Assertions.assertTrue(result.results().isEmpty());
+            }
+        }
+    }
+
+    @TestTemplate
+    public void testIsNull() throws Exception {
+        // set nulls
+        // make sure that there will be some btree file only containing nulls.
+        for (int i = dataNum - 1; i >= dataNum * 0.85; i--) {
+            data.get(i).setLeft(null);
+        }
+
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult result;
+
+            result = reader.visitIsNull(ref).get();
+            assertResult(result, filter(Objects::isNull));
+
+            result = reader.visitIsNotNull(ref).get();
+            assertResult(result, filter(Objects::nonNull));
+        }
+    }
+
+    @TestTemplate
+    public void testInPredicate() throws Exception {
+        FieldRef ref = new FieldRef(1, "testField", dataType);
+
+        try (GlobalIndexReader reader = prepareDataAndCreateReader()) {
+            GlobalIndexResult result;
+            for (int i = 0; i < 10; i++) {
+                Random random = new Random(System.currentTimeMillis());
+                List<Object> literals =
+                        data.stream().map(Pair::getKey).collect(Collectors.toList());
+                Collections.shuffle(literals, random);
+                literals = literals.subList(0, (int) (dataNum * 0.1));
+
+                TreeSet<Object> set = new TreeSet<>(comparator);
+                set.addAll(literals);
+
+                // 1. test in
+                result = reader.visitIn(ref, literals).get();
+                assertResult(result, filter(set::contains));
+
+                // 2. test not in
+                result = reader.visitNotIn(ref, literals).get();
+                assertResult(result, filter(obj -> !set.contains(obj)));
+            }
+        }
+    }
+
+    protected abstract GlobalIndexReader prepareDataAndCreateReader() throws Exception;
 
     protected GlobalIndexIOMeta writeData(List<Pair<Object, Long>> data) throws IOException {
         GlobalIndexParallelWriter indexWriter = globalIndexer.createWriter(fileWriter);

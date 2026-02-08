@@ -16,12 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.predicate;
 
-import org.apache.paimon.table.FormatTable
+/** Abstract {@link LeafFunction} for n-ary function. */
+public abstract class LeafNAryFunction extends LeafFunction {
 
-case class FormatTableScanBuilder(table: FormatTable) extends PaimonBaseScanBuilder {
-
-  override def build(): PaimonFormatTableScan =
-    PaimonFormatTableScan(table, requiredSchema, pushedPartitionFilters, pushedDataFilters)
+    private static final long serialVersionUID = 1L;
 }

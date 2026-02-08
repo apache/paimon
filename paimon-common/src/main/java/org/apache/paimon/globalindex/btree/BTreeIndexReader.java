@@ -342,6 +342,19 @@ public class BTreeIndexReader implements GlobalIndexReader {
                         }));
     }
 
+    @Override
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        return Optional.of(
+                GlobalIndexResult.create(
+                        () -> {
+                            try {
+                                return rangeQuery(from, to, true, true);
+                            } catch (IOException ioe) {
+                                throw new RuntimeException("fail to read btree index file.", ioe);
+                            }
+                        }));
+    }
+
     private RoaringNavigableMap64 allNonNullRows() throws IOException {
         // Traverse all data to avoid returning null values, which is very advantageous in
         // situations where there are many null values

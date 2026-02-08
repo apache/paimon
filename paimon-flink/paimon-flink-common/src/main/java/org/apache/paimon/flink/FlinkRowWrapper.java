@@ -27,6 +27,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
@@ -161,6 +162,11 @@ public class FlinkRowWrapper implements InternalRow {
     }
 
     @Override
+    public InternalVector getVector(int pos) {
+        throw new UnsupportedOperationException("Not support VectorType yet.");
+    }
+
+    @Override
     public InternalMap getMap(int pos) {
         return new FlinkMapWrapper(row.getMap(pos));
     }
@@ -258,6 +264,11 @@ public class FlinkRowWrapper implements InternalRow {
         @Override
         public InternalArray getArray(int pos) {
             return new FlinkArrayWrapper(array.getArray(pos));
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            throw new UnsupportedOperationException("Not support VectorType yet.");
         }
 
         @Override

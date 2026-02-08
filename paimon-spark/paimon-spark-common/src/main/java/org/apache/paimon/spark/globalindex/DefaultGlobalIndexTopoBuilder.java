@@ -116,7 +116,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
 
         List<byte[]> commitMessageBytes =
                 javaSparkContext
-                        .parallelize(taskList)
+                        .parallelize(taskList, taskList.size())
                         .map(DefaultGlobalIndexTopoBuilder::buildIndex)
                         .collect();
         return CommitMessageSerializer.deserializeAll(commitMessageBytes);

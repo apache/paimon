@@ -30,7 +30,6 @@ from pypaimon.globalindex.global_index_scan_builder import (
     GlobalIndexScanBuilder,
     RowRangeGlobalIndexScanner,
 )
-from pypaimon.globalindex.roaring_bitmap import RoaringBitmap64
 from pypaimon.globalindex.range import Range
 
 __all__ = [
@@ -46,6 +45,5 @@ __all__ = [
     'GlobalIndexEvaluator',
     'GlobalIndexScanBuilder',
     'RowRangeGlobalIndexScanner',
-    'RoaringBitmap64',
     'Range',
 ]

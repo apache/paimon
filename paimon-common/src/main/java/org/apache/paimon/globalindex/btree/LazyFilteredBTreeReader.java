@@ -42,7 +42,6 @@ import java.util.Optional;
 public class LazyFilteredBTreeReader implements GlobalIndexReader {
 
     private final BTreeFileMetaSelector fileSelector;
-    private final List<GlobalIndexIOMeta> files;
     private final Map<Path, GlobalIndexReader> readerCache;
     private final KeySerializer keySerializer;
     private final CacheManager cacheManager;
@@ -58,7 +57,6 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
         this.cacheManager = cacheManager;
         this.fileReader = fileReader;
         this.keySerializer = keySerializer;
-        this.files = files;
     }
 
     @Override
@@ -249,6 +247,20 @@ public class LazyFilteredBTreeReader implements GlobalIndexReader {
             return Optional.of(GlobalIndexResult.createEmpty());
         }
         return createUnionReader(selected).visitNotIn(fieldRef, literals);
+    }
+
+    @Override
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        Optional<List<GlobalIndexIOMeta>> selectedOpt =
+                fileSelector.visitBetween(fieldRef, from, to);
+        if (!selectedOpt.isPresent()) {
+            return Optional.empty();
+        }
+        List<GlobalIndexIOMeta> selected = selectedOpt.get();
+        if (selected.isEmpty()) {
+            return Optional.of(GlobalIndexResult.createEmpty());
+        }
+        return createUnionReader(selected).visitBetween(fieldRef, from, to);
     }
 
     /**

@@ -103,6 +103,8 @@ class ManifestListManager:
                     "_NULL_COUNTS": meta.partition_stats.null_counts,
                 },
                 "_SCHEMA_ID": meta.schema_id,
+                "_MIN_ROW_ID": meta.min_row_id,
+                "_MAX_ROW_ID": meta.max_row_id,
             }
             avro_records.append(avro_record)
 

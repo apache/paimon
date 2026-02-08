@@ -26,10 +26,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
-import javax.annotation.Nullable;
-
 import java.util.Iterator;
-import java.util.function.Supplier;
 
 /** A checker to check strict mode based on last safe snapshot. */
 public class StrictModeChecker {
@@ -49,19 +46,6 @@ public class StrictModeChecker {
         this.commitUser = commitUser;
         this.scan = scan;
         this.strictModeLastSafeSnapshot = strictModeLastSafeSnapshot;
-    }
-
-    @Nullable
-    public static StrictModeChecker create(
-            SnapshotManager snapshotManager,
-            String commitUser,
-            Supplier<FileStoreScan> scanSupplier,
-            @Nullable Long strictModeLastSafeSnapshot) {
-        if (strictModeLastSafeSnapshot == null) {
-            return null;
-        }
-        return new StrictModeChecker(
-                snapshotManager, commitUser, scanSupplier.get(), strictModeLastSafeSnapshot);
     }
 
     public void check(long newSnapshotId, CommitKind newCommitKind) {

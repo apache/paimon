@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.scan
+package org.apache.paimon.spark.read
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions._

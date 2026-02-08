@@ -44,8 +44,6 @@ public class CacheManager {
     private final Cache dataCache;
     private final Cache indexCache;
 
-    private int fileReadCount;
-
     @VisibleForTesting
     public CacheManager(MemorySize maxMemorySize) {
         this(Cache.CacheType.GUAVA, maxMemorySize, 0);
@@ -71,7 +69,6 @@ public class CacheManager {
             this.indexCache =
                     CacheBuilder.newBuilder(cacheType).maximumWeight(indexCacheSize).build();
         }
-        this.fileReadCount = 0;
         LOG.info(
                 "Initialize cache manager with data cache of {} and index cache of {}.",
                 dataCacheSize,
@@ -94,7 +91,6 @@ public class CacheManager {
                 cache.get(
                         key,
                         k -> {
-                            this.fileReadCount++;
                             try {
                                 return new Cache.CacheValue(
                                         MemorySegment.wrap(reader.read(key)), callback);

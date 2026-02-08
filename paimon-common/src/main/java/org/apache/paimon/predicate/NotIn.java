@@ -28,7 +28,7 @@ import java.util.Optional;
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
 /** A {@link LeafFunction} to eval not in. */
-public class NotIn extends LeafFunction {
+public class NotIn extends LeafNAryFunction {
 
     private static final long serialVersionUID = 1L;
 
@@ -81,5 +81,10 @@ public class NotIn extends LeafFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitNotIn(fieldRef, literals);
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

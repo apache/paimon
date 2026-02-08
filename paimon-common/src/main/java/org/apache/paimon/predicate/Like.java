@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
-/** A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like}. */
-public class Like extends NullFalseLeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to evaluate {@code filter like}. */
+public class Like extends LeafBinaryFunction {
 
     public static final String NAME = "LIKE";
 
@@ -62,10 +62,10 @@ public class Like extends NullFalseLeafBinaryFunction {
     }
 
     private Filter<BinaryString> createFunc(DataType type, Object patternLiteral) {
-        Optional<Pair<NullFalseLeafBinaryFunction, Object>> optimized =
+        Optional<Pair<LeafBinaryFunction, Object>> optimized =
                 LikeOptimization.tryOptimize(patternLiteral);
         if (optimized.isPresent()) {
-            NullFalseLeafBinaryFunction func = optimized.get().getKey();
+            LeafBinaryFunction func = optimized.get().getKey();
             Object literal = optimized.get().getValue();
             return field -> func.test(type, field, literal);
         }
@@ -152,5 +152,10 @@ public class Like extends NullFalseLeafBinaryFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitLike(fieldRef, literals.get(0));
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

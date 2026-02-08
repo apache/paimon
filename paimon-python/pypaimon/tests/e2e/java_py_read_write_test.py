@@ -146,7 +146,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             primary_keys=['id'],
             options={
                 'dynamic-partition-overwrite': 'false',
-                'bucket': '2',
+                'bucket': '4',
                 'file.format': file_format,
                 "orc.timestamp-ltz.legacy.type": "false"
             }
@@ -207,6 +207,15 @@ class JavaPyReadWriteTest(unittest.TestCase):
         expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
         actual_names = set(initial_result['name'].tolist())
         self.assertEqual(actual_names, expected_names)
+
+        from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+        expected_bucket_first_row = 2
+        first_row = initial_data.head(1)
+        batch = pa.RecordBatch.from_pandas(first_row, schema=pa_schema)
+        extractor = FixedBucketRowKeyExtractor(table.table_schema)
+        _, buckets = extractor.extract_partition_bucket_batch(batch)
+        self.assertEqual(buckets[0], expected_bucket_first_row,
+                         "bucket for first row (id=1) with num_buckets=4 must be %d" % expected_bucket_first_row)
 
     @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):
@@ -325,6 +334,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self._test_read_btree_index_generic("test_btree_index_int", 200, pa.int32())
         self._test_read_btree_index_generic("test_btree_index_bigint", 2000, pa.int64())
         self._test_read_btree_index_large()
+        self._test_read_btree_index_null()
 
     def _test_read_btree_index_generic(self, table_name: str, k, k_type):
         table = self.catalog.get_table('default.' + table_name)
@@ -359,5 +369,59 @@ class JavaPyReadWriteTest(unittest.TestCase):
         expected = pa.Table.from_pydict({
             'k': ["k2"],
             'v': ["v2"]
+        })
+        self.assertEqual(expected, actual)
+
+        # read between index
+        read_builder.with_filter(predicate_builder.between('k', 'k990', 'k995'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k990", "k991", "k992", "k993", "k994", "k995"],
+            'v': ["v990", "v991", "v992", "v993", "v994", "v995"]
+        })
+        self.assertEqual(expected, actual)
+
+        # read in index
+        read_builder.with_filter(predicate_builder.is_in('k', ['k990', 'k995']))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k990", "k995"],
+            'v': ["v990", "v995"]
+        })
+        self.assertEqual(expected, actual)
+
+    def _test_read_btree_index_null(self):
+        table = self.catalog.get_table('default.test_btree_index_null')
+
+        # read is null index
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.is_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': [None, None],
+            'v': ["v3", "v5"]
+        }, schema=pa.schema([
+            ("k", pa.string()),
+            ("v", pa.string())
+        ]))
+        self.assertEqual(expected, actual)
+
+        # read is not null index
+        read_builder: ReadBuilder = table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
+        read_builder.with_filter(predicate_builder.is_not_null('k'))
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'k')
+        expected = pa.Table.from_pydict({
+            'k': ["k1", "k2", "k4"],
+            'v': ["v1", "v2", "v4"]
         })
         self.assertEqual(expected, actual)

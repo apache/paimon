@@ -22,22 +22,29 @@ import org.apache.paimon.types.DataType;
 
 import java.util.List;
 
-/** Function to test a field with a literal. */
-public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
+/** Abstract {@link LeafFunction} for ternary function. */
+public abstract class LeafTernaryFunction extends LeafFunction {
 
     private static final long serialVersionUID = 1L;
 
-    public abstract boolean test(DataType type, Object field, Object literal);
+    public abstract boolean test(DataType type, Object field, Object literal1, Object literal2);
 
     public abstract boolean test(
-            DataType type, long rowCount, Object min, Object max, Long nullCount, Object literal);
+            DataType type,
+            long rowCount,
+            Object min,
+            Object max,
+            Long nullCount,
+            Object literal1,
+            Object literal2);
 
     @Override
     public boolean test(DataType type, Object field, List<Object> literals) {
-        if (field == null || literals.get(0) == null) {
+        if (field == null || literals.get(0) == null || literals.get(1) == null) {
             return false;
         }
-        return test(type, field, literals.get(0));
+
+        return test(type, field, literals.get(0), literals.get(1));
     }
 
     @Override
@@ -49,10 +56,11 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
             Long nullCount,
             List<Object> literals) {
         if (nullCount != null) {
-            if (rowCount == nullCount || literals.get(0) == null) {
+            if (rowCount == nullCount || literals.get(0) == null || literals.get(1) == null) {
                 return false;
             }
         }
-        return test(type, rowCount, min, max, nullCount, literals.get(0));
+
+        return test(type, rowCount, min, max, nullCount, literals.get(0), literals.get(1));
     }
 }

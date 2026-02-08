@@ -36,6 +36,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
+import org.apache.paimon.metastore.ChainTableCommitPreCallback;
 import org.apache.paimon.metastore.ChainTableOverwriteCommitCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
@@ -47,7 +48,6 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
-import org.apache.paimon.operation.commit.StrictModeChecker;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -56,9 +56,10 @@ import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
@@ -289,12 +290,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 newIndexFileHandler(),
                                 snapshotManager,
                                 scanner);
-        StrictModeChecker strictModeChecker =
-                StrictModeChecker.create(
-                        snapshotManager,
-                        commitUser,
-                        this::newScan,
-                        options.commitStrictModeLastSafeSnapshot().orElse(null));
         CommitRollback rollback = null;
         TableRollback tableRollback = catalogEnvironment.catalogTableRollback();
         if (tableRollback != null) {
@@ -308,31 +303,17 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 commitUser,
                 partitionType,
                 options,
-                options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager,
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),
-                newScan(),
-                options.bucket(),
-                options.manifestTargetSize(),
-                options.manifestFullCompactionThresholdSize(),
-                options.manifestMergeMinCount(),
-                partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
-                options.branch(),
+                this::newScan,
                 newStatsFileHandler(),
                 bucketMode(),
-                options.scanManifestParallelism(),
+                createCommitPreCallbacks(table),
                 createCommitCallbacks(commitUser, table),
-                options.commitMaxRetries(),
-                options.commitTimeout(),
-                options.commitMinRetryWait(),
-                options.commitMaxRetryWait(),
-                options.rowTrackingEnabled(),
-                options.commitDiscardDuplicateFiles(),
                 conflictDetectFactory,
-                strictModeChecker,
                 rollback);
     }
 
@@ -392,14 +373,23 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.legacyPartitionName());
     }
 
+    private List<CommitPreCallback> createCommitPreCallbacks(FileStoreTable table) {
+        List<CommitPreCallback> callbacks = new ArrayList<>();
+        if (options.isChainTable()) {
+            callbacks.add(new ChainTableCommitPreCallback(table));
+        }
+        return callbacks;
+    }
+
     private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
         List<CommitCallback> callbacks = new ArrayList<>();
 
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
                 callbacks.add(
-                        new AddPartitionCommitCallback(partitionHandler, partitionComputer()));
+                        new AddPartitionCommitCallback(partitionModification, partitionComputer()));
             }
         }
 
@@ -407,12 +397,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (options.tagToPartitionField() != null
                 && tagPreview != null
                 && schema.partitionKeys().isEmpty()) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
                 TagPreviewCommitCallback callback =
                         new TagPreviewCommitCallback(
                                 new AddPartitionTagCallback(
-                                        partitionHandler, options.tagToPartitionField()),
+                                        partitionModification, options.tagToPartitionField()),
                                 tagPreview);
                 callbacks.add(callback);
             }
@@ -458,9 +449,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             Duration expirationTime,
             Duration checkInterval,
             PartitionExpireStrategy expireStrategy) {
-        PartitionHandler partitionHandler = null;
+        PartitionModification partitionModification = null;
         if (options.partitionedTableInMetastore()) {
-            partitionHandler = catalogEnvironment.partitionHandler();
+            partitionModification = catalogEnvironment.partitionModification();
         }
 
         return new PartitionExpire(
@@ -469,7 +460,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 expireStrategy,
                 newScan(),
                 newCommit(commitUser, table),
-                partitionHandler,
+                partitionModification,
                 options.endInputCheckPartitionExpire(),
                 options.partitionExpireMaxNum(),
                 options.partitionExpireBatchSize());
@@ -491,9 +482,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         String partitionField = options.tagToPartitionField();
 
         if (partitionField != null) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
-                callbacks.add(new AddPartitionTagCallback(partitionHandler, partitionField));
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
+                callbacks.add(new AddPartitionTagCallback(partitionModification, partitionField));
             }
         }
         if (options.tagCreateSuccessFile()) {
