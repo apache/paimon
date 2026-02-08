@@ -55,6 +55,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PartitionModification;
@@ -419,9 +420,15 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new ChainTableOverwriteCommitCallback(table));
         }
 
-        VisibilityWaitCallback visibilityWaitCallback = VisibilityWaitCallback.create(table);
-        if (visibilityWaitCallback != null) {
-            callbacks.add(visibilityWaitCallback);
+        if (table.primaryKeys().isEmpty()) {
+            return null;
+        }
+
+        if (options.visibilityCallbackEnabled() && !schema.primaryKeys().isEmpty()) {
+            if (table.bucketMode() == BucketMode.POSTPONE_MODE
+                    || options.deletionVectorsEnabled()) {
+                callbacks.add(new VisibilityWaitCallback(table));
+            }
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));

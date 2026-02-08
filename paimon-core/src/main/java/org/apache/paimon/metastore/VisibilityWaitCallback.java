@@ -24,15 +24,12 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitCallback;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -53,31 +50,12 @@ public class VisibilityWaitCallback implements CommitCallback {
     private final Duration timeout;
     private final Duration checkInterval;
 
-    private VisibilityWaitCallback(FileStoreTable table) {
+    public VisibilityWaitCallback(FileStoreTable table) {
         this.table = table;
         CoreOptions options = table.coreOptions();
         this.deletionVectorsEnabled = options.deletionVectorsEnabled();
         this.timeout = options.visibilityCallbackTimeout();
         this.checkInterval = options.visibilityCallbackCheckInterval();
-    }
-
-    @Nullable
-    public static VisibilityWaitCallback create(FileStoreTable table) {
-        if (table.primaryKeys().isEmpty()) {
-            return null;
-        }
-
-        CoreOptions options = table.coreOptions();
-
-        if (!options.visibilityCallbackEnabled()) {
-            return null;
-        }
-
-        if (table.bucketMode() != BucketMode.POSTPONE_MODE && !options.deletionVectorsEnabled()) {
-            return null;
-        }
-
-        return new VisibilityWaitCallback(table);
     }
 
     @Override
