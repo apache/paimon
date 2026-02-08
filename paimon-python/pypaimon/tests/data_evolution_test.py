@@ -22,17 +22,14 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-<<<<<<< HEAD
-from pypaimon.manifest.manifest_list_manager import ManifestListManager
-from pypaimon.snapshot.snapshot_manager import SnapshotManager
-=======
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.reader.predicate_filter_record_batch_reader import (
     PredicateFilterRecordBatchReader,
 )
 from pypaimon.schema.data_types import AtomicType, DataField
->>>>>>> c00cafaf0 (support data evolution read)
+from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
 class DataEvolutionTest(unittest.TestCase):

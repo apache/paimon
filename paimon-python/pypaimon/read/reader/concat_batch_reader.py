@@ -172,7 +172,6 @@ class DataEvolutionMergeReader(RecordBatchReader):
         batches: List[Optional[RecordBatch]] = [None] * len(self.readers)
         for i, reader in enumerate(self.readers):
             if reader is not None:
-<<<<<<< HEAD
                 if self._buffers[i] is not None:
                     remainder = self._buffers[i]
                     self._buffers[i] = None
@@ -206,74 +205,42 @@ class DataEvolutionMergeReader(RecordBatchReader):
         if min_rows == 0:
             return None
 
-=======
-                batch = reader.read_arrow_batch()
-                if batch is None:
-                    # all readers are aligned, as long as one returns null, the others will also have no data
-                    return None
-                batches[i] = batch
-        # All readers may be None (e.g. all bunches had empty read_fields_per_bunch)
-        if not any(b is not None for b in batches):
-            return None
->>>>>>> c00cafaf0 (support data evolution read)
         columns = []
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
-<<<<<<< HEAD
-            if batch_index >= 0 and batches[batch_index] is not None:
-                columns.append(batches[batch_index].column(field_index).slice(0, min_rows))
-            else:
-                columns.append(pa.nulls(min_rows, type=self.schema.field(i).type))
-
-        for i in range(len(self.readers)):
-            if batches[i] is not None and batches[i].num_rows > min_rows:
-                self._buffers[i] = batches[i].slice(min_rows, batches[i].num_rows - min_rows)
-
-        return pa.RecordBatch.from_arrays(columns, schema=self.schema)
-=======
             field_name = self.schema.field(i).name if self.schema else None
             column = None
-            out_name = None
 
             if batch_index >= 0 and batches[batch_index] is not None:
                 src_batch = batches[batch_index]
                 if field_name is not None and field_name in src_batch.schema.names:
-                    column = src_batch.column(src_batch.schema.get_field_index(field_name))
-                    out_name = (
-                        self.schema.field(i).name
-                        if self.schema is not None and i < len(self.schema)
-                        else field_name
-                    )
+                    column = src_batch.column(
+                        src_batch.schema.get_field_index(field_name)
+                    ).slice(0, min_rows)
                 elif field_index < src_batch.num_columns:
-                    column = src_batch.column(field_index)
-                    out_name = (
-                        self.schema.field(i).name
-                        if self.schema is not None and i < len(self.schema)
-                        else src_batch.schema.names[field_index]
-                    )
+                    column = src_batch.column(field_index).slice(0, min_rows)
 
             if column is None and field_name is not None:
                 for b in batches:
                     if b is not None and field_name in b.schema.names:
-                        column = b.column(b.schema.get_field_index(field_name))
-                        out_name = (
-                            self.schema.field(i).name
-                            if self.schema is not None and i < len(self.schema)
-                            else field_name
+                        column = b.column(b.schema.get_field_index(field_name)).slice(
+                            0, min_rows
                         )
                         break
 
-            if column is not None and out_name is not None:
+            if column is not None:
                 columns.append(column)
             elif self.schema is not None and i < len(self.schema):
-                # row_offsets[i] == -1 or no batch has this field: output null column per schema
-                num_rows = next(b.num_rows for b in batches if b is not None)
-                columns.append(pa.nulls(num_rows, type=self.schema.field(i).type))
-        if columns and len(columns) == len(self.schema):
-            return pa.RecordBatch.from_arrays(columns, schema=self.schema)
-        return None
->>>>>>> c00cafaf0 (support data evolution read)
+                columns.append(pa.nulls(min_rows, type=self.schema.field(i).type))
+
+        for i in range(len(self.readers)):
+            if batches[i] is not None and batches[i].num_rows > min_rows:
+                self._buffers[i] = batches[i].slice(
+                    min_rows, batches[i].num_rows - min_rows
+                )
+
+        return pa.RecordBatch.from_arrays(columns, schema=self.schema)
 
     def close(self) -> None:
         try:
