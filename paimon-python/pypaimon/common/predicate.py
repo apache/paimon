@@ -178,6 +178,8 @@ class Equal(Tester):
     name = 'equal'
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return val == literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -191,6 +193,8 @@ class NotEqual(Tester):
     name = "notEqual"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return val != literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -204,6 +208,8 @@ class LessThan(Tester):
     name = "lessThan"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return val < literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -217,6 +223,8 @@ class LessOrEqual(Tester):
     name = "lessOrEqual"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return val <= literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -230,6 +238,8 @@ class GreaterThan(Tester):
     name = "greaterThan"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return val > literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -243,6 +253,8 @@ class GreaterOrEqual(Tester):
     name = "greaterOrEqual"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return val >= literals[0]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -256,6 +268,8 @@ class In(Tester):
     name = "in"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None:
+            return False
         return val in literals
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -269,6 +283,8 @@ class NotIn(Tester):
     name = "notIn"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None:
+            return False
         return val not in literals
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -282,6 +298,8 @@ class Between(Tester):
     name = "between"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals or len(literals) < 2:
+            return False
         return literals[0] <= val <= literals[1]
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -295,6 +313,8 @@ class StartsWith(Tester):
     name = "startsWith"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return isinstance(val, str) and val.startswith(literals[0])
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -310,6 +330,8 @@ class EndsWith(Tester):
     name = "endsWith"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return isinstance(val, str) and val.endswith(literals[0])
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
@@ -323,6 +345,8 @@ class Contains(Tester):
     name = "contains"
 
     def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
         return isinstance(val, str) and literals[0] in val
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:

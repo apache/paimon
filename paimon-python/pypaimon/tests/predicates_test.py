@@ -342,7 +342,7 @@ class PredicateTest(unittest.TestCase):
         table = self.catalog.get_table('default.test_pk')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.is_not_in('f1', ['abc', 'abbc'])
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[2:4])
+        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[2, 3]])
 
     def test_between_append(self):
         table = self.catalog.get_table('default.test_append')
@@ -373,7 +373,7 @@ class PredicateTest(unittest.TestCase):
         _check_filtered_result(table.new_read_builder().with_filter(predicate),
                                self.df.loc[[0, 3, 4]])
 
-    def test_filter_null_or_comparison(self):
+    def test_filter_with_null_and_or(self):
         from pypaimon.common.predicate import Predicate
         from pypaimon.table.row.offset_row import OffsetRow
 
@@ -382,8 +382,7 @@ class PredicateTest(unittest.TestCase):
         predicate = Predicate(method='or', index=None, field=None, literals=[p_gt, p_null])
 
         record_null = OffsetRow([1, None], 0, 2)  # id=1, score=None
-        with self.assertRaises(TypeError):
-            predicate.test(record_null)
+        self.assertTrue(predicate.test(record_null))
 
         record_ok = OffsetRow([1, 15], 0, 2)
         self.assertTrue(predicate.test(record_ok))
