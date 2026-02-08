@@ -25,8 +25,10 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory
 from pypaimon import Schema
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.read import push_down_utils
 from pypaimon.read.split import Split
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class ReaderPredicateTest(unittest.TestCase):
@@ -91,3 +93,23 @@ class ReaderPredicateTest(unittest.TestCase):
         self.assertEqual(len(pred.literals), 2)
         self.assertEqual(pred.literals[0].field, 'pt')
         self.assertEqual(pred.literals[1].field, 'pt')
+
+    def test_remove_row_id_filter(self):
+        fields = [
+            DataField(0, '_ROW_ID', AtomicType('BIGINT')),
+            DataField(1, 'f0', AtomicType('INT')),
+        ]
+        pb = PredicateBuilder(fields)
+        and_pred = pb.and_predicates([pb.equal('_ROW_ID', 1), pb.greater_than('f0', 5)])
+        result = push_down_utils.remove_row_id_filter(and_pred)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.field, 'f0')
+        self.assertEqual(result.method, 'greaterThan')
+        or_mixed = pb.or_predicates([pb.equal('_ROW_ID', 1), pb.greater_than('f0', 5)])
+        result = push_down_utils.remove_row_id_filter(or_mixed)
+        self.assertIsNone(result)
+        or_no_row_id = pb.or_predicates([pb.greater_than('f0', 5), pb.less_than('f0', 10)])
+        result = push_down_utils.remove_row_id_filter(or_no_row_id)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.method, 'or')
+        self.assertEqual(len(result.literals), 2)

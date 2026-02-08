@@ -95,9 +95,34 @@ def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:
 
     if not predicate:
         return None
-    parts = _split_and(predicate)
-    non_row_id = [
-        p for p in parts
-        if _get_all_fields(p) != {SpecialFields.ROW_ID.name}
-    ]
-    return PredicateBuilder.and_predicates(non_row_id)
+    if predicate.field == SpecialFields.ROW_ID.name:
+        return None
+    if predicate.method == "and":
+        parts = _split_and(predicate)
+        non_row_id = [
+            p for p in parts
+            if _get_all_fields(p) != {SpecialFields.ROW_ID.name}
+        ]
+        if not non_row_id:
+            return None
+        filtered = []
+        for p in non_row_id:
+            r = remove_row_id_filter(p)
+            if r is None:
+                return None
+            filtered.append(r)
+        return PredicateBuilder.and_predicates(filtered)
+    if predicate.method == "or":
+        if any(
+            SpecialFields.ROW_ID.name in _get_all_fields(c)
+            for c in (predicate.literals or [])
+        ):
+            return None
+        new_children = []
+        for c in predicate.literals or []:
+            r = remove_row_id_filter(c)
+            if r is None:
+                return None
+            new_children.append(r)
+        return PredicateBuilder.or_predicates(new_children) if new_children else None
+    return predicate
