@@ -250,7 +250,7 @@ class RaySinkTest(unittest.TestCase):
         self.assertEqual(len(commit_args), 2)  # Empty message filtered out
         mock_commit.close.assert_called_once()
 
-        # Test commit failure: abort should be called
+        # Test commit failure: abort should not be called
         datasink = PaimonDatasink(self.table, overwrite=False)
         datasink.on_write_start()
         commit_msg1 = Mock(spec=CommitMessage)
@@ -271,9 +271,7 @@ class RaySinkTest(unittest.TestCase):
         with self.assertRaises(Exception):
             datasink.on_write_complete(write_result)
 
-        mock_commit.abort.assert_called_once()
-        abort_args = mock_commit.abort.call_args[0][0]
-        self.assertEqual(len(abort_args), 2)
+        mock_commit.abort.assert_not_called()
         mock_commit.close.assert_called_once()
 
         # Test table_commit creation failure
