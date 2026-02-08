@@ -48,21 +48,17 @@ class TableCommit:
         if not non_empty_messages:
             return
 
-        try:
-            if self.overwrite_partition is not None:
-                self.file_store_commit.overwrite(
-                    overwrite_partition=self.overwrite_partition,
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-            else:
-                self.file_store_commit.commit(
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-        except Exception as e:
-            self.file_store_commit.abort(commit_messages)
-            raise RuntimeError(f"Failed to commit: {str(e)}") from e
+        if self.overwrite_partition is not None:
+            self.file_store_commit.overwrite(
+                overwrite_partition=self.overwrite_partition,
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
+        else:
+            self.file_store_commit.commit(
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
 
     def abort(self, commit_messages: List[CommitMessage]):
         self.file_store_commit.abort(commit_messages)
