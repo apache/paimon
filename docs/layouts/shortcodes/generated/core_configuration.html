@@ -1453,6 +1453,24 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>The Variant shredding schema for writing.</td>
         </tr>
         <tr>
+            <td><h5>visibility-callback.check-interval</h5></td>
+            <td style="word-wrap: break-word;">10 s</td>
+            <td>Duration</td>
+            <td>The interval for checking visibility when visibility-callback enabled.</td>
+        </tr>
+        <tr>
+            <td><h5>visibility-callback.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable the visibility wait callback that waits for compaction to complete after commit. This is useful for primary key tables with deletion vectors or postpone bucket mode to ensure data visibility.</td>
+        </tr>
+        <tr>
+            <td><h5>visibility-callback.timeout</h5></td>
+            <td style="word-wrap: break-word;">30 min</td>
+            <td>Duration</td>
+            <td>The maximum time to wait for compaction to complete when visibility callback is enabled. If the timeout is reached, an exception will be thrown.</td>
+        </tr>
+        <tr>
             <td><h5>write-buffer-for-append</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
