@@ -2204,6 +2204,30 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to try upgrading the data files after overwriting a primary key table.");
 
+    public static final ConfigOption<Boolean> VISIBILITY_CALLBACK_ENABLED =
+            key("visibility-callback.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable the visibility wait callback that waits for compaction to complete "
+                                    + "after commit. This is useful for primary key tables with deletion vectors or "
+                                    + "postpone bucket mode to ensure data visibility.");
+
+    public static final ConfigOption<Duration> VISIBILITY_CALLBACK_TIMEOUT =
+            key("visibility-callback.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(30))
+                    .withDescription(
+                            "The maximum time to wait for compaction to complete when visibility callback is enabled. "
+                                    + "If the timeout is reached, an exception will be thrown.");
+
+    public static final ConfigOption<Duration> VISIBILITY_CALLBACK_CHECK_INTERVAL =
+            key("visibility-callback.check-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(10))
+                    .withDescription(
+                            "The interval for checking visibility when visibility-callback enabled.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3429,6 +3453,18 @@ public class CoreOptions implements Serializable {
 
     public boolean overwriteUpgrade() {
         return options.get(OVERWRITE_UPGRADE);
+    }
+
+    public boolean visibilityCallbackEnabled() {
+        return options.get(VISIBILITY_CALLBACK_ENABLED);
+    }
+
+    public Duration visibilityCallbackTimeout() {
+        return options.get(VISIBILITY_CALLBACK_TIMEOUT);
+    }
+
+    public Duration visibilityCallbackCheckInterval() {
+        return options.get(VISIBILITY_CALLBACK_CHECK_INTERVAL);
     }
 
     /** Specifies the merge engine for table with primary key. */

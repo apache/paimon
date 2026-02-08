@@ -39,6 +39,7 @@ import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.ChainTableCommitPreCallback;
 import org.apache.paimon.metastore.ChainTableOverwriteCommitCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
+import org.apache.paimon.metastore.VisibilityWaitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.Lock;
@@ -416,6 +417,11 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
         if (options.isChainTable()) {
             callbacks.add(new ChainTableOverwriteCommitCallback(table));
+        }
+
+        VisibilityWaitCallback visibilityWaitCallback = VisibilityWaitCallback.create(table);
+        if (visibilityWaitCallback != null) {
+            callbacks.add(visibilityWaitCallback);
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
