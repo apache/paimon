@@ -373,6 +373,24 @@ class PredicateTest(unittest.TestCase):
         _check_filtered_result(table.new_read_builder().with_filter(predicate),
                                self.df.loc[[0, 3, 4]])
 
+    def test_filter_null_or_comparison(self):
+        from pypaimon.common.predicate import Predicate
+        from pypaimon.table.row.offset_row import OffsetRow
+
+        p_gt = Predicate(method='greaterThan', index=1, field='score', literals=[10])
+        p_null = Predicate(method='isNull', index=1, field='score', literals=[])
+        predicate = Predicate(method='or', index=None, field=None, literals=[p_gt, p_null])
+
+        record_null = OffsetRow([1, None], 0, 2)  # id=1, score=None
+        with self.assertRaises(TypeError):
+            predicate.test(record_null)
+
+        record_ok = OffsetRow([1, 15], 0, 2)
+        self.assertTrue(predicate.test(record_ok))
+
+        predicate_safe = Predicate(method='or', index=None, field=None, literals=[p_null, p_gt])
+        self.assertTrue(predicate_safe.test(record_null))
+
     def test_pk_reader_with_filter(self):
         pa_schema = pa.schema([
             pa.field('key1', pa.int32(), nullable=False),
