@@ -50,8 +50,7 @@ class SimpleTableTest(unittest.TestCase):
     def test_tag_scan(self):
         """
         Test reading from a specific tag.
-        
-        Similar to Java's StaticFromTagStartingScannerTest.testScan():
+
         1. Write data in 3 commits
         2. Create a tag at snapshot 2
         3. Read from the tag and verify only data from snapshots 1 and 2 is returned
@@ -134,8 +133,6 @@ class SimpleTableTest(unittest.TestCase):
     def test_non_existing_tag(self):
         """
         Test that reading from a non-existing tag raises an error.
-        
-        Similar to Java's StaticFromTagStartingScannerTest.testNonExistingTag()
         """
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
