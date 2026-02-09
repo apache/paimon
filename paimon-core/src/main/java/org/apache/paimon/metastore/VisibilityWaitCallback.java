@@ -137,7 +137,7 @@ public class VisibilityWaitCallback implements CommitCallback {
             return true;
         }
 
-        return entry.bucket() == -2;
+        return entry.bucket() == BucketMode.POSTPONE_BUCKET;
     }
 
     @Override
