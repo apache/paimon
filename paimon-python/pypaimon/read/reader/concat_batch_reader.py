@@ -141,6 +141,8 @@ class DataEvolutionMergeReader(RecordBatchReader):
      - The fourth field comes from batch1, and it is at offset 1 in batch1.
      - The fifth field comes from batch2, and it is at offset 1 in batch2.
      - The sixth field comes from batch1, and it is at offset 0 in batch1.
+
+    When row_offsets[i] == -1 (no file provides that field), output a column of nulls using schema.
     """
 
     def __init__(
@@ -207,14 +209,36 @@ class DataEvolutionMergeReader(RecordBatchReader):
         for i in range(len(self.row_offsets)):
             batch_index = self.row_offsets[i]
             field_index = self.field_offsets[i]
+            field_name = self.schema.field(i).name if self.schema else None
+            column = None
+
             if batch_index >= 0 and batches[batch_index] is not None:
-                columns.append(batches[batch_index].column(field_index).slice(0, min_rows))
-            else:
+                src_batch = batches[batch_index]
+                if field_name is not None and field_name in src_batch.schema.names:
+                    column = src_batch.column(
+                        src_batch.schema.get_field_index(field_name)
+                    ).slice(0, min_rows)
+                elif field_index < src_batch.num_columns:
+                    column = src_batch.column(field_index).slice(0, min_rows)
+
+            if column is None and field_name is not None:
+                for b in batches:
+                    if b is not None and field_name in b.schema.names:
+                        column = b.column(b.schema.get_field_index(field_name)).slice(
+                            0, min_rows
+                        )
+                        break
+
+            if column is not None:
+                columns.append(column)
+            elif self.schema is not None and i < len(self.schema):
                 columns.append(pa.nulls(min_rows, type=self.schema.field(i).type))
 
         for i in range(len(self.readers)):
             if batches[i] is not None and batches[i].num_rows > min_rows:
-                self._buffers[i] = batches[i].slice(min_rows, batches[i].num_rows - min_rows)
+                self._buffers[i] = batches[i].slice(
+                    min_rows, batches[i].num_rows - min_rows
+                )
 
         return pa.RecordBatch.from_arrays(columns, schema=self.schema)
 

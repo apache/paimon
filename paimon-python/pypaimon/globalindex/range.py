@@ -154,6 +154,14 @@ class Range:
         return result
 
     @staticmethod
+    def to_ranges(ids: List[int]) -> List['Range']:
+        if not ids:
+            return []
+        sorted_ids = sorted(set(ids))
+        ranges = [Range(i, i) for i in sorted_ids]
+        return Range.sort_and_merge_overlap(ranges, merge=True, adjacent=True)
+
+    @staticmethod
     def sort_and_merge_overlap(ranges: List['Range'], merge: bool = True, adjacent: bool = True) -> List['Range']:
         """
         Sort ranges and optionally merge overlapping ones.

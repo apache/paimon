@@ -41,6 +41,54 @@ from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 
 
+def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
+    """
+    Extract row ID ranges from predicate for data evolution push-down.
+    Supports _ROW_ID with 'equal' and 'in', and 'and'/'or' of those.
+    Returns None if predicate cannot be converted to row ID ranges.
+    """
+    from pypaimon.globalindex.range import Range
+    from pypaimon.table.special_fields import SpecialFields
+
+    if predicate is None:
+        return None
+
+    def visit(p: Predicate):
+        if p.method == 'and':
+            result = None
+            for child in p.literals:
+                sub = visit(child)
+                if sub is None:
+                    continue
+                result = Range.and_(result, sub) if result is not None else sub
+                if not result:
+                    return result
+            return result
+        if p.method == 'or':
+            parts = []
+            for child in p.literals:
+                sub = visit(child)
+                if sub is None:
+                    return None
+                parts.extend(sub)
+            if not parts:
+                return []
+            return Range.sort_and_merge_overlap(parts, merge=True, adjacent=True)
+        if p.field != SpecialFields.ROW_ID.name:
+            return None
+        if p.method == 'equal':
+            if not p.literals:
+                return []
+            return Range.to_ranges([int(p.literals[0])])
+        if p.method == 'in':
+            if not p.literals:
+                return []
+            return Range.to_ranges([int(x) for x in p.literals])
+        return None
+
+    return visit(predicate)
+
+
 def _filter_manifest_files_by_row_ranges(
         manifest_files: List[ManifestFileMeta],
         row_ranges: List) -> List[ManifestFileMeta]:
@@ -196,6 +244,8 @@ class FileScanner:
             row_ranges = global_index_result.results().to_range_list()
             if isinstance(global_index_result, ScoredGlobalIndexResult):
                 score_getter = global_index_result.score_getter()
+        if row_ranges is None and self.predicate is not None:
+            row_ranges = _row_ranges_from_predicate(self.predicate)
 
         manifest_files = self.manifest_scanner()
 
@@ -353,6 +403,10 @@ class FileScanner:
         else:
             if not self.predicate:
                 return True
+            from pypaimon.globalindex.data_evolution_batch_scan import DataEvolutionBatchScan
+            predicate_for_stats = DataEvolutionBatchScan.remove_row_id_filter(self.predicate)
+            if predicate_for_stats is None:
+                return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols
             else:
@@ -362,7 +416,7 @@ class FileScanner:
                 entry.file.row_count,
                 stats_fields
             )
-            return self.predicate.test_by_simple_stats(
+            return predicate_for_stats.test_by_simple_stats(
                 evolved_stats,
                 entry.file.row_count
             )

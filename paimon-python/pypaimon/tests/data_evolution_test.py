@@ -22,7 +22,13 @@ import unittest
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
+from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.read.reader.predicate_filter_record_batch_reader import (
+    PredicateFilterRecordBatchReader,
+)
+from pypaimon.schema.data_types import AtomicType, DataField
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
@@ -86,6 +92,54 @@ class DataEvolutionTest(unittest.TestCase):
             ('f1', pa.int16()),
         ]))
         self.assertEqual(actual_data, expect_data)
+        self.assertEqual(
+            len(actual_data.schema), len(expect_data.schema),
+            'Read output column count must match schema')
+        self.assertEqual(
+            actual_data.schema.names, expect_data.schema.names,
+            'Read output column names must match schema')
+
+    def test_partitioned_read_requested_column_missing_in_file(self):
+        pa_schema = pa.schema([('f0', pa.int32()), ('f1', pa.string()), ('dt', pa.string())])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=['dt'],
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'}
+        )
+        self.catalog.create_table('default.test_partition_missing_col', schema, False)
+        table = self.catalog.get_table('default.test_partition_missing_col')
+        wb = table.new_batch_write_builder()
+
+        tw1 = wb.new_write()
+        tc1 = wb.new_commit()
+        tw1.write_arrow(pa.Table.from_pydict(
+            {'f0': [1, 2], 'f1': ['a', 'b'], 'dt': ['p1', 'p1']},
+            schema=pa_schema
+        ))
+        tc1.commit(tw1.prepare_commit())
+        tw1.close()
+        tc1.close()
+
+        tw2 = wb.new_write().with_write_type(['f0', 'dt'])
+        tc2 = wb.new_commit()
+        # Row key extractor uses table column indices; pass table-ordered data with null for f1
+        tw2.write_arrow(pa.Table.from_pydict(
+            {'f0': [3, 4], 'f1': [None, None], 'dt': ['p1', 'p1']},
+            schema=pa_schema
+        ))
+        tc2.commit(tw2.prepare_commit())
+        tw2.close()
+        tc2.close()
+
+        actual = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(len(actual.schema), 3, 'Must have f0, f1, dt (no silent drop when f1 missing in file)')
+        self.assertEqual(actual.schema.names, ['f0', 'f1', 'dt'])
+        self.assertEqual(actual.num_rows, 4)
+        f1_col = actual.column('f1')
+        self.assertEqual(f1_col[0].as_py(), 'a')
+        self.assertEqual(f1_col[1].as_py(), 'b')
+        self.assertIsNone(f1_col[2].as_py())
+        self.assertIsNone(f1_col[3].as_py())
 
         # assert manifest file meta contains min and max row id
         manifest_list_manager = ManifestListManager(table)
@@ -225,6 +279,14 @@ class DataEvolutionTest(unittest.TestCase):
             [2, 1001, 2001],
             "with_slice(1, 4) should return id in (2, 1001, 2001). Got ids=%s" % ids,
         )
+        scan_oob = rb.new_scan().with_slice(10, 12)
+        splits_oob = scan_oob.plan().splits()
+        result_oob = rb.new_read().to_pandas(splits_oob)
+        self.assertEqual(
+            len(result_oob),
+            0,
+            "with_slice(10, 12) on 6 rows should return 0 rows (out of bounds), got %d" % len(result_oob),
+        )
 
         # Out-of-bounds slice: 6 rows total, slice(10, 12) should return 0 rows
         scan_oob = rb.new_scan().with_slice(10, 12)
@@ -320,6 +382,8 @@ class DataEvolutionTest(unittest.TestCase):
             'f2': ['b'] * 100 + ['y'] + ['d'],
         }, schema=simple_pa_schema)
         self.assertEqual(actual, expect)
+        self.assertEqual(len(actual.schema), len(expect.schema), 'Merge read output column count must match schema')
+        self.assertEqual(actual.schema.names, expect.schema.names, 'Merge read output column names must match schema')
 
     def test_disorder_cols_append(self):
         simple_pa_schema = pa.schema([
@@ -689,6 +753,7 @@ class DataEvolutionTest(unittest.TestCase):
             pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
+        self.assertEqual(len(actual_data.schema), len(expect_data.schema), 'Read output column count must match schema')
 
         # write 2
         table_write = write_builder.new_write().with_write_type(['f0'])
@@ -724,6 +789,7 @@ class DataEvolutionTest(unittest.TestCase):
             pa.field('_SEQUENCE_NUMBER', pa.int64(), nullable=False),
         ]))
         self.assertEqual(actual_data, expect_data)
+        self.assertEqual(len(actual_data.schema), len(expect_data.schema), 'Read output column count must match schema')
 
     def test_from_arrays_without_schema(self):
         schema = pa.schema([
@@ -742,3 +808,35 @@ class DataEvolutionTest(unittest.TestCase):
         rebuilt = pa.RecordBatch.from_arrays(arrays, names=batch.schema.names)
         self.assertTrue(rebuilt.schema.field('_ROW_ID').nullable)
         self.assertTrue(rebuilt.schema.field('_SEQUENCE_NUMBER').nullable)
+
+    def test_with_filter(self):
+        batch = pa.RecordBatch.from_arrays(
+            [pa.array([1, 2, 3]), pa.array(['a', 'b', 'c'])],
+            names=['f0', 'f1'],
+        )
+        fields = [
+            DataField(0, 'f0', AtomicType('BIGINT')),
+            DataField(1, 'f1', AtomicType('STRING')),
+            DataField(2, 'f2', AtomicType('INT')),
+        ]
+        pb = PredicateBuilder(fields)
+        predicate = pb.greater_than('f2', 5)
+
+        class _SingleBatchReader(RecordBatchReader):
+            def __init__(self, b):
+                self._batch, self._returned = b, False
+
+            def read_arrow_batch(self):
+                if self._returned:
+                    return None
+                self._returned = True
+                return self._batch
+
+            def close(self):
+                pass
+
+        filtered_reader = PredicateFilterRecordBatchReader(
+            _SingleBatchReader(batch), predicate
+        )
+        with self.assertRaises(IndexError):
+            filtered_reader.read_arrow_batch()
