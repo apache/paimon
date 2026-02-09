@@ -1030,9 +1030,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (strictModeChecker != null) {
             strictModeChecker.update(newSnapshotId);
         }
-        commitCallbacks.forEach(
-                callback ->
-                        callback.call(finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot));
+        CommitCallback.Context context =
+                new CommitCallback.Context(
+                        finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);
+        commitCallbacks.forEach(callback -> callback.call(context));
         return new SuccessCommitResult();
     }
 
