@@ -26,8 +26,6 @@ from pypaimon.common.options.core_options import CoreOptions
 
 
 class SimpleTableTest(unittest.TestCase):
-    """Tests for Tag read and write functionality, similar to Java's StaticFromTagStartingScannerTest."""
-
     @classmethod
     def setUpClass(cls):
         cls.tempdir = tempfile.mkdtemp()
@@ -118,13 +116,13 @@ class SimpleTableTest(unittest.TestCase):
         # Verify: should only contain data from snapshot 1 and 2
         # (pt=1, k=10, v=100), (pt=1, k=20, v=200), (pt=2, k=30, v=101), (pt=2, k=40, v=201)
         result_sorted = result.sort_by([('pt', 'ascending'), ('k', 'ascending')])
-        
+
         expected = pa.Table.from_pydict({
             'pt': [1, 1, 2, 2],
             'k': [10, 20, 30, 40],
             'v': [100, 200, 101, 201]
         }, schema=self.pa_schema)
-        
+
         self.assertEqual(result_sorted.num_rows, 4)
         self.assertEqual(result_sorted.column('pt').to_pylist(), expected.column('pt').to_pylist())
         self.assertEqual(result_sorted.column('k').to_pylist(), expected.column('k').to_pylist())
