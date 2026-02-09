@@ -89,6 +89,58 @@ class FileStoreTable(Table):
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
         return SnapshotManager(self)
 
+    def tag_manager(self):
+        """Get the tag manager for this table."""
+        from pypaimon import TagManager
+        return TagManager(self.file_io, self.table_path, self.current_branch())
+
+    def create_tag(
+            self,
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            time_retained: Optional['timedelta'] = None,
+            ignore_if_exists: bool = False
+    ) -> None:
+        """
+        Create a tag for a snapshot.
+        
+        Args:
+            tag_name: Name for the tag
+            snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
+            time_retained: Optional duration for how long the tag should be retained
+            ignore_if_exists: If True, don't raise error if tag already exists
+            
+        Raises:
+            ValueError: If no snapshot exists or tag already exists (when ignore_if_exists=False)
+        """
+
+        snapshot_mgr = self.snapshot_manager()
+
+        if snapshot_id is not None:
+            snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot with id {snapshot_id} doesn't exist.")
+        else:
+            snapshot = snapshot_mgr.get_latest_snapshot()
+            if snapshot is None:
+                raise ValueError("No snapshot exists in this table.")
+
+        tag_mgr = self.tag_manager()
+        tag_mgr.create_tag(snapshot, tag_name, time_retained, ignore_if_exists)
+
+    def delete_tag(self, tag_name: str) -> bool:
+        """
+        Delete a tag.
+        
+        Args:
+            tag_name: Name of the tag to delete
+            
+        Returns:
+            True if tag was deleted, False if tag didn't exist
+        """
+        tag_mgr = self.tag_manager()
+        return tag_mgr.delete_tag(tag_name)
+
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 

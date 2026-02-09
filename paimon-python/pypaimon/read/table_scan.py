@@ -102,6 +102,22 @@ class TableScan:
                 return manifests
 
             return FileScanner(self.table, incremental_manifest, self.predicate, self.limit)
+        elif options.contains(CoreOptions.SCAN_TAG_NAME):  # Handle tag-based reading
+            tag_name = options.get(CoreOptions.SCAN_TAG_NAME)
+
+            def tag_manifest_scanner():
+                tag_manager = self.table.tag_manager()
+                tag = tag_manager.get_or_throw(tag_name)
+                snapshot = tag.trim_to_snapshot()
+                return manifest_list_manager.read_all(snapshot)
+
+            return FileScanner(
+                self.table,
+                tag_manifest_scanner,
+                self.predicate,
+                self.limit,
+                vector_search=self.vector_search
+            )
 
         def all_manifests():
             snapshot = snapshot_manager.get_latest_snapshot()
