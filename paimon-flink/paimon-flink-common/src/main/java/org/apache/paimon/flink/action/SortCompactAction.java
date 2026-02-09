@@ -127,7 +127,13 @@ public class SortCompactAction extends CompactAction {
                         .setRangeNumber(sinkParallelism * 10)
                         .build();
 
-        TableSorter sorter = TableSorter.getSorter(env, source, fileStoreTable, sortInfo);
+        TableSorter sorter =
+                TableSorter.getSorter(
+                        env,
+                        source,
+                        fileStoreTable.coreOptions(),
+                        fileStoreTable.rowType(),
+                        sortInfo);
 
         new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)

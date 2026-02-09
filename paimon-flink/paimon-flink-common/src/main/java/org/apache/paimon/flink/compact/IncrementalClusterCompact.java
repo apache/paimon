@@ -146,7 +146,13 @@ public class IncrementalClusterCompact {
                         .setRangeNumber(sinkParallelism * 10)
                         .build();
         DataStream<RowData> sorted =
-                TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
+                TableSorter.getSorter(
+                                env,
+                                sourcePair.getLeft(),
+                                table.coreOptions(),
+                                table.rowType(),
+                                sortInfo)
+                        .sort();
 
         // 2.3 write and then reorganize the committable
         // set parallelism to null, and it'll forward parallelism when doWrite()

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.NoneCopyVersionedSerializerTypeSerializerProxy;
 import org.apache.paimon.flink.sink.RewriteFileIndexSink;
@@ -26,9 +25,9 @@ import org.apache.paimon.flink.source.RewriteFileIndexSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -78,29 +77,13 @@ public class RewriteFileIndexProcedure extends ProcedureBase {
                         ? null
                         : getPartitions(partitions.split(";"));
 
-        Predicate partitionPredicate;
-        if (partitionList != null) {
-            // This predicate is based on the row type of the original table, not bucket table.
-            // Because TableScan in BucketsTable is the same with FileStoreTable,
-            // and partition filter is done by scan.
-            partitionPredicate =
-                    PredicateBuilder.or(
-                            partitionList.stream()
-                                    .map(
-                                            p ->
-                                                    PredicateBuilder.partition(
-                                                            p,
-                                                            ((FileStoreTable) table)
-                                                                    .schema()
-                                                                    .logicalPartitionType(),
-                                                            CoreOptions.PARTITION_DEFAULT_NAME
-                                                                    .defaultValue()))
-                                    .toArray(Predicate[]::new));
-        } else {
-            partitionPredicate = null;
-        }
-
         FileStoreTable storeTable = (FileStoreTable) table;
+        Predicate partitionPredicate =
+                ParameterUtils.toPartitionPredicate(
+                        partitionList,
+                        storeTable.schema().logicalPartitionType(),
+                        storeTable.coreOptions().partitionDefaultName());
+
         DataStreamSource<ManifestEntry> source =
                 env.fromSource(
                         new RewriteFileIndexSource(storeTable, partitionPredicate),
