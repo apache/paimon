@@ -90,6 +90,8 @@ public class CoreOptions implements Serializable {
 
     public static final String COLUMNS = "columns";
 
+    public static final String BLOB_DESCRIPTOR_PREFIX = "blob-descriptor.";
+
     public static final ConfigOption<TableType> TYPE =
             key("type")
                     .enumType(TableType.class)
