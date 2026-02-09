@@ -98,7 +98,6 @@ class FileStoreTable(Table):
             self,
             tag_name: str,
             snapshot_id: Optional[int] = None,
-            time_retained: Optional['timedelta'] = None,
             ignore_if_exists: bool = False
     ) -> None:
         """
@@ -107,7 +106,6 @@ class FileStoreTable(Table):
         Args:
             tag_name: Name for the tag
             snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
-            time_retained: Optional duration for how long the tag should be retained
             ignore_if_exists: If True, don't raise error if tag already exists
             
         Raises:
@@ -126,7 +124,7 @@ class FileStoreTable(Table):
                 raise ValueError("No snapshot exists in this table.")
 
         tag_mgr = self.tag_manager()
-        tag_mgr.create_tag(snapshot, tag_name, time_retained, ignore_if_exists)
+        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists)
 
     def delete_tag(self, tag_name: str) -> bool:
         """

@@ -24,40 +24,10 @@ from pypaimon.snapshot.snapshot import Snapshot
 
 
 @dataclass
-class Tag:
-    """
-    Tag with tagCreateTime and tagTimeRetained.
-    
-    A Tag is essentially a Snapshot with additional metadata about when the tag
-    was created and how long it should be retained.
-    """
-    # Required fields from Snapshot
-    version: int = json_field("version")
-    id: int = json_field("id")
-    schema_id: int = json_field("schemaId")
-    base_manifest_list: str = json_field("baseManifestList")
-    delta_manifest_list: str = json_field("deltaManifestList")
-    total_record_count: int = json_field("totalRecordCount")
-    delta_record_count: int = json_field("deltaRecordCount")
-    commit_user: str = json_field("commitUser")
-    commit_identifier: int = json_field("commitIdentifier")
-    commit_kind: str = json_field("commitKind")
-    time_millis: int = json_field("timeMillis")
-
-    # Optional fields from Snapshot
-    changelog_manifest_list: Optional[str] = optional_json_field("changelogManifestList", "non_null")
-    index_manifest: Optional[str] = optional_json_field("indexManifest", "non_null")
-    changelog_record_count: Optional[int] = optional_json_field("changelogRecordCount", "non_null")
-    watermark: Optional[int] = optional_json_field("watermark", "non_null")
-    statistics: Optional[str] = optional_json_field("statistics", "non_null")
-    next_row_id: Optional[int] = optional_json_field("nextRowId", "non_null")
-
-    # Tag-specific fields TODO support auto create and expire
-    tag_create_time: Optional[str] = optional_json_field("tagCreateTime", "non_null")
-    tag_time_retained: Optional[str] = optional_json_field("tagTimeRetained", "non_null")
+class Tag(Snapshot):
 
     def trim_to_snapshot(self) -> Snapshot:
-        """Convert this Tag to a Snapshot by removing tag-specific fields."""
+        """Convert this Tag to a Snapshot"""
         return Snapshot(
             version=self.version,
             id=self.id,
@@ -79,32 +49,16 @@ class Tag:
         )
 
     @staticmethod
-    def from_snapshot(
-            snapshot: Snapshot,
-            tag_time_retained: Optional[timedelta] = None,
-            tag_create_time: Optional[datetime] = None
-    ) -> 'Tag':
+    def from_snapshot(snapshot: Snapshot) -> 'Tag':
         """
-        Create a Tag from a Snapshot with optional tag TTL.
+        Create a Tag from a Snapshot.
         
         Args:
             snapshot: The snapshot to create the tag from
-            tag_time_retained: Optional duration for how long the tag should be retained
-            tag_create_time: Optional creation time, defaults to current time if tag_time_retained is set
             
         Returns:
             A new Tag instance
         """
-        create_time_str = None
-        retained_str = None
-
-        if tag_time_retained is not None:
-            if tag_create_time is None:
-                tag_create_time = datetime.now()
-            create_time_str = tag_create_time.isoformat()
-            # Convert timedelta to ISO 8601 duration format (e.g., "PT1H" for 1 hour)
-            total_seconds = int(tag_time_retained.total_seconds())
-            retained_str = f"PT{total_seconds}S"
 
         return Tag(
             version=snapshot.version,
@@ -123,7 +77,5 @@ class Tag:
             changelog_record_count=snapshot.changelog_record_count,
             watermark=snapshot.watermark,
             statistics=snapshot.statistics,
-            next_row_id=snapshot.next_row_id,
-            tag_create_time=create_time_str,
-            tag_time_retained=retained_str
+            next_row_id=snapshot.next_row_id
         )

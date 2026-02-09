@@ -119,7 +119,6 @@ class TagManager:
             self,
             snapshot: Snapshot,
             tag_name: str,
-            time_retained: Optional[timedelta] = None,
             ignore_if_exists: bool = False
     ) -> None:
         """
@@ -128,7 +127,6 @@ class TagManager:
         Args:
             snapshot: The snapshot to tag
             tag_name: Name for the tag
-            time_retained: Optional duration for how long the tag should be retained
             ignore_if_exists: If True, don't raise error if tag already exists
             
         Raises:
@@ -142,20 +140,15 @@ class TagManager:
                 return
             raise ValueError(f"Tag '{tag_name}' already exists.")
 
-        self._create_or_replace_tag(snapshot, tag_name, time_retained)
+        self._create_or_replace_tag(snapshot, tag_name)
 
     def _create_or_replace_tag(
             self,
             snapshot: Snapshot,
-            tag_name: str,
-            time_retained: Optional[timedelta] = None
+            tag_name: str
     ) -> None:
         """
         Internal method to create or replace a tag.
-        
-        When time_retained is not defined, we write the snapshot JSON directly
-        to maintain compatibility with older versions (<= 0.7).
-        When time_retained is defined, we write the full Tag JSON.
         """
         tag_path = self.tag_path(tag_name)
 
@@ -164,13 +157,7 @@ class TagManager:
         if not self.file_io.exists(tag_dir):
             self.file_io.mkdirs(tag_dir)
 
-        if time_retained is not None:
-            # Create Tag with TTL information
-            tag = Tag.from_snapshot(snapshot, time_retained, datetime.now())
-            content = JSON.to_json(tag)
-        else:
-            # Write snapshot JSON directly for backward compatibility
-            content = JSON.to_json(snapshot)
+        content = JSON.to_json(snapshot)
 
         self.file_io.overwrite_file_utf8(tag_path, content)
 
