@@ -52,7 +52,7 @@ public class ExternalBlobDescriptorITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true')",
-                "CREATE TABLE external_blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true', 'blob-descriptor.io.root-dir'='"
+                "CREATE TABLE external_blob_table_descriptor (id INT, data STRING, picture BYTES) WITH ('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture', 'blob-as-descriptor'='true', 'blob-descriptor.root-dir'='"
                         + "isolated://"
                         + warehouse
                         + "')");
@@ -112,7 +112,7 @@ public class ExternalBlobDescriptorITCase extends CatalogITCaseBase {
                 .getConfiguration()
                 .setString(
                         "paimon.*.*.blob_table_descriptor."
-                                + CoreOptions.BLOB_DESCRIPTOR_IO_PREFIX
+                                + CoreOptions.BLOB_DESCRIPTOR_PREFIX
                                 + IsolatedDirectoryFileIO.ROOT_DIR,
                         "isolated://" + warehouse);
         batchSql(

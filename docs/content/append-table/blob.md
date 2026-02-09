@@ -124,7 +124,7 @@ For details about the blob file format structure, see [File Format - BLOB]({{< r
 
 Specifically, if the storage system of the input BlobDescriptor differs from that used by Paimon, 
 you can specify the storage configuration for the input blob descriptor using the prefix 
-`blob-descriptor.io.`. For example, if the source data is stored in a different OSS endpoint, 
+`blob-descriptor.`. For example, if the source data is stored in a different OSS endpoint, 
 you can configure it as below (using flink sql as an example):
 ```sql
 CREATE TABLE image_table (
@@ -136,7 +136,7 @@ CREATE TABLE image_table (
     'data-evolution.enabled' = 'true',
     'blob-field' = 'image',
     'fs.oss.endpoint' = 'aaa',                   -- This is for Paimon's own config
-    'blob-descriptor.io.fs.oss.endpoint' = 'bbb' -- This is for input blob descriptors' config
+    'blob-descriptor.fs.oss.endpoint' = 'bbb'    -- This is for input blob descriptors' config
 );
 ```
 

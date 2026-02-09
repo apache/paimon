@@ -27,7 +27,7 @@ import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_IO_PREFIX;
+import static org.apache.paimon.CoreOptions.BLOB_DESCRIPTOR_PREFIX;
 
 /** Utils for {@link BlobDescriptor}. */
 public class BlobDescriptorUtils {
@@ -41,9 +41,9 @@ public class BlobDescriptorUtils {
         Map<String, String> descriptorSpecified = new HashMap<>();
         for (Map.Entry<String, String> entry : tableOptions.toMap().entrySet()) {
             String key = entry.getKey();
-            if (key != null && key.startsWith(BLOB_DESCRIPTOR_IO_PREFIX)) {
+            if (key != null && key.startsWith(BLOB_DESCRIPTOR_PREFIX)) {
                 descriptorSpecified.put(
-                        key.substring(BLOB_DESCRIPTOR_IO_PREFIX.length()), entry.getValue());
+                        key.substring(BLOB_DESCRIPTOR_PREFIX.length()), entry.getValue());
             }
         }
 
