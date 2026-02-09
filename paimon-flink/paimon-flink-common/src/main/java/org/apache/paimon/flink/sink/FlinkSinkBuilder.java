@@ -340,7 +340,11 @@ public class FlinkSinkBuilder {
         if (tableSortInfo != null) {
             TableSorter sorter =
                     TableSorter.getSorter(
-                            input.getExecutionEnvironment(), input, table, tableSortInfo);
+                            input.getExecutionEnvironment(),
+                            input,
+                            table.coreOptions(),
+                            table.rowType(),
+                            tableSortInfo);
             return sorter.sort();
         }
         return input;

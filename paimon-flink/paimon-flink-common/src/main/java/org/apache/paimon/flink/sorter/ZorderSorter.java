@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.sort.zorder.ZIndexer;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -53,15 +53,16 @@ public class ZorderSorter extends TableSorter {
     public ZorderSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
-            FileStoreTable table,
+            CoreOptions options,
+            RowType rowType,
             TableSortInfo sortInfo) {
-        super(batchTEnv, origin, table, sortInfo.getSortColumns());
+        super(batchTEnv, origin, options, rowType, sortInfo.getSortColumns());
         this.sortInfo = sortInfo;
     }
 
     @Override
     public DataStream<RowData> sort() {
-        return sortStreamByZOrder(origin, table);
+        return sortStreamByZOrder(origin, options, rowType);
     }
 
     /**
@@ -71,12 +72,12 @@ public class ZorderSorter extends TableSorter {
      * @return the sorted data stream
      */
     private DataStream<RowData> sortStreamByZOrder(
-            DataStream<RowData> inputStream, FileStoreTable table) {
-        final ZIndexer zIndexer =
-                new ZIndexer(table.rowType(), orderColNames, table.coreOptions().varTypeSize());
+            DataStream<RowData> inputStream, CoreOptions options, RowType rowType) {
+        final ZIndexer zIndexer = new ZIndexer(rowType, orderColNames, options.varTypeSize());
         return SortUtils.sortStreamByKey(
                 inputStream,
-                table,
+                options,
+                rowType,
                 KEY_TYPE,
                 TypeInformation.of(byte[].class),
                 () ->

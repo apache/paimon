@@ -25,7 +25,6 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.shuffle.RangeShuffle;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -68,7 +67,6 @@ public class SortUtils {
      * Sort the input stream by the key specified.
      *
      * @param inputStream the input data stream
-     * @param table the sorted file store table
      * @param sortKeyType we will use paimon `BinaryExternalSortBuffer` to local sort, so we need to
      *     specify the key type.
      * @param keyTypeInformation we will use range shuffle in global sort, so we need to range
@@ -83,16 +81,14 @@ public class SortUtils {
      */
     public static <KEY> DataStream<RowData> sortStreamByKey(
             final DataStream<RowData> inputStream,
-            final FileStoreTable table,
+            final CoreOptions options,
+            final RowType valueRowType,
             final RowType sortKeyType,
             final TypeInformation<KEY> keyTypeInformation,
             final SerializableSupplier<Comparator<KEY>> shuffleKeyComparator,
             final KeyAbstract<KEY> shuffleKeyAbstract,
             final ShuffleKeyConvertor<KEY> convertor,
             final TableSortInfo tableSortInfo) {
-
-        final RowType valueRowType = table.rowType();
-        CoreOptions options = table.coreOptions();
         final int sinkParallelism = tableSortInfo.getSinkParallelism();
         final int localSampleSize = tableSortInfo.getLocalSampleSize();
         final int globalSampleSize = tableSortInfo.getGlobalSampleSize();
