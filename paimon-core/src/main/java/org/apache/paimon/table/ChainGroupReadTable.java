@@ -170,8 +170,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                         new ChainSplit(
                                 dataSplit.partition(),
                                 dataSplit.dataFiles(),
-                                fileBucketPathMapping,
-                                fileBranchMapping));
+                                fileBranchMapping,
+                                fileBucketPathMapping));
                 completePartitions.add(dataSplit.partition());
             }
             List<BinaryRow> remainingPartitions =
@@ -281,8 +281,8 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                                 .flatMap(
                                                         datsSplit -> datsSplit.dataFiles().stream())
                                                 .collect(Collectors.toList()),
-                                        fileBucketPathMapping,
-                                        fileBranchMapping);
+                                        fileBranchMapping,
+                                        fileBucketPathMapping);
                         splits.add(split);
                     }
                 }
