@@ -61,6 +61,8 @@ public class NativeLibraryLoader {
     private static final String[] DEPENDENCY_LIBRARIES = {
         // GCC runtime libraries (must be loaded first as others depend on them)
         "libgcc_s.so.1",
+        // C++ standard library (needed by libfaiss and JNI)
+        "libstdc++.so.6",
         // Quadmath library (needed by gfortran)
         "libquadmath.so.0",
         // Fortran runtime (needed by OpenBLAS)
@@ -211,7 +213,7 @@ public class NativeLibraryLoader {
             String resourcePath = "/" + os + "/" + arch + "/" + depLib;
             try (InputStream is = NativeLibraryLoader.class.getResourceAsStream(resourcePath)) {
                 if (is == null) {
-                    LOG.debug("Dependency library not bundled: {}", depLib);
+                    LOG.warn("Dependency library not bundled: {}", depLib);
                     continue;
                 }
 
@@ -235,9 +237,9 @@ public class NativeLibraryLoader {
                 LOG.info("Loaded bundled dependency library: {}", depLib);
             } catch (UnsatisfiedLinkError e) {
                 // Library might already be loaded or not needed
-                LOG.debug("Could not load dependency {}: {}", depLib, e.getMessage());
+                LOG.warn("Could not load dependency {}: {}", depLib, e.getMessage());
             } catch (IOException e) {
-                LOG.debug("Could not extract dependency {}: {}", depLib, e.getMessage());
+                LOG.warn("Could not extract dependency {}: {}", depLib, e.getMessage());
             }
         }
     }
