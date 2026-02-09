@@ -16,14 +16,10 @@
 #  under the License.
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Optional
 
-from pypaimon.common.json_util import json_field, optional_json_field
 from pypaimon.snapshot.snapshot import Snapshot
 
 
-@dataclass
 class Tag(Snapshot):
 
     def trim_to_snapshot(self) -> Snapshot:
@@ -46,36 +42,4 @@ class Tag(Snapshot):
             watermark=self.watermark,
             statistics=self.statistics,
             next_row_id=self.next_row_id
-        )
-
-    @staticmethod
-    def from_snapshot(snapshot: Snapshot) -> 'Tag':
-        """
-        Create a Tag from a Snapshot.
-        
-        Args:
-            snapshot: The snapshot to create the tag from
-            
-        Returns:
-            A new Tag instance
-        """
-
-        return Tag(
-            version=snapshot.version,
-            id=snapshot.id,
-            schema_id=snapshot.schema_id,
-            base_manifest_list=snapshot.base_manifest_list,
-            delta_manifest_list=snapshot.delta_manifest_list,
-            total_record_count=snapshot.total_record_count,
-            delta_record_count=snapshot.delta_record_count,
-            commit_user=snapshot.commit_user,
-            commit_identifier=snapshot.commit_identifier,
-            commit_kind=snapshot.commit_kind,
-            time_millis=snapshot.time_millis,
-            changelog_manifest_list=snapshot.changelog_manifest_list,
-            index_manifest=snapshot.index_manifest,
-            changelog_record_count=snapshot.changelog_record_count,
-            watermark=snapshot.watermark,
-            statistics=snapshot.statistics,
-            next_row_id=snapshot.next_row_id
         )

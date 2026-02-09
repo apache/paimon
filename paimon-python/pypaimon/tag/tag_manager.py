@@ -17,7 +17,6 @@
 
 import logging
 import re
-from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 from pypaimon.common.file_io import FileIO
