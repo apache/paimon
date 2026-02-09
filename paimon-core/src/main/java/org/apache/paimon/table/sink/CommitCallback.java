@@ -40,15 +40,7 @@ import java.util.List;
  */
 public interface CommitCallback extends AutoCloseable {
 
-    default void call(Context context) {
-        call(context.baseFiles, context.deltaFiles, context.indexFiles, context.snapshot);
-    }
-
-    default void call(
-            List<SimpleFileEntry> baseFiles,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {}
+    void call(Context context);
 
     void retry(ManifestCommittable committable);
 

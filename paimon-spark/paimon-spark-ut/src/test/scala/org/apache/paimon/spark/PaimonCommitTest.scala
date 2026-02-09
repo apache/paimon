@@ -64,11 +64,7 @@ object PaimonCommitTest {
 
 case class CustomCommitCallback(testId: String) extends CommitCallback {
 
-  override def call(
-      baseFiles: List[SimpleFileEntry],
-      deltaFiles: List[ManifestEntry],
-      indexFiles: List[IndexManifestEntry],
-      snapshot: Snapshot): Unit = {
+  override def call(context: CommitCallback.Context): Unit = {
     PaimonCommitTest.id = testId
   }
 
