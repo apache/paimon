@@ -2211,7 +2211,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to enable the visibility wait callback that waits for compaction to complete "
                                     + "after commit. This is useful for primary key tables with deletion vectors or "
-                                    + "postpone bucket mode to ensure data visibility.");
+                                    + "postpone bucket mode to ensure data visibility, only used for batch mode or bounded stream.");
 
     public static final ConfigOption<Duration> VISIBILITY_CALLBACK_TIMEOUT =
             key("visibility-callback.timeout")

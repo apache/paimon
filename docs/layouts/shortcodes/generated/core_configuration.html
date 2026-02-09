@@ -1462,7 +1462,7 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td><h5>visibility-callback.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>Whether to enable the visibility wait callback that waits for compaction to complete after commit. This is useful for primary key tables with deletion vectors or postpone bucket mode to ensure data visibility.</td>
+            <td>Whether to enable the visibility wait callback that waits for compaction to complete after commit. This is useful for primary key tables with deletion vectors or postpone bucket mode to ensure data visibility, only used for batch mode or bounded stream.</td>
         </tr>
         <tr>
             <td><h5>visibility-callback.timeout</h5></td>
