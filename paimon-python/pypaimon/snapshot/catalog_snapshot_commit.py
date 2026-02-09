@@ -16,9 +16,12 @@
 # limitations under the License.
 ################################################################################
 
+import logging
 from typing import List
 
 from pypaimon.catalog.catalog import Catalog
+
+logger = logging.getLogger(__name__)
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
@@ -64,7 +67,10 @@ class CatalogSnapshotCommit(SnapshotCommit):
 
         # Call catalog's commit_snapshot method
         if hasattr(self.catalog, 'commit_snapshot'):
-            return self.catalog.commit_snapshot(new_identifier, self.uuid, snapshot, statistics)
+            success = self.catalog.commit_snapshot(new_identifier, self.uuid, snapshot, statistics)
+            if success:
+                logger.info("Catalog snapshot commit succeeded for %s, snapshot id %d", new_identifier, snapshot.id)
+            return success
         else:
             # Fallback for catalogs that don't support snapshot commits
             raise NotImplementedError(

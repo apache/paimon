@@ -97,6 +97,11 @@ class FileStoreCommit:
         if not commit_messages:
             return
 
+        logger.info(
+            "Ready to commit to table %s, number of commit messages: %d",
+            self.table.identifier,
+            len(commit_messages),
+        )
         commit_entries = []
         for msg in commit_messages:
             partition = GenericRow(list(msg.partition), self.table.partition_keys_fields)
@@ -109,6 +114,7 @@ class FileStoreCommit:
                     file=file
                 ))
 
+        logger.info("Finished collecting changes, including: %d entries", len(commit_entries))
         self._try_commit(commit_kind="APPEND",
                          commit_identifier=commit_identifier,
                          commit_entries_plan=lambda snapshot: commit_entries)
@@ -118,6 +124,11 @@ class FileStoreCommit:
         if not commit_messages:
             return
 
+        logger.info(
+            "Ready to overwrite to table %s, number of commit messages: %d",
+            self.table.identifier,
+            len(commit_messages),
+        )
         partition_filter = None
         # sanity check, all changes must be done within the given partition, meanwhile build a partition filter
         if len(overwrite_partition) > 0:
@@ -203,16 +214,43 @@ class FileStoreCommit:
             )
 
             if result.is_success():
+                commit_duration_ms = int(time.time() * 1000) - start_time_ms
                 logger.info(
-                    f"Thread {thread_id}: commit success {latest_snapshot.id + 1 if latest_snapshot else 1} "
-                    f"after {retry_count} retries"
+                    "Thread %s: commit success %d after %d retries",
+                    thread_id,
+                    latest_snapshot.id + 1 if latest_snapshot else 1,
+                    retry_count,
                 )
+                if commit_kind == "OVERWRITE":
+                    logger.info(
+                        "Finished overwrite to table %s, duration %d ms",
+                        self.table.identifier,
+                        commit_duration_ms,
+                    )
+                else:
+                    logger.info(
+                        "Finished commit to table %s, duration %d ms",
+                        self.table.identifier,
+                        commit_duration_ms,
+                    )
                 break
 
             retry_result = result
 
             elapsed_ms = int(time.time() * 1000) - start_time_ms
             if elapsed_ms > self.commit_timeout or retry_count >= self.commit_max_retries:
+                if commit_kind == "OVERWRITE":
+                    logger.info(
+                        "Finished (Uncertain of success) overwrite to table %s, duration %d ms",
+                        self.table.identifier,
+                        elapsed_ms,
+                    )
+                else:
+                    logger.info(
+                        "Finished (Uncertain of success) commit to table %s, duration %d ms",
+                        self.table.identifier,
+                        elapsed_ms,
+                    )
                 error_msg = (
                     f"Commit failed {latest_snapshot.id + 1 if latest_snapshot else 1} "
                     f"after {elapsed_ms} millis with {retry_count} retries, "
@@ -229,6 +267,7 @@ class FileStoreCommit:
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry], commit_identifier: int,
                          latest_snapshot: Optional[Snapshot]) -> CommitResult:
+        start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
         
@@ -306,18 +345,32 @@ class FileStoreCommit:
             with self.snapshot_commit:
                 success = self.snapshot_commit.commit(snapshot_data, self.table.current_branch(), statistics)
                 if not success:
-                    logger.warning(f"Atomic commit failed for snapshot #{new_snapshot_id} failed")
+                    commit_time_s = (int(time.time() * 1000) - start_millis) / 1000
+                    logger.warning(
+                        "Atomic commit failed for snapshot #%d by user %s "
+                        "with identifier %s and kind %s after %.0f seconds. "
+                        "Clean up and try again.",
+                        new_snapshot_id,
+                        self.commit_user,
+                        commit_identifier,
+                        commit_kind,
+                        commit_time_s,
+                    )
                     self._cleanup_preparation_failure(delta_manifest_list, base_manifest_list)
                     return RetryResult(latest_snapshot, None)
         except Exception as e:
             # Commit exception, not sure about the situation and should not clean up the files
-            logger.warning("Retry commit for exception")
+            logger.warning("Retry commit for exception.", exc_info=True)
             return RetryResult(latest_snapshot, e)
 
-        logger.warning(
-            f"Successfully commit snapshot {new_snapshot_id} to table {self.table.identifier} "
-            f"for snapshot-{new_snapshot_id} by user {self.commit_user} "
-            + f"with identifier {commit_identifier} and kind {commit_kind}."
+        logger.info(
+            "Successfully commit snapshot %d to table %s by user %s "
+            "with identifier %s and kind %s.",
+            new_snapshot_id,
+            self.table.identifier,
+            self.commit_user,
+            commit_identifier,
+            commit_kind,
         )
         return SuccessResult()
 

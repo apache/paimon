@@ -16,7 +16,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import os
+import time
+import logging
 from typing import List, Optional, Dict, Set, Callable
+
+logger = logging.getLogger(__name__)
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
@@ -143,6 +147,7 @@ class FileScanner:
         return self._scan_dv_index(self.snapshot_manager.get_latest_snapshot(), bucket_files)
 
     def scan(self) -> Plan:
+        start_ms = time.time() * 1000
         # Create appropriate split generator based on table type
         if self.table.is_primary_key_table:
             entries = self.plan_files()
@@ -176,6 +181,11 @@ class FileScanner:
         splits = split_generator.create_splits(entries)
 
         splits = self._apply_push_down_limit(splits)
+        duration_ms = int(time.time() * 1000 - start_ms)
+        logger.info(
+            "File store scan plan completed in %d ms. Files size: %d",
+            duration_ms, len(entries)
+        )
         return Plan(splits)
 
     def _create_data_evolution_split_generator(self):
