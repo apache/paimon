@@ -15,7 +15,6 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from dataclasses import dataclass
 
 from pypaimon.snapshot.snapshot import Snapshot
 

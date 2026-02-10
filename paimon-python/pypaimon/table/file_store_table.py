@@ -227,7 +227,7 @@ class FileStoreTable(Table):
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
-    def copy(self, options: dict) -> 'FileStoreTable':
+    def copy(self, options: dict, try_time_travel: bool = True) -> 'FileStoreTable':
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
@@ -236,9 +236,36 @@ class FileStoreTable(Table):
                 new_options.pop(k)
             else:
                 new_options[k] = v
+
         new_table_schema = self.table_schema.copy(new_options=new_options)
+
+        if try_time_travel:
+            time_travel_schema = self._try_time_travel(Options(new_options))
+            if time_travel_schema is not None:
+                new_table_schema = time_travel_schema
+
         return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
                               self.catalog_environment)
+
+    def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
+        """
+        Try to resolve time travel options and return the corresponding schema.
+        
+        Supports the following time travel options:
+        - scan.tag-name: Travel to a specific tag
+        
+        Returns:
+            The TableSchema at the time travel point, or None if no time travel option is set.
+        """
+
+        try:
+            from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+            snapshot = TimeTravelUtil.try_travel_to_snapshot(options, self.tag_manager())
+            if snapshot is None:
+                return None
+            return self.schema_manager.get_schema(snapshot.schema_id).copy(new_options=options.to_map())
+        except Exception:
+            return None
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse

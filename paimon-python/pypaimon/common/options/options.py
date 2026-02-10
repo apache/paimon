@@ -54,5 +54,9 @@ class Options:
     def contains(self, key: ConfigOption):
         return key.key() in self.data
 
+    def contains_key(self, key: str) -> bool:
+        """Check if the given key string exists in the options."""
+        return key in self.data
+
     def copy(self) -> 'Options':
         return Options(dict(self.data))
