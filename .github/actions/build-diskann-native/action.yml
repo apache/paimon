@@ -21,6 +21,12 @@ runs:
         rustc --version
         cargo --version
 
+    - name: Install dependency bundling tools (Linux)
+      if: startsWith(inputs.platform, 'linux')
+      shell: bash
+      run: |
+        sudo apt-get update -qq && sudo apt-get install -y -qq patchelf
+
     - name: Build native library
       shell: bash
       run: |

@@ -54,6 +54,8 @@ under the License.
                 <configuration>
                     <nonFilteredFileExtensions>
                         <nonFilteredFileExtension>so</nonFilteredFileExtension>
+                        <!-- Versioned shared libraries (e.g. libgcc_s.so.1) -->
+                        <nonFilteredFileExtension>so.*</nonFilteredFileExtension>
                         <nonFilteredFileExtension>dylib</nonFilteredFileExtension>
                     </nonFilteredFileExtensions>
                 </configuration>
@@ -85,6 +87,8 @@ under the License.
                                             <directory>${project.basedir}/src/main/resources</directory>
                                             <includes>
                                                 <include>**/*.so</include>
+                                                <!-- Versioned shared libraries (e.g. libgcc_s.so.1) -->
+                                                <include>**/*.so.*</include>
                                                 <include>**/*.dylib</include>
                                             </includes>
                                         </resource>

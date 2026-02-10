@@ -49,8 +49,22 @@ public class NativeLibraryLoader {
     /** System property to specify a custom path to the native library. */
     private static final String LIBRARY_PATH_PROPERTY = "paimon.diskann.lib.path";
 
-    /** Dependency libraries that need to be loaded before the main JNI library. */
-    private static final String[] DEPENDENCY_LIBRARIES = {};
+    /**
+     * Dependency libraries that need to be loaded before the main JNI library. These are bundled in
+     * the JAR when the build script detects they are dynamically linked.
+     *
+     * <p>Order matters! Libraries must be loaded before the libraries that depend on them. The Rust
+     * {@code cdylib} statically links all Rust code but may dynamically link against the GCC
+     * runtime and C++ standard library on Linux.
+     */
+    private static final String[] DEPENDENCY_LIBRARIES = {
+        // GCC runtime (Rust cdylib uses libgcc_s for stack unwinding on Linux)
+        "libgcc_s.so.1",
+        // C++ standard library (needed if diskann crate compiles C++ code internally)
+        "libstdc++.so.6",
+        // OpenMP runtime (possible transitive dependency)
+        "libgomp.so.1",
+    };
 
     /** Whether the native library has been loaded. */
     private static volatile boolean libraryLoaded = false;

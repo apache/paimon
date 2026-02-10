@@ -22,12 +22,20 @@
 //! This module uses Microsoft's official `diskann` Rust crate (v0.45.0)
 //! from <https://github.com/microsoft/DiskANN> to provide graph-based
 //! approximate nearest neighbor search via JNI.
+//!
+//! # JNI Safety
+//!
+//! Every `extern "system"` entry point is wrapped with [`std::panic::catch_unwind`]
+//! so that a Rust panic never unwinds across the FFI boundary, which would cause
+//! undefined behaviour and likely crash the JVM.  On panic the function throws a
+//! `java.lang.RuntimeException` with the panic message and returns a safe default.
 
 use jni::objects::{JByteArray, JByteBuffer, JClass, JPrimitiveArray, ReleaseMode};
 use jni::sys::{jfloat, jint, jlong};
 use jni::JNIEnv;
 
 use std::collections::HashMap;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use diskann::graph::test::provider as test_provider;
@@ -47,8 +55,31 @@ const MAGIC: i32 = 0x5044414E;
 const SERIALIZE_VERSION: i32 = 2;
 
 /// The u32 ID reserved for the DiskANN graph start/entry point.
-/// This is not a user vector and is filtered from search results.
 const START_POINT_ID: u32 = 0;
+
+// ======================== Panic‐safe JNI helper ========================
+
+/// Run `body` inside [`catch_unwind`].  If it panics, throw a Java
+/// `RuntimeException` with the panic message and return `default`.
+fn jni_catch_unwind<F, R>(env: &mut JNIEnv, default: R, body: F) -> R
+where
+    F: FnOnce() -> R + panic::UnwindSafe,
+{
+    match panic::catch_unwind(body) {
+        Ok(v) => v,
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "Unknown Rust panic in DiskANN JNI".to_string()
+            };
+            let _ = env.throw_new("java/lang/RuntimeException", msg);
+            default
+        }
+    }
+}
 
 // ======================== Metric Mapping ========================
 
@@ -62,29 +93,21 @@ fn map_metric(metric_type: i32) -> Metric {
 
 // ======================== Index State ========================
 
-/// Holds the DiskANN index, tokio runtime, and ID mappings.
 struct IndexState {
-    /// The real DiskANN graph index backed by an in-memory test provider.
     index: Arc<DiskANNIndex<test_provider::Provider>>,
-    /// Execution context for the test provider.
     context: test_provider::Context,
-    /// Tokio runtime for running async DiskANN operations.
     runtime: tokio::runtime::Runtime,
 
-    // -- Metadata --
     dimension: i32,
     metric_type: i32,
     index_type: i32,
     max_degree: usize,
     build_list_size: usize,
 
-    // -- ID mapping (user i64 ↔ DiskANN u32) --
     ext_to_int: HashMap<i64, u32>,
     int_to_ext: HashMap<u32, i64>,
-    /// Next u32 ID to assign (0 is reserved for start point).
     next_id: u32,
 
-    // -- Raw data kept for serialization --
     raw_data: Vec<(i64, Vec<f32>)>,
 }
 
@@ -116,7 +139,6 @@ fn registry() -> &'static Mutex<IndexRegistry> {
     REGISTRY.get_or_init(|| Mutex::new(IndexRegistry::new()))
 }
 
-/// Get a cloned Arc to the index state (brief registry lock).
 fn get_index(handle: i64) -> Option<Arc<Mutex<IndexState>>> {
     let guard = registry().lock().ok()?;
     guard.indices.get(&handle).cloned()
@@ -124,7 +146,6 @@ fn get_index(handle: i64) -> Option<Arc<Mutex<IndexState>>> {
 
 // ======================== Index Construction ========================
 
-/// Create a new DiskANN index backed by the official `diskann` crate.
 fn create_index_state(
     dimension: i32,
     metric_type: i32,
@@ -135,17 +156,13 @@ fn create_index_state(
     let dim = dimension as usize;
     let metric = map_metric(metric_type);
     let md = std::cmp::max(max_degree as usize, 4);
-    // l_build must be >= pruned_degree for the DiskANN config to validate.
     let bls = std::cmp::max(build_list_size as usize, md);
 
-    // Tokio runtime for async DiskANN operations.
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| format!("Failed to create tokio runtime: {}", e))?;
 
-    // The DiskANN graph needs at least one start/entry point.
-    // Use a non-zero vector to avoid division-by-zero with cosine metric.
     let start_vector = vec![1.0f32; dim];
     let provider_config = test_provider::Config::new(
         metric,
@@ -155,14 +172,11 @@ fn create_index_state(
     .map_err(|e| format!("Failed to create provider config: {:?}", e))?;
     let provider = test_provider::Provider::new(provider_config);
 
-    // Build graph config using the metric's default prune kind.
-    // Use MaxDegree::same() because the test provider enforces a strict max_degree
-    // and does not allow slack (the graph construction would exceed the provider limit).
     let index_config = graph::config::Builder::new(
         md,
         graph::config::MaxDegree::same(),
         bls,
-        metric.into(), // Metric → PruneKind conversion
+        metric.into(),
     )
     .build()
     .map_err(|e| format!("Failed to create index config: {:?}", e))?;
@@ -198,71 +212,56 @@ fn get_direct_buffer_slice<'a>(
     if capacity < len {
         return None;
     }
-    // SAFETY: The caller guarantees the buffer is valid for `len` bytes.
     unsafe { Some(std::slice::from_raw_parts_mut(ptr, len)) }
 }
 
 // ======================== Serialization Helpers ========================
 
 fn read_i32(buf: &[u8], offset: &mut usize) -> Option<i32> {
-    if *offset + 4 > buf.len() {
-        return None;
-    }
-    let mut bytes = [0u8; 4];
-    bytes.copy_from_slice(&buf[*offset..*offset + 4]);
+    if *offset + 4 > buf.len() { return None; }
+    let mut b = [0u8; 4];
+    b.copy_from_slice(&buf[*offset..*offset + 4]);
     *offset += 4;
-    Some(i32::from_ne_bytes(bytes))
+    Some(i32::from_ne_bytes(b))
 }
 
 fn read_i64(buf: &[u8], offset: &mut usize) -> Option<i64> {
-    if *offset + 8 > buf.len() {
-        return None;
-    }
-    let mut bytes = [0u8; 8];
-    bytes.copy_from_slice(&buf[*offset..*offset + 8]);
+    if *offset + 8 > buf.len() { return None; }
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&buf[*offset..*offset + 8]);
     *offset += 8;
-    Some(i64::from_ne_bytes(bytes))
+    Some(i64::from_ne_bytes(b))
 }
 
 fn read_f32(buf: &[u8], offset: &mut usize) -> Option<f32> {
-    if *offset + 4 > buf.len() {
-        return None;
-    }
-    let mut bytes = [0u8; 4];
-    bytes.copy_from_slice(&buf[*offset..*offset + 4]);
+    if *offset + 4 > buf.len() { return None; }
+    let mut b = [0u8; 4];
+    b.copy_from_slice(&buf[*offset..*offset + 4]);
     *offset += 4;
-    Some(f32::from_ne_bytes(bytes))
+    Some(f32::from_ne_bytes(b))
 }
 
-fn write_i32(buf: &mut [u8], offset: &mut usize, value: i32) -> bool {
-    if *offset + 4 > buf.len() {
-        return false;
-    }
-    buf[*offset..*offset + 4].copy_from_slice(&value.to_ne_bytes());
+fn write_i32(buf: &mut [u8], offset: &mut usize, v: i32) -> bool {
+    if *offset + 4 > buf.len() { return false; }
+    buf[*offset..*offset + 4].copy_from_slice(&v.to_ne_bytes());
     *offset += 4;
     true
 }
 
-fn write_i64(buf: &mut [u8], offset: &mut usize, value: i64) -> bool {
-    if *offset + 8 > buf.len() {
-        return false;
-    }
-    buf[*offset..*offset + 8].copy_from_slice(&value.to_ne_bytes());
+fn write_i64(buf: &mut [u8], offset: &mut usize, v: i64) -> bool {
+    if *offset + 8 > buf.len() { return false; }
+    buf[*offset..*offset + 8].copy_from_slice(&v.to_ne_bytes());
     *offset += 8;
     true
 }
 
-fn write_f32(buf: &mut [u8], offset: &mut usize, value: f32) -> bool {
-    if *offset + 4 > buf.len() {
-        return false;
-    }
-    buf[*offset..*offset + 4].copy_from_slice(&value.to_ne_bytes());
+fn write_f32(buf: &mut [u8], offset: &mut usize, v: f32) -> bool {
+    if *offset + 4 > buf.len() { return false; }
+    buf[*offset..*offset + 4].copy_from_slice(&v.to_ne_bytes());
     *offset += 4;
     true
 }
 
-/// Calculate serialization size:
-/// Header (32 bytes) + count * (8 bytes ID + dim*4 bytes vector)
 fn serialization_size(dimension: i32, count: usize) -> usize {
     8 * 4 + count * (8 + (dimension as usize) * 4)
 }
@@ -279,22 +278,19 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreate<
     max_degree: jint,
     build_list_size: jint,
 ) -> jlong {
-    match create_index_state(dimension, metric_type, index_type, max_degree, build_list_size) {
-        Ok(state) => match registry().lock() {
-            Ok(mut guard) => guard.insert(state),
-            Err(_) => {
-                let _ =
-                    env.throw_new("java/lang/IllegalStateException", "DiskANN registry error");
-                0
-            }
-        },
-        Err(msg) => {
-            let _ = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("Failed to create DiskANN index: {}", msg),
-            );
-            0
+    let result = jni_catch_unwind(&mut env, 0i64, AssertUnwindSafe(|| -> jlong {
+        match create_index_state(dimension, metric_type, index_type, max_degree, build_list_size) {
+            Ok(state) => match registry().lock() {
+                Ok(mut guard) => guard.insert(state),
+                Err(_) => -1,
+            },
+            Err(_) => -2,
         }
+    }));
+    match result {
+        -1 => { let _ = env.throw_new("java/lang/IllegalStateException", "DiskANN registry error"); 0 }
+        -2 => { let _ = env.throw_new("java/lang/RuntimeException", "Failed to create DiskANN index"); 0 }
+        v => v,
     }
 }
 
@@ -304,11 +300,11 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexDestroy
     _class: JClass<'local>,
     handle: jlong,
 ) {
-    if let Ok(mut guard) = registry().lock() {
-        guard.indices.remove(&handle);
-    } else {
-        let _ = env.throw_new("java/lang/IllegalStateException", "DiskANN registry error");
-    }
+    jni_catch_unwind(&mut env, (), AssertUnwindSafe(|| {
+        if let Ok(mut guard) = registry().lock() {
+            guard.indices.remove(&handle);
+        }
+    }));
 }
 
 #[no_mangle]
@@ -317,21 +313,11 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexGetDime
     _class: JClass<'local>,
     handle: jlong,
 ) -> jint {
-    let arc = match get_index(handle) {
-        Some(a) => a,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid index handle");
-            return 0;
-        }
-    };
-    let result = match arc.lock() {
-        Ok(state) => state.dimension,
-        Err(_) => {
-            let _ = env.throw_new("java/lang/IllegalStateException", "Index lock poisoned");
-            0
-        }
-    };
-    result
+    jni_catch_unwind(&mut env, 0, AssertUnwindSafe(|| {
+        get_index(handle)
+            .and_then(|arc| arc.lock().ok().map(|s| s.dimension))
+            .unwrap_or(0)
+    }))
 }
 
 #[no_mangle]
@@ -340,21 +326,11 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexGetCoun
     _class: JClass<'local>,
     handle: jlong,
 ) -> jlong {
-    let arc = match get_index(handle) {
-        Some(a) => a,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid index handle");
-            return 0;
-        }
-    };
-    let result = match arc.lock() {
-        Ok(state) => state.raw_data.len() as jlong,
-        Err(_) => {
-            let _ = env.throw_new("java/lang/IllegalStateException", "Index lock poisoned");
-            0
-        }
-    };
-    result
+    jni_catch_unwind(&mut env, 0, AssertUnwindSafe(|| {
+        get_index(handle)
+            .and_then(|arc| arc.lock().ok().map(|s| s.raw_data.len() as jlong))
+            .unwrap_or(0)
+    }))
 }
 
 #[no_mangle]
@@ -363,21 +339,11 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexGetMetr
     _class: JClass<'local>,
     handle: jlong,
 ) -> jint {
-    let arc = match get_index(handle) {
-        Some(a) => a,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid index handle");
-            return 0;
-        }
-    };
-    let result = match arc.lock() {
-        Ok(state) => state.metric_type,
-        Err(_) => {
-            let _ = env.throw_new("java/lang/IllegalStateException", "Index lock poisoned");
-            0
-        }
-    };
-    result
+    jni_catch_unwind(&mut env, 0, AssertUnwindSafe(|| {
+        get_index(handle)
+            .and_then(|arc| arc.lock().ok().map(|s| s.metric_type))
+            .unwrap_or(0)
+    }))
 }
 
 #[no_mangle]
@@ -424,7 +390,6 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexAddWith
         }
     };
 
-    // SAFETY: Reinterpret byte buffers as typed slices.
     let vectors =
         unsafe { std::slice::from_raw_parts(vec_bytes.as_ptr() as *const f32, num * dimension) };
     let ids = unsafe { std::slice::from_raw_parts(id_bytes.as_ptr() as *const i64, num) };
@@ -436,27 +401,35 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexAddWith
         let base = i * dimension;
         let vector = vectors[base..base + dimension].to_vec();
 
-        // Assign a DiskANN-internal u32 ID.
         let int_id = state.next_id;
         state.next_id += 1;
         state.ext_to_int.insert(ext_id, int_id);
         state.int_to_ext.insert(int_id, ext_id);
         state.raw_data.push((ext_id, vector.clone()));
 
-        // Insert into the DiskANN graph index (async → block_on).
-        let result = state.runtime.block_on(state.index.insert(
-            strat,
-            &state.context,
-            &int_id,
-            vector.as_slice(),
-        ));
+        // catch_unwind around the DiskANN graph insert which may panic.
+        let idx_clone = Arc::clone(&state.index);
+        let ctx = &state.context;
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            state.runtime.block_on(idx_clone.insert(strat, ctx, &int_id, vector.as_slice()))
+        }));
 
-        if let Err(e) = result {
-            let _ = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("DiskANN insert failed for id {}: {}", ext_id, e),
-            );
-            return;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                let _ = env.throw_new(
+                    "java/lang/RuntimeException",
+                    format!("DiskANN insert failed for id {}: {}", ext_id, e),
+                );
+                return;
+            }
+            Err(_) => {
+                let _ = env.throw_new(
+                    "java/lang/RuntimeException",
+                    format!("DiskANN insert panicked for id {}", ext_id),
+                );
+                return;
+            }
         }
     }
 }
@@ -468,11 +441,12 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexBuild<'
     handle: jlong,
     _build_list_size: jint,
 ) {
-    // DiskANN builds the Vamana graph incrementally during insert.
-    // This function is a no-op because the graph is already built.
-    if get_index(handle).is_none() {
-        let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid index handle");
-    }
+    jni_catch_unwind(&mut env, (), AssertUnwindSafe(|| {
+        if get_index(handle).is_none() {
+            // Will be caught below.
+            panic!("Invalid index handle");
+        }
+    }));
 }
 
 #[no_mangle]
@@ -498,7 +472,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
         }
     };
 
-    // Read query vectors into owned Vec (releases borrow on env).
+    // Read query vectors into owned Vec.
     let query: Vec<f32> = {
         let query_elements =
             match unsafe { env.get_array_elements(&query_vectors, ReleaseMode::NoCopyBack) } {
@@ -527,16 +501,12 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
     let mut result_distances = vec![f32::MAX; total_results];
     let mut result_labels = vec![-1i64; total_results];
 
-    // If the index has no user vectors, return empty results.
-    if state.raw_data.is_empty() {
-        // Leave default values (distances=MAX, labels=-1).
-    } else {
+    if !state.raw_data.is_empty() {
         let strat = test_provider::Strategy::new();
 
         for qi in 0..num {
             let query_vec = &query[qi * dimension..(qi + 1) * dimension];
 
-            // Request k+1 results to account for the start point being returned.
             let search_k = top_k + 1;
             let l_value = std::cmp::max(search_list_size as usize, search_k);
 
@@ -552,26 +522,38 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
             };
 
             let mut neighbors = vec![Neighbor::<u32>::default(); search_k];
-            let search_result = state.runtime.block_on(state.index.search(
-                &strat,
-                &state.context,
-                query_vec,
-                &params,
-                &mut BackInserter::new(&mut neighbors),
-            ));
+
+            // catch_unwind around graph search.
+            let idx_clone = Arc::clone(&state.index);
+            let ctx = &state.context;
+            let search_result = panic::catch_unwind(AssertUnwindSafe(|| {
+                state.runtime.block_on(idx_clone.search(
+                    &strat,
+                    ctx,
+                    query_vec,
+                    &params,
+                    &mut BackInserter::new(&mut neighbors),
+                ))
+            }));
 
             let stats = match search_result {
-                Ok(s) => s,
-                Err(e) => {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => {
                     let _ = env.throw_new(
                         "java/lang/RuntimeException",
                         format!("DiskANN search failed: {}", e),
                     );
                     return;
                 }
+                Err(_) => {
+                    let _ = env.throw_new(
+                        "java/lang/RuntimeException",
+                        "DiskANN search panicked",
+                    );
+                    return;
+                }
             };
 
-            // Collect results, filtering out the start point.
             let result_count = stats.result_count as usize;
             let mut count = 0;
             for ri in 0..result_count {
@@ -580,7 +562,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
                 }
                 let neighbor = &neighbors[ri];
                 if neighbor.id == START_POINT_ID {
-                    continue; // Skip the graph entry point.
+                    continue;
                 }
                 let idx = qi * top_k + count;
                 result_labels[idx] =
@@ -591,10 +573,9 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
         }
     }
 
-    // Release the index lock before writing results to JNI arrays.
     drop(state);
 
-    // Write distances back to the Java array.
+    // Write distances back.
     {
         let mut dist_elements =
             match unsafe { env.get_array_elements(&distances, ReleaseMode::CopyBack) } {
@@ -610,7 +591,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
         }
     }
 
-    // Write labels back to the Java array.
+    // Write labels back.
     {
         let mut label_elements =
             match unsafe { env.get_array_elements(&labels, ReleaseMode::CopyBack) } {
@@ -695,21 +676,15 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
     _class: JClass<'local>,
     handle: jlong,
 ) -> jlong {
-    let arc = match get_index(handle) {
-        Some(a) => a,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid index handle");
-            return 0;
-        }
-    };
-    let result = match arc.lock() {
-        Ok(state) => serialization_size(state.dimension, state.raw_data.len()) as jlong,
-        Err(_) => {
-            let _ = env.throw_new("java/lang/IllegalStateException", "Index lock poisoned");
-            0
-        }
-    };
-    result
+    jni_catch_unwind(&mut env, 0, AssertUnwindSafe(|| {
+        get_index(handle)
+            .and_then(|arc| {
+                arc.lock()
+                    .ok()
+                    .map(|s| serialization_size(s.dimension, s.raw_data.len()) as jlong)
+            })
+            .unwrap_or(0)
+    }))
 }
 
 #[no_mangle]
@@ -729,13 +704,9 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexDeseria
 
     let mut offset = 0usize;
 
-    // Read and validate header.
     let magic = match read_i32(&bytes, &mut offset) {
         Some(v) => v,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "Data too short");
-            return 0;
-        }
+        None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Data too short"); return 0; }
     };
     if magic != MAGIC {
         let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid magic number");
@@ -744,69 +715,49 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexDeseria
 
     let version = match read_i32(&bytes, &mut offset) {
         Some(v) => v,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "Data too short");
-            return 0;
-        }
+        None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Data too short"); return 0; }
     };
 
     let dimension = read_i32(&bytes, &mut offset).unwrap_or(0);
     let metric_type = read_i32(&bytes, &mut offset).unwrap_or(METRIC_L2);
     let index_type = read_i32(&bytes, &mut offset).unwrap_or(0);
 
-    // Version 2 includes max_degree and build_list_size; version 1 uses defaults.
     let (max_degree, build_list_size, count) = if version >= 2 {
         let md = read_i32(&bytes, &mut offset).unwrap_or(64);
         let bls = read_i32(&bytes, &mut offset).unwrap_or(100);
         let cnt = read_i32(&bytes, &mut offset).unwrap_or(0) as usize;
         (md, bls, cnt)
     } else if version == 1 {
-        // Legacy format: no max_degree/build_list_size fields.
         let cnt = read_i32(&bytes, &mut offset).unwrap_or(0) as usize;
         (64, 100, cnt)
     } else {
-        let _ = env.throw_new(
-            "java/lang/IllegalArgumentException",
-            format!("Unsupported version: {}", version),
-        );
+        let _ = env.throw_new("java/lang/IllegalArgumentException", format!("Unsupported version: {}", version));
         return 0;
     };
 
-    // Read vector data.
     let dim = dimension as usize;
     let mut entries: Vec<(i64, Vec<f32>)> = Vec::with_capacity(count);
     for _ in 0..count {
         let id = match read_i64(&bytes, &mut offset) {
             Some(v) => v,
-            None => {
-                let _ = env.throw_new("java/lang/IllegalArgumentException", "Truncated data");
-                return 0;
-            }
+            None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Truncated data"); return 0; }
         };
         let mut vector = Vec::with_capacity(dim);
         for _ in 0..dim {
             let v = match read_f32(&bytes, &mut offset) {
                 Some(val) => val,
-                None => {
-                    let _ =
-                        env.throw_new("java/lang/IllegalArgumentException", "Truncated data");
-                    return 0;
-                }
+                None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Truncated data"); return 0; }
             };
             vector.push(v);
         }
         entries.push((id, vector));
     }
 
-    // Create a new DiskANN index and re-insert all vectors to rebuild the graph.
     let mut state =
         match create_index_state(dimension, metric_type, index_type, max_degree, build_list_size) {
             Ok(s) => s,
             Err(msg) => {
-                let _ = env.throw_new(
-                    "java/lang/RuntimeException",
-                    format!("Failed to create index during deserialization: {}", msg),
-                );
+                let _ = env.throw_new("java/lang/RuntimeException", format!("Failed to create index during deserialization: {}", msg));
                 return 0;
             }
         };
@@ -819,22 +770,22 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexDeseria
         state.int_to_ext.insert(int_id, *ext_id);
         state.raw_data.push((*ext_id, vector.clone()));
 
-        let result = state.runtime.block_on(state.index.insert(
-            strat,
-            &state.context,
-            &int_id,
-            vector.as_slice(),
-        ));
+        let idx_clone = Arc::clone(&state.index);
+        let ctx = &state.context;
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            state.runtime.block_on(idx_clone.insert(strat, ctx, &int_id, vector.as_slice()))
+        }));
 
-        if let Err(e) = result {
-            let _ = env.throw_new(
-                "java/lang/RuntimeException",
-                format!(
-                    "Failed to re-insert vector {} during deserialization: {}",
-                    ext_id, e
-                ),
-            );
-            return 0;
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                let _ = env.throw_new("java/lang/RuntimeException", format!("Deserialization insert failed for id {}: {}", ext_id, e));
+                return 0;
+            }
+            Err(_) => {
+                let _ = env.throw_new("java/lang/RuntimeException", format!("Deserialization insert panicked for id {}", ext_id));
+                return 0;
+            }
         }
     }
 

@@ -193,9 +193,235 @@ fi
 
 cp "$SRC_LIB" "$OUTPUT_DIR/"
 
+# =====================================================================
+# Bundle shared library dependencies
+# =====================================================================
+# Rust cdylib statically links all Rust code but may dynamically link
+# to system C/C++ libraries (libgcc_s, libstdc++, etc.).  On Linux CI
+# containers the target machine may have different versions, so we
+# bundle all non-trivial dependencies — mirroring the FAISS approach.
+# =====================================================================
+
 echo ""
-echo "Native library location:"
-ls -la "$OUTPUT_DIR/$(basename "$SRC_LIB")"
+echo "============================================"
+echo "Checking & bundling library dependencies"
+echo "============================================"
+
+if [ "$OS" = "Linux" ]; then
+    # ---- Helper: copy a real library file into OUTPUT_DIR ----
+    bundle_lib() {
+        local src_path="$1"
+        local target_name="$2"
+
+        if [ -f "$OUTPUT_DIR/$target_name" ]; then
+            echo "  Already bundled: $target_name"
+            return 0
+        fi
+
+        # Resolve symlinks to the real file
+        local real_path
+        real_path=$(readlink -f "$src_path" 2>/dev/null || realpath "$src_path" 2>/dev/null || echo "$src_path")
+        if [ ! -f "$real_path" ]; then
+            echo "  Cannot resolve: $src_path"
+            return 1
+        fi
+
+        cp "$real_path" "$OUTPUT_DIR/$target_name"
+        chmod +x "$OUTPUT_DIR/$target_name"
+        echo "  Bundled: $real_path -> $target_name"
+        return 0
+    }
+
+    # ---- Helper: search common paths for a library by glob pattern ----
+    find_and_bundle() {
+        local pattern="$1"
+        local target_name="$2"
+
+        if [ -f "$OUTPUT_DIR/$target_name" ]; then
+            echo "  Already bundled: $target_name"
+            return 0
+        fi
+
+        for search_path in /usr/local/lib /usr/local/lib64 \
+                           /usr/lib /usr/lib64 \
+                           /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu; do
+            local found_lib
+            found_lib=$(find "$search_path" -maxdepth 1 -name "$pattern" -type f 2>/dev/null | head -1)
+            if [ -n "$found_lib" ] && [ -f "$found_lib" ]; then
+                bundle_lib "$found_lib" "$target_name"
+                return $?
+            fi
+            local found_link
+            found_link=$(find "$search_path" -maxdepth 1 -name "$pattern" -type l 2>/dev/null | head -1)
+            if [ -n "$found_link" ] && [ -L "$found_link" ]; then
+                bundle_lib "$found_link" "$target_name"
+                return $?
+            fi
+        done
+
+        # Try ldconfig cache
+        local ldconfig_path
+        ldconfig_path=$(ldconfig -p 2>/dev/null | grep "$pattern" | head -1 | awk '{print $NF}')
+        if [ -n "$ldconfig_path" ] && [ -f "$ldconfig_path" ]; then
+            bundle_lib "$ldconfig_path" "$target_name"
+            return $?
+        fi
+
+        echo "  Not found: $pattern"
+        return 1
+    }
+
+    echo ""
+    echo "Bundling required libraries..."
+
+    # 1. GCC runtime (Rust cdylib may link against libgcc_s for stack unwinding)
+    if ! find_and_bundle "libgcc_s.so*" "libgcc_s.so.1"; then
+        echo "  Note: libgcc_s not found as shared library - likely statically linked"
+    fi
+
+    # 2. C++ standard library (needed if the diskann crate compiles any C++ code)
+    if ! find_and_bundle "libstdc++.so*" "libstdc++.so.6"; then
+        echo "  Note: libstdc++ not found as shared library - likely statically linked"
+    fi
+
+    # ---- Scan ldd for additional non-system dependencies ----
+    echo ""
+    echo "Scanning ldd for additional dependencies..."
+    JNI_LIB="$OUTPUT_DIR/$(basename "$SRC_LIB")"
+    LIBS_TO_CHECK="$JNI_LIB"
+    for bundled_lib in "$OUTPUT_DIR"/*.so*; do
+        [ -f "$bundled_lib" ] && LIBS_TO_CHECK="$LIBS_TO_CHECK $bundled_lib"
+    done
+
+    LIBS_CHECKED=""
+    while [ -n "$LIBS_TO_CHECK" ]; do
+        CURRENT_LIB=$(echo "$LIBS_TO_CHECK" | awk '{print $1}')
+        LIBS_TO_CHECK=$(echo "$LIBS_TO_CHECK" | cut -d' ' -f2-)
+        [ "$LIBS_TO_CHECK" = "$CURRENT_LIB" ] && LIBS_TO_CHECK=""
+
+        # Skip already-checked
+        echo "$LIBS_CHECKED" | grep -q "$CURRENT_LIB" 2>/dev/null && continue
+        LIBS_CHECKED="$LIBS_CHECKED $CURRENT_LIB"
+
+        [ ! -f "$CURRENT_LIB" ] && continue
+
+        echo "  Checking deps of: $(basename "$CURRENT_LIB")"
+
+        DEPS=$(ldd "$CURRENT_LIB" 2>/dev/null | grep "=>" | awk '{print $1 " " $3}') || true
+
+        while IFS= read -r dep_line; do
+            [ -z "$dep_line" ] && continue
+            DEP_NAME=$(echo "$dep_line" | awk '{print $1}')
+            DEP_PATH=$(echo "$dep_line" | awk '{print $2}')
+
+            # Skip universally-available system libraries
+            case "$DEP_NAME" in
+                linux-vdso.so*|libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*)
+                    continue
+                    ;;
+            esac
+
+            # Bundle known problematic libraries
+            case "$DEP_NAME" in
+                libgcc_s*)
+                    bundle_lib "$DEP_PATH" "libgcc_s.so.1" || true
+                    ;;
+                libstdc++*)
+                    if bundle_lib "$DEP_PATH" "libstdc++.so.6"; then
+                        LIBS_TO_CHECK="$LIBS_TO_CHECK $OUTPUT_DIR/libstdc++.so.6"
+                    fi
+                    ;;
+                libgomp*)
+                    if bundle_lib "$DEP_PATH" "libgomp.so.1"; then
+                        LIBS_TO_CHECK="$LIBS_TO_CHECK $OUTPUT_DIR/libgomp.so.1"
+                    fi
+                    ;;
+                libquadmath*)
+                    bundle_lib "$DEP_PATH" "libquadmath.so.0" || true
+                    ;;
+                libgfortran*)
+                    bundle_lib "$DEP_PATH" "libgfortran.so.3" || true
+                    ;;
+            esac
+        done <<< "$DEPS"
+    done
+
+    # ---- Set rpath to $ORIGIN so bundled libs are found at load time ----
+    if command -v patchelf &>/dev/null; then
+        echo ""
+        echo "Setting rpath to \$ORIGIN for all libraries..."
+        for lib in "$OUTPUT_DIR"/*.so*; do
+            if [ -f "$lib" ]; then
+                patchelf --set-rpath '$ORIGIN' "$lib" 2>/dev/null || true
+            fi
+        done
+        echo "Done setting rpath"
+    else
+        echo ""
+        echo "WARNING: patchelf not found, cannot set rpath."
+        echo "         Install with: sudo apt-get install patchelf"
+        echo "         The Java loader will still pre-load deps from JAR, but setting"
+        echo "         rpath provides an additional safety net."
+    fi
+
+elif [ "$OS" = "Darwin" ]; then
+    # On macOS, Rust cdylibs are normally self-contained.
+    # But check if any non-system dylibs are referenced.
+    echo ""
+    echo "Checking macOS dylib dependencies..."
+    DYLIB_PATH="$OUTPUT_DIR/$(basename "$SRC_LIB")"
+    otool -L "$DYLIB_PATH" 2>/dev/null | tail -n +2 | while read -r dep_entry; do
+        dep_path=$(echo "$dep_entry" | awk '{print $1}')
+        case "$dep_path" in
+            /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*)
+                # System or relative — OK
+                ;;
+            *)
+                if [ -f "$dep_path" ]; then
+                    dep_basename=$(basename "$dep_path")
+                    if [ ! -f "$OUTPUT_DIR/$dep_basename" ]; then
+                        echo "  Bundling macOS dep: $dep_path -> $dep_basename"
+                        cp "$dep_path" "$OUTPUT_DIR/$dep_basename"
+                        chmod +x "$OUTPUT_DIR/$dep_basename"
+                        # Rewrite the install name so the JNI lib finds the bundled copy
+                        install_name_tool -change "$dep_path" "@loader_path/$dep_basename" "$DYLIB_PATH" 2>/dev/null || true
+                    fi
+                fi
+                ;;
+        esac
+    done
+fi
+
+# =====================================================================
+# Summary: list all libraries and their dependencies
+# =====================================================================
+
+echo ""
+echo "============================================"
+echo "Native library summary"
+echo "============================================"
+
+BUILT_LIBS=$(find "$PROJECT_DIR/src/main/resources" -type f \( -name "*.so" -o -name "*.so.*" -o -name "*.dylib" \) 2>/dev/null)
+
+if [ -n "$BUILT_LIBS" ]; then
+    for lib in $BUILT_LIBS; do
+        echo ""
+        echo "Library: $lib"
+        ls -la "$lib"
+
+        echo ""
+        echo "Dependencies:"
+        if [ "$OS" = "Darwin" ]; then
+            otool -L "$lib" 2>/dev/null | head -20 || true
+        elif [ "$OS" = "Linux" ]; then
+            ldd "$lib" 2>/dev/null | head -20 || readelf -d "$lib" 2>/dev/null | grep NEEDED | head -20 || true
+        fi
+    done
+else
+    echo "  (no libraries found)"
+    ls -la "$PROJECT_DIR/src/main/resources/"*/*/ 2>/dev/null || true
+fi
+
 echo ""
 echo "To package the JAR with native libraries, run:"
 echo "  mvn package"

@@ -64,5 +64,5 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.artifact-name }}
-          path: paimon-diskann/paimon-diskann-jni/src/main/resources/linux/amd64/
+          path: paimon-diskann/paimon-diskann-jni/src/main/resources/
           retention-days: ${{ inputs.retention-days }}

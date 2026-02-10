@@ -153,7 +153,7 @@ public class Index implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         if (!closed) {
             closed = true;
             if (nativeHandle != 0) {

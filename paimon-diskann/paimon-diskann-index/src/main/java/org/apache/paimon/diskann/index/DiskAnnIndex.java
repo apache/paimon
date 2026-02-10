@@ -37,14 +37,23 @@ public class DiskAnnIndex implements Closeable {
     private final int dimension;
     private final DiskAnnVectorMetric metric;
     private final DiskAnnIndexType indexType;
+    private final int maxDegree;
+    private final int buildListSize;
     private volatile boolean closed = false;
 
     private DiskAnnIndex(
-            Index index, int dimension, DiskAnnVectorMetric metric, DiskAnnIndexType indexType) {
+            Index index,
+            int dimension,
+            DiskAnnVectorMetric metric,
+            DiskAnnIndexType indexType,
+            int maxDegree,
+            int buildListSize) {
         this.index = index;
         this.dimension = dimension;
         this.metric = metric;
         this.indexType = indexType;
+        this.maxDegree = maxDegree;
+        this.buildListSize = buildListSize;
     }
 
     public static DiskAnnIndex create(
@@ -56,7 +65,7 @@ public class DiskAnnIndex implements Closeable {
         MetricType metricType = metric.toMetricType();
         Index index =
                 Index.create(dimension, metricType, indexType.value(), maxDegree, buildListSize);
-        return new DiskAnnIndex(index, dimension, metric, indexType);
+        return new DiskAnnIndex(index, dimension, metric, indexType, maxDegree, buildListSize);
     }
 
     public void addWithIds(ByteBuffer vectorBuffer, ByteBuffer idBuffer, int n) {
@@ -66,7 +75,12 @@ public class DiskAnnIndex implements Closeable {
         index.addWithIds(n, vectorBuffer, idBuffer);
     }
 
-    public void build(int buildListSize) {
+    /**
+     * Build the index graph after adding vectors.
+     *
+     * <p>Uses the buildListSize parameter that was specified during index creation.
+     */
+    public void build() {
         ensureOpen();
         index.build(buildListSize);
     }
@@ -114,6 +128,14 @@ public class DiskAnnIndex implements Closeable {
         return indexType;
     }
 
+    public int maxDegree() {
+        return maxDegree;
+    }
+
+    public int buildListSize() {
+        return buildListSize;
+    }
+
     public long serializeSize() {
         ensureOpen();
         return index.serializeSize();
@@ -129,7 +151,23 @@ public class DiskAnnIndex implements Closeable {
 
     public static DiskAnnIndex deserialize(byte[] data, DiskAnnVectorMetric metric) {
         Index index = Index.deserialize(data);
-        return new DiskAnnIndex(index, index.getDimension(), metric, DiskAnnIndexType.UNKNOWN);
+        return new DiskAnnIndex(
+                index, index.getDimension(), metric, DiskAnnIndexType.UNKNOWN, 64, 100);
+    }
+
+    /**
+     * Reset the index (remove all vectors).
+     *
+     * <p>Note: This is not supported in the current implementation. DiskANN indices are immutable
+     * once built. To "reset", you must create a new index.
+     *
+     * @throws UnsupportedOperationException always, as reset is not currently supported
+     */
+    public void reset() {
+        throw new UnsupportedOperationException(
+                "Reset is not supported for DiskANN indices. "
+                        + "DiskANN indices are immutable once built. "
+                        + "Please create a new index instead.");
     }
 
     public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {

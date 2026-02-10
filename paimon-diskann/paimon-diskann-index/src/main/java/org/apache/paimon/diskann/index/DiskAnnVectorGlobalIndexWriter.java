@@ -27,6 +27,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 
 import java.io.BufferedOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -41,8 +42,11 @@ import java.util.List;
  *
  * <p>Vectors are added to the index in batches. When the current index reaches {@code sizePerIndex}
  * vectors, it is built and serialized to a file and a new index is created.
+ *
+ * <p>This class implements {@link Closeable} so that the native DiskANN index is released even if
+ * {@link #finish()} is never called or throws an exception.
  */
-public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
+public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
 
     private static final int DEFAULT_BATCH_SIZE = 10000;
 
@@ -174,7 +178,7 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
         }
 
         if (!built) {
-            currentIndex.build(options.buildListSize());
+            currentIndex.build();
             built = true;
         }
 
@@ -244,6 +248,21 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
             for (int i = 0; i < vector.length; i++) {
                 vector[i] /= norm;
             }
+        }
+    }
+
+    /**
+     * Release native resources held by the current in-progress index.
+     *
+     * <p>This is a safety net: under normal operation the index is closed by {@link
+     * #flushCurrentIndex()}, but if an error occurs before flushing this method ensures the native
+     * handle is freed.
+     */
+    @Override
+    public void close() {
+        if (currentIndex != null) {
+            currentIndex.close();
+            currentIndex = null;
         }
     }
 
