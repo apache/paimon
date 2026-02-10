@@ -160,10 +160,6 @@ class DataFileMeta:
 
     @staticmethod
     def is_blob_file(file_name: str) -> bool:
-        """
-        True if the given file name is a blob data file (by extension).
-        Aligns with Java BlobFileFormat.isBlobFile(String fileName).
-        """
         return file_name.endswith(".blob")
 
     def assign_first_row_id(self, first_row_id: int) -> 'DataFileMeta':
