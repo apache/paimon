@@ -29,12 +29,10 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 /** Compaction Sink for unaware-bucket table. */
 public class AppendTableCompactSink extends FlinkSink<AppendCompactTask> {
 
-    private final FileStoreTable table;
     private final boolean isStreaming;
 
     public AppendTableCompactSink(FileStoreTable table, boolean isStreaming) {
         super(table, true);
-        this.table = table;
         this.isStreaming = isStreaming;
     }
 
