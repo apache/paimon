@@ -134,12 +134,6 @@ def _filter_manifest_files_by_row_ranges(
 def _filter_manifest_entries_by_row_ranges(
         entries: List[ManifestEntry],
         row_ranges: List) -> List[ManifestEntry]:
-    """
-    Filter manifest entries by row ranges (per-entry, same as Java filterByStats(ManifestEntry)).
-
-    Keep only entries whose file [first_row_id, first_row_id + row_count - 1] overlaps
-    with any of the given row_ranges. Entries with first_row_id None are kept.
-    """
     from pypaimon.globalindex.range import Range
 
     if not row_ranges:
