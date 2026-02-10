@@ -16,8 +16,7 @@
 #  under the License.
 
 import logging
-import re
-from typing import Dict, List, Optional
+from typing import Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
@@ -181,74 +180,3 @@ class TagManager:
         path = self.tag_path(tag_name)
         self.file_io.delete_quietly(path)
         return True
-
-    def tags(self) -> Dict[int, List[str]]:
-        """
-        Get all tagged snapshots with names sorted by snapshot id.
-        
-        Returns:
-            Dictionary mapping snapshot ID to list of tag names
-        """
-        tag_dir = self.tag_directory()
-        if not self.file_io.exists(tag_dir):
-            return {}
-
-        result: Dict[int, List[str]] = {}
-
-        file_infos = self.file_io.list_status(tag_dir)
-        tag_pattern = re.compile(f'^{TAG_PREFIX}(.+)$')
-
-        for file_info in file_infos:
-            filename = file_info.path.split('/')[-1]
-            match = tag_pattern.match(filename)
-            if match:
-                tag_name = match.group(1)
-                try:
-                    tag = self.get(tag_name)
-                    if tag is not None:
-                        snapshot_id = tag.id
-                        if snapshot_id not in result:
-                            result[snapshot_id] = []
-                        result[snapshot_id].append(tag_name)
-                except Exception:
-                    # If tag file is corrupted or deleted, skip it
-                    pass
-
-        return dict(sorted(result.items()))
-
-    def tagged_snapshots(self) -> List[Snapshot]:
-        """
-        Get all tagged snapshots sorted by snapshot id.
-        
-        Returns:
-            List of snapshots that have tags
-        """
-        result = []
-        for tag_names in self.tags().values():
-            if tag_names:
-                tag = self.get(tag_names[0])
-                if tag is not None:
-                    result.append(tag.trim_to_snapshot())
-        return result
-
-    def tag_count(self) -> int:
-        """
-        Get the number of tags.
-        
-        Returns:
-            Number of tags
-        """
-        tag_dir = self.tag_directory()
-        if not self.file_io.exists(tag_dir):
-            return 0
-
-        count = 0
-        file_infos = self.file_io.list_status(tag_dir)
-        tag_pattern = re.compile(f'^{TAG_PREFIX}')
-
-        for file_info in file_infos:
-            filename = file_info.path.split('/')[-1]
-            if tag_pattern.match(filename):
-                count += 1
-
-        return count

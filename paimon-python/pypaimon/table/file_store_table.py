@@ -227,7 +227,7 @@ class FileStoreTable(Table):
         else:
             raise ValueError(f"Unsupported bucket mode: {bucket_mode}")
 
-    def copy(self, options: dict, try_time_travel: bool = True) -> 'FileStoreTable':
+    def copy(self, options: dict) -> 'FileStoreTable':
         if CoreOptions.BUCKET.key() in options and int(options.get(CoreOptions.BUCKET.key())) != self.options.bucket():
             raise ValueError("Cannot change bucket number")
         new_options = CoreOptions.copy(self.options).options.to_map()
@@ -239,10 +239,9 @@ class FileStoreTable(Table):
 
         new_table_schema = self.table_schema.copy(new_options=new_options)
 
-        if try_time_travel:
-            time_travel_schema = self._try_time_travel(Options(new_options))
-            if time_travel_schema is not None:
-                new_table_schema = time_travel_schema
+        time_travel_schema = self._try_time_travel(Options(new_options))
+        if time_travel_schema is not None:
+            new_table_schema = time_travel_schema
 
         return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
                               self.catalog_environment)
