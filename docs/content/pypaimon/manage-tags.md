@@ -46,13 +46,12 @@ If snapshot_id unset, snapshot_id defaults to the latest.
 ## Read Tag
 You can read data from a specific tag.
 ```python
-from pypaimon.common.options.core_options import CoreOptions
 
 table = catalog.get_table('database_name.table_name')
 table.create_tag("tag2", snapshot_id=2)
 
 # Read from tag2 using scan.tag-name option
-table_with_tag = table.copy({CoreOptions.SCAN_TAG_NAME.key(): "tag2"})
+table_with_tag = table.copy({"scan.tag-name": "tag2"})
 read_builder = table_with_tag.new_read_builder()
 table_scan = read_builder.new_scan()
 table_read = read_builder.new_read()
