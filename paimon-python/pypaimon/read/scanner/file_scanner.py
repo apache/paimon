@@ -27,7 +27,10 @@ from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (trim_and_transform_predicate)
+from pypaimon.read.push_down_utils import (
+    remove_row_id_filter,
+    trim_and_transform_predicate,
+)
 from pypaimon.read.scanner.append_table_split_generator import AppendTableSplitGenerator
 from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
 from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
@@ -128,6 +131,37 @@ def _filter_manifest_files_by_row_ranges(
     return filtered_files
 
 
+def _filter_manifest_entries_by_row_ranges(
+        entries: List[ManifestEntry],
+        row_ranges: List) -> List[ManifestEntry]:
+    """
+    Filter manifest entries by row ranges (per-entry, same as Java filterByStats(ManifestEntry)).
+
+    Keep only entries whose file [first_row_id, first_row_id + row_count - 1] overlaps
+    with any of the given row_ranges. Entries with first_row_id None are kept.
+    """
+    from pypaimon.globalindex.range import Range
+
+    if not row_ranges:
+        return entries
+
+    filtered = []
+    for entry in entries:
+        first_row_id = entry.file.first_row_id
+        if first_row_id is None:
+            filtered.append(entry)
+            continue
+        file_range = Range(
+            first_row_id,
+            first_row_id + entry.file.row_count - 1
+        )
+        for r in row_ranges:
+            if file_range.overlaps(r):
+                filtered.append(entry)
+                break
+    return filtered
+
+
 class FileScanner:
     def __init__(
         self,
@@ -142,6 +176,7 @@ class FileScanner:
         self.table: FileStoreTable = table
         self.manifest_scanner = manifest_scanner
         self.predicate = predicate
+        self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
         self.limit = limit
         self.vector_search = vector_search
 
@@ -239,6 +274,9 @@ class FileScanner:
             manifest_files = _filter_manifest_files_by_row_ranges(manifest_files, row_ranges)
 
         entries = self.read_manifest_entries(manifest_files)
+
+        if row_ranges is not None:
+            entries = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
 
         return entries, DataEvolutionSplitGenerator(
             self.table,
@@ -388,9 +426,7 @@ class FileScanner:
         else:
             if not self.predicate:
                 return True
-            from pypaimon.read.push_down_utils import remove_row_id_filter
-            predicate_for_stats = remove_row_id_filter(self.predicate)
-            if predicate_for_stats is None:
+            if self.predicate_for_stats is None:
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols
@@ -401,7 +437,7 @@ class FileScanner:
                 entry.file.row_count,
                 stats_fields
             )
-            return predicate_for_stats.test_by_simple_stats(
+            return self.predicate_for_stats.test_by_simple_stats(
                 evolved_stats,
                 entry.file.row_count
             )
