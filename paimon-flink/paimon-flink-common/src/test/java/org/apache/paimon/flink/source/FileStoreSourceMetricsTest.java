@@ -54,32 +54,48 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for file store sources with metrics. */
 public class FileStoreSourceMetricsTest {
     private FileStoreTable table;
+    private FileStoreTable fixBucketTable;
     private TestingSplitEnumeratorContextWithRegisteringGroup context;
     private MetricGroup scanMetricGroup;
+    private MetricGroup enumeratorMetricGroup;
 
     @BeforeEach
     public void before(@TempDir java.nio.file.Path path) throws Exception {
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(path.toString());
+        Path fixBucketTablePath = new Path(path.toString(), "fix_bucket");
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        SchemaManager fixBucketSchemaManager = new SchemaManager(fileIO, fixBucketTablePath);
         TableSchema tableSchema =
                 schemaManager.createTable(
                         Schema.newBuilder()
                                 .column("a", DataTypes.INT())
                                 .column("b", DataTypes.BIGINT())
                                 .build());
+        TableSchema fixBucketTableSchema =
+                fixBucketSchemaManager.createTable(
+                        Schema.newBuilder()
+                                .column("a", DataTypes.INT())
+                                .column("b", DataTypes.BIGINT())
+                                .primaryKey("a")
+                                .option("bucket", "2")
+                                .option("bucket-key", "a")
+                                .build());
         table = FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
+        fixBucketTable =
+                FileStoreTableFactory.create(fileIO, fixBucketTablePath, fixBucketTableSchema);
         context = new TestingSplitEnumeratorContextWithRegisteringGroup(1);
         scanMetricGroup =
                 context.metricGroup()
                         .addGroup("paimon")
                         .addGroup("table", table.name())
                         .addGroup("scan");
+        enumeratorMetricGroup = context.metricGroup();
     }
 
     @Test
     public void staticFileStoreSourceScanMetricsTest() throws Exception {
-        writeOnce();
+        writeOnce(table);
         StaticFileStoreSource staticFileStoreSource =
                 new StaticFileStoreSource(
                         table.newReadBuilder(),
@@ -98,7 +114,7 @@ public class FileStoreSourceMetricsTest {
 
     @Test
     public void continuousFileStoreSourceScanMetricsTest() throws Exception {
-        writeOnce();
+        writeOnce(table);
         ContinuousFileStoreSource continuousFileStoreSource =
                 new ContinuousFileStoreSource(table.newReadBuilder(), table.options(), null);
         ContinuousFileSplitEnumerator enumerator =
@@ -114,7 +130,7 @@ public class FileStoreSourceMetricsTest {
                                 .getValue())
                 .isEqualTo(1L);
 
-        writeAgain();
+        writeAgain(table);
         enumerator.scanNextSnapshot();
         assertThat(TestingMetricUtils.getHistogram(scanMetricGroup, "scanDuration").getCount())
                 .isEqualTo(2);
@@ -126,7 +142,48 @@ public class FileStoreSourceMetricsTest {
                 .isEqualTo(1L);
     }
 
-    private void writeOnce() throws Exception {
+    @Test
+    public void continuousFileStoreFixBucketEnumeratorMetricsTest() throws Exception {
+        writeOnce(fixBucketTable);
+
+        ContinuousFileStoreSource continuousFileStoreSource =
+                new ContinuousFileStoreSource(
+                        fixBucketTable.newReadBuilder(), fixBucketTable.options(), null);
+        ContinuousFileSplitEnumerator enumerator =
+                (ContinuousFileSplitEnumerator)
+                        continuousFileStoreSource.restoreEnumerator(context, null);
+        enumerator.scanNextSnapshot();
+
+        // equal bucketNum when bucket > 0
+        assertThat(
+                        TestingMetricUtils.getGauge(
+                                        enumeratorMetricGroup,
+                                        ContinuousFileStoreSource.SOURCE_PARALLELISM_UPPER_BOUND)
+                                .getValue())
+                .isEqualTo(2);
+    }
+
+    @Test
+    public void continuousFileStoreDynBucketEnumeratorMetricsTest() throws Exception {
+        writeOnce(table);
+
+        ContinuousFileStoreSource continuousFileStoreSource =
+                new ContinuousFileStoreSource(table.newReadBuilder(), table.options(), null);
+        ContinuousFileSplitEnumerator enumerator =
+                (ContinuousFileSplitEnumerator)
+                        continuousFileStoreSource.restoreEnumerator(context, null);
+        enumerator.scanNextSnapshot();
+
+        // equal parallelism when bucket < 0
+        assertThat(
+                        TestingMetricUtils.getGauge(
+                                        enumeratorMetricGroup,
+                                        ContinuousFileStoreSource.SOURCE_PARALLELISM_UPPER_BOUND)
+                                .getValue())
+                .isEqualTo(ContinuousFileStoreSource.MAX_PARALLELISM_OF_SOURCE);
+    }
+
+    private void writeOnce(FileStoreTable table) throws Exception {
         InnerTableWrite writer = table.newWrite("test");
         TableCommitImpl commit = table.newCommit("test");
         writer.write(GenericRow.of(1, 2L));
@@ -140,7 +197,7 @@ public class FileStoreSourceMetricsTest {
         writer.close();
     }
 
-    private void writeAgain() throws Exception {
+    private void writeAgain(FileStoreTable table) throws Exception {
         InnerTableWrite writer = table.newWrite("test");
         TableCommitImpl commit = table.newCommit("test");
         writer.write(GenericRow.of(10, 2L));
