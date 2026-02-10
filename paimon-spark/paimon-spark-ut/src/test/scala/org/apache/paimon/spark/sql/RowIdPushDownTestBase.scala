@@ -26,12 +26,12 @@ import org.apache.spark.sql.Row
 
 import scala.collection.JavaConverters._
 
-class RowIdPushDownTestBase extends PaimonSparkTestBase {
+abstract class RowIdPushDownTestBase extends PaimonSparkTestBase {
 
   test("test paimon-spark row id push down") {
     withTable("t") {
       sql("CREATE TABLE t (a INT, b INT, c STRING) TBLPROPERTIES " +
-        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'row-id-push-down.enabled'='true')")
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true')")
 
       // first manifest
       sql("INSERT INTO t VALUES (0, 0, '0'), (1, 1, '1'), (2, 2, '2'), (3, 3, '3')")
@@ -63,6 +63,10 @@ class RowIdPushDownTestBase extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT * FROM t WHERE _ROW_ID IN (6, 7)"),
         Seq()
+      )
+      checkAnswer(
+        sql("SELECT * FROM t WHERE _ROW_ID BETWEEN 0 AND 2"),
+        Seq(Row(0, 0, "0"), Row(1, 1, "1"), Row(2, 2, "2"))
       )
 
       // 2.CompoundPredicate

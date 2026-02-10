@@ -21,6 +21,7 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.utils.Range;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -57,9 +58,12 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Ran
                 for (Object literal : predicate.literals()) {
                     rowIds.add((Long) literal);
                 }
-                // The list output by getRangesFromList is already sorted,
-                // and has no overlap
                 return Optional.of(Range.toRanges(rowIds));
+            } else if (function instanceof Between) {
+                List<Object> literals = predicate.literals();
+                return Optional.of(
+                        Collections.singletonList(
+                                new Range((Long) literals.get(0), (Long) literals.get(1))));
             }
         }
         return Optional.empty();
