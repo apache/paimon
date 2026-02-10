@@ -231,4 +231,3 @@ class ManifestSchemaTest(unittest.TestCase):
         self.assertEqual(meta.schema_id, 0)
         self.assertIsNone(meta.min_row_id)
         self.assertIsNone(meta.max_row_id)
-
