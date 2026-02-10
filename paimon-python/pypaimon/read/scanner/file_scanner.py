@@ -143,7 +143,7 @@ def _filter_manifest_entries_by_row_ranges(
     from pypaimon.globalindex.range import Range
 
     if not row_ranges:
-        return entries
+        return []
 
     filtered = []
     for entry in entries:

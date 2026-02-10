@@ -18,6 +18,7 @@ limitations under the License.
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import pyarrow as pa
 
@@ -663,6 +664,16 @@ class DataEvolutionTest(unittest.TestCase):
         self.assertIn(1, f0_vals, "_ROW_ID=0 row has f0=1")
         self.assertIn(101, f0_vals)
         self.assertIn(102, f0_vals)
+
+    def test_filter_manifest_entries_by_row_ranges(self):
+        from pypaimon.read.scanner.file_scanner import _filter_manifest_entries_by_row_ranges
+
+        entry_0 = SimpleNamespace(file=SimpleNamespace(first_row_id=0, row_count=1))
+        entries = [entry_0]
+        row_ranges = []
+
+        filtered = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+        self.assertEqual(filtered, [], "empty row_ranges must return no entries, not all entries")
 
     def test_more_data(self):
         simple_pa_schema = pa.schema([
