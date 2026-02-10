@@ -614,16 +614,16 @@ class PyarrowFieldParser:
             unit = field_type.unit
             if field_type.tz is None:
                 if unit == 'ms':
-                    return {"type": "long", "logicalType": "timestamp-millis"}
+                    return {"type": "long", "logicalType": "local-timestamp-millis"}
                 elif unit == 'us':
-                    return {"type": "long", "logicalType": "timestamp-micros"}
+                    return {"type": "long", "logicalType": "local-timestamp-micros"}
                 else:
                     raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
             else:
                 if unit == 'ms':
-                    return {"type": "long", "logicalType": "local-timestamp-millis"}
+                    return {"type": "long", "logicalType": "timestamp-millis"}
                 elif unit == 'us':
-                    return {"type": "long", "logicalType": "local-timestamp-micros"}
+                    return {"type": "long", "logicalType": "timestamp-micros"}
                 else:
                     raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
         elif pyarrow.types.is_list(field_type) or pyarrow.types.is_large_list(field_type):

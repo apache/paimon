@@ -134,3 +134,68 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(len(converted_nested_field.fields), 2)
         self.assertEqual(converted_nested_field.fields[0].name, "inner_field1")
         self.assertEqual(converted_nested_field.fields[1].name, "inner_field2")
+
+    def test_timestamp_without_timezone_millis_to_avro(self):
+        """Test PyArrow timestamp[ms] without timezone converts to local-timestamp-millis."""
+        field_type = pa.timestamp('ms')
+        avro_type = PyarrowFieldParser.to_avro_type(field_type, "ts_field")
+
+        self.assertEqual(avro_type["type"], "long")
+        self.assertEqual(avro_type["logicalType"], "local-timestamp-millis")
+
+    def test_timestamp_without_timezone_micros_to_avro(self):
+        """Test PyArrow timestamp[us] without timezone converts to local-timestamp-micros."""
+        field_type = pa.timestamp('us')
+        avro_type = PyarrowFieldParser.to_avro_type(field_type, "ts_field")
+
+        self.assertEqual(avro_type["type"], "long")
+        self.assertEqual(avro_type["logicalType"], "local-timestamp-micros")
+
+    def test_timestamp_with_timezone_micros_to_avro(self):
+        """Test PyArrow timestamp[us] with timezone converts to timestamp-micros."""
+        field_type = pa.timestamp('us', tz='UTC')
+        avro_type = PyarrowFieldParser.to_avro_type(field_type, "ts_field")
+
+        self.assertEqual(avro_type["type"], "long")
+        self.assertEqual(avro_type["logicalType"], "timestamp-micros")
+
+    def test_timestamp_with_non_utc_timezone_to_avro(self):
+        """Test PyArrow timestamp with non-UTC timezone converts to timestamp-millis."""
+        field_type = pa.timestamp('ms', tz='Asia/Shanghai')
+        avro_type = PyarrowFieldParser.to_avro_type(field_type, "ts_field")
+
+        self.assertEqual(avro_type["type"], "long")
+        self.assertEqual(avro_type["logicalType"], "timestamp-millis")
+
+    def test_timestamp_unsupported_unit_raises_error(self):
+        """Test PyArrow timestamp with unsupported unit raises ValueError."""
+        field_type = pa.timestamp('ns')
+
+        with self.assertRaises(ValueError) as context:
+            PyarrowFieldParser.to_avro_type(field_type, "ts_field")
+
+        self.assertIn("ns", str(context.exception))
+
+    def test_timestamp_in_schema_to_avro(self):
+        """Test timestamp field in PyArrow schema converts correctly to Avro schema."""
+        pa_schema = pa.schema([
+            pa.field("id", pa.int64()),
+            pa.field("local_ts", pa.timestamp('ms')),
+            pa.field("utc_ts", pa.timestamp('us', tz='UTC'))
+        ])
+
+        avro_schema = PyarrowFieldParser.to_avro_schema(pa_schema, name="test_record")
+
+        self.assertEqual(avro_schema["type"], "record")
+        self.assertEqual(avro_schema["name"], "test_record")
+        self.assertEqual(len(avro_schema["fields"]), 3)
+
+        local_ts_field = avro_schema["fields"][1]
+        self.assertEqual(local_ts_field["name"], "local_ts")
+        local_ts_type = local_ts_field["type"][1]
+        self.assertEqual(local_ts_type["logicalType"], "local-timestamp-millis")
+
+        utc_ts_field = avro_schema["fields"][2]
+        self.assertEqual(utc_ts_field["name"], "utc_ts")
+        utc_ts_type = utc_ts_field["type"][1]
+        self.assertEqual(utc_ts_type["logicalType"], "timestamp-micros")
