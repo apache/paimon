@@ -54,7 +54,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 if manifest_entry.file.first_row_id is not None
                 else float('-inf')
             )
-            is_blob = 1 if self._is_blob_file(manifest_entry.file.file_name) else 0
+            is_blob = 1 if manifest_entry.file.is_blob_file() else 0
             max_seq = manifest_entry.file.max_sequence_number
             return first_row_id, is_blob, -max_seq
 
@@ -341,7 +341,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 split_by_row_id.append([file])
                 continue
 
-            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
+            if not file.is_blob_file() and first_row_id != last_row_id:
                 if current_split:
                     split_by_row_id.append(current_split)
 
@@ -382,7 +382,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         current_pos = file_end_pos
         data_file_infos = []
         for file in split.files:
-            if self._is_blob_file(file.file_name):
+            if file.is_blob_file():
                 continue
             file_begin_pos = current_pos
             current_pos += file.row_count
@@ -402,7 +402,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         # Second pass: only blob files (data files already in shard_file_idx_map from first pass)
         for file in split.files:
-            if not self._is_blob_file(file.file_name):
+            if not file.is_blob_file():
                 continue
             blob_first_row_id = file.first_row_id if file.first_row_id is not None else 0
             data_file_range = None
@@ -489,7 +489,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         row_id_end = -1
 
         for file in files:
-            if not DataEvolutionSplitGenerator._is_blob_file(file.file_name):
+            if not file.is_blob_file():
                 if file.first_row_id is not None:
                     row_id_start = file.first_row_id
                     row_id_end = file.first_row_id + file.row_count

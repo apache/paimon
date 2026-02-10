@@ -64,7 +64,7 @@ class BlobBunch(FieldBunch):
 
     def add(self, file: DataFileMeta) -> None:
         """Add a blob file to this bunch."""
-        if not self._is_blob_file(file.file_name):
+        if not file.is_blob_file():
             raise ValueError("Only blob file can be added to a blob bunch.")
 
         if file.first_row_id == self.latest_first_row_id:
@@ -113,8 +113,3 @@ class BlobBunch(FieldBunch):
 
     def files(self) -> List[DataFileMeta]:
         return self._files
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file based on its extension."""
-        return file_name.endswith('.blob')

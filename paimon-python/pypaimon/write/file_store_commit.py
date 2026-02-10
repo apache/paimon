@@ -648,7 +648,7 @@ class FileStoreCommit:
                     entry.file.file_source == 0 and  # APPEND file source
                     entry.file.first_row_id is None):  # No existing first_row_id
 
-                if self._is_blob_file(entry.file.file_name):
+                if entry.file.is_blob_file():
                     # Handle blob files specially
                     if blob_start >= start:
                         raise RuntimeError(
@@ -669,8 +669,3 @@ class FileStoreCommit:
                 row_id_assigned.append(entry)
 
         return row_id_assigned, start
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file based on its extension."""
-        return file_name.endswith('.blob')

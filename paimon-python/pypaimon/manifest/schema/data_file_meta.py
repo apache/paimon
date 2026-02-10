@@ -158,6 +158,9 @@ class DataFileMeta:
             file_path=self.file_path
         )
 
+    def is_blob_file(self) -> bool:
+        return self.file_name.endswith(".blob")
+
     def assign_first_row_id(self, first_row_id: int) -> 'DataFileMeta':
         """Create a new DataFileMeta with the assigned first_row_id."""
         return DataFileMeta(
