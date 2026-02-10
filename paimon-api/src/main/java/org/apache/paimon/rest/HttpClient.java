@@ -144,6 +144,16 @@ public class HttpClient implements RESTClient {
                                                         : "response body is null",
                                                 response.getCode());
                             }
+                            if (error.getMessage() == null || error.getMessage().isEmpty()) {
+                                error =
+                                        new ErrorResponse(
+                                                error.getResourceType(),
+                                                error.getResourceName(),
+                                                responseBodyStr != null
+                                                        ? responseBodyStr
+                                                        : "response body is null",
+                                                error.getCode());
+                            }
                             errorHandler.accept(error, extractRequestId(response));
                         }
                         if (responseType != null && responseBodyStr != null) {
