@@ -46,14 +46,8 @@ public class ContinuousFileStoreSource extends FlinkSource {
     protected final Map<String, String> options;
     protected final boolean unordered;
 
-    /**
-     * Metric name for source scaling max parallelism. This metric provides a recommended upper
-     * bound of parallelism for auto-scaling systems.
-     */
-    public static final String SOURCE_PARALLELISM_UPPER_BOUND = "sourceParallelismUpperBound";
-
-    /** refer org.apache.flink.configuration.PipelineOptions.MAX_PARALLELISM. */
-    public static final int MAX_PARALLELISM_OF_SOURCE = 32768;
+    /** refer to org.apache.flink.configuration.PipelineOptions.MAX_PARALLELISM. */
+    protected static final int MAX_PARALLELISM_OF_SOURCE = 32768;
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
@@ -94,12 +88,6 @@ public class ContinuousFileStoreSource extends FlinkSource {
         }
         StreamTableScan scan = readBuilder.newStreamScan();
         if (metricGroup(context) != null) {
-            int bucketNum = CoreOptions.fromMap(options).bucket();
-            int sourceParallelismUpperBound = bucketNum < 0 ? MAX_PARALLELISM_OF_SOURCE : bucketNum;
-
-            context.metricGroup()
-                    .gauge(SOURCE_PARALLELISM_UPPER_BOUND, () -> sourceParallelismUpperBound);
-
             ((StreamDataTableScan) scan)
                     .withMetricRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
@@ -123,6 +111,9 @@ public class ContinuousFileStoreSource extends FlinkSource {
             @Nullable Long nextSnapshotId,
             StreamTableScan scan) {
         Options options = Options.fromMap(this.options);
+        int bucketNum = options.get(CoreOptions.BUCKET);
+        int sourceParallelismUpperBound = bucketNum < 0 ? MAX_PARALLELISM_OF_SOURCE : bucketNum;
+
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
@@ -132,6 +123,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 unordered,
                 options.get(CoreOptions.SCAN_MAX_SPLITS_PER_TASK),
                 options.get(FlinkConnectorOptions.READ_SHUFFLE_BUCKET_WITH_PARTITION),
-                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT));
+                options.get(FlinkConnectorOptions.SCAN_MAX_SNAPSHOT_COUNT),
+                sourceParallelismUpperBound);
     }
 }

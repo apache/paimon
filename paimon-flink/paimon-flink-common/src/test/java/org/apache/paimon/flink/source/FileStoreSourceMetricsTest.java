@@ -152,13 +152,14 @@ public class FileStoreSourceMetricsTest {
         ContinuousFileSplitEnumerator enumerator =
                 (ContinuousFileSplitEnumerator)
                         continuousFileStoreSource.restoreEnumerator(context, null);
-        enumerator.scanNextSnapshot();
+        enumerator.start();
 
         // equal bucketNum when bucket > 0
         assertThat(
                         TestingMetricUtils.getGauge(
                                         enumeratorMetricGroup,
-                                        ContinuousFileStoreSource.SOURCE_PARALLELISM_UPPER_BOUND)
+                                        ContinuousFileSplitEnumerator
+                                                .SOURCE_PARALLELISM_UPPER_BOUND)
                                 .getValue())
                 .isEqualTo(2);
     }
@@ -172,13 +173,14 @@ public class FileStoreSourceMetricsTest {
         ContinuousFileSplitEnumerator enumerator =
                 (ContinuousFileSplitEnumerator)
                         continuousFileStoreSource.restoreEnumerator(context, null);
-        enumerator.scanNextSnapshot();
+        enumerator.start();
 
         // equal parallelism when bucket < 0
         assertThat(
                         TestingMetricUtils.getGauge(
                                         enumeratorMetricGroup,
-                                        ContinuousFileStoreSource.SOURCE_PARALLELISM_UPPER_BOUND)
+                                        ContinuousFileSplitEnumerator
+                                                .SOURCE_PARALLELISM_UPPER_BOUND)
                                 .getValue())
                 .isEqualTo(ContinuousFileStoreSource.MAX_PARALLELISM_OF_SOURCE);
     }

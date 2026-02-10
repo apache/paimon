@@ -395,7 +395,7 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
             <td>sourceParallelismUpperBound</td>
             <td>Flink Source Enumerator</td>
             <td>Gauge</td>
-            <td>Recommended upper bound of parallelism for auto-scaling systems. For fixed bucket tables, this equals the bucket number. For dynamic or postpone bucket tables (bucket < 0), this equals the flink max parallelism. Note: This is a recommendation, not a hard limit.</td>
+            <td>Recommended upper bound of parallelism for auto-scaling systems. Note: This is a recommendation, not a hard limit.</td>
         </tr>
     </tbody>
 </table>
