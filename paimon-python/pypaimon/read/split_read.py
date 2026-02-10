@@ -475,7 +475,7 @@ class DataEvolutionSplitRead(SplitRead):
         # Sort files by firstRowId and then by maxSequenceNumber
         def sort_key(file: DataFileMeta) -> tuple:
             first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
-            is_blob = 1 if file.is_blob_file() else 0
+            is_blob = 1 if DataFileMeta.is_blob_file(file.file_name) else 0
             max_seq = file.max_sequence_number
             return (first_row_id, is_blob, -max_seq)
 
@@ -493,7 +493,7 @@ class DataEvolutionSplitRead(SplitRead):
                 split_by_row_id.append([file])
                 continue
 
-            if not file.is_blob_file() and first_row_id != last_row_id:
+            if not DataFileMeta.is_blob_file(file.file_name) and first_row_id != last_row_id:
                 if current_split:
                     split_by_row_id.append(current_split)
                 if first_row_id < check_row_id_start:
@@ -541,7 +541,7 @@ class DataEvolutionSplitRead(SplitRead):
             first_file = bunch.files()[0]
 
             # Get field IDs for this bunch
-            if first_file.is_blob_file():
+            if DataFileMeta.is_blob_file(first_file.file_name):
                 # For blob files, we need to get the field ID from the write columns
                 field_ids = [self._get_field_id_from_write_cols(first_file)]
             elif first_file.write_cols:
@@ -615,7 +615,7 @@ class DataEvolutionSplitRead(SplitRead):
         row_count = -1
 
         for file in need_merge_files:
-            if file.is_blob_file():
+            if DataFileMeta.is_blob_file(file.file_name):
                 field_id = self._get_field_id_from_write_cols(file)
                 if field_id not in blob_bunch_map:
                     blob_bunch_map[field_id] = BlobBunch(row_count)

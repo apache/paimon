@@ -64,7 +64,7 @@ class BlobBunch(FieldBunch):
 
     def add(self, file: DataFileMeta) -> None:
         """Add a blob file to this bunch."""
-        if not file.is_blob_file():
+        if not DataFileMeta.is_blob_file(file.file_name):
             raise ValueError("Only blob file can be added to a blob bunch.")
 
         if file.first_row_id == self.latest_first_row_id:
