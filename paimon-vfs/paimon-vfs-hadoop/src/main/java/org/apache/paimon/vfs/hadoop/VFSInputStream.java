@@ -29,9 +29,7 @@ import java.io.IOException;
 /**
  * VFSInputStream wrap over paimon SeekableInputStream to support hadoop FSDataInputStream. TODO:
  * SeekableInputStream interface is too simple to fully support all FSDataInputStream operations: 1.
- * ByteBufferReadable and ByteBufferPositionedReadable should be implemented for full support. 2.
- * Positioned read is not supported in SeekableInputStream, so it is by default implemented by
- * sequence read, which is not a good solution.
+ * ByteBufferReadable and ByteBufferPositionedReadable should be implemented for full support.
  */
 public class VFSInputStream extends FSInputStream {
     private SeekableInputStream in;
