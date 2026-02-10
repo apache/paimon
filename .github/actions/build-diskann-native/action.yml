@@ -1,0 +1,57 @@
+name: 'Build DiskANN Native Library'
+description: 'Build DiskANN native library (Rust JNI) for specified platform'
+inputs:
+  platform:
+    description: 'Target platform (linux-amd64, linux-aarch64, darwin-aarch64)'
+    required: true
+  rust-version:
+    description: 'Rust toolchain version'
+    required: false
+    default: 'stable'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust toolchain
+      shell: bash
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${{ inputs.rust-version }}
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        source "$HOME/.cargo/env"
+        rustc --version
+        cargo --version
+
+    - name: Build native library
+      shell: bash
+      run: |
+        ./paimon-diskann/paimon-diskann-jni/scripts/build-native.sh --clean
+
+    - name: List built libraries (Linux AMD64)
+      if: inputs.platform == 'linux-amd64'
+      shell: bash
+      run: |
+        echo "=== Built libraries ==="
+        ls -la paimon-diskann/paimon-diskann-jni/src/main/resources/linux/amd64/
+        echo ""
+        echo "=== Library dependencies ==="
+        ldd paimon-diskann/paimon-diskann-jni/src/main/resources/linux/amd64/libpaimon_diskann_jni.so || true
+
+    - name: List built libraries (Linux AARCH64)
+      if: inputs.platform == 'linux-aarch64'
+      shell: bash
+      run: |
+        echo "=== Built libraries ==="
+        ls -la paimon-diskann/paimon-diskann-jni/src/main/resources/linux/aarch64/
+        echo ""
+        echo "=== Library dependencies ==="
+        ldd paimon-diskann/paimon-diskann-jni/src/main/resources/linux/aarch64/libpaimon_diskann_jni.so || true
+
+    - name: List built libraries (macOS)
+      if: inputs.platform == 'darwin-aarch64'
+      shell: bash
+      run: |
+        echo "=== Built libraries ==="
+        ls -la paimon-diskann/paimon-diskann-jni/src/main/resources/darwin/aarch64/
+        echo ""
+        echo "=== Library dependencies ==="
+        otool -L paimon-diskann/paimon-diskann-jni/src/main/resources/darwin/aarch64/libpaimon_diskann_jni.dylib || true

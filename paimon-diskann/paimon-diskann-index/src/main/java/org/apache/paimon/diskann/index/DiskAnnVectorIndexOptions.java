@@ -1,0 +1,147 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.diskann.index;
+
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
+
+/** Options for DiskANN vector index. */
+public class DiskAnnVectorIndexOptions {
+
+    public static final ConfigOption<Integer> VECTOR_DIM =
+            ConfigOptions.key("vector.dim")
+                    .intType()
+                    .defaultValue(128)
+                    .withDescription("The dimension of the vector");
+
+    public static final ConfigOption<DiskAnnVectorMetric> VECTOR_METRIC =
+            ConfigOptions.key("vector.metric")
+                    .enumType(DiskAnnVectorMetric.class)
+                    .defaultValue(DiskAnnVectorMetric.L2)
+                    .withDescription(
+                            "The similarity metric for vector search (L2, INNER_PRODUCT, COSINE), and L2 is the default");
+
+    public static final ConfigOption<DiskAnnIndexType> VECTOR_INDEX_TYPE =
+            ConfigOptions.key("vector.diskann.index-type")
+                    .enumType(DiskAnnIndexType.class)
+                    .defaultValue(DiskAnnIndexType.MEMORY)
+                    .withDescription("The DiskANN index type to use (MEMORY, DISK)");
+
+    public static final ConfigOption<Integer> VECTOR_MAX_DEGREE =
+            ConfigOptions.key("vector.diskann.max-degree")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription("The maximum degree (R) for DiskANN graph construction");
+
+    public static final ConfigOption<Integer> VECTOR_BUILD_LIST_SIZE =
+            ConfigOptions.key("vector.diskann.build-list-size")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("The build list size (L) for DiskANN index construction");
+
+    public static final ConfigOption<Integer> VECTOR_SEARCH_LIST_SIZE =
+            ConfigOptions.key("vector.diskann.search-list-size")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("The search list size (L) for DiskANN query");
+
+    public static final ConfigOption<Integer> VECTOR_SIZE_PER_INDEX =
+            ConfigOptions.key("vector.size-per-index")
+                    .intType()
+                    .defaultValue(200_0000)
+                    .withDescription("The size of vectors stored in each vector index file");
+
+    public static final ConfigOption<Integer> VECTOR_SEARCH_FACTOR =
+            ConfigOptions.key("vector.search-factor")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "The multiplier for the search limit when filtering is applied. "
+                                    + "This is used to fetch more results to ensure enough records after filtering.");
+
+    public static final ConfigOption<Boolean> VECTOR_NORMALIZE =
+            ConfigOptions.key("vector.normalize")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to L2 normalize vectors before indexing and searching. "
+                                    + "Enabling this converts L2 distance to cosine similarity.");
+
+    private final int dimension;
+    private final DiskAnnVectorMetric metric;
+    private final DiskAnnIndexType indexType;
+    private final int maxDegree;
+    private final int buildListSize;
+    private final int searchListSize;
+    private final int sizePerIndex;
+    private final int searchFactor;
+    private final boolean normalize;
+
+    public DiskAnnVectorIndexOptions(Options options) {
+        this.dimension = options.get(VECTOR_DIM);
+        this.metric = options.get(VECTOR_METRIC);
+        this.indexType = options.get(VECTOR_INDEX_TYPE);
+        this.maxDegree = options.get(VECTOR_MAX_DEGREE);
+        this.buildListSize = options.get(VECTOR_BUILD_LIST_SIZE);
+        this.searchListSize = options.get(VECTOR_SEARCH_LIST_SIZE);
+        this.sizePerIndex =
+                options.get(VECTOR_SIZE_PER_INDEX) > 0
+                        ? options.get(VECTOR_SIZE_PER_INDEX)
+                        : VECTOR_SIZE_PER_INDEX.defaultValue();
+        this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
+        this.normalize = options.get(VECTOR_NORMALIZE);
+    }
+
+    public int dimension() {
+        return dimension;
+    }
+
+    public DiskAnnVectorMetric metric() {
+        return metric;
+    }
+
+    public DiskAnnIndexType indexType() {
+        return indexType;
+    }
+
+    public int maxDegree() {
+        return maxDegree;
+    }
+
+    public int buildListSize() {
+        return buildListSize;
+    }
+
+    public int searchListSize() {
+        return searchListSize;
+    }
+
+    public int sizePerIndex() {
+        return sizePerIndex;
+    }
+
+    public int searchFactor() {
+        return searchFactor;
+    }
+
+    public boolean normalize() {
+        return normalize;
+    }
+}
