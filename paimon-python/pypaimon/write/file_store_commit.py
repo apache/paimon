@@ -25,6 +25,7 @@ from typing import Dict, List, Optional
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -648,7 +649,7 @@ class FileStoreCommit:
                     entry.file.file_source == 0 and  # APPEND file source
                     entry.file.first_row_id is None):  # No existing first_row_id
 
-                if self._is_blob_file(entry.file.file_name):
+                if DataFileMeta.is_blob_file(entry.file.file_name):
                     # Handle blob files specially
                     if blob_start >= start:
                         raise RuntimeError(
@@ -669,8 +670,3 @@ class FileStoreCommit:
                 row_id_assigned.append(entry)
 
         return row_id_assigned, start
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file based on its extension."""
-        return file_name.endswith('.blob')

@@ -240,8 +240,3 @@ class AbstractSplitGenerator(ABC):
             return -1, -1
         # File is completely within the shard range
         return None
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file."""
-        return file_name.endswith('.blob')
