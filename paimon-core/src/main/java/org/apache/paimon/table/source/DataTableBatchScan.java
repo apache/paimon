@@ -138,6 +138,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         long scannedRowCount = 0;
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
         List<Split> planSplits = plan.splits();
+        // Limit pushdown only supports DataSplit. Skip for IncrementalSplit.
         if (planSplits.stream().anyMatch(s -> !(s instanceof DataSplit))) {
             return Optional.of(result);
         }
@@ -200,6 +201,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
         List<Split> planSplits = plan.splits();
+        // TopN pushdown only supports DataSplit. Skip for IncrementalSplit.
         if (planSplits.stream().anyMatch(s -> !(s instanceof DataSplit))) {
             return Optional.of(result);
         }
