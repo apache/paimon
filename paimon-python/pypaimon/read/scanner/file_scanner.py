@@ -78,6 +78,10 @@ def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]
             if not p.literals:
                 return []
             return Range.to_ranges([int(x) for x in p.literals])
+        if p.method == 'between':
+            if not p.literals or len(p.literals) < 2:
+                return []
+            return [Range(int(p.literals[0]), int(p.literals[1]))]
         return None
 
     return visit(predicate)
