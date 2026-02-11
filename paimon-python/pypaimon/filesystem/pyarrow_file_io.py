@@ -19,6 +19,7 @@ import logging
 import os
 import subprocess
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
@@ -121,10 +122,10 @@ class PyArrowFileIO(FileIO):
 
         if self._pyarrow_gte_7:
             client_kwargs['force_virtual_addressing'] = True
-            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+            client_kwargs['endpoint_override'] = "oss-cn-hangzhou.aliyuncs.com"
         else:
             client_kwargs['endpoint_override'] = (self._oss_bucket + "." +
-                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
+                                                  "oss-cn-hangzhou.aliyuncs.com")
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
@@ -399,7 +400,13 @@ class PyArrowFileIO(FileIO):
         def record_generator():
             num_rows = len(list(records_dict.values())[0])
             for i in range(num_rows):
-                yield {col: records_dict[col][i] for col in records_dict.keys()}
+                record = {}
+                for col in records_dict.keys():
+                    value = records_dict[col][i]
+                    if isinstance(value, datetime) and value.tzinfo is None:
+                        value = value.replace(tzinfo=timezone.utc)
+                    record[col] = value
+                yield record
 
         records = record_generator()
 
