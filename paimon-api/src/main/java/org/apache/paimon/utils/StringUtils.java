@@ -18,12 +18,7 @@
 
 package org.apache.paimon.utils;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Objects;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -543,6 +538,36 @@ public class StringUtils {
             return null;
         }
         return value.trim();
+    }
+
+    public static String trim(String value, String charsToTrim) {
+        if (value == null || charsToTrim == null) {
+            return null;
+        }
+        return rtrim(ltrim(value, charsToTrim), charsToTrim);
+    }
+
+    public static String ltrim(String value, String charsToTrim) {
+        if (value == null || charsToTrim == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value);
+        while (sb.length() > 0 && charsToTrim.contains(sb.substring(0, 1))) {
+            sb.deleteCharAt(0);
+        }
+        return sb.toString();
+    }
+
+    public static String rtrim(String value, String charsToTrim) {
+        if (value == null || charsToTrim == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value);
+        while (sb.length() > 0
+                && charsToTrim.contains(sb.substring(sb.length() - 1, sb.length()))) {
+            sb.deleteCharAt(sb.length() - 1);
+        }
+        return sb.toString();
     }
 
     public static String toUpperCase(String value) {
