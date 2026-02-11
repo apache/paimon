@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import pyarrow
-import pyarrow.fs
+import pyarrow.fs as pafs
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
@@ -119,9 +119,9 @@ class LocalFileIO(FileIO):
                 self.original_path = original_path
                 self.size = stat_info.st_size if file_path.is_file() else None
                 self.type = (
-                    pyarrow.fs.FileType.Directory if file_path.is_dir()
-                    else pyarrow.fs.FileType.File if file_path.is_file()
-                    else pyarrow.fs.FileType.NotFound
+                    pafs.FileType.Directory if file_path.is_dir()
+                    else pafs.FileType.File if file_path.is_file()
+                    else pafs.FileType.NotFound
                 )
                 self.mtime = stat_info.st_mtime
         

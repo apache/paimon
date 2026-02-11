@@ -183,14 +183,10 @@ class FormatTableWrite:
             pq.write_table(tbl, buf, compression="zstd")
             raw = buf.getvalue()
         elif fmt == Format.CSV:
-            if hasattr(pyarrow, "csv"):
-                buf = io.BytesIO()
-                pyarrow.csv.write_csv(tbl, buf)
-                raw = buf.getvalue()
-            else:
-                buf = io.StringIO()
-                tbl.to_pandas().to_csv(buf, index=False)
-                raw = buf.getvalue().encode("utf-8")
+            import pyarrow.csv as csv
+            buf = io.BytesIO()
+            csv.write_csv(tbl, buf)
+            raw = buf.getvalue()
         elif fmt == Format.JSON:
             import json
             lines = []
@@ -202,15 +198,10 @@ class FormatTableWrite:
                 lines.append(json.dumps(row) + "\n")
             raw = "".join(lines).encode("utf-8")
         elif fmt == Format.ORC:
-            if hasattr(pyarrow, "orc"):
-                buf = io.BytesIO()
-                pyarrow.orc.write_table(tbl, buf)
-                raw = buf.getvalue()
-            else:
-                raise ValueError(
-                    "Format table write for ORC requires PyArrow with ORC "
-                    "support (pyarrow.orc)"
-                )
+            import pyarrow.orc as orc
+            buf = io.BytesIO()
+            orc.write_table(tbl, buf)
+            raw = buf.getvalue()
         elif fmt == Format.TEXT:
             partition_keys = self.table.partition_keys
             if partition_keys:
