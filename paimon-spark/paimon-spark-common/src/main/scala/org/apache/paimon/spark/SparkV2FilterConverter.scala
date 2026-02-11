@@ -179,11 +179,15 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
   private def convertToBetweenFunction(
       leftPredicate: Predicate,
       rightPredicate: Predicate): Option[Predicate] = {
+
     def toBetweenLeafPredicate(
-        transform: Transform,
-        lowerBoundInclusive: Object,
-        upperBoundInclusive: Object): Predicate = {
-      builder.between(transform, lowerBoundInclusive, upperBoundInclusive)
+        gtePredicate: LeafPredicate,
+        ltePredicate: LeafPredicate): Predicate = {
+      // gtePredicate and ltePredicate should have the same transform
+      builder.between(
+        gtePredicate.transform(),
+        gtePredicate.literals().get(0),
+        ltePredicate.literals().get(0))
     }
 
     (leftPredicate, rightPredicate) match {
@@ -194,17 +198,9 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
         }
         (left.function(), right.function()) match {
           case (_: GreaterOrEqual, _: LessOrEqual) =>
-            Some(
-              toBetweenLeafPredicate(
-                left.transform(),
-                left.literals().get(0),
-                right.literals().get(0)))
+            Some(toBetweenLeafPredicate(left, right))
           case (_: LessOrEqual, _: GreaterOrEqual) =>
-            Some(
-              toBetweenLeafPredicate(
-                left.transform(),
-                right.literals().get(0),
-                left.literals().get(0)))
+            Some(toBetweenLeafPredicate(right, left))
           case _ => None
         }
       case _ =>
