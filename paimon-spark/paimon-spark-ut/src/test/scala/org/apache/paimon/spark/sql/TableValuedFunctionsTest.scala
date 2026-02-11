@@ -344,8 +344,7 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
     }
   }
 
-  test(
-    "incremental query by tag with LIMIT - no ClassCastException (IncrementalSplit handled in applyPushDownLimit)") {
+  test("incremental query by tag with LIMIT") {
     sql("use paimon")
     withTable("t") {
       spark.sql("""
