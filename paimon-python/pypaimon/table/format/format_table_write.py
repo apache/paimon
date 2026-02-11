@@ -178,8 +178,9 @@ class FormatTableWrite:
         fmt = self._file_format
         tbl = pyarrow.Table.from_batches([data])
         if fmt == Format.PARQUET:
+            import pyarrow.parquet as pq
             buf = io.BytesIO()
-            pyarrow.parquet.write_table(tbl, buf, compression="zstd")
+            pq.write_table(tbl, buf, compression="zstd")
             raw = buf.getvalue()
         elif fmt == Format.CSV:
             if hasattr(pyarrow, "csv"):

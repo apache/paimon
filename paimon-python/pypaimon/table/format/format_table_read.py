@@ -71,13 +71,14 @@ def _read_file_to_arrow(
 
     if fmt == Format.PARQUET:
         import io
+        import pyarrow.parquet as pq
         data = (
             bytes(data) if not isinstance(data, bytes) else data
         )
         if len(data) < 4 or data[:4] != b"PAR1":
             return pyarrow.table({})
         try:
-            tbl = pyarrow.parquet.read_table(io.BytesIO(data))
+            tbl = pq.read_table(io.BytesIO(data))
         except pyarrow.ArrowInvalid:
             return pyarrow.table({})
     elif fmt == Format.CSV:
