@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
 
+import pyarrow  # noqa: F401
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
