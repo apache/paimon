@@ -223,4 +223,42 @@ public class HttpClientTest {
                                         ));
         return parameters;
     }
+
+    @Test
+    public void testGetWithUnparsableJsonErrorResponse() {
+        // Test case for JSON response with mismatched field names that cannot be parsed as
+        // ErrorResponse
+        String jsonWithUppercaseFields =
+                "{\"Message\":\"Your request is denied as lack of ssl protect.\","
+                        + "\"Code\":\"InvalidProtocol.NeedSsl\"}";
+        server.enqueueResponse(jsonWithUppercaseFields, 403);
+
+        try {
+            httpClient.get(MOCK_PATH, MockRESTData.class, restAuthFunction);
+            Assertions.fail("Expected exception to be thrown");
+        } catch (Exception e) {
+            Assertions.assertTrue(
+                    e.getMessage().contains("Your request is denied as lack of ssl protect")
+                            || e.getMessage().contains(jsonWithUppercaseFields),
+                    "Error message should contain the original response body");
+        }
+    }
+
+    @Test
+    public void testPostWithNonJsonErrorResponse() {
+        // Test case for non-JSON response (plain text) that cannot be parsed
+        String plainTextResponse = "Internal Server Error: Database connection failed";
+        server.enqueueResponse(plainTextResponse, 500);
+
+        try {
+            httpClient.post(MOCK_PATH, mockResponseData, MockRESTData.class, restAuthFunction);
+            Assertions.fail("Expected exception to be thrown");
+        } catch (Exception e) {
+            // Verify that the error message contains the original plain text response
+            Assertions.assertTrue(
+                    e.getMessage().contains(plainTextResponse)
+                            || e.getMessage().contains("Database connection failed"),
+                    "Error message should contain the original non-JSON response");
+        }
+    }
 }
