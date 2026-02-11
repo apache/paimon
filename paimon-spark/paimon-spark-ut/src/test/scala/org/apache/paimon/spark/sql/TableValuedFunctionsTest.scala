@@ -361,7 +361,7 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
 
       checkAnswer(
         spark.sql(
-          "SELECT * FROM paimon_incremental_query('t', 'tag1', 'tag2') LIMIT 5 ORDER BY a, b"),
+          "SELECT * FROM paimon_incremental_query('t', 'tag1', 'tag2') ORDER BY a, b LIMIT 5"),
         Seq(Row(1, 3, "3"), Row(2, 4, "4")))
     }
   }
