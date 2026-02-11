@@ -19,7 +19,7 @@ Linked issue: close #xxx
 
 <!-- Does this change introduce a new feature -->
 
-### Was this patch authored or co-authored using generative AI tooling?
+### Generative AI tooling
 
 <!--
 If generative AI tooling has been used in the process of authoring this patch, please include the
