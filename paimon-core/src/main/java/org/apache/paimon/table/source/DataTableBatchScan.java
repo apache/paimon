@@ -137,7 +137,14 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         long scannedRowCount = 0;
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
+        List<Split> planSplits = plan.splits();
+        // Limit pushdown only supports DataSplit. Skip for IncrementalSplit.
+        if (planSplits.stream().anyMatch(s -> !(s instanceof DataSplit))) {
+            return Optional.of(result);
+        }
+        @SuppressWarnings("unchecked")
+        List<DataSplit> splits = (List<DataSplit>) (List<?>) planSplits;
+
         LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
         if (splits.isEmpty()) {
             return Optional.of(result);
@@ -193,7 +200,13 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
 
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
+        List<Split> planSplits = plan.splits();
+        // TopN pushdown only supports DataSplit. Skip for IncrementalSplit.
+        if (planSplits.stream().anyMatch(s -> !(s instanceof DataSplit))) {
+            return Optional.of(result);
+        }
+        @SuppressWarnings("unchecked")
+        List<DataSplit> splits = (List<DataSplit>) (List<?>) planSplits;
         if (splits.isEmpty()) {
             return Optional.of(result);
         }
