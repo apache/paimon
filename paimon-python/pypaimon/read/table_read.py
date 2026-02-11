@@ -66,7 +66,7 @@ class TableRead:
         num_rows = batch.num_rows
 
         for field in target_schema:
-            if field.name in batch.column_names:
+            if field.name in batch.schema.names:
                 col = batch.column(field.name)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
@@ -198,7 +198,7 @@ class TableRead:
         elif self.table.options.data_evolution_enabled():
             return DataEvolutionSplitRead(
                 table=self.table,
-                predicate=None,  # Never push predicate to split read
+                predicate=self.predicate,
                 read_type=self.read_type,
                 split=split,
                 row_tracking_enabled=True

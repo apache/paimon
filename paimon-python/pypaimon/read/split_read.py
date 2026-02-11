@@ -40,6 +40,7 @@ from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
+from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
 from pypaimon.read.reader.format_lance_reader import FormatLanceReader
@@ -52,6 +53,7 @@ from pypaimon.read.reader.key_value_unwrap_reader import \
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
+from pypaimon.read.push_down_utils import _get_all_fields
 from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
@@ -449,6 +451,10 @@ class DataEvolutionSplitRead(SplitRead):
             actual_split = split.data_split()
         super().__init__(table, predicate, read_type, actual_split, row_tracking_enabled)
 
+    def _push_down_predicate(self) -> Optional[Predicate]:
+        # Do not push predicate to file readers;
+        return None
+
     def create_reader(self) -> RecordReader:
         files = self.split.files
         suppliers = []
@@ -467,7 +473,21 @@ class DataEvolutionSplitRead(SplitRead):
                     lambda files=need_merge_files: self._create_union_reader(files)
                 )
 
-        return ConcatBatchReader(suppliers)
+        merge_reader = ConcatBatchReader(suppliers)
+        if self.predicate is not None:
+            # Only apply filter when all predicate columns are in read_type (e.g. projected schema).
+            read_names = {f.name for f in self.read_fields}
+            if _get_all_fields(self.predicate).issubset(read_names):
+                field_names = [f.name for f in self.read_fields]
+                # Row-by-row path uses predicate.index (from read_type); layout must match.
+                schema_fields = self.read_fields
+                return FilterRecordBatchReader(
+                    merge_reader,
+                    self.predicate,
+                    field_names=field_names,
+                    schema_fields=schema_fields,
+                )
+        return merge_reader
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """Split files by firstRowId for data evolution."""

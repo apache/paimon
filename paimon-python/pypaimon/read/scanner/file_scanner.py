@@ -434,7 +434,11 @@ class FileScanner:
         else:
             if not self.predicate:
                 return True
+<<<<<<< HEAD
             if self.predicate_for_stats is None:
+=======
+            if self.data_evolution:
+>>>>>>> 867ca010a ([python] fix data evolution predicate filtering)
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols
