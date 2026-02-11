@@ -76,13 +76,26 @@ public class DiskAnnVectorIndexOptions {
                             "The multiplier for the search limit when filtering is applied. "
                                     + "This is used to fetch more results to ensure enough records after filtering.");
 
-    public static final ConfigOption<Boolean> VECTOR_NORMALIZE =
-            ConfigOptions.key("vector.normalize")
-                    .booleanType()
-                    .defaultValue(false)
+    public static final ConfigOption<Integer> VECTOR_PQ_SUBSPACES =
+            ConfigOptions.key("vector.diskann.pq-subspaces")
+                    .intType()
+                    .defaultValue(-1)
                     .withDescription(
-                            "Whether to L2 normalize vectors before indexing and searching. "
-                                    + "Enabling this converts L2 distance to cosine similarity.");
+                            "Number of subspaces (M) for Product Quantization. "
+                                    + "Dimension must be divisible by M. "
+                                    + "Default (-1) auto-computes as max(1, dim/4).");
+
+    public static final ConfigOption<Integer> VECTOR_PQ_KMEANS_ITERATIONS =
+            ConfigOptions.key("vector.diskann.pq-kmeans-iterations")
+                    .intType()
+                    .defaultValue(20)
+                    .withDescription("Number of K-Means iterations for PQ codebook training.");
+
+    public static final ConfigOption<Integer> VECTOR_PQ_SAMPLE_SIZE =
+            ConfigOptions.key("vector.diskann.pq-sample-size")
+                    .intType()
+                    .defaultValue(100_000)
+                    .withDescription("Maximum number of vectors sampled for PQ codebook training.");
 
     private final int dimension;
     private final DiskAnnVectorMetric metric;
@@ -92,7 +105,9 @@ public class DiskAnnVectorIndexOptions {
     private final int searchListSize;
     private final int sizePerIndex;
     private final int searchFactor;
-    private final boolean normalize;
+    private final int pqSubspaces;
+    private final int pqKmeansIterations;
+    private final int pqSampleSize;
 
     public DiskAnnVectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
@@ -106,7 +121,12 @@ public class DiskAnnVectorIndexOptions {
                         ? options.get(VECTOR_SIZE_PER_INDEX)
                         : VECTOR_SIZE_PER_INDEX.defaultValue();
         this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
-        this.normalize = options.get(VECTOR_NORMALIZE);
+
+        int rawPqSub = options.get(VECTOR_PQ_SUBSPACES);
+        this.pqSubspaces =
+                rawPqSub > 0 ? rawPqSub : ProductQuantizer.defaultNumSubspaces(dimension);
+        this.pqKmeansIterations = options.get(VECTOR_PQ_KMEANS_ITERATIONS);
+        this.pqSampleSize = options.get(VECTOR_PQ_SAMPLE_SIZE);
     }
 
     public int dimension() {
@@ -141,7 +161,18 @@ public class DiskAnnVectorIndexOptions {
         return searchFactor;
     }
 
-    public boolean normalize() {
-        return normalize;
+    /** Number of PQ subspaces (M). */
+    public int pqSubspaces() {
+        return pqSubspaces;
+    }
+
+    /** Number of K-Means iterations for PQ training. */
+    public int pqKmeansIterations() {
+        return pqKmeansIterations;
+    }
+
+    /** Maximum number of training samples for PQ. */
+    public int pqSampleSize() {
+        return pqSampleSize;
     }
 }

@@ -263,8 +263,4 @@ public class NativeLibraryLoader {
             throw new UnsupportedOperationException("Unsupported architecture: " + osArch);
         }
     }
-
-    public static String getLibraryName() {
-        return JNI_LIBRARY_NAME;
-    }
 }

@@ -20,9 +20,7 @@ package org.apache.paimon.diskann.index;
 
 /** DiskANN index type. */
 public enum DiskAnnIndexType {
-    MEMORY(0),
-    DISK(1),
-    UNKNOWN(-1);
+    MEMORY(0);
 
     private final int value;
 

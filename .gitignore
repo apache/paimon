@@ -37,3 +37,5 @@ paimon-faiss/paimon-faiss-jni/build/
 paimon-faiss/paimon-faiss-jni/src/main/resources/darwin*
 paimon-faiss/paimon-faiss-jni/src/main/resources/linux*
 paimon-faiss/paimon-faiss-jni/src/main/native/cmake-build-debug/
+paimon-diskann/paimon-diskann-jni/src/main/resources/darwin*
+paimon-diskann/paimon-diskann-jni/src/main/resources/linux*

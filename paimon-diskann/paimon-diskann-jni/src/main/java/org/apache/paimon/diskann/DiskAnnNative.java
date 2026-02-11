@@ -44,9 +44,6 @@ final class DiskAnnNative {
     /** Destroy an index and free its resources. */
     static native void indexDestroy(long handle);
 
-    /** Get the dimension of an index. */
-    static native int indexGetDimension(long handle);
-
     /** Get the number of vectors in an index. */
     static native long indexGetCount(long handle);
 
@@ -80,12 +77,71 @@ final class DiskAnnNative {
             float[] distances,
             long[] labels);
 
-    /** Serialize an index to a direct ByteBuffer (zero-copy). */
+    /**
+     * Serialize an index with its graph adjacency lists to a direct ByteBuffer.
+     *
+     * <p>The format stores the Vamana graph structure alongside vector data, so the graph can be
+     * loaded for search without re-building from scratch.
+     *
+     * @param handle the native handle of the in-memory index.
+     * @param buffer a direct ByteBuffer at least {@link #indexSerializeSize} bytes.
+     * @return the number of bytes written.
+     */
     static native long indexSerialize(long handle, ByteBuffer buffer);
 
-    /** Get the size in bytes needed to serialize an index. */
+    /** Return the number of bytes needed for serialization. */
     static native long indexSerializeSize(long handle);
 
-    /** Deserialize an index from a byte array. */
-    static native long indexDeserialize(byte[] data, long length);
+    /**
+     * Create a <em>search-only</em> index from serialized data and a Java callback for on-demand
+     * vector reads.
+     *
+     * <p>The graph adjacency lists are loaded into memory from {@code data}. During search, the
+     * Rust code invokes {@code vectorReader.readVector(long)} via JNI whenever a full vector is
+     * needed - enabling the classic DiskANN architecture where vectors live on remote object
+     * storage (e.g., via Jindo SDK).
+     *
+     * @param data byte[] containing serialized index data.
+     * @param vectorReader a Java object with a {@code float[] readVector(long)} method.
+     * @return a searcher handle (>= 100 000) for use with {@link #indexSearchWithReader}.
+     */
+    static native long indexCreateSearcher(byte[] data, Object vectorReader);
+
+    /**
+     * Create a <em>search-only</em> index from two on-demand readers: one for the graph structure
+     * and one for vectors.
+     *
+     * <p>Neither the graph data nor the vector data is loaded into Java memory upfront. Instead:
+     *
+     * <ul>
+     *   <li><b>Graph</b>: the Rust side calls {@code graphReader.readNeighbors(int)} via JNI to
+     *       fetch neighbor lists on demand during beam search. It also calls getter methods ({@code
+     *       getDimension()}, {@code getCount()}, {@code getStartId()}, {@code getAllInternalIds()},
+     *       {@code getAllExternalIds()}) during initialization.
+     *   <li><b>Vectors</b>: the Rust side calls {@code vectorReader.readVector(long)} via JNI (same
+     *       as {@link #indexCreateSearcher}).
+     * </ul>
+     *
+     * @param graphReader a Java object providing graph structure on demand.
+     * @param vectorReader a Java object with a {@code float[] readVector(long)} method.
+     * @return a searcher handle (>= 100 000) for use with {@link #indexSearchWithReader}.
+     */
+    static native long indexCreateSearcherFromReaders(Object graphReader, Object vectorReader);
+
+    /**
+     * Search on a searcher handle created by {@link #indexCreateSearcher}.
+     *
+     * @see #indexSearch for parameter descriptions — semantics are identical.
+     */
+    static native void indexSearchWithReader(
+            long handle,
+            long n,
+            float[] queryVectors,
+            int k,
+            int searchListSize,
+            float[] distances,
+            long[] labels);
+
+    /** Destroy a searcher handle and free its resources. */
+    static native void indexDestroySearcher(long handle);
 }

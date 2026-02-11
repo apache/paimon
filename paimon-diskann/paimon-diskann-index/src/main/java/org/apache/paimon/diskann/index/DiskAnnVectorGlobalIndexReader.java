@@ -18,6 +18,8 @@
 
 package org.apache.paimon.diskann.index;
 
+import org.apache.paimon.diskann.IndexSearcher;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
@@ -31,17 +33,14 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
-import java.util.UUID;
 
 /**
  * Vector global index reader using DiskANN.
@@ -52,15 +51,24 @@ import java.util.UUID;
  */
 public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
 
-    private final List<DiskAnnIndex> indices;
+    /**
+     * Loaded search handles. Each entry wraps a DiskANN {@link IndexSearcher} (Rust native beam
+     * search with graph in memory, full vectors read on-demand via {@link FileIOVectorReader}).
+     */
+    private final List<SearchHandle> handles;
+
     private final List<DiskAnnIndexMeta> indexMetas;
-    private final List<File> localIndexFiles;
     private final List<GlobalIndexIOMeta> ioMetas;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final DiskAnnVectorIndexOptions options;
     private volatile boolean metasLoaded = false;
     private volatile boolean indicesLoaded = false;
+
+    /**
+     * Number of vectors to cache per searcher in the LRU cache inside {@link FileIOVectorReader}.
+     */
+    private static final int VECTOR_CACHE_SIZE = 4096;
 
     public DiskAnnVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
@@ -71,9 +79,50 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
         this.ioMetas = ioMetas;
         this.fieldType = fieldType;
         this.options = options;
-        this.indices = new ArrayList<>();
+        this.handles = new ArrayList<>();
         this.indexMetas = new ArrayList<>();
-        this.localIndexFiles = new ArrayList<>();
+    }
+
+    /** Wrapper around a search implementation for lifecycle management. */
+    private interface SearchHandle extends AutoCloseable {
+        void search(
+                long n,
+                float[] queryVectors,
+                int k,
+                int searchListSize,
+                float[] distances,
+                long[] labels);
+
+        @Override
+        void close() throws IOException;
+    }
+
+    /**
+     * Uses DiskANN's native Rust beam search via {@link IndexSearcher}. Graph is in memory; vectors
+     * are fetched on demand from object storage through {@link FileIOVectorReader} JNI callbacks.
+     */
+    private static class DiskAnnSearchHandle implements SearchHandle {
+        private final IndexSearcher searcher;
+
+        DiskAnnSearchHandle(IndexSearcher searcher) {
+            this.searcher = searcher;
+        }
+
+        @Override
+        public void search(
+                long n,
+                float[] queryVectors,
+                int k,
+                int searchListSize,
+                float[] distances,
+                long[] labels) {
+            searcher.search(n, queryVectors, k, searchListSize, distances, labels);
+        }
+
+        @Override
+        public void close() {
+            searcher.close();
+        }
     }
 
     @Override
@@ -123,9 +172,6 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
     private GlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
         validateVectorType(vectorSearch.vector());
         float[] queryVector = ((float[]) vectorSearch.vector()).clone();
-        if (options.normalize()) {
-            normalizeL2(queryVector);
-        }
         int limit = vectorSearch.limit();
 
         PriorityQueue<ScoredRow> result =
@@ -140,11 +186,11 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
                             (int) includeRowIds.getLongCardinality());
         }
 
-        for (DiskAnnIndex index : indices) {
-            if (index == null) {
+        for (SearchHandle handle : handles) {
+            if (handle == null) {
                 continue;
             }
-            int effectiveK = (int) Math.min(searchK, index.size());
+            int effectiveK = searchK;
             if (effectiveK <= 0) {
                 continue;
             }
@@ -155,7 +201,7 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
             // Dynamic search list sizing: use max of configured value and effectiveK
             // This follows Milvus best practice: search_list should be >= topk
             int dynamicSearchListSize = Math.max(options.searchListSize(), effectiveK);
-            index.search(queryVector, 1, effectiveK, dynamicSearchListSize, distances, labels);
+            handle.search(1, queryVector, effectiveK, dynamicSearchListSize, distances, labels);
 
             for (int i = 0; i < effectiveK; i++) {
                 long rowId = labels[i];
@@ -239,83 +285,93 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
 
     private void ensureLoadIndices(List<Integer> positions) throws IOException {
         synchronized (this) {
-            while (indices.size() < ioMetas.size()) {
-                indices.add(null);
+            while (handles.size() < ioMetas.size()) {
+                handles.add(null);
             }
             for (int pos : positions) {
-                if (indices.get(pos) == null) {
+                if (handles.get(pos) == null) {
                     loadIndexAt(pos);
                 }
             }
         }
     }
 
+    /**
+     * Load an index at the given position.
+     *
+     * <p>The index file (header + graph) and the data file (vectors) are accessed on demand via
+     * {@link SeekableInputStream}s — neither is loaded into Java memory in full. The PQ pivots and
+     * compressed codes are loaded into memory as the "memory thumbnail" for approximate distance
+     * computation during native beam search.
+     */
     private void loadIndexAt(int position) throws IOException {
         GlobalIndexIOMeta ioMeta = ioMetas.get(position);
-        DiskAnnIndex index = null;
-        try (SeekableInputStream in = fileReader.getInputStream(ioMeta)) {
-            index = loadIndex(in);
-            if (indices.size() <= position) {
-                while (indices.size() < position) {
-                    indices.add(null);
+        DiskAnnIndexMeta meta = indexMetas.get(position);
+        SearchHandle handle = null;
+        try {
+            // 1. Open index file (header + graph) as a SeekableInputStream.
+            //    FileIOGraphReader scans the header + builds offset index; graph neighbors are read
+            //    on demand during beam search.
+            SeekableInputStream graphStream = fileReader.getInputStream(ioMeta);
+            FileIOGraphReader graphReader = new FileIOGraphReader(graphStream, VECTOR_CACHE_SIZE);
+
+            // 2. Open data file stream for on-demand full-vector reads.
+            Path dataPath = new Path(ioMeta.filePath().getParent(), meta.dataFileName());
+            GlobalIndexIOMeta dataIOMeta = new GlobalIndexIOMeta(dataPath, 0L, new byte[0]);
+            SeekableInputStream vectorStream = fileReader.getInputStream(dataIOMeta);
+            FileIOVectorReader vectorReader =
+                    new FileIOVectorReader(
+                            vectorStream,
+                            graphReader.getDimension(),
+                            0L, // vectors start at offset 0 in the data file
+                            buildExtIdToEntryIndex(graphReader),
+                            VECTOR_CACHE_SIZE);
+
+            // 3. Create DiskANN native searcher with on-demand graph + vector access.
+            handle =
+                    new DiskAnnSearchHandle(
+                            IndexSearcher.createFromReaders(
+                                    graphReader, vectorReader, graphReader.getDimension()));
+
+            if (handles.size() <= position) {
+                while (handles.size() < position) {
+                    handles.add(null);
                 }
-                indices.add(index);
+                handles.add(handle);
             } else {
-                indices.set(position, index);
+                handles.set(position, handle);
             }
         } catch (Exception e) {
-            IOUtils.closeQuietly(index);
-            throw e;
+            IOUtils.closeQuietly(handle);
+            throw e instanceof IOException ? (IOException) e : new IOException(e);
         }
     }
 
-    private DiskAnnIndex loadIndex(SeekableInputStream in) throws IOException {
-        // For better memory efficiency, write to a temporary file
-        // This allows the OS to manage memory more efficiently for large indices
-        File tempIndexFile =
-                Files.createTempFile("paimon-diskann-" + UUID.randomUUID(), ".index").toFile();
-        localIndexFiles.add(tempIndexFile);
-
-        // Copy index data to temp file
-        try (FileOutputStream fos = new FileOutputStream(tempIndexFile)) {
-            byte[] buffer = new byte[32768];
-            int bytesRead;
-            while ((bytesRead = in.read(buffer)) != -1) {
-                fos.write(buffer, 0, bytesRead);
-            }
+    /**
+     * Build the extId → entryIndex mapping from the graph reader's ID arrays. This is needed by
+     * {@link FileIOVectorReader} to map external vector IDs to byte offsets in the data file.
+     */
+    private static Map<Long, Integer> buildExtIdToEntryIndex(FileIOGraphReader graphReader) {
+        int[] intIds = graphReader.getAllInternalIds();
+        long[] extIds = graphReader.getAllExternalIds();
+        Map<Long, Integer> map = new HashMap<>(intIds.length);
+        for (int i = 0; i < intIds.length; i++) {
+            map.put(extIds[i], i);
         }
-
-        // Load from file for potential mmap benefits
-        // Note: Current implementation still deserializes to memory
-        // Future enhancement: Add native file-based loading if supported
-        byte[] data = Files.readAllBytes(tempIndexFile.toPath());
-        return DiskAnnIndex.deserialize(data, options.metric());
-    }
-
-    private void normalizeL2(float[] vector) {
-        float norm = 0.0f;
-        for (float v : vector) {
-            norm += v * v;
-        }
-        norm = (float) Math.sqrt(norm);
-        if (norm > 0) {
-            for (int i = 0; i < vector.length; i++) {
-                vector[i] /= norm;
-            }
-        }
+        return map;
     }
 
     @Override
     public void close() throws IOException {
         Throwable firstException = null;
 
-        // Close all DiskANN indices
-        for (DiskAnnIndex index : indices) {
-            if (index == null) {
+        // Close all search handles (also closes their FileIOVectorReader streams).
+        for (SearchHandle handle : handles) {
+            if (handle == null) {
                 continue;
             }
             try {
-                index.close();
+                handle.close();
             } catch (Throwable t) {
                 if (firstException == null) {
                     firstException = t;
@@ -324,23 +380,7 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
                 }
             }
         }
-        indices.clear();
-
-        // Delete temporary files
-        for (File tempFile : localIndexFiles) {
-            try {
-                if (tempFile != null && tempFile.exists()) {
-                    tempFile.delete();
-                }
-            } catch (Throwable t) {
-                if (firstException == null) {
-                    firstException = t;
-                } else {
-                    firstException.addSuppressed(t);
-                }
-            }
-        }
-        localIndexFiles.clear();
+        handles.clear();
 
         if (firstException != null) {
             if (firstException instanceof IOException) {

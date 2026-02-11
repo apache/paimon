@@ -40,8 +40,26 @@ import java.util.List;
 /**
  * Vector global index writer using DiskANN.
  *
- * <p>Vectors are added to the index in batches. When the current index reaches {@code sizePerIndex}
- * vectors, it is built and serialized to a file and a new index is created.
+ * <p>The build pipeline follows two phases:
+ *
+ * <ol>
+ *   <li><b>Vamana Graph Construction</b> — vectors are added in batches and the Vamana graph (with
+ *       alpha-pruning) is built via the native DiskANN library.
+ *   <li><b>PQ Compression</b> — after the graph is built, a Product Quantization codebook is
+ *       trained on the vectors and all vectors are compressed to compact PQ codes.
+ * </ol>
+ *
+ * <p>For each index flush, four files are produced:
+ *
+ * <ul>
+ *   <li>{@code .index} — Vamana graph (header + adjacency lists)
+ *   <li>{@code .data} — raw vector data (for exact distance reranking)
+ *   <li>{@code .pq_pivots} — PQ codebook (centroids)
+ *   <li>{@code .pq_compressed} — PQ compressed codes (memory thumbnail)
+ * </ul>
+ *
+ * <p>The PQ compressed data acts as a "memory thumbnail" — during search it stays resident in
+ * memory and allows fast approximate distance computation, reducing disk I/O for full vectors.
  *
  * <p>This class implements {@link Closeable} so that the native DiskANN index is released even if
  * {@link #finish()} is never called or throws an exception.
@@ -66,6 +84,9 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
     private DiskAnnIndex currentIndex;
     private boolean built = false;
 
+    /** All vectors accumulated for the current index, kept for PQ training after graph build. */
+    private final List<float[]> currentIndexVectors;
+
     public DiskAnnVectorGlobalIndexWriter(
             GlobalIndexFileWriter fileWriter,
             DataType fieldType,
@@ -78,6 +99,7 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
         this.dim = options.dimension();
         this.pendingBatch = new ArrayList<>(batchSize);
         this.results = new ArrayList<>();
+        this.currentIndexVectors = new ArrayList<>();
 
         validateFieldType(fieldType);
     }
@@ -106,9 +128,6 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
                     "Unsupported vector type: " + fieldData.getClass().getName());
         }
         checkDimension(vector);
-        if (options.normalize()) {
-            normalizeL2(vector);
-        }
         currentIndexMinId = Math.min(currentIndexMinId, count);
         currentIndexMaxId = Math.max(currentIndexMaxId, count);
         pendingBatch.add(new VectorEntry(count, vector));
@@ -164,6 +183,8 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
                 floatView.put(i * dim + j, vector[j]);
             }
             longView.put(i, entry.id);
+            // Accumulate vectors for PQ training.
+            currentIndexVectors.add(vector);
         }
 
         currentIndex.addWithIds(vectorBuffer, idBuffer, n);
@@ -177,31 +198,82 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
             return;
         }
 
+        // ---- Phase 2: Vamana graph construction ----
         if (!built) {
             currentIndex.build();
             built = true;
         }
 
-        String fileName = fileWriter.newFileName(DiskAnnVectorGlobalIndexerFactory.IDENTIFIER);
-        try (OutputStream out = new BufferedOutputStream(fileWriter.newOutputStream(fileName))) {
-            long serializeSize = currentIndex.serializeSize();
-            if (serializeSize > Integer.MAX_VALUE) {
-                throw new IOException(
-                        "Index too large to serialize: "
-                                + serializeSize
-                                + " bytes exceeds maximum buffer size");
-            }
-            ByteBuffer serializeBuffer =
-                    ByteBuffer.allocateDirect((int) serializeSize).order(ByteOrder.nativeOrder());
-            long bytesWritten = currentIndex.serialize(serializeBuffer);
+        // Serialize the full index (header + graph + vectors) into one buffer.
+        long serializeSize = currentIndex.serializeSize();
+        if (serializeSize > Integer.MAX_VALUE) {
+            throw new IOException(
+                    "Index too large to serialize: "
+                            + serializeSize
+                            + " bytes exceeds maximum buffer size");
+        }
 
-            byte[] indexData = new byte[(int) bytesWritten];
-            serializeBuffer.rewind();
-            serializeBuffer.get(indexData);
-            out.write(indexData);
+        ByteBuffer serializeBuffer =
+                ByteBuffer.allocateDirect((int) serializeSize).order(ByteOrder.nativeOrder());
+        long bytesWritten = currentIndex.serialize(serializeBuffer);
+
+        byte[] fullData = new byte[(int) bytesWritten];
+        serializeBuffer.rewind();
+        serializeBuffer.get(fullData);
+
+        // Parse layout to find the boundary between graph and vector sections.
+        FileIOVectorReader.IndexLayout layout = FileIOVectorReader.parseIndexLayout(fullData);
+        int vectorOffset = (int) layout.vectorSectionOffset();
+
+        // Generate file names — all share the same base name.
+        String indexFileName = fileWriter.newFileName(DiskAnnVectorGlobalIndexerFactory.IDENTIFIER);
+        String baseName = indexFileName.replaceAll("\\.index$", "");
+        String dataFileName = baseName + ".data";
+        String pqPivotsFileName = baseName + ".pq_pivots";
+        String pqCompressedFileName = baseName + ".pq_compressed";
+
+        // Write index file: header + graph section only.
+        try (OutputStream out =
+                new BufferedOutputStream(fileWriter.newOutputStream(indexFileName))) {
+            out.write(fullData, 0, vectorOffset);
             out.flush();
         }
 
+        // Write data file: raw vector section only.
+        try (OutputStream out =
+                new BufferedOutputStream(fileWriter.newOutputStream(dataFileName))) {
+            out.write(fullData, vectorOffset, fullData.length - vectorOffset);
+            out.flush();
+        }
+
+        // ---- Phase 1: PQ Compression & Training ----
+        // Train PQ codebook on the accumulated vectors and compress them.
+        float[][] vectors = currentIndexVectors.toArray(new float[0][]);
+        ProductQuantizer pq =
+                ProductQuantizer.train(
+                        vectors,
+                        dim,
+                        options.pqSubspaces(),
+                        options.pqSampleSize(),
+                        options.pqKmeansIterations());
+
+        byte[][] codes = pq.encodeAll(vectors);
+
+        // Write PQ pivots file (codebook).
+        try (OutputStream out =
+                new BufferedOutputStream(fileWriter.newOutputStream(pqPivotsFileName))) {
+            out.write(pq.serializePivots());
+            out.flush();
+        }
+
+        // Write PQ compressed file (memory thumbnail).
+        try (OutputStream out =
+                new BufferedOutputStream(fileWriter.newOutputStream(pqCompressedFileName))) {
+            out.write(ProductQuantizer.serializeCompressed(codes, options.pqSubspaces()));
+            out.flush();
+        }
+
+        // Build metadata with all companion file names.
         DiskAnnIndexMeta meta =
                 new DiskAnnIndexMeta(
                         dim,
@@ -209,14 +281,18 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
                         options.indexType().value(),
                         currentIndexCount,
                         currentIndexMinId,
-                        currentIndexMaxId);
-        results.add(new ResultEntry(fileName, currentIndexCount, meta.serialize()));
+                        currentIndexMaxId,
+                        dataFileName,
+                        pqPivotsFileName,
+                        pqCompressedFileName);
+        results.add(new ResultEntry(indexFileName, currentIndexCount, meta.serialize()));
 
         currentIndex.close();
         currentIndex = null;
         currentIndexCount = 0;
         currentIndexMinId = Long.MAX_VALUE;
         currentIndexMaxId = Long.MIN_VALUE;
+        currentIndexVectors.clear();
         built = false;
     }
 
@@ -238,19 +314,6 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
         }
     }
 
-    private void normalizeL2(float[] vector) {
-        float norm = 0.0f;
-        for (float v : vector) {
-            norm += v * v;
-        }
-        norm = (float) Math.sqrt(norm);
-        if (norm > 0) {
-            for (int i = 0; i < vector.length; i++) {
-                vector[i] /= norm;
-            }
-        }
-    }
-
     /**
      * Release native resources held by the current in-progress index.
      *
@@ -264,6 +327,7 @@ public class DiskAnnVectorGlobalIndexWriter implements GlobalIndexSingletonWrite
             currentIndex.close();
             currentIndex = null;
         }
+        currentIndexVectors.clear();
     }
 
     /** Entry holding a vector and its row ID. */

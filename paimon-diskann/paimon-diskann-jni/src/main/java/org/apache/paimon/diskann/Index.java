@@ -96,23 +96,27 @@ public class Index implements AutoCloseable {
                 nativeHandle, n, queryVectors, k, searchListSize, distances, labels);
     }
 
+    /** Return the number of bytes needed for serialization. */
     public long serializeSize() {
         checkNotClosed();
         return DiskAnnNative.indexSerializeSize(nativeHandle);
     }
 
+    /**
+     * Serialize this index with its Vamana graph adjacency lists into the given direct ByteBuffer.
+     *
+     * <p>The serialized data can later be loaded by {@link IndexSearcher#create(byte[],
+     * java.io.Closeable)} for search-only use where vectors are read on demand from an object
+     * store.
+     *
+     * @return the number of bytes written
+     */
     public long serialize(ByteBuffer buffer) {
         checkNotClosed();
         if (!buffer.isDirect()) {
             throw new IllegalArgumentException("Buffer must be a direct buffer");
         }
         return DiskAnnNative.indexSerialize(nativeHandle, buffer);
-    }
-
-    public static Index deserialize(byte[] data) {
-        long handle = DiskAnnNative.indexDeserialize(data, data.length);
-        int dimension = DiskAnnNative.indexGetDimension(handle);
-        return new Index(handle, dimension);
     }
 
     public static Index create(

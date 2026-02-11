@@ -31,3 +31,7 @@ diskann-vector = "0.45.0"
 # Tokio with rt feature: Required for async DiskANN operations
 # Uses single-threaded runtime (new_current_thread) for efficient resource usage
 tokio = { version = "1", features = ["rt"] }
+# Futures utilities (for futures_util::future::ok in JniProvider)
+futures-util = "0.3"
+# Concurrent HashMap used by the JniProvider graph storage
+dashmap = "6"

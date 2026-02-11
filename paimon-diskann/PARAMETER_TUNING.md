@@ -92,15 +92,8 @@ DiskANN is a graph-based approximate nearest neighbor (ANN) search algorithm des
 - **Description**: Distance metric for similarity computation
 - **Recommendations**:
   - **L2**: For Euclidean distance (most common)
-  - **INNER_PRODUCT**: For dot product similarity (use with normalized vectors)
+  - **INNER_PRODUCT**: For dot product similarity
   - **COSINE**: For cosine similarity
-
-#### `vector.normalize`
-- **Default**: false
-- **Description**: Whether to L2-normalize vectors before indexing/searching
-- **Recommendations**:
-  - **true**: When using COSINE metric or when vectors have varying magnitudes
-  - **false**: When vectors are already normalized or using L2 metric
 
 ### 4. Index Organization
 

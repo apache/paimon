@@ -35,24 +35,12 @@ public class DiskAnnIndex implements Closeable {
 
     private final Index index;
     private final int dimension;
-    private final DiskAnnVectorMetric metric;
-    private final DiskAnnIndexType indexType;
-    private final int maxDegree;
     private final int buildListSize;
     private volatile boolean closed = false;
 
-    private DiskAnnIndex(
-            Index index,
-            int dimension,
-            DiskAnnVectorMetric metric,
-            DiskAnnIndexType indexType,
-            int maxDegree,
-            int buildListSize) {
+    private DiskAnnIndex(Index index, int dimension, int buildListSize) {
         this.index = index;
         this.dimension = dimension;
-        this.metric = metric;
-        this.indexType = indexType;
-        this.maxDegree = maxDegree;
         this.buildListSize = buildListSize;
     }
 
@@ -65,7 +53,7 @@ public class DiskAnnIndex implements Closeable {
         MetricType metricType = metric.toMetricType();
         Index index =
                 Index.create(dimension, metricType, indexType.value(), maxDegree, buildListSize);
-        return new DiskAnnIndex(index, dimension, metric, indexType, maxDegree, buildListSize);
+        return new DiskAnnIndex(index, dimension, buildListSize);
     }
 
     public void addWithIds(ByteBuffer vectorBuffer, ByteBuffer idBuffer, int n) {
@@ -85,89 +73,28 @@ public class DiskAnnIndex implements Closeable {
         index.build(buildListSize);
     }
 
-    public void search(
-            float[] queryVectors,
-            int n,
-            int k,
-            int searchListSize,
-            float[] distances,
-            long[] labels) {
-        ensureOpen();
-        if (queryVectors.length < n * dimension) {
-            throw new IllegalArgumentException(
-                    "Query vectors array too small: required "
-                            + (n * dimension)
-                            + ", got "
-                            + queryVectors.length);
-        }
-        if (distances.length < n * k) {
-            throw new IllegalArgumentException(
-                    "Distances array too small: required " + (n * k) + ", got " + distances.length);
-        }
-        if (labels.length < n * k) {
-            throw new IllegalArgumentException(
-                    "Labels array too small: required " + (n * k) + ", got " + labels.length);
-        }
-        index.search(n, queryVectors, k, searchListSize, distances, labels);
-    }
-
-    public long size() {
-        ensureOpen();
-        return index.getCount();
-    }
-
-    public int dimension() {
-        return dimension;
-    }
-
-    public DiskAnnVectorMetric metric() {
-        return metric;
-    }
-
-    public DiskAnnIndexType indexType() {
-        return indexType;
-    }
-
-    public int maxDegree() {
-        return maxDegree;
-    }
-
-    public int buildListSize() {
-        return buildListSize;
-    }
-
+    /** Return the number of bytes needed for serialization. */
     public long serializeSize() {
         ensureOpen();
         return index.serializeSize();
     }
 
+    /**
+     * Serialize this index with its Vamana graph adjacency lists into the given direct ByteBuffer.
+     *
+     * <p>The serialized data is later split into an index file (header + graph) and a data file
+     * (raw vectors) by the writer, then loaded by {@link DiskAnnVectorGlobalIndexReader} for
+     * search.
+     *
+     * @param buffer a direct ByteBuffer of at least {@link #serializeSize()} bytes
+     * @return the number of bytes written
+     */
     public long serialize(ByteBuffer buffer) {
         ensureOpen();
         if (!buffer.isDirect()) {
             throw new IllegalArgumentException("Buffer must be a direct buffer");
         }
         return index.serialize(buffer);
-    }
-
-    public static DiskAnnIndex deserialize(byte[] data, DiskAnnVectorMetric metric) {
-        Index index = Index.deserialize(data);
-        return new DiskAnnIndex(
-                index, index.getDimension(), metric, DiskAnnIndexType.UNKNOWN, 64, 100);
-    }
-
-    /**
-     * Reset the index (remove all vectors).
-     *
-     * <p>Note: This is not supported in the current implementation. DiskANN indices are immutable
-     * once built. To "reset", you must create a new index.
-     *
-     * @throws UnsupportedOperationException always, as reset is not currently supported
-     */
-    public void reset() {
-        throw new UnsupportedOperationException(
-                "Reset is not supported for DiskANN indices. "
-                        + "DiskANN indices are immutable once built. "
-                        + "Please create a new index instead.");
     }
 
     public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {

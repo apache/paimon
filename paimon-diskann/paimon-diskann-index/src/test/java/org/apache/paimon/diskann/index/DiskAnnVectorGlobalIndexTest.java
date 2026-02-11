@@ -107,8 +107,8 @@ public class DiskAnnVectorGlobalIndexTest {
         };
     }
 
-    private GlobalIndexFileReader createFileReader(Path path) {
-        return meta -> fileIO.newInputStream(new Path(path, meta.filePath()));
+    private GlobalIndexFileReader createFileReader(Path basePath) {
+        return meta -> fileIO.newInputStream(new Path(basePath, meta.filePath()));
     }
 
     @Test

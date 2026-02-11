@@ -25,7 +25,17 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 
-/** Metadata for DiskANN vector index. */
+/**
+ * Metadata for DiskANN vector index.
+ *
+ * <p>Stores the file names of the companion files that live alongside the index file:
+ *
+ * <ul>
+ *   <li>{@link #dataFileName()} — raw vector data file
+ *   <li>{@link #pqPivotsFileName()} — PQ codebook (pivots)
+ *   <li>{@link #pqCompressedFileName()} — PQ compressed codes
+ * </ul>
+ */
 public class DiskAnnIndexMeta implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -38,31 +48,29 @@ public class DiskAnnIndexMeta implements Serializable {
     private final long numVectors;
     private final long minId;
     private final long maxId;
+    private final String dataFileName;
+    private final String pqPivotsFileName;
+    private final String pqCompressedFileName;
 
     public DiskAnnIndexMeta(
-            int dim, int metricValue, int indexTypeValue, long numVectors, long minId, long maxId) {
+            int dim,
+            int metricValue,
+            int indexTypeValue,
+            long numVectors,
+            long minId,
+            long maxId,
+            String dataFileName,
+            String pqPivotsFileName,
+            String pqCompressedFileName) {
         this.dim = dim;
         this.metricValue = metricValue;
         this.indexTypeValue = indexTypeValue;
         this.numVectors = numVectors;
         this.minId = minId;
         this.maxId = maxId;
-    }
-
-    public int dim() {
-        return dim;
-    }
-
-    public int metricValue() {
-        return metricValue;
-    }
-
-    public int indexTypeValue() {
-        return indexTypeValue;
-    }
-
-    public long numVectors() {
-        return numVectors;
+        this.dataFileName = dataFileName;
+        this.pqPivotsFileName = pqPivotsFileName;
+        this.pqCompressedFileName = pqCompressedFileName;
     }
 
     public long minId() {
@@ -71,6 +79,11 @@ public class DiskAnnIndexMeta implements Serializable {
 
     public long maxId() {
         return maxId;
+    }
+
+    /** The file name of the separate vector data file. */
+    public String dataFileName() {
+        return dataFileName;
     }
 
     /** Serialize metadata to byte array. */
@@ -84,6 +97,9 @@ public class DiskAnnIndexMeta implements Serializable {
         out.writeLong(numVectors);
         out.writeLong(minId);
         out.writeLong(maxId);
+        out.writeUTF(dataFileName);
+        out.writeUTF(pqPivotsFileName);
+        out.writeUTF(pqCompressedFileName);
         out.flush();
         return baos.toByteArray();
     }
@@ -101,6 +117,18 @@ public class DiskAnnIndexMeta implements Serializable {
         long numVectors = in.readLong();
         long minId = in.readLong();
         long maxId = in.readLong();
-        return new DiskAnnIndexMeta(dim, metricValue, indexTypeValue, numVectors, minId, maxId);
+        String dataFileName = in.readUTF();
+        String pqPivotsFileName = in.readUTF();
+        String pqCompressedFileName = in.readUTF();
+        return new DiskAnnIndexMeta(
+                dim,
+                metricValue,
+                indexTypeValue,
+                numVectors,
+                minId,
+                maxId,
+                dataFileName,
+                pqPivotsFileName,
+                pqCompressedFileName);
     }
 }
