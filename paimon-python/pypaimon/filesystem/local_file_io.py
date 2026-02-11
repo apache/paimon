@@ -117,6 +117,7 @@ class LocalFileIO(FileIO):
                 stat_info = file_path.stat()
                 self.path = str(file_path.absolute())
                 self.original_path = original_path
+                self.base_name = os.path.basename(original_path)
                 self.size = stat_info.st_size if file_path.is_file() else None
                 self.type = (
                     pyarrow.fs.FileType.Directory if file_path.is_dir()

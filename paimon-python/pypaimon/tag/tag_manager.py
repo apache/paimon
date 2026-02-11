@@ -140,6 +140,14 @@ class TagManager:
 
         self._create_or_replace_tag(snapshot, tag_name)
 
+    def list_tag(self):
+        """List all tags."""
+        result = []
+        for tag_file in self.file_io.list_status(self.tag_directory()):
+            _, tag = tag_file.base_name.split("-", 1)
+            result.append(tag)
+        return result
+
     def _create_or_replace_tag(
             self,
             snapshot: Snapshot,

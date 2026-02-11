@@ -139,6 +139,16 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         return tag_mgr.delete_tag(tag_name)
 
+    def list_tag(self):
+        """
+        List all tags.
+
+        Returns:
+            List of name of tag
+        """
+        tag_mgr = self.tag_manager()
+        return tag_mgr.list_tag()
+
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
