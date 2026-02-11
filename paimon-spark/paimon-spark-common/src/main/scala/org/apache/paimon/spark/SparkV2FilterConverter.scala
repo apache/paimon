@@ -18,15 +18,14 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.{GreaterOrEqual, LeafPredicate, LessOrEqual, Predicate, PredicateBuilder, Transform}
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder, Transform}
+import org.apache.paimon.spark.util.PredicateUtils.convertToBetweenFunction
 import org.apache.paimon.spark.util.SparkExpressionConverter.{toPaimonLiteral, toPaimonTransform}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.expressions.{Expression, Literal}
 import org.apache.spark.sql.connector.expressions.filter.{And, Not, Or, Predicate => SparkPredicate}
-
-import java.util.Objects
 
 import scala.collection.JavaConverters._
 
@@ -173,38 +172,6 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
 
       // TODO: AlwaysTrue, AlwaysFalse
       case _ => throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
-    }
-  }
-
-  private def convertToBetweenFunction(
-      leftPredicate: Predicate,
-      rightPredicate: Predicate): Option[Predicate] = {
-
-    def toBetweenLeafPredicate(
-        gtePredicate: LeafPredicate,
-        ltePredicate: LeafPredicate): Predicate = {
-      // gtePredicate and ltePredicate should have the same transform
-      builder.between(
-        gtePredicate.transform(),
-        gtePredicate.literals().get(0),
-        ltePredicate.literals().get(0))
-    }
-
-    (leftPredicate, rightPredicate) match {
-      case (left: LeafPredicate, right: LeafPredicate) =>
-        // left and right should have the same transform
-        if (!Objects.equals(left.transform(), right.transform())) {
-          return None
-        }
-        (left.function(), right.function()) match {
-          case (_: GreaterOrEqual, _: LessOrEqual) =>
-            Some(toBetweenLeafPredicate(left, right))
-          case (_: LessOrEqual, _: GreaterOrEqual) =>
-            Some(toBetweenLeafPredicate(right, left))
-          case _ => None
-        }
-      case _ =>
-        None
     }
   }
 

@@ -21,7 +21,8 @@ package org.apache.paimon.spark
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.partition.PartitionPredicate
 import org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
+import org.apache.paimon.predicate.{GreaterOrEqual, LeafPredicate, LessOrEqual, PartitionPredicateVisitor, Predicate, TopN, VectorSearch}
+import org.apache.paimon.spark.util.PredicateUtils
 import org.apache.paimon.table.{SpecialFields, Table}
 import org.apache.paimon.types.RowType
 
@@ -101,12 +102,52 @@ abstract class PaimonBaseScanBuilder
       this.pushedPartitionFilters = Array(pair.getLeft.get())
     }
     if (pushableDataFilters.nonEmpty) {
-      this.pushedDataFilters = pushableDataFilters.toArray
+      this.pushedDataFilters = rewriteDataFiltersToBetween(pushableDataFilters.toArray)
     }
     if (postScan.nonEmpty) {
       this.hasPostScanPredicates = true
     }
     postScan.toArray
+  }
+
+  /** Rewrite pushable data filters to use Between predicate when possible. */
+  private def rewriteDataFiltersToBetween(
+      pushableDataFilters: Array[Predicate]): Array[Predicate] = {
+    val leafPredicates =
+      pushableDataFilters.filter(_.isInstanceOf[LeafPredicate]).map(_.asInstanceOf[LeafPredicate])
+    val nonLeafPredicates = pushableDataFilters.filterNot(_.isInstanceOf[LeafPredicate])
+
+    // Group LeafPredicates by transform
+    val groupedByTransform = leafPredicates.groupBy(_.transform())
+
+    val rewrittenPredicates = scala.collection.mutable.ArrayBuffer.empty[Predicate]
+    rewrittenPredicates ++= nonLeafPredicates
+
+    groupedByTransform.values.foreach {
+      predicates =>
+        // Filter predicates with LessOrEqual or GreaterOrEqual functions
+        val candidates = predicates.filter(
+          p => p.function().isInstanceOf[LessOrEqual] || p.function().isInstanceOf[GreaterOrEqual])
+        // Add other predicates directly to result
+        val nonCandidates = predicates.filterNot(
+          p => p.function().isInstanceOf[LessOrEqual] || p.function().isInstanceOf[GreaterOrEqual])
+        rewrittenPredicates ++= nonCandidates
+
+        // Now we only support the simplest case: one pair of LessOrEqual and GreaterOrEqual
+        if (candidates.length == 2) {
+          // Try to convert to Between
+          PredicateUtils.convertToBetweenFunction(candidates(0), candidates(1)) match {
+            case Some(betweenPredicate) =>
+              rewrittenPredicates += betweenPredicate
+            case None =>
+              rewrittenPredicates ++= candidates
+          }
+        } else {
+          rewrittenPredicates ++= candidates
+        }
+    }
+
+    rewrittenPredicates.toArray
   }
 
   override def pushedPredicates: Array[SparkPredicate] = {
