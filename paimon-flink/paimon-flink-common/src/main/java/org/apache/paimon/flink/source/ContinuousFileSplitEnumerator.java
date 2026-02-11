@@ -92,6 +92,14 @@ public class ContinuousFileSplitEnumerator
 
     private final int maxSnapshotCount;
 
+    private final int sourceParallelismUpperBound;
+
+    /**
+     * Metric name for source scaling max parallelism. This metric provides a recommended upper
+     * bound of parallelism for auto-scaling systems.
+     */
+    public static final String SOURCE_PARALLELISM_UPPER_BOUND = "sourceParallelismUpperBound";
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
@@ -101,7 +109,8 @@ public class ContinuousFileSplitEnumerator
             boolean unordered,
             int splitMaxPerTask,
             boolean shuffleBucketWithPartition,
-            int maxSnapshotCount) {
+            int maxSnapshotCount,
+            int sourceParallelismUpperBound) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -118,6 +127,7 @@ public class ContinuousFileSplitEnumerator
         this.consumerProgressCalculator =
                 new ConsumerProgressCalculator(context.currentParallelism());
         this.maxSnapshotCount = maxSnapshotCount;
+        this.sourceParallelismUpperBound = sourceParallelismUpperBound;
     }
 
     @VisibleForTesting
@@ -135,8 +145,18 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
+        registerMetrics();
         context.callAsync(
                 this::scanNextSnapshot, this::processDiscoveredSplits, 0, discoveryInterval);
+    }
+
+    private void registerMetrics() {
+        try {
+            context.metricGroup()
+                    .gauge(SOURCE_PARALLELISM_UPPER_BOUND, () -> sourceParallelismUpperBound);
+        } catch (Exception e) {
+            LOG.warn("Failed to register enumerator metrics.", e);
+        }
     }
 
     @Override
