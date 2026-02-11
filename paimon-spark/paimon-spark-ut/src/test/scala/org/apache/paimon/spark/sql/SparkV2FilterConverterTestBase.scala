@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.predicate.{Between, LeafPredicate, PredicateBuilder}
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkV2FilterConverter}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.table.source.DataSplit
@@ -293,6 +293,39 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
       sql(s"SELECT int_col from test_tbl WHERE $filter ORDER BY int_col"),
       Seq(Row(1), Row(2), Row(3)))
     assert(scanFilesCount(filter) == 3)
+  }
+
+  test("V2Filter: Between") {
+    // 1. test basic between
+    val filter = "string_col BETWEEN 'a' AND 'r'"
+    val actual = converter.convert(v2Filter(filter)).get
+    assert(
+      actual.equals(builder.between(0, BinaryString.fromString("a"), BinaryString.fromString("r"))))
+    checkAnswer(
+      sql(s"SELECT string_col from test_tbl WHERE $filter ORDER BY string_col"),
+      Seq(Row("hello"), Row("hi"), Row("paimon"))
+    )
+
+    // 2. >= and <= on same transform should also be converted to between
+    val filter1 = "CONCAT(string_col, '_suffix') >= 'a' AND CONCAT(string_col, '_suffix') <= 'r'"
+    val actual1 = converter.convert(v2Filter(filter1)).get
+    assert(actual1.isInstanceOf[LeafPredicate])
+    val function = actual1.asInstanceOf[LeafPredicate].function
+    assert(function.isInstanceOf[Between])
+    checkAnswer(
+      sql(s"SELECT string_col from test_tbl WHERE $filter1 ORDER BY string_col"),
+      Seq(Row("hello"), Row("hi"), Row("paimon"))
+    )
+
+    // 3. >= and <= on different transform should not be converted to between
+    val filter2 = "CONCAT(string_col, '_suffix1') >= 'a' AND CONCAT(string_col, '_suffix2') <= 'r'"
+    val actual2 = converter.convert(v2Filter(filter2)).get
+    assert(!actual2.isInstanceOf[LeafPredicate])
+
+    // 4. >= and <= on different columns should not be converted to between
+    val filter3 = "string_col >= 'a' AND int_col <= 2"
+    val actual3 = converter.convert(v2Filter(filter3)).get
+    assert(!actual3.isInstanceOf[LeafPredicate])
   }
 
   test("V2Filter: And") {

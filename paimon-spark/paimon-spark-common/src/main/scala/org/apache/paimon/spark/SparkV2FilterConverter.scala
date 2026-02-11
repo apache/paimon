@@ -18,13 +18,15 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder, Transform}
+import org.apache.paimon.predicate.{GreaterOrEqual, LeafPredicate, LessOrEqual, Predicate, PredicateBuilder, Transform}
 import org.apache.paimon.spark.util.SparkExpressionConverter.{toPaimonLiteral, toPaimonTransform}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.expressions.{Expression, Literal}
 import org.apache.spark.sql.connector.expressions.filter.{And, Not, Or, Predicate => SparkPredicate}
+
+import java.util.Objects
 
 import scala.collection.JavaConverters._
 
@@ -125,7 +127,12 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
 
       case AND =>
         val and = sparkPredicate.asInstanceOf[And]
-        PredicateBuilder.and(convert(and.left), convert(and.right()))
+        val leftPredicate = convert(and.left)
+        val rightPredicate = convert(and.right())
+        convertToBetweenFunction(leftPredicate, rightPredicate) match {
+          case Some(predicate) => predicate
+          case _ => PredicateBuilder.and(leftPredicate, rightPredicate)
+        }
 
       case OR =>
         val or = sparkPredicate.asInstanceOf[Or]
@@ -166,6 +173,42 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
 
       // TODO: AlwaysTrue, AlwaysFalse
       case _ => throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
+    }
+  }
+
+  private def convertToBetweenFunction(
+      leftPredicate: Predicate,
+      rightPredicate: Predicate): Option[Predicate] = {
+    def toBetweenLeafPredicate(
+        transform: Transform,
+        lowerBoundInclusive: Object,
+        upperBoundInclusive: Object): Predicate = {
+      builder.between(transform, lowerBoundInclusive, upperBoundInclusive)
+    }
+
+    (leftPredicate, rightPredicate) match {
+      case (left: LeafPredicate, right: LeafPredicate) =>
+        // left and right should have the same transform
+        if (!Objects.equals(left.transform(), right.transform())) {
+          return None
+        }
+        (left.function(), right.function()) match {
+          case (_: GreaterOrEqual, _: LessOrEqual) =>
+            Some(
+              toBetweenLeafPredicate(
+                left.transform(),
+                left.literals().get(0),
+                right.literals().get(0)))
+          case (_: LessOrEqual, _: GreaterOrEqual) =>
+            Some(
+              toBetweenLeafPredicate(
+                left.transform(),
+                right.literals().get(0),
+                left.literals().get(0)))
+          case _ => None
+        }
+      case _ =>
+        None
     }
   }
 

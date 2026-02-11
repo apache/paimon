@@ -65,6 +65,10 @@ abstract class RowIdPushDownTestBase extends PaimonSparkTestBase {
         sql("SELECT * FROM t WHERE _ROW_ID IN (6, 7)"),
         Seq()
       )
+      checkAnswer(
+        sql("SELECT * FROM t WHERE _ROW_ID BETWEEN 0 AND 2"),
+        Seq(Row(0, 0, "0"), Row(1, 1, "1"), Row(2, 2, "2"))
+      )
 
       // 2.CompoundPredicate
       checkAnswer(
