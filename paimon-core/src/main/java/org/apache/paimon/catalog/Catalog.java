@@ -233,6 +233,17 @@ public interface Catalog extends AutoCloseable {
             throws DatabaseNotExistException;
 
     /**
+     * Get list of table details under this database. An empty list is returned if none exists.
+     *
+     * <p>NOTE: System tables will not be listed.
+     *
+     * @param databaseName Name of the database to list table details.
+     * @return a list of the details of all tables in this database.
+     * @throws DatabaseNotExistException if the database does not exist
+     */
+    List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException;
+
+    /**
      * Gets an array of tables for a catalog.
      *
      * <p>NOTE: System tables will not be listed.
