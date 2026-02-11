@@ -137,24 +137,17 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         long scannedRowCount = 0;
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<Split> planSplits = plan.splits();
-        // Limit pushdown only supports DataSplit. Skip for IncrementalSplit.
-        if (planSplits.stream().anyMatch(s -> !(s instanceof DataSplit))) {
-            return Optional.of(result);
-        }
-        @SuppressWarnings("unchecked")
-        List<DataSplit> splits = (List<DataSplit>) (List<?>) planSplits;
-
-        LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }
 
+        LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
         List<Split> limitedSplits = new ArrayList<>();
-        for (DataSplit dataSplit : splits) {
-            OptionalLong mergedRowCount = dataSplit.mergedRowCount();
+        for (Split split : splits) {
+            OptionalLong mergedRowCount = split.mergedRowCount();
             if (mergedRowCount.isPresent()) {
-                limitedSplits.add(dataSplit);
+                limitedSplits.add(split);
                 scannedRowCount += mergedRowCount.getAsLong();
                 if (scannedRowCount >= pushDownLimit) {
                     SnapshotReader.Plan newPlan =
@@ -200,13 +193,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
 
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<Split> planSplits = plan.splits();
-        // TopN pushdown only supports DataSplit. Skip for IncrementalSplit.
-        if (planSplits.stream().anyMatch(s -> !(s instanceof DataSplit))) {
-            return Optional.of(result);
-        }
-        @SuppressWarnings("unchecked")
-        List<DataSplit> splits = (List<DataSplit>) (List<?>) planSplits;
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }
