@@ -204,14 +204,14 @@ class SimpleTableTest(unittest.TestCase):
         table_commit.close()
 
         table.create_tag("test_tag_2")
-        all_tags = set(table.list_tag())
+        all_tags = set(table.list_tags())
         self.assertEqual(all_tags, {"test_tag", "test_tag_2"})
 
         # Delete the tag
         result = table.delete_tag("test_tag")
         self.assertTrue(result)
 
-        all_tags = table.list_tag()
+        all_tags = table.list_tags()
         self.assertEqual(all_tags, ["test_tag_2"])
 
         # Verify tag no longer exists
