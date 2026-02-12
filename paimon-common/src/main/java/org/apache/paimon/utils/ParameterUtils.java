@@ -18,10 +18,15 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -37,6 +42,23 @@ public class ParameterUtils {
             partitions.add(parseCommaSeparatedKeyValues(partition));
         }
         return partitions;
+    }
+
+    @Nullable
+    public static Predicate toPartitionPredicate(
+            List<Map<String, String>> partitionList,
+            RowType partitionType,
+            String partitionDefaultName) {
+        if (partitionList == null || partitionList.isEmpty()) {
+            return null;
+        }
+        return PredicateBuilder.or(
+                partitionList.stream()
+                        .map(
+                                p ->
+                                        PredicateBuilder.partition(
+                                                p, partitionType, partitionDefaultName))
+                        .toArray(Predicate[]::new));
     }
 
     public static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {

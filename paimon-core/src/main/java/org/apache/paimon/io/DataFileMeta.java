@@ -309,6 +309,11 @@ public interface DataFileMeta {
         return firstRowId;
     }
 
+    default Range nonNullRowIdRange() {
+        long firstRowId = nonNullFirstRowId();
+        return new Range(firstRowId, firstRowId + rowCount() - 1);
+    }
+
     @Nullable
     List<String> writeCols();
 

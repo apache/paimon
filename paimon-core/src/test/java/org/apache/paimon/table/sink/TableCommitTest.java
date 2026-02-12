@@ -19,7 +19,6 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
@@ -28,10 +27,7 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -192,12 +188,8 @@ public class TableCommitTest {
         }
 
         @Override
-        public void call(
-                List<SimpleFileEntry> baseFiles,
-                List<ManifestEntry> deltaFiles,
-                List<IndexManifestEntry> indexFiles,
-                Snapshot snapshot) {
-            commitCallbackResult.get(testId).add(snapshot.commitIdentifier());
+        public void call(Context context) {
+            commitCallbackResult.get(testId).add(context.snapshot.commitIdentifier());
         }
 
         @Override

@@ -18,13 +18,10 @@
 
 package org.apache.paimon.metastore;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -62,13 +59,9 @@ public class AddPartitionCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(
-            List<SimpleFileEntry> baseFiles,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+    public void call(Context context) {
         Set<BinaryRow> partitions =
-                deltaFiles.stream()
+                context.deltaFiles.stream()
                         .filter(e -> FileKind.ADD.equals(e.kind()))
                         .map(ManifestEntry::partition)
                         .collect(Collectors.toSet());

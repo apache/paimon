@@ -48,7 +48,6 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -221,16 +220,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     public void close() throws Exception {}
 
     @Override
-    public void call(
-            List<SimpleFileEntry> baseFiles,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+    public void call(Context context) {
         createMetadata(
-                snapshot,
+                context.snapshot,
                 (removedFiles, addedFiles) ->
-                        collectFileChanges(deltaFiles, removedFiles, addedFiles),
-                indexFiles);
+                        collectFileChanges(context.deltaFiles, removedFiles, addedFiles),
+                context.indexFiles);
     }
 
     @Override

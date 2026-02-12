@@ -20,6 +20,7 @@ package org.apache.paimon.append.dataevolution;
 
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.CompactIncrement;
@@ -36,7 +37,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -46,34 +46,17 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Data evolution table compaction task. */
-public class DataEvolutionCompactTask {
+public class DataEvolutionCompactTask extends AppendCompactTask {
 
     private static final Map<String, String> DYNAMIC_WRITE_OPTIONS =
             Collections.singletonMap(CoreOptions.TARGET_FILE_SIZE.key(), "99999 G");
 
-    private final BinaryRow partition;
-    private final List<DataFileMeta> compactBefore;
-    private final List<DataFileMeta> compactAfter;
     private final boolean blobTask;
 
     public DataEvolutionCompactTask(
             BinaryRow partition, List<DataFileMeta> files, boolean blobTask) {
-        this.partition = partition;
-        this.compactBefore = new ArrayList<>(files);
-        this.compactAfter = new ArrayList<>();
+        super(partition, files);
         this.blobTask = blobTask;
-    }
-
-    public BinaryRow partition() {
-        return partition;
-    }
-
-    public List<DataFileMeta> compactBefore() {
-        return compactBefore;
-    }
-
-    public List<DataFileMeta> compactAfter() {
-        return compactAfter;
     }
 
     public boolean isBlobTask() {

@@ -31,11 +31,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Compaction Sink for data-evolution table. */
 public class DataEvolutionTableCompactSink extends FlinkSink<DataEvolutionCompactTask> {
 
-    private final FileStoreTable table;
-
     public DataEvolutionTableCompactSink(FileStoreTable table) {
         super(table, true);
-        this.table = table;
     }
 
     public static DataStreamSink<?> sink(

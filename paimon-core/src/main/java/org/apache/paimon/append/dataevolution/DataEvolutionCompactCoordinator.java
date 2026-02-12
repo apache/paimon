@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
 import javax.annotation.Nullable;
@@ -105,7 +106,8 @@ public class DataEvolutionCompactCoordinator {
                             .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null);
             if (allManifestMetaContainsRowId) {
                 RangeHelper<ManifestFileMeta> rangeHelper =
-                        new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
+                        new RangeHelper<>(
+                                manifest -> new Range(manifest.minRowId(), manifest.maxRowId()));
                 this.metas =
                         new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
             } else {
@@ -161,9 +163,11 @@ public class DataEvolutionCompactCoordinator {
                 List<DataFileMeta> files = partitionFiles.getValue();
                 RangeHelper<DataFileMeta> rangeHelper =
                         new RangeHelper<>(
-                                DataFileMeta::nonNullFirstRowId,
-                                // merge adjacent files
-                                f -> f.nonNullFirstRowId() + f.rowCount());
+                                f ->
+                                        new Range(
+                                                f.nonNullFirstRowId(),
+                                                // merge adjacent files
+                                                f.nonNullFirstRowId() + f.rowCount()));
 
                 List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(files);
 
@@ -201,10 +205,7 @@ public class DataEvolutionCompactCoordinator {
                     }
 
                     RangeHelper<DataFileMeta> rangeHelper2 =
-                            new RangeHelper<>(
-                                    DataFileMeta::nonNullFirstRowId,
-                                    // files group
-                                    f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+                            new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
                     List<List<DataFileMeta>> groupedFiles =
                             rangeHelper2.mergeOverlappingRanges(dataFiles);
                     List<DataFileMeta> waitCompactFiles = new ArrayList<>();

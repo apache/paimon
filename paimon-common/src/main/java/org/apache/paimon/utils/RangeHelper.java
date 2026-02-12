@@ -21,17 +21,15 @@ package org.apache.paimon.utils;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.function.ToLongFunction;
+import java.util.function.Function;
 
 /** A helper class to handle ranges. */
 public class RangeHelper<T> {
 
-    private final ToLongFunction<T> startFunction;
-    private final ToLongFunction<T> endFunction;
+    private final Function<T, Range> rangeFunction;
 
-    public RangeHelper(ToLongFunction<T> startFunction, ToLongFunction<T> endFunction) {
-        this.startFunction = startFunction;
-        this.endFunction = endFunction;
+    public RangeHelper(Function<T, Range> rangeFunction) {
+        this.rangeFunction = rangeFunction;
     }
 
     public boolean areAllRangesSame(List<T> ranges) {
@@ -41,6 +39,7 @@ public class RangeHelper<T> {
 
         // Get the first range as reference
         T first = ranges.get(0);
+        Range firstRange = rangeFunction.apply(first);
 
         // Compare all other ranges with the first one
         for (int i = 1; i < ranges.size(); i++) {
@@ -48,8 +47,8 @@ public class RangeHelper<T> {
             if (current == null || first == null) {
                 return false; // Null elements are considered different
             }
-            if (startFunction.applyAsLong(current) != startFunction.applyAsLong(first)
-                    || endFunction.applyAsLong(current) != endFunction.applyAsLong(first)) {
+            Range currentRange = rangeFunction.apply(current);
+            if (currentRange.from != firstRange.from || currentRange.to != firstRange.to) {
                 return false; // Found a different range
             }
         }
@@ -123,19 +122,21 @@ public class RangeHelper<T> {
     private class IndexedValue {
 
         private final T value;
+        private final Range range;
         private final int originalIndex;
 
         private IndexedValue(T value, int originalIndex) {
             this.value = value;
+            this.range = rangeFunction.apply(value);
             this.originalIndex = originalIndex;
         }
 
         private long start() {
-            return startFunction.applyAsLong(value);
+            return range.from;
         }
 
         private long end() {
-            return endFunction.applyAsLong(value);
+            return range.to;
         }
     }
 }

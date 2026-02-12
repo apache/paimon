@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -188,6 +189,11 @@ public class SimpleFileEntry implements FileEntry {
         Long firstRowId = firstRowId();
         checkArgument(firstRowId != null, "First row id of '%s' should not be null.", fileName());
         return firstRowId;
+    }
+
+    public Range nonNullRowIdRange() {
+        long firstRowId = nonNullFirstRowId();
+        return new Range(firstRowId, firstRowId + rowCount() - 1);
     }
 
     @Override

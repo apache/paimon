@@ -214,6 +214,13 @@ class CoreOptions:
         .with_description("The timestamp range for incremental reading.")
     )
 
+    SCAN_TAG_NAME: ConfigOption[str] = (
+        ConfigOptions.key("scan.tag-name")
+        .string_type()
+        .no_default_value()
+        .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
+    )
+
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
         ConfigOptions.key("source.split.target-size")
         .memory_type()
@@ -504,6 +511,9 @@ class CoreOptions:
 
     def incremental_between_timestamp(self, default=None):
         return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP, default)
+
+    def scan_tag_name(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TAG_NAME, default)
 
     def source_split_target_size(self, default=None):
         return self.options.get(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, default).get_bytes()

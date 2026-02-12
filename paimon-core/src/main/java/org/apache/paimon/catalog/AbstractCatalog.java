@@ -331,6 +331,19 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        List<Table> result = new ArrayList<>();
+        for (String tableName : listTables(databaseName)) {
+            try {
+                result.add(getTable(Identifier.create(databaseName, tableName)));
+            } catch (TableNotExistException e) {
+                // ignore
+            }
+        }
+        return result;
+    }
+
+    @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         checkNotBranch(identifier, "dropTable");

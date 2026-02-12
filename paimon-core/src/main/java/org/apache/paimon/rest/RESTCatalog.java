@@ -267,6 +267,16 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        try {
+            List<GetTableResponse> tables = api.listTableDetails(databaseName);
+            return tables.stream().map(t -> toTable(databaseName, t)).collect(Collectors.toList());
+        } catch (NoSuchResourceException e) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+    }
+
+    @Override
     public PagedList<Identifier> listTablesPagedGlobally(
             @Nullable String databaseNamePattern,
             @Nullable String tableNamePattern,

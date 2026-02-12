@@ -39,6 +39,7 @@ import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.ChainTableCommitPreCallback;
 import org.apache.paimon.metastore.ChainTableOverwriteCommitCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
+import org.apache.paimon.metastore.VisibilityWaitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.Lock;
@@ -54,6 +55,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PartitionModification;
@@ -416,6 +418,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
         if (options.isChainTable()) {
             callbacks.add(new ChainTableOverwriteCommitCallback(table));
+        }
+
+        if (options.visibilityCallbackEnabled() && !schema.primaryKeys().isEmpty()) {
+            if (table.bucketMode() == BucketMode.POSTPONE_MODE
+                    || options.deletionVectorsEnabled()) {
+                callbacks.add(new VisibilityWaitCallback(table));
+            }
         }
 
         callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));

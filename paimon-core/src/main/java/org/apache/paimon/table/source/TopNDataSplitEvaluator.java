@@ -51,33 +51,34 @@ public class TopNDataSplitEvaluator {
         this.schemaManager = schemaManager;
     }
 
-    public List<DataSplit> evaluate(SortValue order, int limit, List<DataSplit> splits) {
+    public List<Split> evaluate(SortValue order, int limit, List<Split> splits) {
         if (limit > splits.size()) {
             return splits;
         }
         return getTopNSplits(order, limit, splits);
     }
 
-    private List<DataSplit> getTopNSplits(SortValue order, int limit, List<DataSplit> splits) {
+    private List<Split> getTopNSplits(SortValue order, int limit, List<Split> splits) {
         int index = order.field().index();
         DataField field = schema.fields().get(index);
         SimpleStatsEvolutions evolutions =
                 new SimpleStatsEvolutions((id) -> scanTableSchema(id).fields(), schema.id());
 
         // extract the stats
-        List<DataSplit> results = new ArrayList<>();
+        List<Split> results = new ArrayList<>();
         List<RichSplit> richSplits = new ArrayList<>();
-        for (DataSplit split : splits) {
+        for (Split split : splits) {
             if (!minmaxAvailable(split, Collections.singleton(field.name()))) {
                 // unknown split, read it
                 results.add(split);
                 continue;
             }
 
-            Object min = split.minValue(index, field, evolutions);
-            Object max = split.maxValue(index, field, evolutions);
-            Long nullCount = split.nullCount(index, evolutions);
-            richSplits.add(new RichSplit(split, min, max, nullCount));
+            DataSplit dataSplit = (DataSplit) split;
+            Object min = dataSplit.minValue(index, field, evolutions);
+            Object max = dataSplit.maxValue(index, field, evolutions);
+            Long nullCount = dataSplit.nullCount(index, evolutions);
+            richSplits.add(new RichSplit(dataSplit, min, max, nullCount));
         }
 
         // pick the TopN splits

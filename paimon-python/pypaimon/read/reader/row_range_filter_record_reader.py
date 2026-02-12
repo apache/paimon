@@ -20,7 +20,7 @@ from typing import Optional, List
 import pyarrow
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 from pyarrow import RecordBatch
 
 

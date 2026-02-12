@@ -19,6 +19,7 @@ import logging
 import os
 import subprocess
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
@@ -399,7 +400,13 @@ class PyArrowFileIO(FileIO):
         def record_generator():
             num_rows = len(list(records_dict.values())[0])
             for i in range(num_rows):
-                yield {col: records_dict[col][i] for col in records_dict.keys()}
+                record = {}
+                for col in records_dict.keys():
+                    value = records_dict[col][i]
+                    if isinstance(value, datetime) and value.tzinfo is None:
+                        value = value.replace(tzinfo=timezone.utc)
+                    record[col] = value
+                yield record
 
         records = record_generator()
 

@@ -18,11 +18,13 @@ limitations under the License.
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
@@ -235,6 +237,70 @@ class DataEvolutionTest(unittest.TestCase):
             0,
             "with_slice(10, 12) on 6 rows should return 0 rows (out of bounds), got %d"
             % len(result_oob),
+        )
+
+    def test_with_slice_partitioned_table(self):
+        pa_schema = pa.schema([
+            ("pt", pa.int64()),
+            ("b", pa.int32()),
+            ("c", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["pt"],
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+                "source.split.target-size": "512m",
+            },
+        )
+        table_name = "default.test_with_slice_partitioned_table"
+        self.catalog.create_table(table_name, schema, ignore_if_exists=True)
+        table = self.catalog.get_table(table_name)
+
+        for batch in [
+            {"pt": [1, 1], "b": [10, 20], "c": [100, 200]},
+            {"pt": [2, 2], "b": [1011, 2011], "c": [1001, 2001]},
+            {"pt": [2, 2], "b": [-10, -20], "c": [-100, -200]},
+        ]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write()
+            tc = wb.new_commit()
+            tw.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        rb: ReadBuilder = table.new_read_builder()
+        full_splits = rb.new_scan().plan().splits()
+        full_result = rb.new_read().to_pandas(full_splits)
+        self.assertEqual(
+            len(full_result),
+            6,
+            "Full scan should return 6 rows",
+        )
+
+        predicate_builder = rb.new_predicate_builder()
+        rb.with_filter(predicate_builder.equal("pt", 2))
+
+        # 0 to 2
+        scan_oob = rb.new_scan().with_slice(0, 2)
+        splits_oob = scan_oob.plan().splits()
+        result_oob = rb.new_read().to_pandas(splits_oob)
+        self.assertEqual(
+            sorted(result_oob["b"].tolist()),
+            [1011, 2011],
+            "Full set b mismatch",
+        )
+
+        # 2 to 4
+        scan_oob = rb.new_scan().with_slice(2, 4)
+        splits_oob = scan_oob.plan().splits()
+        result_oob = rb.new_read().to_pandas(splits_oob)
+        self.assertEqual(
+            sorted(result_oob["b"].tolist()),
+            [-20, -10],
+            "Full set b mismatch",
         )
 
     def test_multiple_appends(self):
@@ -586,6 +652,93 @@ class DataEvolutionTest(unittest.TestCase):
             actual_with_meta.schema.field('_SEQUENCE_NUMBER').nullable,
             '_SEQUENCE_NUMBER must be non-nullable per SpecialFields',
         )
+
+        rb_with_row_id = table.new_read_builder().with_projection(['f0', 'f1', 'f2', '_ROW_ID'])
+        pb = rb_with_row_id.new_predicate_builder()
+        rb_eq0 = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 0))
+        result_eq0 = rb_eq0.new_read().to_arrow(rb_eq0.new_scan().plan().splits())
+        self.assertEqual(result_eq0, pa.Table.from_pydict(
+            {'f0': [1], 'f1': ['a'], 'f2': ['b']}, schema=simple_pa_schema))
+        rb_eq1 = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 1))
+        result_eq1 = rb_eq1.new_read().to_arrow(rb_eq1.new_scan().plan().splits())
+        self.assertEqual(result_eq1, pa.Table.from_pydict(
+            {'f0': [2], 'f1': ['c'], 'f2': ['d']}, schema=simple_pa_schema))
+        rb_in = table.new_read_builder().with_filter(pb.is_in('_ROW_ID', [0, 1]))
+        result_in = rb_in.new_read().to_arrow(rb_in.new_scan().plan().splits())
+        self.assertEqual(result_in, expect)
+
+    def test_filter_by_row_id(self):
+        simple_pa_schema = pa.schema([('f0', pa.int32())])
+        schema = Schema.from_pyarrow_schema(
+            simple_pa_schema,
+            options={'row-tracking.enabled': 'true', 'data-evolution.enabled': 'true'},
+        )
+        self.catalog.create_table('default.test_row_id_filter_empty_and_or', schema, False)
+        table = self.catalog.get_table('default.test_row_id_filter_empty_and_or')
+        write_builder = table.new_batch_write_builder()
+
+        # Commit 1: _ROW_ID 0, 1 with f0=1, 2
+        w = write_builder.new_write().with_write_type(['f0'])
+        c = write_builder.new_commit()
+        w.write_arrow(pa.Table.from_pydict(
+            {'f0': [1, 2]}, schema=pa.schema([('f0', pa.int32())])))
+        cmts = w.prepare_commit()
+        for msg in cmts:
+            for nf in msg.new_files:
+                nf.first_row_id = 0
+        c.commit(cmts)
+        w.close()
+        c.close()
+
+        # Commit 2: _ROW_ID 2, 3 with f0=101, 102
+        w = write_builder.new_write().with_write_type(['f0'])
+        c = write_builder.new_commit()
+        w.write_arrow(pa.Table.from_pydict(
+            {'f0': [101, 102]}, schema=pa.schema([('f0', pa.int32())])))
+        cmts = w.prepare_commit()
+        for msg in cmts:
+            for nf in msg.new_files:
+                nf.first_row_id = 2
+        c.commit(cmts)
+        w.close()
+        c.close()
+
+        rb_with_row_id = table.new_read_builder().with_projection(['f0', '_ROW_ID'])
+        pb = rb_with_row_id.new_predicate_builder()
+
+        # 1. Non-existent _ROW_ID -> empty
+        rb_eq999 = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 999))
+        result_eq999 = rb_eq999.new_read().to_arrow(rb_eq999.new_scan().plan().splits())
+        self.assertEqual(len(result_eq999), 0, "Non-existent _ROW_ID should return empty")
+
+        # 2. AND: _ROW_ID=0 AND f0=1 -> 1 row
+        rb_and = table.new_read_builder().with_filter(
+            pb.and_predicates([pb.equal('_ROW_ID', 0), pb.equal('f0', 1)])
+        )
+        result_and = rb_and.new_read().to_arrow(rb_and.new_scan().plan().splits())
+        self.assertEqual(len(result_and), 1)
+        self.assertEqual(result_and['f0'][0].as_py(), 1)
+
+        # 3. OR: _ROW_ID=0 OR f0>100 -> at least row with _ROW_ID=0 and all f0>100
+        rb_or = table.new_read_builder().with_filter(
+            pb.or_predicates([pb.equal('_ROW_ID', 0), pb.greater_than('f0', 100)])
+        )
+        result_or = rb_or.new_read().to_arrow(rb_or.new_scan().plan().splits())
+        f0_vals = set(result_or['f0'][i].as_py() for i in range(len(result_or)))
+        self.assertGreaterEqual(len(result_or), 3, "OR should return _ROW_ID=0 row and f0>100 rows")
+        self.assertIn(1, f0_vals, "_ROW_ID=0 row has f0=1")
+        self.assertIn(101, f0_vals)
+        self.assertIn(102, f0_vals)
+
+    def test_filter_manifest_entries_by_row_ranges(self):
+        from pypaimon.read.scanner.file_scanner import _filter_manifest_entries_by_row_ranges
+
+        entry_0 = SimpleNamespace(file=SimpleNamespace(first_row_id=0, row_count=1))
+        entries = [entry_0]
+        row_ranges = []
+
+        filtered = _filter_manifest_entries_by_row_ranges(entries, row_ranges)
+        self.assertEqual(filtered, [], "empty row_ranges must return no entries, not all entries")
 
     def test_more_data(self):
         simple_pa_schema = pa.schema([

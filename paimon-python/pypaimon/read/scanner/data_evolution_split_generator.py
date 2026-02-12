@@ -16,10 +16,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 from collections import defaultdict
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Tuple
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
@@ -54,7 +54,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 if manifest_entry.file.first_row_id is not None
                 else float('-inf')
             )
-            is_blob = 1 if self._is_blob_file(manifest_entry.file.file_name) else 0
+            is_blob = 1 if DataFileMeta.is_blob_file(manifest_entry.file.file_name) else 0
             max_seq = manifest_entry.file.max_sequence_number
             return first_row_id, is_blob, -max_seq
 
@@ -66,15 +66,11 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         slice_row_ranges = None  # Row ID ranges for slice-based filtering
 
-        if self.start_pos_of_this_subtask is not None:
+        if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
             # Calculate Row ID range for slice-based filtering
             slice_row_ranges = self._calculate_slice_row_ranges(partitioned_files)
             # Filter files by Row ID range
             partitioned_files = self._filter_files_by_row_ranges(partitioned_files, slice_row_ranges)
-        elif self.idx_of_this_subtask is not None:
-            partitioned_files = self._filter_by_shard(
-                partitioned_files, self.idx_of_this_subtask, self.number_of_para_subtasks
-            )
 
         def weight_func(file_list: List[DataFileMeta]) -> int:
             return max(sum(f.file_size for f in file_list), self.open_file_cost)
@@ -133,21 +129,14 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             pack = packed_files[i] if i < len(packed_files) else []
             raw_convertible = all(len(sub_pack) == 1 for sub_pack in pack)
 
-            file_paths = []
-            total_file_size = 0
-            total_record_count = 0
-
             for data_file in file_group:
                 data_file.set_file_path(
                     self.table.table_path,
                     file_entries[0].partition,
                     file_entries[0].bucket
                 )
-                file_paths.append(data_file.file_path)
-                total_file_size += data_file.file_size
-                total_record_count += data_file.row_count
 
-            if file_paths:
+            if file_group:
                 # Get deletion files for this split
                 data_deletion_files = None
                 if self.deletion_files_map:
@@ -161,9 +150,6 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     files=file_group,
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
-                    file_paths=file_paths,
-                    row_count=total_record_count,
-                    file_size=total_file_size,
                     raw_convertible=raw_convertible,
                     data_deletion_files=data_deletion_files
                 )
@@ -178,9 +164,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         list_ranges = []
         for file_entries in partitioned_files.values():
             for entry in file_entries:
-                first_row_id = entry.file.first_row_id
-                # Range is inclusive [from_, to], so use row_count - 1
-                list_ranges.append(Range(first_row_id, first_row_id + entry.file.row_count - 1))
+                list_ranges.append(entry.file.row_id_range())
 
         # Merge overlapping ranges
         sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
@@ -196,13 +180,31 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
     def _divide_ranges_by_position(self, sorted_ranges: List[Range]) -> Tuple[Optional[Range], Optional[Range]]:
         """
         Divide ranges by position (start_pos, end_pos) to get the Row ID range for this slice.
+        If idx_of_this_subtask exists, divide total rows by number_of_para_subtasks.
         """
         if not sorted_ranges:
             return None, None
 
         total_row_count = sum(r.count() for r in sorted_ranges)
-        start_pos = self.start_pos_of_this_subtask
-        end_pos = self.end_pos_of_this_subtask
+        
+        # If idx_of_this_subtask exists, calculate start_pos and end_pos based on number_of_para_subtasks
+        if self.idx_of_this_subtask is not None:
+            # Calculate shard boundaries based on total row count
+            rows_per_task = total_row_count // self.number_of_para_subtasks
+            remainder = total_row_count % self.number_of_para_subtasks
+            
+            start_pos = self.idx_of_this_subtask * rows_per_task
+            # Distribute remainder rows across first 'remainder' tasks
+            if self.idx_of_this_subtask < remainder:
+                start_pos += self.idx_of_this_subtask
+                end_pos = start_pos + rows_per_task + 1
+            else:
+                start_pos += remainder
+                end_pos = start_pos + rows_per_task
+        else:
+            # Use existing start_pos and end_pos
+            start_pos = self.start_pos_of_this_subtask
+            end_pos = self.end_pos_of_this_subtask
 
         if start_pos >= total_row_count:
             return None, None
@@ -239,15 +241,26 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
     def _filter_files_by_row_ranges(partitioned_files: defaultdict, row_ranges: List[Range]) -> defaultdict:
         """
         Filter files by Row ID ranges. Keep files that overlap with the given ranges.
+        Blob files are only included if they overlap with non-blob files that match the ranges.
         """
         filtered_partitioned_files = defaultdict(list)
 
         for key, file_entries in partitioned_files.items():
-            filtered_entries = []
-
+            # Separate blob and non-blob files
+            non_blob_entries = []
+            blob_entries = []
+            
             for entry in file_entries:
-                first_row_id = entry.file.first_row_id
-                file_range = Range(first_row_id, first_row_id + entry.file.row_count - 1)
+                if DataFileMeta.is_blob_file(entry.file.file_name):
+                    blob_entries.append(entry)
+                else:
+                    non_blob_entries.append(entry)
+            
+            # First, filter non-blob files based on row ranges
+            filtered_non_blob_entries = []
+            non_blob_ranges = []
+            for entry in non_blob_entries:
+                file_range = entry.file.row_id_range
 
                 # Check if file overlaps with any of the row ranges
                 overlaps = False
@@ -255,185 +268,53 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                     if r.overlaps(file_range):
                         overlaps = True
                         break
-
+                
                 if overlaps:
-                    filtered_entries.append(entry)
-
+                    filtered_non_blob_entries.append(entry)
+                    non_blob_ranges.append(file_range)
+            
+            # Then, filter blob files based on row ID range of non-blob files
+            filtered_blob_entries = []
+            non_blob_ranges = Range.sort_and_merge_overlap(non_blob_ranges, True, True)
+            # Only keep blob files that overlap with merged non-blob ranges
+            for entry in blob_entries:
+                blob_range = entry.file.row_id_range
+                # Check if blob file overlaps with any merged range
+                for merged_range in non_blob_ranges:
+                    if merged_range.overlaps(blob_range):
+                        filtered_blob_entries.append(entry)
+                        break
+            
+            # Combine filtered non-blob and blob files
+            filtered_entries = filtered_non_blob_entries + filtered_blob_entries
+            
             if filtered_entries:
                 filtered_partitioned_files[key] = filtered_entries
 
         return filtered_partitioned_files
 
-    def _filter_by_shard(self, partitioned_files: defaultdict, sub_task_id: int, total_tasks: int) -> defaultdict:
-        list_ranges = []
-        for file_entries in partitioned_files.values():
-            for entry in file_entries:
-                first_row_id = entry.file.first_row_id
-                if first_row_id is None:
-                    raise ValueError("Found None first row id in files")
-                # Range is inclusive [from_, to], so use row_count - 1
-                list_ranges.append(Range(first_row_id, first_row_id + entry.file.row_count - 1))
+    @staticmethod
+    def _split_by_row_id(files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
+        """
+        Split files by row ID for data evolution tables.
+        Files are grouped by their overlapping row ID ranges.
+        """
+        list_ranges = [file.row_id_range() for file in files]
+
+        if not list_ranges:
+            return []
 
         sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
 
-        start_range, end_range = self._divide_ranges(sorted_ranges, sub_task_id, total_tasks)
-        if start_range is None or end_range is None:
-            return defaultdict(list)
-        start_first_row_id = start_range.from_
-        end_first_row_id = end_range.to
-
-        filtered_partitioned_files = {
-            k: [x for x in v if x.file.first_row_id >= start_first_row_id and x.file.first_row_id <= end_first_row_id]
-            for k, v in partitioned_files.items()
-        }
-
-        filtered_partitioned_files = {k: v for k, v in filtered_partitioned_files.items() if v}
-        return defaultdict(list, filtered_partitioned_files)
-
-    @staticmethod
-    def _divide_ranges(
-        sorted_ranges: List[Range], sub_task_id: int, total_tasks: int
-    ) -> Tuple[Optional[Range], Optional[Range]]:
-        if not sorted_ranges:
-            return None, None
-
-        num_ranges = len(sorted_ranges)
-
-        # If more tasks than ranges, some tasks get nothing
-        if sub_task_id >= num_ranges:
-            return None, None
-
-        # Calculate balanced distribution of ranges across tasks
-        base_ranges_per_task = num_ranges // total_tasks
-        remainder = num_ranges % total_tasks
-
-        # Each of the first 'remainder' tasks gets one extra range
-        if sub_task_id < remainder:
-            num_ranges_for_task = base_ranges_per_task + 1
-            start_idx = sub_task_id * (base_ranges_per_task + 1)
-        else:
-            num_ranges_for_task = base_ranges_per_task
-            start_idx = (
-                remainder * (base_ranges_per_task + 1) +
-                (sub_task_id - remainder) * base_ranges_per_task
-            )
-        end_idx = start_idx + num_ranges_for_task - 1
-        return sorted_ranges[start_idx], sorted_ranges[end_idx]
-
-    def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
-        """
-        Split files by row ID for data evolution tables.
-        """
-        split_by_row_id = []
-
-        # Filter blob files to only include those within the row ID range of non-blob files
-        sorted_files = self._filter_blob(files)
-
-        # Split files by firstRowId
-        last_row_id = -1
-        check_row_id_start = 0
-        current_split = []
-
-        for file in sorted_files:
-            first_row_id = file.first_row_id
-            if first_row_id is None:
-                # Files without firstRowId are treated as individual splits
-                split_by_row_id.append([file])
-                continue
-
-            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
-                if current_split:
-                    split_by_row_id.append(current_split)
-
-                # Validate that files don't overlap
-                if first_row_id < check_row_id_start:
-                    file_names = [f.file_name for f in sorted_files]
-                    raise ValueError(
-                        f"There are overlapping files in the split: {file_names}, "
-                        f"the wrong file is: {file.file_name}"
-                    )
-
-                current_split = []
-                last_row_id = first_row_id
-                check_row_id_start = first_row_id + file.row_count
-
-            current_split.append(file)
-
-        if current_split:
-            split_by_row_id.append(current_split)
-
-        return split_by_row_id
-
-    def _compute_slice_split_file_idx_map(
-        self,
-        plan_start_pos: int,
-        plan_end_pos: int,
-        split: Split,
-        file_end_pos: int
-    ) -> Dict[str, Tuple[int, int]]:
-        """
-        Compute file index map for a split, determining which rows to read from each file.
-        For data files, the range is calculated based on the file's position in the cumulative row space.
-        For blob files (which may be rolled), the range is calculated based on each file's first_row_id.
-        """
-        shard_file_idx_map = {}
-        
-        # First pass: data files only. Compute range and apply directly to avoid second-pass lookup.
-        current_pos = file_end_pos
-        data_file_infos = []
-        for file in split.files:
-            if self._is_blob_file(file.file_name):
-                continue
-            file_begin_pos = current_pos
-            current_pos += file.row_count
-            data_file_range = self._compute_file_range(
-                plan_start_pos, plan_end_pos, file_begin_pos, file.row_count
-            )
-            data_file_infos.append((file, data_file_range))
-            if data_file_range is not None:
-                shard_file_idx_map[file.file_name] = data_file_range
-
-        if not data_file_infos:
-            # No data file, skip this split
-            shard_file_idx_map[self.NEXT_POS_KEY] = file_end_pos
-            return shard_file_idx_map
-
-        next_pos = current_pos
-
-        # Second pass: only blob files (data files already in shard_file_idx_map from first pass)
-        for file in split.files:
-            if not self._is_blob_file(file.file_name):
-                continue
-            blob_first_row_id = file.first_row_id if file.first_row_id is not None else 0
-            data_file_range = None
-            data_file_first_row_id = None
-            for df, fr in data_file_infos:
-                df_first = df.first_row_id if df.first_row_id is not None else 0
-                if df_first <= blob_first_row_id < df_first + df.row_count:
-                    data_file_range = fr
-                    data_file_first_row_id = df_first
+        range_to_files = {}
+        for file in files:
+            file_range = file.row_id_range()
+            for r in sorted_ranges:
+                if r.overlaps(file_range):
+                    range_to_files.setdefault(r, []).append(file)
                     break
-            if data_file_range is None:
-                continue
-            if data_file_range == (-1, -1):
-                shard_file_idx_map[file.file_name] = (-1, -1)
-                continue
-            blob_rel_start = blob_first_row_id - data_file_first_row_id
-            blob_rel_end = blob_rel_start + file.row_count
-            shard_start, shard_end = data_file_range
-            intersect_start = max(blob_rel_start, shard_start)
-            intersect_end = min(blob_rel_end, shard_end)
-            if intersect_start >= intersect_end:
-                shard_file_idx_map[file.file_name] = (-1, -1)
-            elif intersect_start == blob_rel_start and intersect_end == blob_rel_end:
-                pass
-            else:
-                local_start = intersect_start - blob_rel_start
-                local_end = intersect_end - blob_rel_start
-                shard_file_idx_map[file.file_name] = (local_start, local_end)
 
-        shard_file_idx_map[self.NEXT_POS_KEY] = next_pos
-        return shard_file_idx_map
+        return list(range_to_files.values())
 
     def _wrap_to_indexed_splits(self, splits: List[Split], row_ranges: List[Range]) -> List[Split]:
         """
@@ -442,14 +323,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         indexed_splits = []
         for split in splits:
             # Calculate file ranges for this split
-            file_ranges = []
-            for file in split.files:
-                first_row_id = file.first_row_id
-                if first_row_id is not None:
-                    file_ranges.append(Range(
-                        first_row_id,
-                        first_row_id + file.row_count - 1
-                    ))
+            file_ranges = [file.row_id_range() for file in split.files]
 
             if not file_ranges:
                 # No row IDs, keep original split
@@ -478,25 +352,3 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             indexed_splits.append(IndexedSplit(split, expected, scores))
 
         return indexed_splits
-
-    @staticmethod
-    def _filter_blob(files: List[DataFileMeta]) -> List[DataFileMeta]:
-        """
-        Filter blob files to only include those within row ID range of non-blob files.
-        """
-        result = []
-        row_id_start = -1
-        row_id_end = -1
-
-        for file in files:
-            if not DataEvolutionSplitGenerator._is_blob_file(file.file_name):
-                if file.first_row_id is not None:
-                    row_id_start = file.first_row_id
-                    row_id_end = file.first_row_id + file.row_count
-                result.append(file)
-            else:
-                if file.first_row_id is not None and row_id_start != -1:
-                    if row_id_start <= file.first_row_id < row_id_end:
-                        result.append(file)
-
-        return result

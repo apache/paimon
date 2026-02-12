@@ -134,9 +134,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         // group by row id range
         RangeHelper<ManifestEntry> rangeHelper =
-                new RangeHelper<>(
-                        e -> e.file().nonNullFirstRowId(),
-                        e -> e.file().nonNullFirstRowId() + e.file().rowCount() - 1);
+                new RangeHelper<>(e -> e.file().nonNullRowIdRange());
         List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
 
         return splitByRowId.stream()

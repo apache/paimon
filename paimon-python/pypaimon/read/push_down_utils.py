@@ -88,3 +88,39 @@ def _get_all_fields(predicate: Predicate) -> Set[str]:
         for sub_predicate in predicate.literals:
             involved_fields.update(_get_all_fields(sub_predicate))
     return involved_fields
+
+
+def remove_row_id_filter(predicate: Predicate) -> Optional[Predicate]:
+    from pypaimon.table.special_fields import SpecialFields
+
+    if not predicate:
+        return None
+    if predicate.field == SpecialFields.ROW_ID.name:
+        return None
+    if predicate.method == "and":
+        parts = _split_and(predicate)
+        non_row_id = [
+            p for p in parts
+            if _get_all_fields(p) != {SpecialFields.ROW_ID.name}
+        ]
+        if not non_row_id:
+            return None
+        filtered = []
+        for p in non_row_id:
+            r = remove_row_id_filter(p)
+            if r is None:
+                return None
+            filtered.append(r)
+        return PredicateBuilder.and_predicates(filtered)
+    if predicate.method == "or":
+        new_children = []
+        for c in predicate.literals or []:
+            r = remove_row_id_filter(c)
+            if r is not None:
+                new_children.append(r)
+        if not new_children:
+            return None
+        if len(new_children) == 1:
+            return new_children[0]
+        return PredicateBuilder.or_predicates(new_children)
+    return predicate

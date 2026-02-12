@@ -1455,7 +1455,7 @@ class DataBlobWriterTest(unittest.TestCase):
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
 
-        self.assertEqual(sum([s._row_count for s in splits]), 40 * 2)
+        self.assertEqual(sum([s.row_count for s in splits]), 40 * 2)
 
         # Verify the data
         self.assertEqual(result.num_rows, 40, "Should have 40 rows")
@@ -2204,12 +2204,12 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table_read.to_arrow(table_scan.plan().splits())
 
         # Verify the data
-        self.assertEqual(result.num_rows, 80, "Should have 54 rows")
+        self.assertEqual(result.num_rows, 54, "Should have 54 rows")
         self.assertEqual(result.num_columns, 4, "Should have 4 columns")
 
         # Verify blob data integrity
         blob_data = result.column('large_blob').to_pylist()
-        self.assertEqual(len(blob_data), 80, "Should have 54 blob records")
+        self.assertEqual(len(blob_data), 54, "Should have 54 blob records")
         # Verify each blob
         for i, blob in enumerate(blob_data):
             self.assertEqual(len(blob), len(large_blob_data), f"Blob {i + 1} should be {large_blob_size:,} bytes")
@@ -2500,8 +2500,18 @@ class DataBlobWriterTest(unittest.TestCase):
         result = table_read.to_arrow(splits)
 
         # Verify the data was read back correctly
-        # Just one file, so split 0 occupied the whole records
-        self.assertEqual(result.num_rows, 5, "Should have 2 rows")
+        self.assertEqual(result.num_rows, 3, "Should have 3 rows")
+        self.assertEqual(result.num_columns, 3, "Should have 3 columns")
+
+        # Read data back using table API
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan().with_shard(1, 2)
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        result = table_read.to_arrow(splits)
+
+        # Verify the data was read back correctly
+        self.assertEqual(result.num_rows, 2, "Should have 2 rows")
         self.assertEqual(result.num_columns, 3, "Should have 3 columns")
 
     def test_blob_write_read_large_data_volume_rolling_with_shard(self):
@@ -2770,7 +2780,7 @@ class DataBlobWriterTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
 
-        total_split_row_count = sum([s._row_count for s in splits])
+        total_split_row_count = sum([s.row_count for s in splits])
         self.assertEqual(total_split_row_count, num_rows * 2,
                          f"Total split row count should be {num_rows}, got {total_split_row_count}")
         

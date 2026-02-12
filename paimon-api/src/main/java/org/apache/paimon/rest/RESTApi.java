@@ -421,6 +421,28 @@ public class RESTApi {
     }
 
     /**
+     * List table details for a database.
+     *
+     * <p>Gets an array of table details for a database. There is no guarantee of a specific
+     * ordering of the elements in the array.
+     *
+     * @param databaseName name of database.
+     * @return a list of table details.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public List<GetTableResponse> listTableDetails(String databaseName) {
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.tableDetails(databaseName),
+                                queryParams,
+                                ListTableDetailsResponse.class,
+                                restAuthFunction));
+    }
+
+    /**
      * List table for a catalog.
      *
      * <p>Gets an array of table for a catalog. There is no guarantee of a specific ordering of the

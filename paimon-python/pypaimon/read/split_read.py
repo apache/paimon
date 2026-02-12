@@ -475,7 +475,7 @@ class DataEvolutionSplitRead(SplitRead):
         # Sort files by firstRowId and then by maxSequenceNumber
         def sort_key(file: DataFileMeta) -> tuple:
             first_row_id = file.first_row_id if file.first_row_id is not None else float('-inf')
-            is_blob = 1 if self._is_blob_file(file.file_name) else 0
+            is_blob = 1 if DataFileMeta.is_blob_file(file.file_name) else 0
             max_seq = file.max_sequence_number
             return (first_row_id, is_blob, -max_seq)
 
@@ -493,7 +493,7 @@ class DataEvolutionSplitRead(SplitRead):
                 split_by_row_id.append([file])
                 continue
 
-            if not self._is_blob_file(file.file_name) and first_row_id != last_row_id:
+            if not DataFileMeta.is_blob_file(file.file_name) and first_row_id != last_row_id:
                 if current_split:
                     split_by_row_id.append(current_split)
                 if first_row_id < check_row_id_start:
@@ -541,7 +541,7 @@ class DataEvolutionSplitRead(SplitRead):
             first_file = bunch.files()[0]
 
             # Get field IDs for this bunch
-            if self._is_blob_file(first_file.file_name):
+            if DataFileMeta.is_blob_file(first_file.file_name):
                 # For blob files, we need to get the field ID from the write columns
                 field_ids = [self._get_field_id_from_write_cols(first_file)]
             elif first_file.write_cols:
@@ -601,8 +601,7 @@ class DataEvolutionSplitRead(SplitRead):
                 row_tracking_enabled=True)
         if self.row_ranges is None:
             return create_record_reader()
-        file_range = Range(file.first_row_id, file.first_row_id + file.row_count - 1)
-        row_ranges = Range.and_(self.row_ranges, [file_range])
+        row_ranges = Range.and_(self.row_ranges, [file.row_id_range()])
         if len(row_ranges) == 0:
             return EmptyRecordBatchReader()
         return RowIdFilterRecordBatchReader(create_record_reader(), file.first_row_id, row_ranges)
@@ -615,7 +614,7 @@ class DataEvolutionSplitRead(SplitRead):
         row_count = -1
 
         for file in need_merge_files:
-            if self._is_blob_file(file.file_name):
+            if DataFileMeta.is_blob_file(file.file_name):
                 field_id = self._get_field_id_from_write_cols(file)
                 if field_id not in blob_bunch_map:
                     blob_bunch_map[field_id] = BlobBunch(row_count)
@@ -649,11 +648,6 @@ class DataEvolutionSplitRead(SplitRead):
         field_ids.append(SpecialFields.ROW_ID.id)
         field_ids.append(SpecialFields.SEQUENCE_NUMBER.id)
         return field_ids
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file based on its extension."""
-        return file_name.endswith('.blob')
 
     def _get_all_data_fields(self):
         return SpecialFields.row_type_with_row_tracking(self.table.fields)

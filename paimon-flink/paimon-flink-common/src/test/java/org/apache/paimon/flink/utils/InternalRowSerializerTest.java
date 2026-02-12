@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
@@ -80,6 +81,30 @@ public class InternalRowSerializerTest {
         Assertions.assertThat(row.getString(0)).isEqualTo(row1.getString(0));
         Assertions.assertThat(row.getInt(1)).isEqualTo(row1.getInt(1));
         Assertions.assertThat(row.getLong(2)).isEqualTo(row1.getLong(2));
+    }
+
+    @Test
+    public void testSerializeVector() throws Exception {
+        RowType vectorRowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("embed", DataTypes.VECTOR(3, DataTypes.FLOAT()))
+                        .build();
+        InternalRowTypeSerializer internalRowTypeSerializer =
+                new InternalRowTypeSerializer(
+                        vectorRowType.getFieldTypes().toArray(new DataType[0]));
+
+        float[] values = new float[] {1.0f, 2.0f, 3.0f};
+        InternalRow row = GenericRow.of(1, BinaryVector.fromPrimitiveArray(values));
+
+        DataOutputSerializer dataOutputSerializer = new DataOutputSerializer(100);
+        internalRowTypeSerializer.serialize(row, dataOutputSerializer);
+        InternalRow row1 =
+                internalRowTypeSerializer.deserialize(
+                        new DataInputDeserializer(dataOutputSerializer.wrapAsByteBuffer()));
+
+        Assertions.assertThat(row1.getInt(0)).isEqualTo(1);
+        Assertions.assertThat(row1.getVector(1).toFloatArray()).isEqualTo(values);
     }
 
     private BinaryString randomString() {

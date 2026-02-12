@@ -24,7 +24,9 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.table.row.generic_row import GenericRowDeserializer
+from pypaimon.common.predicate import Predicate
+from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 
 
 def _check_filtered_result(read_builder, expected_df):
@@ -373,8 +375,33 @@ class PredicateTest(unittest.TestCase):
         _check_filtered_result(table.new_read_builder().with_filter(predicate),
                                self.df.loc[[0, 3, 4]])
 
+    def test_is_null(self):
+        stat_no_count = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[None],
+        )
+        pred = Predicate(method="isNull", index=0, field="c", literals=None)
+        self.assertTrue(
+            pred.test_by_simple_stats(stat_no_count, 10),
+            "isNull must keep file when null_count is missing",
+        )
+        # null_count == 0 -> can prune
+        stat_zero = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[0],
+        )
+        self.assertFalse(pred.test_by_simple_stats(stat_zero, 10))
+        # null_count > 0 -> keep
+        stat_positive = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[3],
+        )
+        self.assertTrue(pred.test_by_simple_stats(stat_positive, 10))
+
     def test_filter_with_null_and_or(self):
-        from pypaimon.common.predicate import Predicate
         from pypaimon.table.row.offset_row import OffsetRow
 
         p_gt = Predicate(method='greaterThan', index=1, field='score', literals=[10])
