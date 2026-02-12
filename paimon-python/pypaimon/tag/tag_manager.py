@@ -16,6 +16,7 @@
 #  under the License.
 
 import logging
+import os
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
@@ -139,6 +140,23 @@ class TagManager:
             raise ValueError(f"Tag '{tag_name}' already exists.")
 
         self._create_or_replace_tag(snapshot, tag_name)
+
+    def list_tag(self):
+        """List all tags."""
+        result = []
+        for tag_file in self.file_io.list_status(self.tag_directory()):
+            tag_file_name = None
+            if hasattr(tag_file, 'base_name'):
+                tag_file_name = tag_file.base_name
+            else:
+                try:
+                    tag_file_name = os.path.basename(tag_file)
+                except TypeError:
+                    tag_file_name = None
+            if tag_file_name is not None:
+                _, tag = tag_file_name.split("-", 1)
+                result.append(tag)
+        return result
 
     def _create_or_replace_tag(
             self,

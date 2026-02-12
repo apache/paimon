@@ -191,9 +191,28 @@ class SimpleTableTest(unittest.TestCase):
         self.assertIsNotNone(tag)
         self.assertEqual(tag.id, 1)
 
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'pt': [1, 1],
+            'k': [10, 20],
+            'v': [100, 200]
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        table.create_tag("test_tag_2")
+        all_tags = set(table.list_tag())
+        self.assertEqual(all_tags, {"test_tag", "test_tag_2"})
+
         # Delete the tag
         result = table.delete_tag("test_tag")
         self.assertTrue(result)
+
+        all_tags = table.list_tag()
+        self.assertEqual(all_tags, ["test_tag_2"])
 
         # Verify tag no longer exists
         self.assertFalse(tag_manager.tag_exists("test_tag"))
