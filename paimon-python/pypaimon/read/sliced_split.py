@@ -112,7 +112,7 @@ class SlicedSplit(Split):
             return int(underlying_merged * self.row_count / original_row_count) if original_row_count > 0 else 0
         
         from pypaimon.read.split import DataSplit
-        from pypaimon.globalindex.range import Range
+        from pypaimon.utils.range import Range
         
         if not isinstance(self._data_split, DataSplit):
             return None

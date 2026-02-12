@@ -19,7 +19,7 @@ from collections import defaultdict
 from typing import List, Optional, Tuple
 
 from pypaimon.globalindex.indexed_split import IndexedSplit
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
@@ -164,9 +164,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         list_ranges = []
         for file_entries in partitioned_files.values():
             for entry in file_entries:
-                first_row_id = entry.file.first_row_id
-                # Range is inclusive [from_, to], so use row_count - 1
-                list_ranges.append(Range(first_row_id, first_row_id + entry.file.row_count - 1))
+                list_ranges.append(entry.file.row_id_range())
 
         # Merge overlapping ranges
         sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
@@ -262,9 +260,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             filtered_non_blob_entries = []
             non_blob_ranges = []
             for entry in non_blob_entries:
-                first_row_id = entry.file.first_row_id
-                file_range = Range(first_row_id, first_row_id + entry.file.row_count - 1)
-                
+                file_range = entry.file.row_id_range
+
                 # Check if file overlaps with any of the row ranges
                 overlaps = False
                 for r in row_ranges:
@@ -281,8 +278,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             non_blob_ranges = Range.sort_and_merge_overlap(non_blob_ranges, True, True)
             # Only keep blob files that overlap with merged non-blob ranges
             for entry in blob_entries:
-                first_row_id = entry.file.first_row_id
-                blob_range = Range(first_row_id, first_row_id + entry.file.row_count - 1)
+                blob_range = entry.file.row_id_range
                 # Check if blob file overlaps with any merged range
                 for merged_range in non_blob_ranges:
                     if merged_range.overlaps(blob_range):
@@ -303,10 +299,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         Split files by row ID for data evolution tables.
         Files are grouped by their overlapping row ID ranges.
         """
-        list_ranges = []
-        for file in files:
-            first_row_id = file.first_row_id
-            list_ranges.append(Range(first_row_id, first_row_id + file.row_count - 1))
+        list_ranges = [file.row_id_range() for file in files]
 
         if not list_ranges:
             return []
@@ -315,8 +308,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
 
         range_to_files = {}
         for file in files:
-            first_row_id = file.first_row_id
-            file_range = Range(first_row_id, first_row_id + file.row_count - 1)
+            file_range = file.row_id_range()
             for r in sorted_ranges:
                 if r.overlaps(file_range):
                     range_to_files.setdefault(r, []).append(file)
@@ -331,14 +323,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         indexed_splits = []
         for split in splits:
             # Calculate file ranges for this split
-            file_ranges = []
-            for file in split.files:
-                first_row_id = file.first_row_id
-                if first_row_id is not None:
-                    file_ranges.append(Range(
-                        first_row_id,
-                        first_row_id + file.row_count - 1
-                    ))
+            file_ranges = [file.row_id_range() for file in split.files]
 
             if not file_ranges:
                 # No row IDs, keep original split

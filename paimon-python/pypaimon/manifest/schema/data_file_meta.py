@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import List, Optional
 import time
 
+from pypaimon.utils.range import Range
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.simple_stats import (KEY_STATS_SCHEMA, VALUE_STATS_SCHEMA,
                                                    SimpleStats)
@@ -53,6 +54,11 @@ class DataFileMeta:
 
     # not a schema field, just for internal usage
     file_path: str = None
+
+    def row_id_range(self) -> Optional[Range]:
+        if self.first_row_id is None:
+            return None
+        return Range(self.first_row_id, self.first_row_id + self.row_count - 1)
 
     def get_creation_time(self) -> Optional[Timestamp]:
         return self.creation_time

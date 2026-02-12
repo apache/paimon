@@ -253,9 +253,9 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         long end = Long.MIN_VALUE;
         for (DataSplit dataSplit : dataSplits) {
             for (DataFileMeta file : dataSplit.dataFiles()) {
-                long firstRowId = file.nonNullFirstRowId();
-                start = Math.min(start, firstRowId);
-                end = Math.max(end, firstRowId + file.rowCount() - 1);
+                Range range = file.nonNullRowIdRange();
+                start = Math.min(start, range.from);
+                end = Math.max(end, range.to);
             }
         }
         return start == Long.MAX_VALUE ? null : new Range(start, end);

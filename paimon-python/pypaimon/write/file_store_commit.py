@@ -405,12 +405,11 @@ class FileStoreCommit:
                 min_row_id = None
                 max_row_id = None
                 break
-            entry_min = entry.file.first_row_id
-            entry_max = entry.file.first_row_id + entry.file.row_count - 1
-            if min_row_id is None or entry_min < min_row_id:
-                min_row_id = entry_min
-            if max_row_id is None or entry_max > max_row_id:
-                max_row_id = entry_max
+            file_range = entry.file.row_id_range()
+            if min_row_id is None or file_range.from_ < min_row_id:
+                min_row_id = file_range.from_
+            if max_row_id is None or file_range.to > max_row_id:
+                max_row_id = file_range.to
 
         # return new ManifestFileMeta
         manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"

@@ -292,10 +292,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
             DataSplit dataSplit = (DataSplit) split;
             List<Range> fileRanges = new ArrayList<>();
             for (DataFileMeta file : dataSplit.dataFiles()) {
-                fileRanges.add(
-                        new Range(
-                                file.nonNullFirstRowId(),
-                                file.nonNullFirstRowId() + file.rowCount() - 1));
+                fileRanges.add(file.nonNullRowIdRange());
             }
 
             fileRanges = Range.mergeSortedAsPossible(fileRanges);

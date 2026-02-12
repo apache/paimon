@@ -35,8 +35,7 @@ def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total
     list_ranges = []
     for split in splits:
         for file in split.files:
-            first_row_id = file.first_row_id
-            list_ranges.append(Range(first_row_id, first_row_id + file.row_count - 1))
+            list_ranges.append(file.row_id_range())
 
     sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
 
@@ -168,10 +167,7 @@ class ShardTableUpdator:
 
     @staticmethod
     def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
-        ranges = []
-        for file in files:
-            ranges.append(Range(file.first_row_id, file.first_row_id + file.row_count - 1))
-
+        ranges = [file.row_id_range() for file in files]
         return Range.sort_and_merge_overlap(ranges, True, False)
 
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:

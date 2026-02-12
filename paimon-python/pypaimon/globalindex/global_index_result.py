@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from typing import Callable, List, Optional
 
 from pypaimon.utils.roaring_bitmap import RoaringBitmap64
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 
 
 class GlobalIndexResult(ABC):

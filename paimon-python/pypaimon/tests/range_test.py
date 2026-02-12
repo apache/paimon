@@ -19,7 +19,7 @@
 import unittest
 
 from pypaimon.common.predicate import Predicate
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 from pypaimon.read.scanner.file_scanner import _row_ranges_from_predicate
 from pypaimon.table.special_fields import SpecialFields
 

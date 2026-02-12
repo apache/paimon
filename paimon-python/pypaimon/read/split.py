@@ -22,6 +22,7 @@ from typing import List, Optional, Callable
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.range import Range
 
 
 class Split(ABC):
@@ -192,39 +193,10 @@ class DataSplit(Split):
         
         file_ranges = []
         for file in self._files:
-            if file.first_row_id is not None and file.row_count > 0:
-                start = file.first_row_id
-                end = file.first_row_id + file.row_count - 1
-                file_ranges.append((file, start, end))
+            file_ranges.append(file.row_id_range())
         
         if not file_ranges:
             return 0
-        
-        file_ranges.sort(key=lambda x: (x[1], x[2]))
-        
-        groups = []
-        current_group = [file_ranges[0]]
-        current_end = file_ranges[0][2]
-        
-        for file_range in file_ranges[1:]:
-            file, start, end = file_range
-            if start <= current_end:
-                current_group.append(file_range)
-                if end > current_end:
-                    current_end = end
-            else:
-                groups.append(current_group)
-                current_group = [file_range]
-                current_end = end
-        
-        if current_group:
-            groups.append(current_group)
-        
-        sum_rows = 0
-        for group in groups:
-            max_count = 0
-            for file, _, _ in group:
-                max_count = max(max_count, file.row_count)
-            sum_rows += max_count
-        
-        return sum_rows
+
+        ranges = Range.sort_and_merge_overlap(file_ranges, True, True)
+        return sum([r.count() for r in ranges])

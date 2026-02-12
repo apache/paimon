@@ -22,7 +22,7 @@ Implementation of GlobalIndexScanBuilder for FileStoreTable.
 
 from typing import List
 
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 from pypaimon.globalindex.global_index_scan_builder import (
     GlobalIndexScanBuilder,
     RowRangeGlobalIndexScanner

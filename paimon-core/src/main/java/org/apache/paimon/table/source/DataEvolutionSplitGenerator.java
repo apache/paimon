@@ -49,10 +49,7 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> input) {
-        RangeHelper<DataFileMeta> rangeHelper =
-                new RangeHelper<>(
-                        DataFileMeta::nonNullFirstRowId,
-                        f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(input);
         Function<List<DataFileMeta>, Long> weightFunc =
                 file ->

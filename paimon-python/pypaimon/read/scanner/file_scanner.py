@@ -45,7 +45,7 @@ from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
-    from pypaimon.globalindex.range import Range
+    from pypaimon.utils.range import Range
     from pypaimon.table.special_fields import SpecialFields
 
     if predicate is None:
@@ -106,7 +106,7 @@ def _filter_manifest_files_by_row_ranges(
     Returns:
         Filtered list of manifest files
     """
-    from pypaimon.globalindex.range import Range
+    from pypaimon.utils.range import Range
 
     filtered_files = []
     for manifest in manifest_files:
@@ -142,7 +142,6 @@ def _filter_manifest_files_by_row_ranges(
 def _filter_manifest_entries_by_row_ranges(
         entries: List[ManifestEntry],
         row_ranges: List) -> List[ManifestEntry]:
-    from pypaimon.globalindex.range import Range
 
     if not row_ranges:
         return []
@@ -153,10 +152,7 @@ def _filter_manifest_entries_by_row_ranges(
         if first_row_id is None:
             filtered.append(entry)
             continue
-        file_range = Range(
-            first_row_id,
-            first_row_id + entry.file.row_count - 1
-        )
+        file_range = entry.file.row_id_range()
         for r in row_ranges:
             if file_range.overlaps(r):
                 filtered.append(entry)
@@ -306,7 +302,7 @@ class FileScanner:
         from pypaimon.globalindex.global_index_scan_builder import (
             GlobalIndexScanBuilder
         )
-        from pypaimon.globalindex.range import Range
+        from pypaimon.utils.range import Range
 
         # No filter and no vector search - nothing to evaluate
         if self.predicate is None and self.vector_search is None:

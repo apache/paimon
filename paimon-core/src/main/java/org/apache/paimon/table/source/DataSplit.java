@@ -173,10 +173,7 @@ public class DataSplit implements Split {
 
     private long dataEvolutionMergedRowCount() {
         long sum = 0L;
-        RangeHelper<DataFileMeta> rangeHelper =
-                new RangeHelper<>(
-                        DataFileMeta::nonNullFirstRowId,
-                        f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(dataFiles);
         for (List<DataFileMeta> group : ranges) {
             long maxCount = 0;

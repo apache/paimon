@@ -184,12 +184,11 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                 }
 
                 // Calculate the row ID range this file covers
-                long fileStartRowId = firstRowId;
-                long fileEndRowId = firstRowId + file.rowCount() - 1;
+                Range fileRange = file.nonNullRowIdRange();
 
                 // Calculate which shards this file overlaps with
-                long startShardId = fileStartRowId / rowsPerShard;
-                long endShardId = fileEndRowId / rowsPerShard;
+                long startShardId = fileRange.from / rowsPerShard;
+                long endShardId = fileRange.to / rowsPerShard;
 
                 // Add this file to all shards it overlaps with
                 for (long shardId = startShardId; shardId <= endShardId; shardId++) {
@@ -273,10 +272,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         // Calculate the actual row range covered by the files
         long groupMinRowId = files.get(0).nonNullFirstRowId();
         long groupMaxRowId =
-                files.stream()
-                        .mapToLong(f -> f.nonNullFirstRowId() + f.rowCount() - 1)
-                        .max()
-                        .getAsLong();
+                files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().getAsLong();
 
         // Clamp to shard boundaries
         // Range.from >= shardStart, Range.to <= shardEnd

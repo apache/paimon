@@ -601,8 +601,7 @@ class DataEvolutionSplitRead(SplitRead):
                 row_tracking_enabled=True)
         if self.row_ranges is None:
             return create_record_reader()
-        file_range = Range(file.first_row_id, file.first_row_id + file.row_count - 1)
-        row_ranges = Range.and_(self.row_ranges, [file_range])
+        row_ranges = Range.and_(self.row_ranges, [file.row_id_range()])
         if len(row_ranges) == 0:
             return EmptyRecordBatchReader()
         return RowIdFilterRecordBatchReader(create_record_reader(), file.first_row_id, row_ranges)
