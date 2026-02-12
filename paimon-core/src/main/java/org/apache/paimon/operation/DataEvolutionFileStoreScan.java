@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
@@ -41,10 +42,14 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
@@ -52,6 +57,7 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -121,6 +127,50 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             }
         }
         return this;
+    }
+
+    @Override
+    public Iterator<ManifestEntry> readManifestEntries(
+            List<ManifestFileMeta> manifestFileMetas, boolean useSequential) {
+
+        if (limit != null
+                && manifestFileMetas.stream()
+                        .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null)) {
+            List<ManifestEntry> filtered = new ArrayList<>();
+            RangeHelper<ManifestFileMeta> rangeHelper =
+                    new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
+            Queue<List<ManifestFileMeta>> queue =
+                    new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
+
+            long accumulatedRowCount = 0;
+            while (!queue.isEmpty()) {
+                List<ManifestFileMeta> groupMetas = queue.poll();
+                List<ManifestEntry> entries = new ArrayList<>();
+                super.readManifestEntries(groupMetas, useSequential).forEachRemaining(entries::add);
+                RangeHelper<ManifestEntry> rangeHelper2 =
+                        new RangeHelper<>(
+                                e -> e.file().nonNullFirstRowId(),
+                                e -> e.file().nonNullFirstRowId() + e.file().rowCount() - 1);
+                List<List<ManifestEntry>> splitByRowId =
+                        rangeHelper2.mergeOverlappingRanges(entries);
+
+                for (List<ManifestEntry> group : splitByRowId) {
+                    filtered.addAll(group);
+                    long groupRowCount =
+                            group.stream()
+                                    .mapToLong(e -> e.file().rowCount())
+                                    .reduce(Long::max)
+                                    .orElse(0L);
+                    accumulatedRowCount += groupRowCount;
+                    if (accumulatedRowCount >= limit) {
+                        return filtered.iterator();
+                    }
+                }
+            }
+            return filtered.iterator();
+        }
+
+        return super.readManifestEntries(manifestFileMetas, useSequential);
     }
 
     @Override
