@@ -132,10 +132,29 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         if (!cleanEmptyDirectories || deletionBuckets.isEmpty()) {
             return;
         }
+        doCleanEmptyDirectories(deletionBuckets);
+        deletionBuckets.clear();
+    }
 
+    /**
+     * Try to delete data directories that may be empty after data file deletion.
+     *
+     * <p>This method uses externally provided buckets instead of internal deletionBuckets. Used in
+     * parallel expire mode where buckets are aggregated from multiple workers.
+     *
+     * @param aggregatedBuckets merged deletion buckets from all workers
+     */
+    public void cleanEmptyDirectories(Map<BinaryRow, Set<Integer>> aggregatedBuckets) {
+        if (!cleanEmptyDirectories || aggregatedBuckets.isEmpty()) {
+            return;
+        }
+        doCleanEmptyDirectories(aggregatedBuckets);
+    }
+
+    private void doCleanEmptyDirectories(Map<BinaryRow, Set<Integer>> buckets) {
         // All directory paths are deduplicated and sorted by hierarchy level
         Map<Integer, Set<Path>> deduplicate = new HashMap<>();
-        for (Map.Entry<BinaryRow, Set<Integer>> entry : deletionBuckets.entrySet()) {
+        for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
             List<Path> toDeleteEmptyDirectory = new ArrayList<>();
             // try to delete bucket directories
             for (Integer bucket : entry.getValue()) {
@@ -162,14 +181,29 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         for (int hierarchy = deduplicate.size() - 1; hierarchy >= 0; hierarchy--) {
             deduplicate.get(hierarchy).forEach(this::tryDeleteEmptyDirectory);
         }
-
-        deletionBuckets.clear();
     }
 
     protected void recordDeletionBuckets(ExpireFileEntry entry) {
         deletionBuckets
                 .computeIfAbsent(entry.partition(), p -> new HashSet<>())
                 .add(entry.bucket());
+    }
+
+    /**
+     * Get and clear the deletion buckets.
+     *
+     * <p>This method is used in parallel expire to collect buckets for a single task without
+     * accumulating results from previous tasks processed by the same worker.
+     *
+     * @return a copy of the deletion buckets, the internal state is cleared after this call
+     */
+    public Map<BinaryRow, Set<Integer>> drainDeletionBuckets() {
+        Map<BinaryRow, Set<Integer>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, Set<Integer>> entry : deletionBuckets.entrySet()) {
+            result.put(entry.getKey(), new HashSet<>(entry.getValue()));
+        }
+        deletionBuckets.clear();
+        return result;
     }
 
     public void cleanUnusedDataFiles(String manifestList, Predicate<ExpireFileEntry> skipper) {
