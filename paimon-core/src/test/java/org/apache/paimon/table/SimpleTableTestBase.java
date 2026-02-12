@@ -1176,6 +1176,46 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testDeleteTagReferencedByBranch() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch("branch1", "tag1");
+
+        // verify that deleting a tag referenced by a branch fails
+        assertThatThrownBy(() -> table.deleteTag("tag1"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Cannot delete tag 'tag1' because it is still referenced by branches: [branch1]"));
+
+        // create another branch from the same tag
+        table.createBranch("branch2", "tag1");
+
+        // verify that deleting the tag still fails and shows both branches
+        assertThatThrownBy(() -> table.deleteTag("tag1"))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalStateException.class,
+                                "Cannot delete tag 'tag1' because it is still referenced by branches:"));
+
+        // delete both branches
+        table.deleteBranch("branch1");
+        table.deleteBranch("branch2");
+
+        // verify that deleting the tag succeeds after branches are deleted
+        table.deleteTag("tag1");
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        assertThat(tagManager.tagExists("tag1")).isFalse();
+    }
+
+    @Test
     public void testFastForward() throws Exception {
         FileStoreTable table = createFileStoreTable();
         generateBranch(table);
