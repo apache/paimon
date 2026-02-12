@@ -143,6 +143,9 @@ public class LeafPredicate implements Predicate {
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts) {
         Optional<FieldRef> fieldRefOptional = fieldRefOptional();
         if (!fieldRefOptional.isPresent()) {
+            if (transform instanceof TrueTransform) {
+                return function.test(transform.outputType(), 0, null, null, null, literals);
+            }
             return true;
         }
         FieldRef fieldRef = fieldRefOptional.get();
@@ -165,6 +168,9 @@ public class LeafPredicate implements Predicate {
 
     @Override
     public Optional<Predicate> negate() {
+        if (transform instanceof TrueTransform) {
+            return function.negate().map(neg -> new LeafPredicate(transform, neg, literals));
+        }
         Optional<FieldRef> fieldRefOptional = fieldRefOptional();
         if (!fieldRefOptional.isPresent()) {
             return Optional.empty();

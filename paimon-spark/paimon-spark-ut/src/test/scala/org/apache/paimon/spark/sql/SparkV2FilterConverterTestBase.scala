@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.{BinaryString, Decimal, Timestamp}
-import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.predicate.{FalseFunction, LeafPredicate, PredicateBuilder, TrueFunction, TrueTransform}
 import org.apache.paimon.spark.{PaimonSparkTestBase, SparkV2FilterConverter}
 import org.apache.paimon.spark.util.shim.TypeUtils.treatPaimonTimestampTypeAsSparkTimestampType
 import org.apache.paimon.table.source.DataSplit
@@ -29,7 +29,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.PaimonUtils.translateFilterV2
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.plans.logical.Filter
-import org.apache.spark.sql.connector.expressions.filter.Predicate
+import org.apache.spark.sql.connector.expressions.filter.{And, Not, Or, Predicate => SparkPredicate}
 
 import java.time.{LocalDate, LocalDateTime}
 
@@ -355,7 +355,165 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(scanFilesCount(filter) == 4)
   }
 
-  private def v2Filter(str: String, tableName: String = "test_tbl"): Predicate = {
+  private def paimonAlwaysTrue: org.apache.paimon.predicate.Predicate =
+    LeafPredicate.of(
+      TrueTransform.INSTANCE,
+      TrueFunction.INSTANCE,
+      java.util.Collections.emptyList())
+
+  private def paimonAlwaysFalse: org.apache.paimon.predicate.Predicate =
+    LeafPredicate.of(
+      TrueTransform.INSTANCE,
+      FalseFunction.INSTANCE,
+      java.util.Collections.emptyList())
+
+  test("V2Filter: AlwaysTrue") {
+    val sparkAlwaysTrue =
+      new SparkPredicate(
+        "ALWAYS_TRUE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val actual = converter.convert(sparkAlwaysTrue).get
+    assert(actual.equals(paimonAlwaysTrue))
+  }
+
+  test("V2Filter: AlwaysFalse") {
+    val sparkAlwaysFalse =
+      new SparkPredicate(
+        "ALWAYS_FALSE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val actual = converter.convert(sparkAlwaysFalse).get
+    assert(actual.equals(paimonAlwaysFalse))
+  }
+
+  test("V2Filter: NOT AlwaysTrue") {
+    val sparkAlwaysTrue =
+      new SparkPredicate(
+        "ALWAYS_TRUE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val sparkNotAlwaysTrue = new Not(sparkAlwaysTrue)
+    val actual = converter.convert(sparkNotAlwaysTrue).get
+    assert(actual.equals(paimonAlwaysFalse))
+  }
+
+  test("V2Filter: NOT AlwaysFalse") {
+    val sparkAlwaysFalse =
+      new SparkPredicate(
+        "ALWAYS_FALSE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val sparkNotAlwaysFalse = new Not(sparkAlwaysFalse)
+    val actual = converter.convert(sparkNotAlwaysFalse).get
+    assert(actual.equals(paimonAlwaysTrue))
+  }
+
+  test("V2Filter: AND with AlwaysTrue") {
+    val sparkAlwaysTrue =
+      new SparkPredicate(
+        "ALWAYS_TRUE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val intGt2 = v2Filter("int_col > 2")
+    val sparkAnd = new And(sparkAlwaysTrue, intGt2)
+    val actual = converter.convert(sparkAnd).get
+    assert(actual.equals(PredicateBuilder.and(paimonAlwaysTrue, builder.greaterThan(3, 2))))
+  }
+
+  test("V2Filter: OR with AlwaysFalse") {
+    val sparkAlwaysFalse =
+      new SparkPredicate(
+        "ALWAYS_FALSE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val intGt2 = v2Filter("int_col > 2")
+    val sparkOr = new Or(sparkAlwaysFalse, intGt2)
+    val actual = converter.convert(sparkOr).get
+    assert(actual.equals(PredicateBuilder.or(paimonAlwaysFalse, builder.greaterThan(3, 2))))
+  }
+
+  test("V2Filter: performance - OR(AlwaysFalse, int_col = 1) enables file skipping") {
+    // Before: OR(ALWAYS_FALSE, int_col = 1) conversion fails entirely -> no pushdown -> 4 files
+    // After:  OR(ALWAYS_FALSE, int_col = 1) converts correctly -> pushdown -> 1 file
+    val sparkAlwaysFalse =
+      new SparkPredicate(
+        "ALWAYS_FALSE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val intEq1 = v2Filter("int_col = 1")
+    val sparkOr = new Or(sparkAlwaysFalse, intEq1)
+    val paimonPredicate = converter.convert(sparkOr).get
+
+    val filesScanned = scanFilesWithPredicate(paimonPredicate)
+    // Only 1 file should be scanned (the one containing int_col = 1)
+    assert(filesScanned == 1, s"Expected 1 file but scanned $filesScanned files")
+  }
+
+  test("V2Filter: performance - AND(AlwaysTrue, int_col > 2) enables file skipping") {
+    // Before: AND(ALWAYS_TRUE, int_col > 2) conversion fails entirely -> no pushdown -> 4 files
+    // After:  AND(ALWAYS_TRUE, int_col > 2) converts correctly -> pushdown -> 1 file
+    val sparkAlwaysTrue =
+      new SparkPredicate(
+        "ALWAYS_TRUE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val intGt2 = v2Filter("int_col > 2")
+    val sparkAnd = new And(sparkAlwaysTrue, intGt2)
+    val paimonPredicate = converter.convert(sparkAnd).get
+
+    val filesScanned = scanFilesWithPredicate(paimonPredicate)
+    // Only 1 file should be scanned (the one containing int_col = 3)
+    assert(filesScanned == 1, s"Expected 1 file but scanned $filesScanned files")
+  }
+
+  test("V2Filter: performance - pure AlwaysFalse achieves zero I/O") {
+    // AlwaysFalse alone should skip all data files -> 0 files scanned
+    val sparkAlwaysFalse =
+      new SparkPredicate(
+        "ALWAYS_FALSE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val paimonPredicate = converter.convert(sparkAlwaysFalse).get
+
+    val filesScanned = scanFilesWithPredicate(paimonPredicate)
+    assert(filesScanned == 0, s"Expected 0 files but scanned $filesScanned files")
+  }
+
+  test("V2Filter: performance - AND(AlwaysFalse, int_col = 1) achieves zero I/O") {
+    // AND with AlwaysFalse should result in zero files no matter what the other predicate is
+    val sparkAlwaysFalse =
+      new SparkPredicate(
+        "ALWAYS_FALSE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val intEq1 = v2Filter("int_col = 1")
+    val sparkAnd = new And(sparkAlwaysFalse, intEq1)
+    val paimonPredicate = converter.convert(sparkAnd).get
+
+    val filesScanned = scanFilesWithPredicate(paimonPredicate)
+    assert(filesScanned == 0, s"Expected 0 files but scanned $filesScanned files")
+  }
+
+  test("V2Filter: performance - NOT(AlwaysTrue) achieves zero I/O") {
+    // NOT(ALWAYS_TRUE) = ALWAYS_FALSE -> 0 files scanned
+    val sparkAlwaysTrue =
+      new SparkPredicate(
+        "ALWAYS_TRUE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val sparkNot = new Not(sparkAlwaysTrue)
+    val paimonPredicate = converter.convert(sparkNot).get
+
+    val filesScanned = scanFilesWithPredicate(paimonPredicate)
+    assert(filesScanned == 0, s"Expected 0 files but scanned $filesScanned files")
+  }
+
+  test("V2Filter: performance - OR(AlwaysTrue, int_col = 1) scans all files") {
+    // OR with AlwaysTrue means everything matches -> all files scanned
+    val sparkAlwaysTrue =
+      new SparkPredicate(
+        "ALWAYS_TRUE",
+        Array.empty[org.apache.spark.sql.connector.expressions.Expression])
+    val intEq1 = v2Filter("int_col = 1")
+    val sparkOr = new Or(sparkAlwaysTrue, intEq1)
+    val paimonPredicate = converter.convert(sparkOr).get
+
+    val filesScanned = scanFilesWithPredicate(paimonPredicate)
+    // All 4 files should be scanned because AlwaysTrue in OR matches everything
+    assert(filesScanned == 4, s"Expected 4 files but scanned $filesScanned files")
+  }
+
+  private def v2Filter(str: String, tableName: String = "test_tbl"): SparkPredicate = {
     val condition = sql(s"SELECT * FROM $tableName WHERE $str").queryExecution.optimizedPlan
       .collectFirst { case f: Filter => f }
       .get
@@ -366,6 +524,21 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
   private def scanFilesCount(str: String, tableName: String = "test_tbl"): Int = {
     getPaimonScan(s"SELECT * FROM $tableName WHERE $str").inputPartitions
       .flatMap(_.splits)
+      .map(_.asInstanceOf[DataSplit].dataFiles().size())
+      .sum
+  }
+
+  /** Use Paimon ReadBuilder to count how many data files would be scanned for a given predicate. */
+  private def scanFilesWithPredicate(
+      predicate: org.apache.paimon.predicate.Predicate,
+      tableName: String = "test_tbl"): Int = {
+    loadTable(tableName)
+      .newReadBuilder()
+      .withFilter(predicate)
+      .newScan()
+      .plan()
+      .splits()
+      .asScala
       .map(_.asInstanceOf[DataSplit].dataFiles().size())
       .sum
   }
