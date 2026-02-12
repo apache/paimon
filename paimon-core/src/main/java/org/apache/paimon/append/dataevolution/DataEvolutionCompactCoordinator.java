@@ -162,7 +162,12 @@ public class DataEvolutionCompactCoordinator {
                 BinaryRow partition = partitionFiles.getKey();
                 List<DataFileMeta> files = partitionFiles.getValue();
                 RangeHelper<DataFileMeta> rangeHelper =
-                        new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
+                        new RangeHelper<>(
+                                f ->
+                                        new Range(
+                                                f.nonNullFirstRowId(),
+                                                // merge adjacent files
+                                                f.nonNullFirstRowId() + f.rowCount()));
 
                 List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(files);
 
