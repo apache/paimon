@@ -45,22 +45,16 @@ public class DiskAnnIndex implements Closeable {
     }
 
     public static DiskAnnIndex create(
-            int dimension,
-            DiskAnnVectorMetric metric,
-            DiskAnnIndexType indexType,
-            int maxDegree,
-            int buildListSize) {
+            int dimension, DiskAnnVectorMetric metric, int maxDegree, int buildListSize) {
         MetricType metricType = metric.toMetricType();
-        Index index =
-                Index.create(dimension, metricType, indexType.value(), maxDegree, buildListSize);
+        Index index = Index.create(dimension, metricType, 0, maxDegree, buildListSize);
         return new DiskAnnIndex(index, dimension, buildListSize);
     }
 
-    public void addWithIds(ByteBuffer vectorBuffer, ByteBuffer idBuffer, int n) {
+    public void add(ByteBuffer vectorBuffer, int n) {
         ensureOpen();
         validateVectorBuffer(vectorBuffer, n);
-        validateIdBuffer(idBuffer, n);
-        index.addWithIds(n, vectorBuffer, idBuffer);
+        index.add(n, vectorBuffer);
     }
 
     /**
@@ -82,9 +76,9 @@ public class DiskAnnIndex implements Closeable {
     /**
      * Serialize this index with its Vamana graph adjacency lists into the given direct ByteBuffer.
      *
-     * <p>The serialized data is later split into an index file (header + graph) and a data file
-     * (raw vectors) by the writer, then loaded by {@link DiskAnnVectorGlobalIndexReader} for
-     * search.
+     * <p>The serialized data (graph + vectors, no header) is later split into an index file (graph
+     * only) and a data file (raw vectors) by the writer, then loaded by {@link
+     * DiskAnnVectorGlobalIndexReader} for search. Metadata is stored in {@link DiskAnnIndexMeta}.
      *
      * @param buffer a direct ByteBuffer of at least {@link #serializeSize()} bytes
      * @return the number of bytes written
@@ -97,13 +91,22 @@ public class DiskAnnIndex implements Closeable {
         return index.serialize(buffer);
     }
 
+    /**
+     * Train a PQ codebook on the vectors in this index and encode all vectors.
+     *
+     * @param numSubspaces number of PQ subspaces (M).
+     * @param maxSamples maximum training samples for K-Means.
+     * @param kmeansIters number of K-Means iterations.
+     * @return {@code byte[2]}: [0] = serialized pivots, [1] = serialized compressed codes.
+     */
+    public byte[][] pqTrainAndEncode(int numSubspaces, int maxSamples, int kmeansIters) {
+        ensureOpen();
+        return index.pqTrainAndEncode(numSubspaces, maxSamples, kmeansIters);
+    }
+
     public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {
         return ByteBuffer.allocateDirect(numVectors * dimension * Float.BYTES)
                 .order(ByteOrder.nativeOrder());
-    }
-
-    public static ByteBuffer allocateIdBuffer(int numIds) {
-        return ByteBuffer.allocateDirect(numIds * Long.BYTES).order(ByteOrder.nativeOrder());
     }
 
     private void validateVectorBuffer(ByteBuffer buffer, int numVectors) {
@@ -114,20 +117,6 @@ public class DiskAnnIndex implements Closeable {
         if (buffer.capacity() < requiredBytes) {
             throw new IllegalArgumentException(
                     "Vector buffer too small: required "
-                            + requiredBytes
-                            + " bytes, got "
-                            + buffer.capacity());
-        }
-    }
-
-    private void validateIdBuffer(ByteBuffer buffer, int numIds) {
-        if (!buffer.isDirect()) {
-            throw new IllegalArgumentException("ID buffer must be a direct buffer");
-        }
-        int requiredBytes = numIds * Long.BYTES;
-        if (buffer.capacity() < requiredBytes) {
-            throw new IllegalArgumentException(
-                    "ID buffer too small: required "
                             + requiredBytes
                             + " bytes, got "
                             + buffer.capacity());

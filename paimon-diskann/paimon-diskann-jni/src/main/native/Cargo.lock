@@ -87,6 +87,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-deque"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9dd111b7b7f7d55b72c0a6ae361660ee5853c9af73f70c3c2ef6858b950e2e51"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -135,6 +154,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "diskann-quantization"
+version = "0.45.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f6703f9a574be9bf6c9f1f59033e127f5300cd240e50fc40dffe9a64475f92d5"
+dependencies = [
+ "bytemuck",
+ "cfg-if",
+ "diskann-utils",
+ "diskann-vector",
+ "diskann-wide",
+ "half",
+ "rand",
+ "rayon",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "diskann-utils"
 version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,6 +181,7 @@ dependencies = [
  "diskann-wide",
  "half",
  "rand",
+ "rayon",
  "thiserror 2.0.18",
 ]
 
@@ -168,6 +205,12 @@ dependencies = [
  "cfg-if",
  "half",
 ]
+
+[[package]]
+name = "either"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "foldhash"
@@ -331,6 +374,8 @@ version = "0.1.0"
 dependencies = [
  "dashmap",
  "diskann",
+ "diskann-quantization",
+ "diskann-utils",
  "diskann-vector",
  "futures-util",
  "jni",
@@ -432,6 +477,26 @@ checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
 dependencies = [
  "num-traits",
  "rand",
+]
+
+[[package]]
+name = "rayon"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
 ]
 
 [[package]]

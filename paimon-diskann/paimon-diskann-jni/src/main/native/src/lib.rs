@@ -30,7 +30,7 @@
 //! undefined behaviour and likely crash the JVM.  On panic the function throws a
 //! `java.lang.RuntimeException` with the panic message and returns a safe default.
 
-use jni::objects::{JByteArray, JByteBuffer, JClass, JObject, JPrimitiveArray, ReleaseMode};
+use jni::objects::{JByteBuffer, JClass, JObject, JPrimitiveArray, ReleaseMode};
 use jni::sys::{jfloat, jint, jlong};
 use jni::JNIEnv;
 
@@ -43,19 +43,15 @@ use diskann::graph::{self, DiskANNIndex};
 use diskann::neighbor::{BackInserter, Neighbor};
 use diskann_vector::distance::Metric;
 
-mod jni_provider;
-use jni_provider::{JniContext, JniProvider, JniStrategy};
+mod paimon_fileio_provider;
+mod pq;
+use paimon_fileio_provider::{FileIOContext, FileIOProvider, FileIOStrategy};
 
 // ======================== Constants ========================
 
 const METRIC_L2: i32 = 0;
 const METRIC_INNER_PRODUCT: i32 = 1;
 const METRIC_COSINE: i32 = 2;
-
-/// Serialization magic number ("PDAN").
-const MAGIC: i32 = 0x5044414E;
-/// Serialization format version (3 = graph + vectors).
-const SERIALIZE_VERSION: i32 = 3;
 
 /// The u32 ID reserved for the DiskANN graph start/entry point.
 const START_POINT_ID: u32 = 0;
@@ -103,15 +99,11 @@ struct IndexState {
 
     dimension: i32,
     metric_type: i32,
-    index_type: i32,
-    max_degree: usize,
-    build_list_size: usize,
 
-    ext_to_int: HashMap<i64, u32>,
-    int_to_ext: HashMap<u32, i64>,
     next_id: u32,
 
-    raw_data: Vec<(i64, Vec<f32>)>,
+    /// Vectors stored in insertion order. Position i has int_id = i + 1.
+    raw_data: Vec<Vec<f32>>,
 }
 
 // ======================== Registry ========================
@@ -152,7 +144,7 @@ fn get_index(handle: i64) -> Option<Arc<Mutex<IndexState>>> {
 fn create_index_state(
     dimension: i32,
     metric_type: i32,
-    index_type: i32,
+    _index_type: i32,
     max_degree: i32,
     build_list_size: i32,
 ) -> Result<IndexState, String> {
@@ -193,11 +185,6 @@ fn create_index_state(
         runtime,
         dimension,
         metric_type,
-        index_type,
-        max_degree: md,
-        build_list_size: bls,
-        ext_to_int: HashMap::new(),
-        int_to_ext: HashMap::new(),
         next_id: START_POINT_ID + 1,
         raw_data: Vec::new(),
     })
@@ -220,33 +207,10 @@ fn get_direct_buffer_slice<'a>(
 
 // ======================== Serialization Helpers ========================
 
-fn read_i32(buf: &[u8], offset: &mut usize) -> Option<i32> {
-    if *offset + 4 > buf.len() { return None; }
-    let mut b = [0u8; 4];
-    b.copy_from_slice(&buf[*offset..*offset + 4]);
-    *offset += 4;
-    Some(i32::from_ne_bytes(b))
-}
-
-fn read_i64(buf: &[u8], offset: &mut usize) -> Option<i64> {
-    if *offset + 8 > buf.len() { return None; }
-    let mut b = [0u8; 8];
-    b.copy_from_slice(&buf[*offset..*offset + 8]);
-    *offset += 8;
-    Some(i64::from_ne_bytes(b))
-}
-
 fn write_i32(buf: &mut [u8], offset: &mut usize, v: i32) -> bool {
     if *offset + 4 > buf.len() { return false; }
     buf[*offset..*offset + 4].copy_from_slice(&v.to_ne_bytes());
     *offset += 4;
-    true
-}
-
-fn write_i64(buf: &mut [u8], offset: &mut usize, v: i64) -> bool {
-    if *offset + 8 > buf.len() { return false; }
-    buf[*offset..*offset + 8].copy_from_slice(&v.to_ne_bytes());
-    *offset += 8;
     true
 }
 
@@ -338,13 +302,12 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexGetMetr
 }
 
 #[no_mangle]
-pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexAddWithIds<'local>(
+pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexAdd<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
     handle: jlong,
     n: jlong,
     vector_buffer: JByteBuffer<'local>,
-    id_buffer: JByteBuffer<'local>,
 ) {
     let arc = match get_index(handle) {
         Some(a) => a,
@@ -364,7 +327,6 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexAddWith
     let num = n as usize;
     let dimension = state.dimension as usize;
     let vec_len = num * dimension * 4;
-    let id_len = num * 8;
 
     let vec_bytes = match get_direct_buffer_slice(&mut env, &vector_buffer, vec_len) {
         Some(slice) => slice,
@@ -373,30 +335,19 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexAddWith
             return;
         }
     };
-    let id_bytes = match get_direct_buffer_slice(&mut env, &id_buffer, id_len) {
-        Some(slice) => slice,
-        None => {
-            let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid id buffer");
-            return;
-        }
-    };
 
     let vectors =
         unsafe { std::slice::from_raw_parts(vec_bytes.as_ptr() as *const f32, num * dimension) };
-    let ids = unsafe { std::slice::from_raw_parts(id_bytes.as_ptr() as *const i64, num) };
 
     let strat = test_provider::Strategy::new();
 
     for i in 0..num {
-        let ext_id = ids[i];
         let base = i * dimension;
         let vector = vectors[base..base + dimension].to_vec();
 
         let int_id = state.next_id;
         state.next_id += 1;
-        state.ext_to_int.insert(ext_id, int_id);
-        state.int_to_ext.insert(int_id, ext_id);
-        state.raw_data.push((ext_id, vector.clone()));
+        state.raw_data.push(vector.clone());
 
         // catch_unwind around the DiskANN graph insert which may panic.
         let idx_clone = Arc::clone(&state.index);
@@ -410,14 +361,14 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexAddWith
             Ok(Err(e)) => {
                 let _ = env.throw_new(
                     "java/lang/RuntimeException",
-                    format!("DiskANN insert failed for id {}: {}", ext_id, e),
+                    format!("DiskANN insert failed for int_id {}: {}", int_id, e),
                 );
                 return;
             }
             Err(_) => {
                 let _ = env.throw_new(
                     "java/lang/RuntimeException",
-                    format!("DiskANN insert panicked for id {}", ext_id),
+                    format!("DiskANN insert panicked for int_id {}", int_id),
                 );
                 return;
             }
@@ -556,8 +507,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
                     continue;
                 }
                 let idx = qi * top_k + count;
-                result_labels[idx] =
-                    *state.int_to_ext.get(&neighbor.id).unwrap_or(&(neighbor.id as i64));
+                result_labels[idx] = (neighbor.id as i64) - 1;
                 result_distances[idx] = neighbor.distance;
                 count += 1;
             }
@@ -599,34 +549,41 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
 }
 
 // ============================================================================
-// Serialization format (graph + vectors)
+// Serialization format (graph + data, no header)
 // ============================================================================
 //
-// Layout:
-//   Header  : 9 × i32  (magic, version=3, dimension, metric, index_type,
-//                         max_degree, build_list_size, count, start_id)
-//   Graph   : for each node (ordered by ascending internal id):
-//               ext_id       : i64
+// The index file (.index) contains ONLY the graph adjacency lists:
+//   Graph   : for each node (start point + user vectors):
 //               int_id       : i32
 //               neighbor_cnt : i32
 //               neighbors    : neighbor_cnt × i32
-//   Vectors : for each node (same order):
+//
+// The data file (.data) contains ONLY raw vectors stored sequentially:
+//   Data    : for each user vector (in order 0, 1, 2, ...):
 //               vector       : dim × f32
 //
-// During search-only mode the Rust side loads the graph into a `JniProvider`
-// and invokes the Java `FileIOVectorReader.readVector(long)` callback
-// for every vector access that is NOT a start point.
+//   The sequential position IS the ID.
+//   The start point is NOT stored in the data file.
+//   position = int_id - 1 for user vectors (int_id > 0).
+//
+// All metadata (dimension, metric, max_degree, build_list_size, count,
+// start_id) is stored in DiskAnnIndexMeta — not in the file.
+//
+// During search, both graph and vector data are read on demand from
+// Paimon FileIO-backed storage (local, HDFS, S3, OSS, etc.) via JNI callbacks:
+//   - Graph:   FileIOGraphReader.readNeighbors(int)
+//   - Vectors: FileIOVectorReader.readVector(long)
 // ============================================================================
 
-// ---- Searcher registry (handles backed by JniProvider) ----
+// ---- Searcher registry (handles backed by FileIOProvider) ----
 
 struct SearcherState {
-    index: Arc<DiskANNIndex<JniProvider>>,
-    context: JniContext,
+    index: Arc<DiskANNIndex<FileIOProvider>>,
+    context: FileIOContext,
     runtime: tokio::runtime::Runtime,
     dimension: i32,
-    /// Mapping from internal DiskANN u32 IDs to external Java long IDs.
-    int_to_ext: HashMap<u32, i64>,
+    /// Minimum external ID for this index. ext_id = min_ext_id + (int_id - 1).
+    min_ext_id: i64,
 }
 
 struct SearcherRegistry {
@@ -679,33 +636,16 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
     let provider = state.index.provider();
 
     let dim = state.dimension as usize;
+    let num_user_vectors = state.raw_data.len();
+    let num_nodes = num_user_vectors + 1; // +1 for start point
 
-    // Build ordered list of (int_id, ext_id, neighbors) using the async
+    // Build ordered list of (int_id, neighbors) using the async
     // NeighborAccessor API run synchronously on our tokio runtime.
-    // Include the start point (int_id=0) so the search can navigate from it.
+    // Node order: start point (int_id=0) first, then user vectors (int_id=1,2,...).
     let mut graph_section_size: usize = 0;
-    let mut graph_entries: Vec<(u32, i64, Vec<u32>)> = Vec::new();
+    let mut graph_entries: Vec<(u32, Vec<u32>)> = Vec::with_capacity(num_nodes);
 
-    // Start point first (ext_id = -1 as sentinel — never a real user ID).
-    {
-        use diskann::graph::AdjacencyList;
-        use diskann::provider::{DefaultAccessor, NeighborAccessor as NeighborAccessorTrait};
-        let accessor = provider.default_accessor();
-        let mut adj = AdjacencyList::<u32>::new();
-        let mut neighbors = Vec::new();
-        if state.runtime.block_on(accessor.get_neighbors(START_POINT_ID, &mut adj)).is_ok() {
-            neighbors = adj.iter().copied().collect();
-        }
-        graph_section_size += 8 + 4 + 4 + neighbors.len() * 4;
-        graph_entries.push((START_POINT_ID, -1i64, neighbors));
-    }
-
-    // User-added vectors.
-    for (ext_id, _vec) in &state.raw_data {
-        let int_id = match state.ext_to_int.get(ext_id) {
-            Some(i) => *i,
-            None => continue,
-        };
+    for int_id in 0..num_nodes as u32 {
         let mut neighbors = Vec::new();
         {
             use diskann::graph::AdjacencyList;
@@ -717,15 +657,13 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
                 neighbors = adj.iter().copied().collect();
             }
         }
-
-        graph_section_size += 8 + 4 + 4 + neighbors.len() * 4; // ext_id + int_id + cnt + neighbors
-        graph_entries.push((int_id, *ext_id, neighbors));
+        graph_section_size += 4 + 4 + neighbors.len() * 4; // int_id + cnt + neighbors
+        graph_entries.push((int_id, neighbors));
     }
 
-    let count = graph_entries.len(); // includes start point
-    let vector_section_size = count * dim * 4;
-    let header_size = 9 * 4; // 9 i32s
-    let total_size = header_size + graph_section_size + vector_section_size;
+    // Data section: user vectors in sequential order (no start point).
+    let data_section_size = num_user_vectors * dim * 4;
+    let total_size = graph_section_size + data_section_size;
 
     let buf = match get_direct_buffer_slice(&mut env, &buffer, total_size) {
         Some(s) => s,
@@ -733,20 +671,9 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
     };
 
     let mut off = 0usize;
-    // Header
-    write_i32(buf, &mut off, MAGIC);
-    write_i32(buf, &mut off, SERIALIZE_VERSION);
-    write_i32(buf, &mut off, state.dimension);
-    write_i32(buf, &mut off, state.metric_type);
-    write_i32(buf, &mut off, state.index_type);
-    write_i32(buf, &mut off, state.max_degree as i32);
-    write_i32(buf, &mut off, state.build_list_size as i32);
-    write_i32(buf, &mut off, count as i32);
-    write_i32(buf, &mut off, START_POINT_ID as i32);
 
-    // Graph section
-    for (int_id, ext_id, neighbors) in &graph_entries {
-        write_i64(buf, &mut off, *ext_id);
+    // Graph section: int_id(i32) + neighbor_cnt(i32) + neighbors(cnt × i32)
+    for (int_id, neighbors) in &graph_entries {
         write_i32(buf, &mut off, *int_id as i32);
         write_i32(buf, &mut off, neighbors.len() as i32);
         for &n in neighbors {
@@ -754,22 +681,10 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
         }
     }
 
-    // Vector section (same order as graph_entries)
-    for (int_id, ext_id, _) in &graph_entries {
-        if *int_id == START_POINT_ID {
-            // Write the start point's dummy vector.
-            for _ in 0..dim {
-                write_f32(buf, &mut off, 1.0);
-            }
-        } else if let Some((_, vec)) = state.raw_data.iter().find(|(id, _)| id == ext_id) {
-            for &v in vec {
-                write_f32(buf, &mut off, v);
-            }
-        } else {
-            // Zero-fill for missing vectors.
-            for _ in 0..dim {
-                write_f32(buf, &mut off, 0.0);
-            }
+    // Data section: user vectors in insertion order.
+    for vec in &state.raw_data {
+        for &v in vec {
+            write_f32(buf, &mut off, v);
         }
     }
 
@@ -794,28 +709,12 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
 
     let dim = state.dimension as usize;
 
-    // Calculate size by iterating over all graph nodes (start point + raw_data).
+    // Calculate size by iterating over all graph nodes (start point + user vectors).
     let provider = state.index.provider();
+    let num_nodes = state.raw_data.len() + 1; // +1 for start point
     let mut graph_section_size: usize = 0;
 
-    // Start point.
-    {
-        use diskann::graph::AdjacencyList;
-        use diskann::provider::{DefaultAccessor, NeighborAccessor as NeighborAccessorTrait};
-        let accessor = provider.default_accessor();
-        let mut adj = AdjacencyList::<u32>::new();
-        let nc = if state.runtime.block_on(accessor.get_neighbors(START_POINT_ID, &mut adj)).is_ok() {
-            adj.len()
-        } else { 0 };
-        graph_section_size += 8 + 4 + 4 + nc * 4;
-    }
-
-    // User-added vectors.
-    for (ext_id, _) in &state.raw_data {
-        let int_id = match state.ext_to_int.get(ext_id) {
-            Some(i) => *i,
-            None => continue,
-        };
+    for int_id in 0..num_nodes as u32 {
         let neighbor_count = {
             use diskann::graph::AdjacencyList;
             use diskann::provider::{DefaultAccessor, NeighborAccessor as NeighborAccessorTrait};
@@ -827,201 +726,12 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
                 0
             }
         };
-        graph_section_size += 8 + 4 + 4 + neighbor_count * 4;
+        graph_section_size += 4 + 4 + neighbor_count * 4; // int_id + cnt + neighbors
     }
 
-    let count = state.raw_data.len() + 1; // +1 for start point
-    let header_size = 9 * 4;
-    let vector_section_size = count * dim * 4;
-    (header_size + graph_section_size + vector_section_size) as jlong
-}
-
-// ======================== indexCreateSearcher ========================
-
-/// Create a search-only handle from serialized data + Java callback reader.
-///
-/// `data`:          byte[] containing the serialized index.
-/// `vectorReader`:  Java object with a `readVector(long)` method (e.g. `FileIOVectorReader`).
-///
-/// Returns a searcher handle (≥100000) that can be used with `indexSearchWithReader`.
-#[no_mangle]
-pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateSearcher<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    data: JByteArray<'local>,
-    vector_reader: JObject<'local>,
-) -> jlong {
-    let bytes = match env.convert_byte_array(&data) {
-        Ok(d) => d,
-        Err(_) => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid data"); return 0; }
-    };
-
-    let mut off = 0usize;
-
-    // Parse header.
-    let magic = read_i32(&bytes, &mut off).unwrap_or(0);
-    if magic != MAGIC {
-        let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid magic");
-        return 0;
-    }
-    let version = read_i32(&bytes, &mut off).unwrap_or(0);
-    if version != SERIALIZE_VERSION {
-        let _ = env.throw_new("java/lang/IllegalArgumentException",
-            format!("Expected version {}, got {}", SERIALIZE_VERSION, version));
-        return 0;
-    }
-    let dimension   = read_i32(&bytes, &mut off).unwrap_or(0);
-    let metric_type = read_i32(&bytes, &mut off).unwrap_or(0);
-    let _index_type = read_i32(&bytes, &mut off).unwrap_or(0);
-    let max_degree  = read_i32(&bytes, &mut off).unwrap_or(64) as usize;
-    let build_ls    = read_i32(&bytes, &mut off).unwrap_or(100) as usize;
-    let count       = read_i32(&bytes, &mut off).unwrap_or(0) as usize;
-    let start_id    = read_i32(&bytes, &mut off).unwrap_or(0) as u32;
-    let dim         = dimension as usize;
-
-    // Parse graph section.
-    let mut graph_data: Vec<(u32, i64, Vec<u32>)> = Vec::with_capacity(count);
-    let mut int_to_ext: HashMap<u32, i64> = HashMap::with_capacity(count);
-
-    for _ in 0..count {
-        let ext_id = match read_i64(&bytes, &mut off) {
-            Some(v) => v,
-            None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Truncated graph"); return 0; }
-        };
-        let int_id = match read_i32(&bytes, &mut off) {
-            Some(v) => v as u32,
-            None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Truncated graph"); return 0; }
-        };
-        let ncnt = match read_i32(&bytes, &mut off) {
-            Some(v) => v as usize,
-            None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Truncated graph"); return 0; }
-        };
-        let mut neighbors = Vec::with_capacity(ncnt);
-        for _ in 0..ncnt {
-            let n = match read_i32(&bytes, &mut off) {
-                Some(v) => v as u32,
-                None => { let _ = env.throw_new("java/lang/IllegalArgumentException", "Truncated graph"); return 0; }
-            };
-            neighbors.push(n);
-        }
-        int_to_ext.insert(int_id, ext_id);
-        graph_data.push((int_id, ext_id, neighbors));
-    }
-
-    // Create JNI global ref for the vector reader callback (needed before
-    // we fetch the start-point vector below).
-    let global_reader = match env.new_global_ref(&vector_reader) {
-        Ok(g) => g,
-        Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException",
-                format!("Failed to create global ref: {}", e));
-            return 0;
-        }
-    };
-
-    let jvm = match env.get_java_vm() {
-        Ok(vm) => vm,
-        Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException",
-                format!("Failed to get JavaVM: {}", e));
-            return 0;
-        }
-    };
-
-    // Fetch start-point vector via JNI callback.
-    // The byte[] passed to this function only contains header + graph
-    // (no vector section), so vectors are read on-demand from the reader.
-    // The start point has ext_id = -1 (sentinel); its vector is the dummy
-    // [1.0, …] written during serialization.  We try the reader first,
-    // falling back to a non-zero dummy to avoid division-by-zero with
-    // cosine metric.
-    let start_ext_id = graph_data.iter()
-        .find(|(iid, _, _)| *iid == start_id)
-        .map(|(_, eid, _)| *eid)
-        .unwrap_or(-1);
-    let start_vec = {
-        // Try reading from the Java reader callback.
-        let fetched = (|| -> Option<Vec<f32>> {
-            let mut e = jvm.attach_current_thread().ok()?;
-            let result = e.call_method(
-                &global_reader, "readVector", "(J)[F",
-                &[jni::objects::JValue::Long(start_ext_id)],
-            ).ok()?;
-            let arr = result.l().ok()?;
-            if arr.is_null() { return None; }
-            let jarr: jni::objects::JFloatArray = arr.into();
-            let len = e.get_array_length(&jarr).ok()? as usize;
-            if len == 0 { return None; }
-            let mut buf = vec![0.0f32; len];
-            e.get_float_array_region(&jarr, 0, &mut buf).ok()?;
-            Some(buf)
-        })();
-        fetched.unwrap_or_else(|| vec![1.0f32; dim])
-    };
-
-    // Build the JniProvider (graph in memory, vectors via JNI callback).
-    let provider = JniProvider::new(
-        graph_data,
-        start_id,
-        start_vec,
-        jvm,
-        global_reader,
-        dim,
-        metric_type,
-        max_degree,
-    );
-
-    // Build DiskANNIndex config.
-    let md = std::cmp::max(max_degree, 4);
-    let bls = std::cmp::max(build_ls, md);
-    let metric = map_metric(metric_type);
-
-    let index_config = match graph::config::Builder::new(
-        md,
-        graph::config::MaxDegree::same(),
-        bls,
-        metric.into(),
-    ).build() {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException",
-                format!("Failed to create index config: {:?}", e));
-            return 0;
-        }
-    };
-
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(r) => r,
-        Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException",
-                format!("Failed to create tokio runtime: {}", e));
-            return 0;
-        }
-    };
-
-    // DiskANNIndex takes ownership of the provider.  After construction,
-    // the provider is accessible via index.provider() for read access.
-    // We store int_to_ext separately for mapping search results.
-    let index = Arc::new(DiskANNIndex::new(index_config, provider, None));
-
-    let searcher = SearcherState {
-        index,
-        context: JniContext,
-        runtime,
-        dimension,
-        int_to_ext,
-    };
-
-    match searcher_registry().lock() {
-        Ok(mut guard) => guard.insert(searcher),
-        Err(_) => {
-            let _ = env.throw_new("java/lang/IllegalStateException", "Searcher registry error");
-            0
-        }
-    }
+    // Data section: only user vectors (no start point).
+    let data_section_size = state.raw_data.len() * dim * 4;
+    (graph_section_size + data_section_size) as jlong
 }
 
 // ======================== indexCreateSearcherFromReaders ========================
@@ -1031,9 +741,9 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
 ///
 /// `graphReader`:   Java object with `readNeighbors(int)`, `getDimension()`,
 ///                  `getCount()`, `getStartId()`, `getMaxDegree()`,
-///                  `getBuildListSize()`, `getMetricValue()`,
-///                  `getAllInternalIds()`, `getAllExternalIds()`.
+///                  `getBuildListSize()`, `getMetricValue()`.
 /// `vectorReader`:  Java object with `readVector(long)`.
+/// `min_ext_id`:    Minimum external ID for int_id → ext_id conversion.
 ///
 /// Returns a searcher handle (≥100000) for use with `indexSearchWithReader`.
 #[no_mangle]
@@ -1042,6 +752,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
     _class: JClass<'local>,
     graph_reader: JObject<'local>,
     vector_reader: JObject<'local>,
+    min_ext_id: jlong,
 ) -> jlong {
     // Helper to call int-returning methods on graphReader.
     macro_rules! call_int {
@@ -1055,55 +766,11 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
 
     let dimension   = call_int!("getDimension");
     let metric_type = call_int!("getMetricValue");
-    let _index_type = call_int!("getIndexTypeValue");
     let max_degree  = call_int!("getMaxDegree") as usize;
     let build_ls    = call_int!("getBuildListSize") as usize;
     let count       = call_int!("getCount") as usize;
     let start_id    = call_int!("getStartId") as u32;
     let dim         = dimension as usize;
-
-    // Read int_to_ext mapping via getAllInternalIds() / getAllExternalIds().
-    let int_ids: Vec<i32> = {
-        let result = match env.call_method(&graph_reader, "getAllInternalIds", "()[I", &[]) {
-            Ok(v) => v,
-            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("getAllInternalIds failed: {}", e)); return 0; }
-        };
-        let obj = match result.l() {
-            Ok(o) => o,
-            Err(_) => { let _ = env.throw_new("java/lang/RuntimeException", "Bad return from getAllInternalIds"); return 0; }
-        };
-        let arr = jni::objects::JIntArray::from(obj);
-        let len = env.get_array_length(&arr).unwrap_or(0) as usize;
-        let mut buf = vec![0i32; len];
-        let _ = env.get_int_array_region(&arr, 0, &mut buf);
-        buf
-    };
-
-    let ext_ids: Vec<i64> = {
-        let result = match env.call_method(&graph_reader, "getAllExternalIds", "()[J", &[]) {
-            Ok(v) => v,
-            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("getAllExternalIds failed: {}", e)); return 0; }
-        };
-        let obj = match result.l() {
-            Ok(o) => o,
-            Err(_) => { let _ = env.throw_new("java/lang/RuntimeException", "Bad return from getAllExternalIds"); return 0; }
-        };
-        let arr = jni::objects::JLongArray::from(obj);
-        let len = env.get_array_length(&arr).unwrap_or(0) as usize;
-        let mut buf = vec![0i64; len];
-        let _ = env.get_long_array_region(&arr, 0, &mut buf);
-        buf
-    };
-
-    // Build ID mappings.
-    let mut int_to_ext: HashMap<u32, i64> = HashMap::with_capacity(count);
-    let mut ext_to_int: HashMap<i64, u32> = HashMap::with_capacity(count);
-    for i in 0..std::cmp::min(int_ids.len(), ext_ids.len()) {
-        let iid = int_ids[i] as u32;
-        let eid = ext_ids[i];
-        int_to_ext.insert(iid, eid);
-        ext_to_int.insert(eid, iid);
-    }
 
     // Create global refs for both readers.
     let global_graph_reader = match env.new_global_ref(&graph_reader) {
@@ -1120,31 +787,12 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("get JVM: {}", e)); return 0; }
     };
 
-    // Fetch start-point vector via vectorReader JNI callback.
-    let start_ext_id = int_to_ext.get(&start_id).copied().unwrap_or(-1);
-    let start_vec = {
-        let fetched = (|| -> Option<Vec<f32>> {
-            let mut e = jvm.attach_current_thread().ok()?;
-            let result = e.call_method(
-                &global_vector_reader, "readVector", "(J)[F",
-                &[jni::objects::JValue::Long(start_ext_id)],
-            ).ok()?;
-            let arr = result.l().ok()?;
-            if arr.is_null() { return None; }
-            let jarr: jni::objects::JFloatArray = arr.into();
-            let len = e.get_array_length(&jarr).ok()? as usize;
-            if len == 0 { return None; }
-            let mut buf = vec![0.0f32; len];
-            e.get_float_array_region(&jarr, 0, &mut buf).ok()?;
-            Some(buf)
-        })();
-        fetched.unwrap_or_else(|| vec![1.0f32; dim])
-    };
+    // Start point is not stored in data file; use a dummy vector.
+    let start_vec = vec![1.0f32; dim];
 
-    // Build the JniProvider with on-demand graph reading.
-    let provider = JniProvider::new_with_readers(
-        int_to_ext.clone(),
-        ext_to_int,
+    // Build the FileIOProvider with on-demand graph reading.
+    let provider = FileIOProvider::new_with_readers(
+        count,
         start_id,
         start_vec,
         jvm,
@@ -1182,10 +830,10 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
 
     let searcher = SearcherState {
         index,
-        context: JniContext,
+        context: FileIOContext,
         runtime,
         dimension,
-        int_to_ext,
+        min_ext_id,
     };
 
     match searcher_registry().lock() {
@@ -1196,7 +844,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
 
 // ======================== indexSearchWithReader ========================
 
-/// Search on a searcher handle created by `indexCreateSearcher`.
+/// Search on a searcher handle created by `indexCreateSearcherFromReaders`.
 #[no_mangle]
 pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearchWithReader<'local>(
     mut env: JNIEnv<'local>,
@@ -1239,7 +887,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearchW
     let mut result_dist = vec![f32::MAX; total];
     let mut result_lbl  = vec![-1i64; total];
 
-    let strat = JniStrategy::new();
+    let strat = FileIOStrategy::new();
 
     for qi in 0..num {
         let qvec = &query[qi * dimension..(qi + 1) * dimension];
@@ -1288,7 +936,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearchW
             let nb = &neighbors[ri];
             if nb.id == START_POINT_ID { continue; }
             let idx = qi * top_k + cnt;
-            result_lbl[idx] = state.int_to_ext.get(&nb.id).copied().unwrap_or(nb.id as i64);
+            result_lbl[idx] = state.min_ext_id + (nb.id as i64) - 1;
             result_dist[idx] = nb.distance;
             cnt += 1;
         }
@@ -1326,4 +974,134 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexDestroy
             guard.searchers.remove(&handle);
         }
     }));
+}
+
+// ======================== PQ Train & Encode ========================
+
+/// Train a PQ codebook on the vectors stored in the index and encode all vectors.
+///
+/// Uses `diskann-quantization`'s `LightPQTrainingParameters` for K-Means++ / Lloyd
+/// training and `BasicTable` for encoding.
+///
+/// Returns a `byte[][]` where:
+///   `[0]` = serialized pivots (codebook)
+///   `[1]` = serialized compressed codes
+#[no_mangle]
+pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_pqTrainAndEncode<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    num_subspaces: jint,
+    max_samples: jint,
+    kmeans_iters: jint,
+) -> JObject<'local> {
+    // Obtain the index state outside of catch_unwind so we can throw typed exceptions.
+    let arc = match get_index(handle) {
+        Some(a) => a,
+        None => {
+            let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid index handle");
+            return JObject::null();
+        }
+    };
+    let state = match arc.lock() {
+        Ok(s) => s,
+        Err(_) => {
+            let _ = env.throw_new("java/lang/IllegalStateException", "Index lock poisoned");
+            return JObject::null();
+        }
+    };
+
+    let dim = state.dimension as usize;
+    let m = num_subspaces as usize;
+    let max_s = max_samples as usize;
+    let iters = kmeans_iters as usize;
+
+    // Perform PQ training and encoding inside catch_unwind to prevent panics crossing FFI.
+    let pq_result = {
+        let raw_data = &state.raw_data;
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            pq::train_and_encode(raw_data, dim, m, max_s, iters)
+        }));
+        // Drop the lock before JNI object creation.
+        drop(state);
+        match result {
+            Ok(Ok(r)) => r,
+            Ok(Err(msg)) => {
+                let _ = env.throw_new("java/lang/RuntimeException", msg);
+                return JObject::null();
+            }
+            Err(payload) => {
+                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "Unknown Rust panic in PQ training".to_string()
+                };
+                let _ = env.throw_new("java/lang/RuntimeException", msg);
+                return JObject::null();
+            }
+        }
+    };
+
+    // Build Java byte[][] result.
+    let pivots_array = match env.byte_array_from_slice(&pq_result.pivots_bytes) {
+        Ok(a) => a,
+        Err(e) => {
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to create pivots byte[]: {}", e),
+            );
+            return JObject::null();
+        }
+    };
+    let compressed_array = match env.byte_array_from_slice(&pq_result.compressed_bytes) {
+        Ok(a) => a,
+        Err(e) => {
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to create compressed byte[]: {}", e),
+            );
+            return JObject::null();
+        }
+    };
+
+    let byte_array_class = match env.find_class("[B") {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to find [B class: {}", e),
+            );
+            return JObject::null();
+        }
+    };
+
+    let result = match env.new_object_array(2, &byte_array_class, &JObject::null()) {
+        Ok(a) => a,
+        Err(e) => {
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to create byte[][]: {}", e),
+            );
+            return JObject::null();
+        }
+    };
+
+    if let Err(e) = env.set_object_array_element(&result, 0, &pivots_array) {
+        let _ = env.throw_new(
+            "java/lang/RuntimeException",
+            format!("Failed to set pivots: {}", e),
+        );
+        return JObject::null();
+    }
+    if let Err(e) = env.set_object_array_element(&result, 1, &compressed_array) {
+        let _ = env.throw_new(
+            "java/lang/RuntimeException",
+            format!("Failed to set compressed: {}", e),
+        );
+        return JObject::null();
+    }
+
+    result.into()
 }

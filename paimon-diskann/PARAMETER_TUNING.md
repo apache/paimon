@@ -108,14 +108,6 @@ DiskANN is a graph-based approximate nearest neighbor (ANN) search algorithm des
   - **2,000,000**: Default for balanced performance
   - **5,000,000+**: For large-scale production systems with ample resources
 
-#### `vector.diskann.index-type`
-- **Default**: MEMORY
-- **Options**: MEMORY, DISK
-- **Description**: Type of index structure
-- **Recommendations**:
-  - **MEMORY**: For datasets that fit in RAM (best performance)
-  - **DISK**: For datasets exceeding RAM (requires SSD)
-
 ## Performance Tuning Guide
 
 ### High Recall (>95%)
@@ -137,14 +129,6 @@ vector.diskann.search-list-size = 100
 vector.diskann.max-degree = 32
 vector.diskann.build-list-size = 75
 vector.diskann.search-list-size = 32
-```
-
-### Memory-Constrained
-```properties
-vector.diskann.max-degree = 32
-vector.diskann.build-list-size = 75
-vector.size-per-index = 500000
-vector.diskann.index-type = DISK
 ```
 
 ## Best Practices

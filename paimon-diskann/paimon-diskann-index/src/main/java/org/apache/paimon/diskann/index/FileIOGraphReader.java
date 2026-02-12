@@ -41,36 +41,34 @@ import java.util.Map;
  * beam search. It also calls getter methods ({@link #getDimension()}, {@link #getCount()}, etc.)
  * during searcher initialization.
  *
- * <h3>Index file layout</h3>
+ * <h3>Index file layout (graph only, no header)</h3>
  *
  * <pre>
- *   Header (36 bytes): 9 × i32
- *     magic, version, dimension, metricType, indexType,
- *     maxDegree, buildListSize, count, startId
- *
  *   Graph section: for each node (count nodes):
- *     ext_id       : i64
  *     int_id       : i32
  *     neighbor_cnt : i32
  *     neighbors    : neighbor_cnt × i32
  * </pre>
  *
- * <p>On construction, the header is read and the graph section is scanned once sequentially to
- * build an offset index (mapping internal node ID → file byte offset for its neighbor data). After
- * that, individual neighbor lists are read on demand by seeking to the stored offset.
+ * <p>DiskANN stores vectors sequentially — the position IS the ID. Internal IDs map to positions
+ * via {@code position = int_id - 1} for user vectors. The start point ({@code int_id == startId})
+ * is not a user vector.
+ *
+ * <p>All metadata (dimension, metric, max_degree, etc.) is provided externally via {@link
+ * DiskAnnIndexMeta} — the file contains only graph data.
+ *
+ * <p>On construction, the graph section is scanned once sequentially to build an offset index
+ * (mapping internal node ID → file byte offset for its neighbor data). After that, individual
+ * neighbor lists are read on demand by seeking to the stored offset.
  */
 public class FileIOGraphReader implements Closeable {
-
-    /** Header size: 9 × i32 = 36 bytes. */
-    private static final int HEADER_SIZE = 36;
 
     /** Source stream — must support seek(). */
     private final SeekableInputStream input;
 
-    // ---- Header fields ----
+    // ---- Metadata fields (from DiskAnnIndexMeta) ----
     private final int dimension;
     private final int metricValue;
-    private final int indexTypeValue;
     private final int maxDegree;
     private final int buildListSize;
     private final int count;
@@ -81,77 +79,68 @@ public class FileIOGraphReader implements Closeable {
     /** Mapping from internal node ID → byte offset of the node's neighbor_cnt field in the file. */
     private final Map<Integer, Long> nodeNeighborOffsets;
 
-    /** All internal node IDs (in file order). */
-    private final int[] allInternalIds;
-
-    /** Corresponding external IDs (same order as {@link #allInternalIds}). */
-    private final long[] allExternalIds;
-
     /** LRU cache: internal node ID → neighbor list (int[]). */
     private final LinkedHashMap<Integer, int[]> cache;
 
     /**
-     * Create a reader by parsing the header and scanning the graph section to build the offset
-     * index.
+     * Create a reader from metadata and a seekable input stream.
      *
-     * @param input seekable input stream for the index file (header + graph)
+     * <p>The stream should point to a file that contains ONLY the graph section (no header, no
+     * IDs). All metadata is supplied via parameters (originally from {@link DiskAnnIndexMeta}).
+     *
+     * @param input seekable input stream for the index file (graph only)
+     * @param dimension vector dimension
+     * @param metricValue metric type value (0=L2, 1=IP, 2=Cosine)
+     * @param maxDegree maximum adjacency list size
+     * @param buildListSize search list size used during construction
+     * @param count total number of graph nodes (including start point)
+     * @param startId internal ID of the graph start/entry point
      * @param cacheSize maximum number of cached neighbor lists (0 uses default 4096)
      * @throws IOException if reading or parsing fails
      */
-    public FileIOGraphReader(SeekableInputStream input, int cacheSize) throws IOException {
+    public FileIOGraphReader(
+            SeekableInputStream input,
+            int dimension,
+            int metricValue,
+            int maxDegree,
+            int buildListSize,
+            int count,
+            int startId,
+            int cacheSize)
+            throws IOException {
         this.input = input;
+        this.dimension = dimension;
+        this.metricValue = metricValue;
+        this.maxDegree = maxDegree;
+        this.buildListSize = buildListSize;
+        this.count = count;
+        this.startId = startId;
 
-        // 1. Read header.
-        byte[] headerBuf = new byte[HEADER_SIZE];
-        input.seek(0);
-        readFully(input, headerBuf);
-
-        int off = 0;
-        // magic(4) + version(4) — skip validation here; Rust validates during search.
-        off += 8;
-        this.dimension = readInt(headerBuf, off);
-        off += 4;
-        this.metricValue = readInt(headerBuf, off);
-        off += 4;
-        this.indexTypeValue = readInt(headerBuf, off);
-        off += 4;
-        this.maxDegree = readInt(headerBuf, off);
-        off += 4;
-        this.buildListSize = readInt(headerBuf, off);
-        off += 4;
-        this.count = readInt(headerBuf, off);
-        off += 4;
-        this.startId = readInt(headerBuf, off);
-
-        // 2. Scan graph section to build offset index.
+        // Scan graph section to build offset index.
+        // The file starts directly with graph entries (no header).
+        // Each entry: int_id(4) + neighbor_cnt(4) + neighbors(cnt*4).
         this.nodeNeighborOffsets = new HashMap<>(count);
-        this.allInternalIds = new int[count];
-        this.allExternalIds = new long[count];
 
-        // Reusable buffer for reading ext_id(8) + int_id(4) + neighbor_cnt(4) = 16 bytes per node.
-        byte[] nodeBuf = new byte[16];
-        long filePos = HEADER_SIZE;
+        // Reusable buffer for reading int_id(4) + neighbor_cnt(4) = 8 bytes per node.
+        byte[] nodeBuf = new byte[8];
+        long filePos = 0;
 
         for (int i = 0; i < count; i++) {
             input.seek(filePos);
             readFully(input, nodeBuf);
 
-            long extId = readLong(nodeBuf, 0);
-            int intId = readInt(nodeBuf, 8);
-            int neighborCount = readInt(nodeBuf, 12);
-
-            allInternalIds[i] = intId;
-            allExternalIds[i] = extId;
+            int intId = readInt(nodeBuf, 0);
+            int neighborCount = readInt(nodeBuf, 4);
 
             // Store file offset pointing to the neighbor_cnt field (so readNeighbors can re-read
             // count + data).
-            nodeNeighborOffsets.put(intId, filePos + 12);
+            nodeNeighborOffsets.put(intId, filePos + 4);
 
-            // Advance past: ext_id(8) + int_id(4) + neighbor_cnt(4) + neighbors(cnt*4).
-            filePos += 16 + (long) neighborCount * 4;
+            // Advance past: int_id(4) + neighbor_cnt(4) + neighbors(cnt*4).
+            filePos += 8 + (long) neighborCount * 4;
         }
 
-        // 3. Create LRU cache.
+        // Create LRU cache.
         final int cap = cacheSize > 0 ? cacheSize : 4096;
         this.cache =
                 new LinkedHashMap<Integer, int[]>(cap, 0.75f, true) {
@@ -172,10 +161,6 @@ public class FileIOGraphReader implements Closeable {
         return metricValue;
     }
 
-    public int getIndexTypeValue() {
-        return indexTypeValue;
-    }
-
     public int getMaxDegree() {
         return maxDegree;
     }
@@ -190,16 +175,6 @@ public class FileIOGraphReader implements Closeable {
 
     public int getStartId() {
         return startId;
-    }
-
-    /** Return all internal node IDs (in file order). */
-    public int[] getAllInternalIds() {
-        return allInternalIds;
-    }
-
-    /** Return all external node IDs (same order as {@link #getAllInternalIds()}). */
-    public long[] getAllExternalIds() {
-        return allExternalIds;
     }
 
     // ---- On-demand neighbor reading (called by Rust JNI during beam search) ----
@@ -278,16 +253,5 @@ public class FileIOGraphReader implements Closeable {
                 | ((buf[off + 1] & 0xFF) << 8)
                 | ((buf[off + 2] & 0xFF) << 16)
                 | ((buf[off + 3] & 0xFF) << 24);
-    }
-
-    private static long readLong(byte[] buf, int off) {
-        return (buf[off] & 0xFFL)
-                | ((buf[off + 1] & 0xFFL) << 8)
-                | ((buf[off + 2] & 0xFFL) << 16)
-                | ((buf[off + 3] & 0xFFL) << 24)
-                | ((buf[off + 4] & 0xFFL) << 32)
-                | ((buf[off + 5] & 0xFFL) << 40)
-                | ((buf[off + 6] & 0xFFL) << 48)
-                | ((buf[off + 7] & 0xFFL) << 56);
     }
 }

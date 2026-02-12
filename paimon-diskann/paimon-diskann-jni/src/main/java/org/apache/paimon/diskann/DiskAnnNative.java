@@ -50,9 +50,8 @@ final class DiskAnnNative {
     /** Get the metric type of an index. */
     static native int indexGetMetricType(long handle);
 
-    /** Add vectors with IDs to an index using direct ByteBuffers (zero-copy). */
-    static native void indexAddWithIds(
-            long handle, long n, ByteBuffer vectorBuffer, ByteBuffer idBuffer);
+    /** Add vectors to an index using a direct ByteBuffer (zero-copy). */
+    static native void indexAdd(long handle, long n, ByteBuffer vectorBuffer);
 
     /** Build the index graph after adding vectors. */
     static native void indexBuild(long handle, int buildListSize);
@@ -93,21 +92,6 @@ final class DiskAnnNative {
     static native long indexSerializeSize(long handle);
 
     /**
-     * Create a <em>search-only</em> index from serialized data and a Java callback for on-demand
-     * vector reads.
-     *
-     * <p>The graph adjacency lists are loaded into memory from {@code data}. During search, the
-     * Rust code invokes {@code vectorReader.readVector(long)} via JNI whenever a full vector is
-     * needed - enabling the classic DiskANN architecture where vectors live on remote object
-     * storage (e.g., via Jindo SDK).
-     *
-     * @param data byte[] containing serialized index data.
-     * @param vectorReader a Java object with a {@code float[] readVector(long)} method.
-     * @return a searcher handle (>= 100 000) for use with {@link #indexSearchWithReader}.
-     */
-    static native long indexCreateSearcher(byte[] data, Object vectorReader);
-
-    /**
      * Create a <em>search-only</em> index from two on-demand readers: one for the graph structure
      * and one for vectors.
      *
@@ -116,20 +100,20 @@ final class DiskAnnNative {
      * <ul>
      *   <li><b>Graph</b>: the Rust side calls {@code graphReader.readNeighbors(int)} via JNI to
      *       fetch neighbor lists on demand during beam search. It also calls getter methods ({@code
-     *       getDimension()}, {@code getCount()}, {@code getStartId()}, {@code getAllInternalIds()},
-     *       {@code getAllExternalIds()}) during initialization.
-     *   <li><b>Vectors</b>: the Rust side calls {@code vectorReader.readVector(long)} via JNI (same
-     *       as {@link #indexCreateSearcher}).
+     *       getDimension()}, {@code getCount()}, {@code getStartId()}) during initialization.
+     *   <li><b>Vectors</b>: the Rust side calls {@code vectorReader.readVector(long)} via JNI.
      * </ul>
      *
      * @param graphReader a Java object providing graph structure on demand.
      * @param vectorReader a Java object with a {@code float[] readVector(long)} method.
+     * @param minExtId minimum external ID for this index (for int_id → ext_id conversion).
      * @return a searcher handle (>= 100 000) for use with {@link #indexSearchWithReader}.
      */
-    static native long indexCreateSearcherFromReaders(Object graphReader, Object vectorReader);
+    static native long indexCreateSearcherFromReaders(
+            Object graphReader, Object vectorReader, long minExtId);
 
     /**
-     * Search on a searcher handle created by {@link #indexCreateSearcher}.
+     * Search on a searcher handle created by {@link #indexCreateSearcherFromReaders}.
      *
      * @see #indexSearch for parameter descriptions — semantics are identical.
      */
@@ -144,4 +128,21 @@ final class DiskAnnNative {
 
     /** Destroy a searcher handle and free its resources. */
     static native void indexDestroySearcher(long handle);
+
+    /**
+     * Train a Product Quantization codebook on the vectors stored in the index and encode all
+     * vectors into compact PQ codes.
+     *
+     * <p>The index must have had vectors added via {@link #indexAddWithIds} before calling this
+     * method.
+     *
+     * @param handle the native index handle.
+     * @param numSubspaces number of PQ subspaces (M). Dimension must be divisible by M.
+     * @param maxSamples maximum number of vectors sampled for K-Means training.
+     * @param kmeansIters number of K-Means iterations.
+     * @return {@code byte[2]} where {@code [0]} is the serialized PQ pivots (codebook) and {@code
+     *     [1]} is the serialized compressed PQ codes.
+     */
+    static native byte[][] pqTrainAndEncode(
+            long handle, int numSubspaces, int maxSamples, int kmeansIters);
 }

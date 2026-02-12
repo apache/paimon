@@ -57,11 +57,10 @@ public class Index implements AutoCloseable {
         return MetricType.fromValue(DiskAnnNative.indexGetMetricType(nativeHandle));
     }
 
-    public void addWithIds(long n, ByteBuffer vectorBuffer, ByteBuffer idBuffer) {
+    public void add(long n, ByteBuffer vectorBuffer) {
         checkNotClosed();
         validateDirectBuffer(vectorBuffer, n * dimension * Float.BYTES, "vector");
-        validateDirectBuffer(idBuffer, n * Long.BYTES, "id");
-        DiskAnnNative.indexAddWithIds(nativeHandle, n, vectorBuffer, idBuffer);
+        DiskAnnNative.indexAdd(nativeHandle, n, vectorBuffer);
     }
 
     public void build(int buildListSize) {
@@ -103,11 +102,10 @@ public class Index implements AutoCloseable {
     }
 
     /**
-     * Serialize this index with its Vamana graph adjacency lists into the given direct ByteBuffer.
+     * Serialize the Vamana graph adjacency lists and vectors into the given direct ByteBuffer.
      *
-     * <p>The serialized data can later be loaded by {@link IndexSearcher#create(byte[],
-     * java.io.Closeable)} for search-only use where vectors are read on demand from an object
-     * store.
+     * <p>The serialized data contains the graph section followed by the vector section, with no
+     * header. Metadata (dimension, metric, etc.) is stored separately in {@code DiskAnnIndexMeta}.
      *
      * @return the number of bytes written
      */
@@ -127,13 +125,22 @@ public class Index implements AutoCloseable {
         return new Index(handle, dimension);
     }
 
+    /**
+     * Train a PQ codebook on the vectors in this index and encode all vectors.
+     *
+     * @param numSubspaces number of PQ subspaces (M).
+     * @param maxSamples maximum training samples for K-Means.
+     * @param kmeansIters number of K-Means iterations.
+     * @return {@code byte[2]}: [0] = serialized pivots, [1] = serialized compressed codes.
+     */
+    public byte[][] pqTrainAndEncode(int numSubspaces, int maxSamples, int kmeansIters) {
+        checkNotClosed();
+        return DiskAnnNative.pqTrainAndEncode(nativeHandle, numSubspaces, maxSamples, kmeansIters);
+    }
+
     public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {
         return ByteBuffer.allocateDirect(numVectors * dimension * Float.BYTES)
                 .order(ByteOrder.nativeOrder());
-    }
-
-    public static ByteBuffer allocateIdBuffer(int numIds) {
-        return ByteBuffer.allocateDirect(numIds * Long.BYTES).order(ByteOrder.nativeOrder());
     }
 
     private void validateDirectBuffer(ByteBuffer buffer, long requiredBytes, String name) {

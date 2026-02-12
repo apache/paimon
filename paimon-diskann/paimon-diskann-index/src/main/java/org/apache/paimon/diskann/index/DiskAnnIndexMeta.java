@@ -48,6 +48,9 @@ public class DiskAnnIndexMeta implements Serializable {
     private final long numVectors;
     private final long minId;
     private final long maxId;
+    private final int maxDegree;
+    private final int buildListSize;
+    private final int startId;
     private final String dataFileName;
     private final String pqPivotsFileName;
     private final String pqCompressedFileName;
@@ -59,6 +62,9 @@ public class DiskAnnIndexMeta implements Serializable {
             long numVectors,
             long minId,
             long maxId,
+            int maxDegree,
+            int buildListSize,
+            int startId,
             String dataFileName,
             String pqPivotsFileName,
             String pqCompressedFileName) {
@@ -68,9 +74,24 @@ public class DiskAnnIndexMeta implements Serializable {
         this.numVectors = numVectors;
         this.minId = minId;
         this.maxId = maxId;
+        this.maxDegree = maxDegree;
+        this.buildListSize = buildListSize;
+        this.startId = startId;
         this.dataFileName = dataFileName;
         this.pqPivotsFileName = pqPivotsFileName;
         this.pqCompressedFileName = pqCompressedFileName;
+    }
+
+    public int dim() {
+        return dim;
+    }
+
+    public int metricValue() {
+        return metricValue;
+    }
+
+    public long numVectors() {
+        return numVectors;
     }
 
     public long minId() {
@@ -81,9 +102,31 @@ public class DiskAnnIndexMeta implements Serializable {
         return maxId;
     }
 
+    public int maxDegree() {
+        return maxDegree;
+    }
+
+    public int buildListSize() {
+        return buildListSize;
+    }
+
+    public int startId() {
+        return startId;
+    }
+
     /** The file name of the separate vector data file. */
     public String dataFileName() {
         return dataFileName;
+    }
+
+    /** The file name of the PQ codebook (pivots) file. */
+    public String pqPivotsFileName() {
+        return pqPivotsFileName;
+    }
+
+    /** The file name of the PQ compressed codes file. */
+    public String pqCompressedFileName() {
+        return pqCompressedFileName;
     }
 
     /** Serialize metadata to byte array. */
@@ -97,6 +140,9 @@ public class DiskAnnIndexMeta implements Serializable {
         out.writeLong(numVectors);
         out.writeLong(minId);
         out.writeLong(maxId);
+        out.writeInt(maxDegree);
+        out.writeInt(buildListSize);
+        out.writeInt(startId);
         out.writeUTF(dataFileName);
         out.writeUTF(pqPivotsFileName);
         out.writeUTF(pqCompressedFileName);
@@ -117,6 +163,9 @@ public class DiskAnnIndexMeta implements Serializable {
         long numVectors = in.readLong();
         long minId = in.readLong();
         long maxId = in.readLong();
+        int maxDegree = in.readInt();
+        int buildListSize = in.readInt();
+        int startId = in.readInt();
         String dataFileName = in.readUTF();
         String pqPivotsFileName = in.readUTF();
         String pqCompressedFileName = in.readUTF();
@@ -127,6 +176,9 @@ public class DiskAnnIndexMeta implements Serializable {
                 numVectors,
                 minId,
                 maxId,
+                maxDegree,
+                buildListSize,
+                startId,
                 dataFileName,
                 pqPivotsFileName,
                 pqCompressedFileName);

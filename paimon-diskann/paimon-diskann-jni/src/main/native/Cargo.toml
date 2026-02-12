@@ -35,3 +35,5 @@ tokio = { version = "1", features = ["rt"] }
 futures-util = "0.3"
 # Concurrent HashMap used by the JniProvider graph storage
 dashmap = "6"
+diskann-quantization = "0.45.0"
+diskann-utils = "0.45.0"

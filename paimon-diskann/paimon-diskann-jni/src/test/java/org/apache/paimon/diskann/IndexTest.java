@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
-import java.nio.LongBuffer;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -75,7 +74,7 @@ class IndexTest {
             assertEquals(MetricType.L2, index.getMetricType());
 
             // Add vectors with IDs
-            addVectorsWithIds(index, NUM_VECTORS, DIMENSION, 0);
+            addVectors(index, NUM_VECTORS, DIMENSION);
             assertEquals(NUM_VECTORS, index.getCount());
 
             // Build the index
@@ -103,21 +102,14 @@ class IndexTest {
     }
 
     @Test
-    void testCustomIds() {
+    void testSequentialIds() {
         try (Index index = createIndex(MetricType.L2)) {
-            ByteBuffer vectorBuffer = createVectorBuffer(NUM_VECTORS, DIMENSION);
-            ByteBuffer idBuffer = Index.allocateIdBuffer(NUM_VECTORS);
-            LongBuffer longView = idBuffer.asLongBuffer();
-            for (int i = 0; i < NUM_VECTORS; i++) {
-                longView.put(i, i * 100L); // Use custom IDs
-            }
-
-            index.addWithIds(NUM_VECTORS, vectorBuffer, idBuffer);
+            addVectors(index, NUM_VECTORS, DIMENSION);
             assertEquals(NUM_VECTORS, index.getCount());
 
             index.build(BUILD_LIST_SIZE);
 
-            // Search should return our custom IDs
+            // Search should return sequential IDs (0, 1, 2, ...)
             float[] queryVectors = createQueryVectors(1, DIMENSION);
             float[] distances = new float[K];
             long[] labels = new long[K];
@@ -125,7 +117,9 @@ class IndexTest {
             index.search(1, queryVectors, K, SEARCH_LIST_SIZE, distances, labels);
 
             for (int i = 0; i < K; i++) {
-                assertTrue(labels[i] % 100 == 0, "Label should be a multiple of 100");
+                assertTrue(
+                        labels[i] >= 0 && labels[i] < NUM_VECTORS,
+                        "Label " + labels[i] + " out of range");
             }
         }
     }
@@ -133,7 +127,7 @@ class IndexTest {
     @Test
     void testBatchSearch() {
         try (Index index = createIndex(MetricType.L2)) {
-            addVectorsWithIds(index, NUM_VECTORS, DIMENSION, 0);
+            addVectors(index, NUM_VECTORS, DIMENSION);
             index.build(BUILD_LIST_SIZE);
 
             int numQueries = 5;
@@ -159,7 +153,7 @@ class IndexTest {
         try (Index index = createIndex(MetricType.INNER_PRODUCT)) {
             assertEquals(MetricType.INNER_PRODUCT, index.getMetricType());
 
-            addVectorsWithIds(index, NUM_VECTORS, DIMENSION, 0);
+            addVectors(index, NUM_VECTORS, DIMENSION);
             index.build(BUILD_LIST_SIZE);
 
             float[] queryVectors = createQueryVectors(1, DIMENSION);
@@ -184,7 +178,7 @@ class IndexTest {
         try (Index index = createIndex(MetricType.COSINE)) {
             assertEquals(MetricType.COSINE, index.getMetricType());
 
-            addVectorsWithIds(index, NUM_VECTORS, DIMENSION, 0);
+            addVectors(index, NUM_VECTORS, DIMENSION);
             index.build(BUILD_LIST_SIZE);
 
             float[] queryVectors = createQueryVectors(1, DIMENSION);
@@ -201,102 +195,30 @@ class IndexTest {
     }
 
     @Test
-    void testSerialization() {
-        float[] queryVectors = createQueryVectors(1, DIMENSION);
-        long[] originalLabels = new long[K];
-        float[] originalDistances = new float[K];
-
-        // Build a map of id -> vector for the in-memory reader
-        java.util.Map<Long, float[]> vectorMap = new java.util.HashMap<>();
-        Random rng = new Random(42);
-        for (int i = 0; i < NUM_VECTORS; i++) {
-            float[] vec = new float[DIMENSION];
-            for (int j = 0; j < DIMENSION; j++) {
-                vec[j] = rng.nextFloat();
-            }
-            vectorMap.put((long) i, vec);
-        }
-
-        // Create, populate, and search
-        try (Index index = createIndex(MetricType.L2)) {
-            addVectorsWithIds(index, NUM_VECTORS, DIMENSION, 0);
-            index.build(BUILD_LIST_SIZE);
-
-            index.search(1, queryVectors, K, SEARCH_LIST_SIZE, originalDistances, originalLabels);
-
-            // Serialize (graph + vectors format)
-            long serializeSize = index.serializeSize();
-            assertTrue(serializeSize > 0);
-
-            ByteBuffer serialized =
-                    ByteBuffer.allocateDirect((int) serializeSize).order(ByteOrder.nativeOrder());
-            long bytesWritten = index.serialize(serialized);
-            assertEquals(serializeSize, bytesWritten);
-
-            // Convert to byte array
-            serialized.rewind();
-            byte[] serializedBytes = new byte[(int) bytesWritten];
-            serialized.get(serializedBytes);
-
-            // Create a simple in-memory vector reader for testing.
-            // The Rust JNI layer invokes readVector(long) via reflection.
-            TestVectorReader reader = new TestVectorReader(vectorMap);
-
-            // Deserialize via IndexSearcher and verify
-            try (IndexSearcher searcher = IndexSearcher.create(serializedBytes, reader)) {
-                assertEquals(DIMENSION, searcher.getDimension());
-
-                float[] deserializedDistances = new float[K];
-                long[] deserializedLabels = new long[K];
-                searcher.search(
-                        1,
-                        queryVectors,
-                        K,
-                        SEARCH_LIST_SIZE,
-                        deserializedDistances,
-                        deserializedLabels);
-
-                // Verify that search results are valid
-                for (int i = 0; i < K; i++) {
-                    assertTrue(
-                            deserializedLabels[i] >= 0 && deserializedLabels[i] < NUM_VECTORS,
-                            "Label " + deserializedLabels[i] + " out of range");
-                }
-            }
-        }
-    }
-
-    @Test
     void testSmallIndex() {
         int dim = 2;
         try (Index index =
                 Index.create(dim, MetricType.L2, INDEX_TYPE_MEMORY, MAX_DEGREE, BUILD_LIST_SIZE)) {
-            // Add a few vectors
+            // Add a few vectors: [1,0], [0,1], [0.7,0.7]
             ByteBuffer vectorBuffer = Index.allocateVectorBuffer(3, dim);
             FloatBuffer floatView = vectorBuffer.asFloatBuffer();
             floatView.put(0, 1.0f);
-            floatView.put(1, 0.0f); // [1, 0]
+            floatView.put(1, 0.0f); // position 0: [1, 0]
             floatView.put(2, 0.0f);
-            floatView.put(3, 1.0f); // [0, 1]
+            floatView.put(3, 1.0f); // position 1: [0, 1]
             floatView.put(4, 0.7f);
-            floatView.put(5, 0.7f); // [0.7, 0.7]
+            floatView.put(5, 0.7f); // position 2: [0.7, 0.7]
 
-            ByteBuffer idBuffer = Index.allocateIdBuffer(3);
-            LongBuffer longView = idBuffer.asLongBuffer();
-            longView.put(0, 10L);
-            longView.put(1, 20L);
-            longView.put(2, 30L);
-
-            index.addWithIds(3, vectorBuffer, idBuffer);
+            index.add(3, vectorBuffer);
             index.build(BUILD_LIST_SIZE);
 
-            // Query for [1, 0] - should find ID 10 as nearest
+            // Query for [1, 0] - should find position 0 as nearest
             float[] query = {1.0f, 0.0f};
             float[] distances = new float[1];
             long[] labels = new long[1];
             index.search(1, query, 1, SEARCH_LIST_SIZE, distances, labels);
 
-            assertEquals(10L, labels[0], "Nearest to [1,0] should be ID 10");
+            assertEquals(0L, labels[0], "Nearest to [1,0] should be position 0");
             assertEquals(0.0f, distances[0], 1e-5f, "Distance to self should be ~0");
         }
     }
@@ -304,7 +226,7 @@ class IndexTest {
     @Test
     void testSearchResultArrays() {
         try (Index index = createIndex(MetricType.L2)) {
-            addVectorsWithIds(index, 100, DIMENSION, 0);
+            addVectors(index, 100, DIMENSION);
             index.build(BUILD_LIST_SIZE);
 
             int numQueries = 3;
@@ -333,12 +255,6 @@ class IndexTest {
         assertTrue(vectorBuffer.isDirect());
         assertEquals(ByteOrder.nativeOrder(), vectorBuffer.order());
         assertEquals(10 * DIMENSION * Float.BYTES, vectorBuffer.capacity());
-
-        // Test ID buffer allocation
-        ByteBuffer idBuffer = Index.allocateIdBuffer(10);
-        assertTrue(idBuffer.isDirect());
-        assertEquals(ByteOrder.nativeOrder(), idBuffer.order());
-        assertEquals(10 * Long.BYTES, idBuffer.capacity());
     }
 
     @Test
@@ -347,22 +263,20 @@ class IndexTest {
         try (Index index = createIndex(MetricType.L2)) {
             ByteBuffer wrongSizeBuffer =
                     ByteBuffer.allocateDirect(10).order(ByteOrder.nativeOrder());
-            ByteBuffer idBuffer = Index.allocateIdBuffer(1);
             assertThrows(
                     IllegalArgumentException.class,
                     () -> {
-                        index.addWithIds(1, wrongSizeBuffer, idBuffer);
+                        index.add(1, wrongSizeBuffer);
                     });
         }
 
         // Test non-direct buffer
         try (Index index = createIndex(MetricType.L2)) {
             ByteBuffer heapBuffer = ByteBuffer.allocate(DIMENSION * Float.BYTES);
-            ByteBuffer idBuffer = Index.allocateIdBuffer(1);
             assertThrows(
                     IllegalArgumentException.class,
                     () -> {
-                        index.addWithIds(1, heapBuffer, idBuffer);
+                        index.add(1, heapBuffer);
                     });
         }
 
@@ -389,7 +303,7 @@ class IndexTest {
     @Test
     void testQueryVectorArrayValidation() {
         try (Index index = createIndex(MetricType.L2)) {
-            addVectorsWithIds(index, 10, DIMENSION, 0);
+            addVectors(index, 10, DIMENSION);
             index.build(BUILD_LIST_SIZE);
 
             // Query vectors array too small
@@ -425,15 +339,10 @@ class IndexTest {
         return Index.create(DIMENSION, metricType, INDEX_TYPE_MEMORY, MAX_DEGREE, BUILD_LIST_SIZE);
     }
 
-    /** Add vectors with sequential IDs starting from {@code startId}. */
-    private void addVectorsWithIds(Index index, int n, int d, long startId) {
+    /** Add random vectors to the index. */
+    private void addVectors(Index index, int n, int d) {
         ByteBuffer vectorBuffer = createVectorBuffer(n, d);
-        ByteBuffer idBuffer = Index.allocateIdBuffer(n);
-        LongBuffer longView = idBuffer.asLongBuffer();
-        for (int i = 0; i < n; i++) {
-            longView.put(i, startId + i);
-        }
-        index.addWithIds(n, vectorBuffer, idBuffer);
+        index.add(n, vectorBuffer);
     }
 
     /** Create a direct ByteBuffer with random vectors. */
@@ -457,24 +366,5 @@ class IndexTest {
             vectors[i] = random.nextFloat();
         }
         return vectors;
-    }
-
-    /**
-     * Simple in-memory vector reader for testing. The Rust JNI layer invokes {@code
-     * readVector(long)} via reflection — no specific interface is required.
-     */
-    static class TestVectorReader implements java.io.Closeable {
-        private final java.util.Map<Long, float[]> vectorMap;
-
-        TestVectorReader(java.util.Map<Long, float[]> vectorMap) {
-            this.vectorMap = vectorMap;
-        }
-
-        public float[] readVector(long vectorId) {
-            return vectorMap.get(vectorId);
-        }
-
-        @Override
-        public void close() {}
     }
 }

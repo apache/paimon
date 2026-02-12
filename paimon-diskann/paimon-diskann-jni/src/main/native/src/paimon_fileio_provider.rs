@@ -17,14 +17,19 @@
  * under the License.
  */
 
-//! A DiskANN [`DataProvider`] whose graph lives in memory but whose vectors
-//! are fetched on demand from Java via JNI callbacks.
+//! A DiskANN [`DataProvider`] backed by Paimon FileIO (local, HDFS, S3, OSS, etc.).
 //!
-//! This enables the classic DiskANN architecture:
-//!  - **In-memory**: navigational graph (adjacency lists) + start-point vectors.
-//!  - **On-demand**: full-precision vectors are read through
-//!    `FileIOVectorReader.readVector(long)` on the Java side, which can
-//!    be backed by Paimon FileIO (local, HDFS, S3, OSS, etc.).
+//! Both the navigational graph (adjacency lists) and full-precision vectors
+//! are stored in Paimon FileIO-backed storage and read on demand via JNI
+//! callbacks to Java reader objects:
+//!
+//!  - **Graph**: read through `FileIOGraphReader.readNeighbors(int)`, which
+//!    reads from a `SeekableInputStream` over the `.index` file.
+//!  - **Vectors**: read through `FileIOVectorReader.readVector(long)`, which
+//!    reads from a `SeekableInputStream` over the `.data` file.
+//!
+//! Frequently accessed neighbors and vectors are cached in a `DashMap` and
+//! an LRU cache respectively, to reduce FileIO/JNI round-trips.
 
 use std::collections::HashMap;
 
@@ -44,34 +49,34 @@ use crate::map_metric;
 // ======================== Error ========================
 
 #[derive(Debug, Clone)]
-pub enum JniProviderError {
+pub enum FileIOProviderError {
     InvalidId(u32),
     JniCallFailed(String),
 }
 
-impl std::fmt::Display for JniProviderError {
+impl std::fmt::Display for FileIOProviderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidId(id) => write!(f, "invalid vector id {}", id),
-            Self::JniCallFailed(msg) => write!(f, "JNI callback failed: {}", msg),
+            Self::JniCallFailed(msg) => write!(f, "FileIO read failed: {}", msg),
         }
     }
 }
 
-impl std::error::Error for JniProviderError {}
+impl std::error::Error for FileIOProviderError {}
 
-impl From<JniProviderError> for ANNError {
+impl From<FileIOProviderError> for ANNError {
     #[track_caller]
-    fn from(e: JniProviderError) -> ANNError {
+    fn from(e: FileIOProviderError) -> ANNError {
         ANNError::opaque(e)
     }
 }
 
-diskann::always_escalate!(JniProviderError);
+diskann::always_escalate!(FileIOProviderError);
 
 // ======================== LRU Cache ========================
 
-/// Tiny LRU cache for recently fetched vectors to reduce JNI round-trips.
+/// Tiny LRU cache for recently fetched vectors to reduce FileIO/JNI round-trips.
 struct VectorCache {
     map: HashMap<u32, Box<[f32]>>,
     order: Vec<u32>,
@@ -108,30 +113,31 @@ impl VectorCache {
 
 // ======================== Graph Term ========================
 
-/// One entry in the in-memory graph: its neighbors and external ID.
+/// One entry in the graph cache: its neighbor list.
 pub struct GraphTerm {
     pub neighbors: AdjacencyList<u32>,
-    pub ext_id: i64,
 }
 
-// ======================== JniProvider ========================
+// ======================== FileIOProvider ========================
 
-/// Data provider that keeps the graph in-memory (or lazily loaded) and reads vectors via JNI.
-pub struct JniProvider {
-    /// In-memory graph: internal_id → { neighbors, ext_id }.
-    /// In on-demand mode this acts as a lazy cache — entries are populated on first access.
+/// DiskANN data provider backed by Paimon FileIO.
+///
+/// Graph neighbors and vectors are read on demand from FileIO-backed storage
+/// (local, HDFS, S3, OSS, etc.) via JNI callbacks to Java reader objects.
+/// A `DashMap` lazily caches graph entries to reduce repeated FileIO reads.
+pub struct FileIOProvider {
+    /// Graph cache: internal_id → { neighbors }.
+    /// Acts as a lazy cache — entries are populated on first access from FileIO.
     graph: DashMap<u32, GraphTerm>,
-    /// Internal→External ID mapping (separate for fast lookup).
-    int_to_ext: HashMap<u32, i64>,
-    /// External→Internal ID mapping.
-    ext_to_int: HashMap<i64, u32>,
+    /// Total number of nodes (start point + user vectors).
+    num_nodes: usize,
     /// Start-point IDs and their vectors (always kept in memory).
     start_points: HashMap<u32, Vec<f32>>,
     /// JVM handle for attaching threads.
     jvm: JavaVM,
-    /// Global reference to the Java vector reader object (e.g. `FileIOVectorReader`).
+    /// Global reference to the Java vector reader object (`FileIOVectorReader`).
     reader_ref: GlobalRef,
-    /// Global reference to the Java graph reader object (e.g. `FileIOGraphReader`).
+    /// Global reference to the Java graph reader object (`FileIOGraphReader`).
     /// When set, graph neighbors are fetched on demand via JNI callbacks.
     graph_reader_ref: Option<GlobalRef>,
     /// Vector dimension.
@@ -142,9 +148,9 @@ pub struct JniProvider {
     max_degree: usize,
 }
 
-impl std::fmt::Debug for JniProvider {
+impl std::fmt::Debug for FileIOProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JniProvider")
+        f.debug_struct("FileIOProvider")
             .field("dim", &self.dim)
             .field("metric", &self.metric)
             .field("max_degree", &self.max_degree)
@@ -154,84 +160,16 @@ impl std::fmt::Debug for JniProvider {
 }
 
 // SAFETY: JavaVM is Send+Sync, GlobalRef is Send+Sync.
-unsafe impl Send for JniProvider {}
-unsafe impl Sync for JniProvider {}
+unsafe impl Send for FileIOProvider {}
+unsafe impl Sync for FileIOProvider {}
 
-impl JniProvider {
-    /// Build a new search-only provider from pre-constructed graph data.
-    ///
-    /// * `graph_data`: (internal_id, external_id, neighbors) tuples.
-    /// * `start_id`:   internal ID of the graph start point.
-    /// * `start_vec`:  vector for the start point (kept in memory).
-    /// * `jvm`:        Java VM reference for JNI callbacks.
-    /// * `reader_ref`: global ref to the Java vector reader.
-    /// * `dim`:        vector dimension.
-    /// * `metric_type`:metric enum value (0=L2, 1=IP, 2=Cosine).
-    /// * `max_degree`: maximum adjacency list size.
-    pub fn new(
-        graph_data: Vec<(u32, i64, Vec<u32>)>,
-        start_id: u32,
-        start_vec: Vec<f32>,
-        jvm: JavaVM,
-        reader_ref: GlobalRef,
-        dim: usize,
-        metric_type: i32,
-        max_degree: usize,
-    ) -> Self {
-        let graph = DashMap::new();
-        let mut int_to_ext = HashMap::new();
-        let mut ext_to_int = HashMap::new();
-
-        for (int_id, ext_id, neighbors) in &graph_data {
-            let adj = AdjacencyList::from_iter_untrusted(neighbors.iter().copied());
-            graph.insert(
-                *int_id,
-                GraphTerm {
-                    neighbors: adj,
-                    ext_id: *ext_id,
-                },
-            );
-            int_to_ext.insert(*int_id, *ext_id);
-            ext_to_int.insert(*ext_id, *int_id);
-        }
-
-        // Ensure start point is in the graph too.
-        if !graph.contains_key(&start_id) {
-            graph.insert(
-                start_id,
-                GraphTerm {
-                    neighbors: AdjacencyList::new(),
-                    ext_id: start_id as i64,
-                },
-            );
-            int_to_ext.insert(start_id, start_id as i64);
-            ext_to_int.insert(start_id as i64, start_id);
-        }
-
-        let mut start_points = HashMap::new();
-        start_points.insert(start_id, start_vec);
-
-        Self {
-            graph,
-            int_to_ext,
-            ext_to_int,
-            start_points,
-            jvm,
-            reader_ref,
-            graph_reader_ref: None,
-            dim,
-            metric: map_metric(metric_type),
-            max_degree,
-        }
-    }
-
+impl FileIOProvider {
     /// Build a search-only provider with on-demand graph reading (no pre-loaded graph data).
     ///
     /// The graph `DashMap` starts empty and acts as a lazy cache — entries are populated
-    /// on first access via JNI callback to `graphReader.readNeighbors(int)`.
+    /// on first access via FileIO through `graphReader.readNeighbors(int)`.
     pub fn new_with_readers(
-        int_to_ext: HashMap<u32, i64>,
-        ext_to_int: HashMap<i64, u32>,
+        num_nodes: usize,
         start_id: u32,
         start_vec: Vec<f32>,
         jvm: JavaVM,
@@ -243,15 +181,12 @@ impl JniProvider {
     ) -> Self {
         let graph = DashMap::new();
 
-        // The start point needs an entry so `to_internal_id` works.
-        // Its neighbors will be fetched on demand.
         let mut start_points = HashMap::new();
         start_points.insert(start_id, start_vec);
 
         Self {
             graph,
-            int_to_ext,
-            ext_to_int,
+            num_nodes,
             start_points,
             jvm,
             reader_ref,
@@ -270,9 +205,9 @@ impl JniProvider {
         self.metric
     }
 
-    /// Fetch neighbor list from Java via JNI callback to `graphReader.readNeighbors(int)`.
-    /// Returns None if graphReader is not set.
-    fn fetch_neighbors_jni(&self, int_id: u32) -> Result<Option<Vec<u32>>, JniProviderError> {
+    /// Fetch neighbor list from FileIO-backed storage via JNI callback to
+    /// `graphReader.readNeighbors(int)`.  Returns None if graphReader is not set.
+    fn fetch_neighbors(&self, int_id: u32) -> Result<Option<Vec<u32>>, FileIOProviderError> {
         let graph_ref = match &self.graph_reader_ref {
             Some(r) => r,
             None => return Ok(None),
@@ -281,7 +216,7 @@ impl JniProvider {
         let mut env = self
             .jvm
             .attach_current_thread()
-            .map_err(|e| JniProviderError::JniCallFailed(format!("attach failed: {}", e)))?;
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("attach failed: {}", e)))?;
 
         let result = env.call_method(
             graph_ref,
@@ -294,7 +229,7 @@ impl JniProvider {
             Ok(v) => v,
             Err(e) => {
                 let _ = env.exception_clear();
-                return Err(JniProviderError::JniCallFailed(format!(
+                return Err(FileIOProviderError::JniCallFailed(format!(
                     "readNeighbors({}) failed: {}",
                     int_id, e
                 )));
@@ -313,38 +248,39 @@ impl JniProvider {
         let int_array = jni::objects::JIntArray::from(obj);
         let len = env
             .get_array_length(&int_array)
-            .map_err(|e| JniProviderError::JniCallFailed(format!("get_array_length: {}", e)))?
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("get_array_length: {}", e)))?
             as usize;
 
         let mut buf = vec![0i32; len];
         env.get_int_array_region(&int_array, 0, &mut buf)
-            .map_err(|e| JniProviderError::JniCallFailed(format!("get_int_array_region: {}", e)))?;
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("get_int_array_region: {}", e)))?;
 
         Ok(Some(buf.into_iter().map(|v| v as u32).collect()))
     }
 
-    /// Fetch a vector from Java via JNI.  Returns None if readVector returns null.
-    fn fetch_vector_jni(&self, ext_id: i64) -> Result<Option<Vec<f32>>, JniProviderError> {
+    /// Fetch a vector from FileIO-backed storage via JNI callback to
+    /// `vectorReader.readVector(long)`.  The `position` is the 0-based index
+    /// in the data file (position = int_id - 1).
+    fn fetch_vector(&self, position: i64) -> Result<Option<Vec<f32>>, FileIOProviderError> {
         let mut env = self
             .jvm
             .attach_current_thread()
-            .map_err(|e| JniProviderError::JniCallFailed(format!("attach failed: {}", e)))?;
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("attach failed: {}", e)))?;
 
         let result = env.call_method(
             &self.reader_ref,
             "readVector",
             "(J)[F",
-            &[jni::objects::JValue::Long(ext_id as jlong)],
+            &[jni::objects::JValue::Long(position as jlong)],
         );
 
         let ret_val = match result {
             Ok(v) => v,
             Err(e) => {
-                // Clear any pending Java exception so the JNI env stays usable.
                 let _ = env.exception_clear();
-                return Err(JniProviderError::JniCallFailed(format!(
+                return Err(FileIOProviderError::JniCallFailed(format!(
                     "readVector({}) failed: {}",
-                    ext_id, e
+                    position, e
                 )));
             }
         };
@@ -362,13 +298,13 @@ impl JniProvider {
         let float_array = jni::objects::JFloatArray::from(obj);
         let len = env
             .get_array_length(&float_array)
-            .map_err(|e| JniProviderError::JniCallFailed(format!("get_array_length: {}", e)))?
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("get_array_length: {}", e)))?
             as usize;
 
         let mut buf = vec![0f32; len];
         env.get_float_array_region(&float_array, 0, &mut buf)
             .map_err(|e| {
-                JniProviderError::JniCallFailed(format!("get_float_array_region: {}", e))
+                FileIOProviderError::JniCallFailed(format!("get_float_array_region: {}", e))
             })?;
 
         Ok(Some(buf))
@@ -377,66 +313,65 @@ impl JniProvider {
 
 // ======================== Context ========================
 
-/// Lightweight execution context (mirrors test_provider::Context).
+/// Lightweight execution context for the FileIO provider.
 #[derive(Debug, Clone, Default)]
-pub struct JniContext;
+pub struct FileIOContext;
 
-impl std::fmt::Display for JniContext {
+impl std::fmt::Display for FileIOContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "jni context")
+        write!(f, "paimon fileio context")
     }
 }
 
-impl provider::ExecutionContext for JniContext {}
+impl provider::ExecutionContext for FileIOContext {}
 
 // ======================== DataProvider ========================
 
-impl provider::DataProvider for JniProvider {
-    type Context = JniContext;
+impl provider::DataProvider for FileIOProvider {
+    type Context = FileIOContext;
     type InternalId = u32;
     type ExternalId = u32;
-    type Error = JniProviderError;
+    type Error = FileIOProviderError;
 
     fn to_internal_id(
         &self,
-        _context: &JniContext,
+        _context: &FileIOContext,
         gid: &u32,
-    ) -> Result<u32, JniProviderError> {
-        // Check ID mapping (works for both in-memory and on-demand modes).
-        if self.int_to_ext.contains_key(gid) || self.start_points.contains_key(gid) {
+    ) -> Result<u32, FileIOProviderError> {
+        if (*gid as usize) < self.num_nodes {
             Ok(*gid)
         } else {
-            Err(JniProviderError::InvalidId(*gid))
+            Err(FileIOProviderError::InvalidId(*gid))
         }
     }
 
     fn to_external_id(
         &self,
-        _context: &JniContext,
+        _context: &FileIOContext,
         id: u32,
-    ) -> Result<u32, JniProviderError> {
-        if self.int_to_ext.contains_key(&id) || self.start_points.contains_key(&id) {
+    ) -> Result<u32, FileIOProviderError> {
+        if (id as usize) < self.num_nodes {
             Ok(id)
         } else {
-            Err(JniProviderError::InvalidId(id))
+            Err(FileIOProviderError::InvalidId(id))
         }
     }
 }
 
 // ======================== SetElement (stub — search only) ========================
 
-impl provider::SetElement<[f32]> for JniProvider {
+impl provider::SetElement<[f32]> for FileIOProvider {
     type SetError = ANNError;
     type Guard = provider::NoopGuard<u32>;
 
     async fn set_element(
         &self,
-        _context: &JniContext,
+        _context: &FileIOContext,
         _id: &u32,
         _element: &[f32],
     ) -> Result<Self::Guard, Self::SetError> {
-        Err(ANNError::opaque(JniProviderError::JniCallFailed(
-            "set_element not supported on search-only JniProvider".to_string(),
+        Err(ANNError::opaque(FileIOProviderError::JniCallFailed(
+            "set_element not supported on search-only FileIOProvider".to_string(),
         )))
     }
 }
@@ -444,44 +379,43 @@ impl provider::SetElement<[f32]> for JniProvider {
 // ======================== NeighborAccessor ========================
 
 #[derive(Debug, Clone, Copy)]
-pub struct JniNeighborAccessor<'a> {
-    provider: &'a JniProvider,
+pub struct FileIONeighborAccessor<'a> {
+    provider: &'a FileIOProvider,
 }
 
-impl provider::HasId for JniNeighborAccessor<'_> {
+impl provider::HasId for FileIONeighborAccessor<'_> {
     type Id = u32;
 }
 
-impl provider::NeighborAccessor for JniNeighborAccessor<'_> {
+impl provider::NeighborAccessor for FileIONeighborAccessor<'_> {
     async fn get_neighbors(
         self,
         id: Self::Id,
         neighbors: &mut AdjacencyList<Self::Id>,
     ) -> ANNResult<Self> {
-        // 1. Try in-memory graph (populated upfront or cached from previous JNI calls).
+        // 1. Try cached graph (populated upfront or cached from previous FileIO reads).
         if let Some(term) = self.provider.graph.get(&id) {
             neighbors.overwrite_trusted(&term.neighbors);
             return Ok(self);
         }
 
-        // 2. On-demand: fetch from Java graph reader via JNI callback.
+        // 2. On-demand: fetch from FileIO-backed storage via graph reader JNI callback.
         if self.provider.graph_reader_ref.is_some() {
-            let fetched = self.provider.fetch_neighbors_jni(id)?;
+            let fetched = self.provider.fetch_neighbors(id)?;
             if let Some(neighbor_ids) = fetched {
                 let adj = AdjacencyList::from_iter_untrusted(neighbor_ids.iter().copied());
                 neighbors.overwrite_trusted(&adj);
                 // Cache in the DashMap for subsequent accesses.
-                let ext_id = self.provider.int_to_ext.get(&id).copied().unwrap_or(id as i64);
-                self.provider.graph.insert(id, GraphTerm { neighbors: adj, ext_id });
+                self.provider.graph.insert(id, GraphTerm { neighbors: adj });
                 return Ok(self);
             }
         }
 
-        Err(ANNError::opaque(JniProviderError::InvalidId(id)))
+        Err(ANNError::opaque(FileIOProviderError::InvalidId(id)))
     }
 }
 
-impl provider::NeighborAccessorMut for JniNeighborAccessor<'_> {
+impl provider::NeighborAccessorMut for FileIONeighborAccessor<'_> {
     async fn set_neighbors(self, id: Self::Id, neighbors: &[Self::Id]) -> ANNResult<Self> {
         match self.provider.graph.get_mut(&id) {
             Some(mut term) => {
@@ -489,7 +423,7 @@ impl provider::NeighborAccessorMut for JniNeighborAccessor<'_> {
                 term.neighbors.extend_from_slice(neighbors);
                 Ok(self)
             }
-            None => Err(ANNError::opaque(JniProviderError::InvalidId(id))),
+            None => Err(ANNError::opaque(FileIOProviderError::InvalidId(id))),
         }
     }
 
@@ -499,34 +433,34 @@ impl provider::NeighborAccessorMut for JniNeighborAccessor<'_> {
                 term.neighbors.extend_from_slice(neighbors);
                 Ok(self)
             }
-            None => Err(ANNError::opaque(JniProviderError::InvalidId(id))),
+            None => Err(ANNError::opaque(FileIOProviderError::InvalidId(id))),
         }
     }
 }
 
 // ======================== DefaultAccessor ========================
 
-impl provider::DefaultAccessor for JniProvider {
-    type Accessor<'a> = JniNeighborAccessor<'a>;
+impl provider::DefaultAccessor for FileIOProvider {
+    type Accessor<'a> = FileIONeighborAccessor<'a>;
 
     fn default_accessor(&self) -> Self::Accessor<'_> {
-        JniNeighborAccessor { provider: self }
+        FileIONeighborAccessor { provider: self }
     }
 }
 
 // ======================== Accessor ========================
 
-/// Accessor that fetches vectors via JNI callback.
+/// Accessor that fetches vectors from FileIO-backed storage via JNI callback.
 ///
-/// Keeps a local buffer and an LRU cache to reduce JNI round-trips.
-pub struct JniAccessor<'a> {
-    provider: &'a JniProvider,
+/// Keeps a local buffer and an LRU cache to reduce FileIO/JNI round-trips.
+pub struct FileIOAccessor<'a> {
+    provider: &'a FileIOProvider,
     buffer: Box<[f32]>,
     cache: VectorCache,
 }
 
-impl<'a> JniAccessor<'a> {
-    pub fn new(provider: &'a JniProvider, cache_size: usize) -> Self {
+impl<'a> FileIOAccessor<'a> {
+    pub fn new(provider: &'a FileIOProvider, cache_size: usize) -> Self {
         let buffer = vec![0.0f32; provider.dim()].into_boxed_slice();
         Self {
             provider,
@@ -536,15 +470,15 @@ impl<'a> JniAccessor<'a> {
     }
 }
 
-impl provider::HasId for JniAccessor<'_> {
+impl provider::HasId for FileIOAccessor<'_> {
     type Id = u32;
 }
 
-impl provider::Accessor for JniAccessor<'_> {
+impl provider::Accessor for FileIOAccessor<'_> {
     type Extended = Box<[f32]>;
     type Element<'a> = &'a [f32] where Self: 'a;
     type ElementRef<'a> = &'a [f32];
-    type GetError = JniProviderError;
+    type GetError = FileIOProviderError;
 
     async fn get_element(
         &mut self,
@@ -562,15 +496,11 @@ impl provider::Accessor for JniAccessor<'_> {
             return Ok(&*self.buffer);
         }
 
-        // 3. JNI callback to Java: FileIOVectorReader.readVector(extId).
-        let ext_id = self
-            .provider
-            .int_to_ext
-            .get(&id)
-            .copied()
-            .unwrap_or(id as i64);
+        // 3. Fetch from FileIO-backed storage via FileIOVectorReader.readVector(position).
+        //    position = int_id - 1 (start point is int_id=0, user vectors start at 1).
+        let position = (id as i64) - 1;
 
-        let fetched = self.provider.fetch_vector_jni(ext_id)?;
+        let fetched = self.provider.fetch_vector(position)?;
 
         match fetched {
             Some(vec) if vec.len() == self.provider.dim() => {
@@ -578,24 +508,24 @@ impl provider::Accessor for JniAccessor<'_> {
                 self.cache.put(id, vec.into_boxed_slice());
                 Ok(&*self.buffer)
             }
-            Some(vec) => Err(JniProviderError::JniCallFailed(format!(
+            Some(vec) => Err(FileIOProviderError::JniCallFailed(format!(
                 "readVector({}) returned {} floats, expected {}",
-                ext_id,
+                position,
                 vec.len(),
                 self.provider.dim()
             ))),
-            None => Err(JniProviderError::InvalidId(id)),
+            None => Err(FileIOProviderError::InvalidId(id)),
         }
     }
 }
 
 // ======================== DelegateNeighbor ========================
 
-impl<'this> provider::DelegateNeighbor<'this> for JniAccessor<'_> {
-    type Delegate = JniNeighborAccessor<'this>;
+impl<'this> provider::DelegateNeighbor<'this> for FileIOAccessor<'_> {
+    type Delegate = FileIONeighborAccessor<'this>;
 
     fn delegate_neighbor(&'this mut self) -> Self::Delegate {
-        JniNeighborAccessor {
+        FileIONeighborAccessor {
             provider: self.provider,
         }
     }
@@ -603,7 +533,7 @@ impl<'this> provider::DelegateNeighbor<'this> for JniAccessor<'_> {
 
 // ======================== BuildQueryComputer ========================
 
-impl provider::BuildQueryComputer<[f32]> for JniAccessor<'_> {
+impl provider::BuildQueryComputer<[f32]> for FileIOAccessor<'_> {
     type QueryComputerError = diskann::error::Infallible;
     type QueryComputer = <f32 as diskann::utils::VectorRepr>::QueryDistance;
 
@@ -620,7 +550,7 @@ impl provider::BuildQueryComputer<[f32]> for JniAccessor<'_> {
 
 // ======================== BuildDistanceComputer ========================
 
-impl provider::BuildDistanceComputer for JniAccessor<'_> {
+impl provider::BuildDistanceComputer for FileIOAccessor<'_> {
     type DistanceComputerError = diskann::error::Infallible;
     type DistanceComputer = <f32 as diskann::utils::VectorRepr>::Distance;
 
@@ -636,7 +566,7 @@ impl provider::BuildDistanceComputer for JniAccessor<'_> {
 
 // ======================== SearchExt ========================
 
-impl glue::SearchExt for JniAccessor<'_> {
+impl glue::SearchExt for FileIOAccessor<'_> {
     fn starting_points(
         &self,
     ) -> impl std::future::Future<Output = ANNResult<Vec<u32>>> + Send {
@@ -646,34 +576,34 @@ impl glue::SearchExt for JniAccessor<'_> {
 
 // ======================== Blanket traits ========================
 
-impl glue::ExpandBeam<[f32]> for JniAccessor<'_> {}
-impl glue::FillSet for JniAccessor<'_> {}
+impl glue::ExpandBeam<[f32]> for FileIOAccessor<'_> {}
+impl glue::FillSet for FileIOAccessor<'_> {}
 
 // ======================== Strategy ========================
 
-/// Search-only strategy for the JNI provider.
+/// Search-only strategy for the Paimon FileIO provider.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct JniStrategy;
+pub struct FileIOStrategy;
 
-impl JniStrategy {
+impl FileIOStrategy {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl glue::SearchStrategy<JniProvider, [f32]> for JniStrategy {
+impl glue::SearchStrategy<FileIOProvider, [f32]> for FileIOStrategy {
     type QueryComputer = <f32 as diskann::utils::VectorRepr>::QueryDistance;
     type PostProcessor = glue::CopyIds;
     type SearchAccessorError = diskann::error::Infallible;
-    type SearchAccessor<'a> = JniAccessor<'a>;
+    type SearchAccessor<'a> = FileIOAccessor<'a>;
 
     fn search_accessor<'a>(
         &'a self,
-        provider: &'a JniProvider,
-        _context: &'a JniContext,
-    ) -> Result<JniAccessor<'a>, diskann::error::Infallible> {
-        // Cache up to 1024 recently fetched vectors to reduce JNI round-trips.
-        Ok(JniAccessor::new(provider, 1024))
+        provider: &'a FileIOProvider,
+        _context: &'a FileIOContext,
+    ) -> Result<FileIOAccessor<'a>, diskann::error::Infallible> {
+        // Cache up to 1024 recently fetched vectors to reduce FileIO round-trips.
+        Ok(FileIOAccessor::new(provider, 1024))
     }
 
     fn post_processor(&self) -> Self::PostProcessor {
@@ -682,24 +612,24 @@ impl glue::SearchStrategy<JniProvider, [f32]> for JniStrategy {
 }
 
 // For insert (graph construction) — delegates to prune/search accessors.
-// We implement InsertStrategy and PruneStrategy as stubs since the JniProvider
+// We implement InsertStrategy and PruneStrategy as stubs since the FileIOProvider
 // is search-only.  DiskANNIndex::new() requires the Provider to be Sized but
 // does NOT call insert methods unless we invoke index.insert().
-impl glue::PruneStrategy<JniProvider> for JniStrategy {
+impl glue::PruneStrategy<FileIOProvider> for FileIOStrategy {
     type DistanceComputer = <f32 as diskann::utils::VectorRepr>::Distance;
-    type PruneAccessor<'a> = JniAccessor<'a>;
+    type PruneAccessor<'a> = FileIOAccessor<'a>;
     type PruneAccessorError = diskann::error::Infallible;
 
     fn prune_accessor<'a>(
         &'a self,
-        provider: &'a JniProvider,
-        _context: &'a JniContext,
+        provider: &'a FileIOProvider,
+        _context: &'a FileIOContext,
     ) -> Result<Self::PruneAccessor<'a>, Self::PruneAccessorError> {
-        Ok(JniAccessor::new(provider, 1024))
+        Ok(FileIOAccessor::new(provider, 1024))
     }
 }
 
-impl glue::InsertStrategy<JniProvider, [f32]> for JniStrategy {
+impl glue::InsertStrategy<FileIOProvider, [f32]> for FileIOStrategy {
     type PruneStrategy = Self;
 
     fn prune_strategy(&self) -> Self::PruneStrategy {
@@ -708,14 +638,14 @@ impl glue::InsertStrategy<JniProvider, [f32]> for JniStrategy {
 
     fn insert_search_accessor<'a>(
         &'a self,
-        provider: &'a JniProvider,
-        _context: &'a JniContext,
+        provider: &'a FileIOProvider,
+        _context: &'a FileIOContext,
     ) -> Result<Self::SearchAccessor<'a>, Self::SearchAccessorError> {
-        Ok(JniAccessor::new(provider, 1024))
+        Ok(FileIOAccessor::new(provider, 1024))
     }
 }
 
-impl<'a> glue::AsElement<&'a [f32]> for JniAccessor<'a> {
+impl<'a> glue::AsElement<&'a [f32]> for FileIOAccessor<'a> {
     type Error = diskann::error::Infallible;
     fn as_element(
         &mut self,

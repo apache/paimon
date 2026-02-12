@@ -38,22 +38,23 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 
 /**
  * Vector global index reader using DiskANN.
  *
- * <p>This implementation uses DiskANN for efficient approximate nearest neighbor search. It
- * supports lazy loading of indices and optional memory-mapped file loading for better memory
- * efficiency with large indices.
+ * <p>This implementation uses DiskANN for efficient approximate nearest neighbor search. Both the
+ * Vamana graph and full-precision vectors are read on demand from Paimon FileIO-backed storage
+ * (local, HDFS, S3, OSS, etc.) via {@link SeekableInputStream}, ensuring that neither is loaded
+ * into Java memory in full.
  */
 public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
 
     /**
      * Loaded search handles. Each entry wraps a DiskANN {@link IndexSearcher} (Rust native beam
-     * search with graph in memory, full vectors read on-demand via {@link FileIOVectorReader}).
+     * search with both graph and vectors read on-demand from FileIO-backed storage via {@link
+     * FileIOGraphReader} and {@link FileIOVectorReader}).
      */
     private final List<SearchHandle> handles;
 
@@ -98,8 +99,9 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     /**
-     * Uses DiskANN's native Rust beam search via {@link IndexSearcher}. Graph is in memory; vectors
-     * are fetched on demand from object storage through {@link FileIOVectorReader} JNI callbacks.
+     * Uses DiskANN's native Rust beam search via {@link IndexSearcher}. Both graph and vectors are
+     * read on demand from Paimon FileIO-backed storage through {@link FileIOGraphReader} and {@link
+     * FileIOVectorReader} JNI callbacks.
      */
     private static class DiskAnnSearchHandle implements SearchHandle {
         private final IndexSearcher searcher;
@@ -299,8 +301,8 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
     /**
      * Load an index at the given position.
      *
-     * <p>The index file (header + graph) and the data file (vectors) are accessed on demand via
-     * {@link SeekableInputStream}s — neither is loaded into Java memory in full. The PQ pivots and
+     * <p>The index file (graph) and the data file (vectors) are accessed on demand via {@link
+     * SeekableInputStream}s — neither is loaded into Java memory in full. The PQ pivots and
      * compressed codes are loaded into memory as the "memory thumbnail" for approximate distance
      * computation during native beam search.
      */
@@ -309,29 +311,35 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
         DiskAnnIndexMeta meta = indexMetas.get(position);
         SearchHandle handle = null;
         try {
-            // 1. Open index file (header + graph) as a SeekableInputStream.
-            //    FileIOGraphReader scans the header + builds offset index; graph neighbors are read
-            //    on demand during beam search.
+            // 1. Open index file (graph only, no header) as a SeekableInputStream.
+            //    FileIOGraphReader scans the graph section + builds offset index; graph neighbors
+            //    are read on demand during beam search.
+            //    numNodes = user vectors + 1 start point.
+            int numNodes = (int) meta.numVectors() + 1;
             SeekableInputStream graphStream = fileReader.getInputStream(ioMeta);
-            FileIOGraphReader graphReader = new FileIOGraphReader(graphStream, VECTOR_CACHE_SIZE);
+            FileIOGraphReader graphReader =
+                    new FileIOGraphReader(
+                            graphStream,
+                            meta.dim(),
+                            meta.metricValue(),
+                            meta.maxDegree(),
+                            meta.buildListSize(),
+                            numNodes,
+                            meta.startId(),
+                            VECTOR_CACHE_SIZE);
 
             // 2. Open data file stream for on-demand full-vector reads.
             Path dataPath = new Path(ioMeta.filePath().getParent(), meta.dataFileName());
             GlobalIndexIOMeta dataIOMeta = new GlobalIndexIOMeta(dataPath, 0L, new byte[0]);
             SeekableInputStream vectorStream = fileReader.getInputStream(dataIOMeta);
             FileIOVectorReader vectorReader =
-                    new FileIOVectorReader(
-                            vectorStream,
-                            graphReader.getDimension(),
-                            0L, // vectors start at offset 0 in the data file
-                            buildExtIdToEntryIndex(graphReader),
-                            VECTOR_CACHE_SIZE);
+                    new FileIOVectorReader(vectorStream, meta.dim(), VECTOR_CACHE_SIZE);
 
             // 3. Create DiskANN native searcher with on-demand graph + vector access.
             handle =
                     new DiskAnnSearchHandle(
                             IndexSearcher.createFromReaders(
-                                    graphReader, vectorReader, graphReader.getDimension()));
+                                    graphReader, vectorReader, meta.dim(), meta.minId()));
 
             if (handles.size() <= position) {
                 while (handles.size() < position) {
@@ -345,20 +353,6 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
             IOUtils.closeQuietly(handle);
             throw e instanceof IOException ? (IOException) e : new IOException(e);
         }
-    }
-
-    /**
-     * Build the extId → entryIndex mapping from the graph reader's ID arrays. This is needed by
-     * {@link FileIOVectorReader} to map external vector IDs to byte offsets in the data file.
-     */
-    private static Map<Long, Integer> buildExtIdToEntryIndex(FileIOGraphReader graphReader) {
-        int[] intIds = graphReader.getAllInternalIds();
-        long[] extIds = graphReader.getAllExternalIds();
-        Map<Long, Integer> map = new HashMap<>(intIds.length);
-        for (int i = 0; i < intIds.length; i++) {
-            map.put(extIds[i], i);
-        }
-        return map;
     }
 
     @Override

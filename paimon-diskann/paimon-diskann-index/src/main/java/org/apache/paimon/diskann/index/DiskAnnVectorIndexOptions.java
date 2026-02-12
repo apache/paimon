@@ -38,12 +38,6 @@ public class DiskAnnVectorIndexOptions {
                     .withDescription(
                             "The similarity metric for vector search (L2, INNER_PRODUCT, COSINE), and L2 is the default");
 
-    public static final ConfigOption<DiskAnnIndexType> VECTOR_INDEX_TYPE =
-            ConfigOptions.key("vector.diskann.index-type")
-                    .enumType(DiskAnnIndexType.class)
-                    .defaultValue(DiskAnnIndexType.MEMORY)
-                    .withDescription("The DiskANN index type to use (MEMORY, DISK)");
-
     public static final ConfigOption<Integer> VECTOR_MAX_DEGREE =
             ConfigOptions.key("vector.diskann.max-degree")
                     .intType()
@@ -99,7 +93,6 @@ public class DiskAnnVectorIndexOptions {
 
     private final int dimension;
     private final DiskAnnVectorMetric metric;
-    private final DiskAnnIndexType indexType;
     private final int maxDegree;
     private final int buildListSize;
     private final int searchListSize;
@@ -112,7 +105,6 @@ public class DiskAnnVectorIndexOptions {
     public DiskAnnVectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
         this.metric = options.get(VECTOR_METRIC);
-        this.indexType = options.get(VECTOR_INDEX_TYPE);
         this.maxDegree = options.get(VECTOR_MAX_DEGREE);
         this.buildListSize = options.get(VECTOR_BUILD_LIST_SIZE);
         this.searchListSize = options.get(VECTOR_SEARCH_LIST_SIZE);
@@ -123,8 +115,7 @@ public class DiskAnnVectorIndexOptions {
         this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
 
         int rawPqSub = options.get(VECTOR_PQ_SUBSPACES);
-        this.pqSubspaces =
-                rawPqSub > 0 ? rawPqSub : ProductQuantizer.defaultNumSubspaces(dimension);
+        this.pqSubspaces = rawPqSub > 0 ? rawPqSub : defaultNumSubspaces(dimension);
         this.pqKmeansIterations = options.get(VECTOR_PQ_KMEANS_ITERATIONS);
         this.pqSampleSize = options.get(VECTOR_PQ_SAMPLE_SIZE);
     }
@@ -135,10 +126,6 @@ public class DiskAnnVectorIndexOptions {
 
     public DiskAnnVectorMetric metric() {
         return metric;
-    }
-
-    public DiskAnnIndexType indexType() {
-        return indexType;
     }
 
     public int maxDegree() {
@@ -174,5 +161,17 @@ public class DiskAnnVectorIndexOptions {
     /** Maximum number of training samples for PQ. */
     public int pqSampleSize() {
         return pqSampleSize;
+    }
+
+    /**
+     * Compute a reasonable default number of PQ subspaces for the given dimension. The result is
+     * the largest divisor of {@code dim} that is {@code <= dim / 4} and at least 1.
+     */
+    static int defaultNumSubspaces(int dim) {
+        int target = Math.max(1, dim / 4);
+        while (target > 1 && dim % target != 0) {
+            target--;
+        }
+        return target;
     }
 }

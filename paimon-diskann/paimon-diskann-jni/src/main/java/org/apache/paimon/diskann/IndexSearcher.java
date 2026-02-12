@@ -21,16 +21,20 @@ package org.apache.paimon.diskann;
 import java.io.Closeable;
 
 /**
- * A <b>search-only</b> DiskANN index whose graph lives in memory and whose vectors are fetched
- * lazily from a vector reader via JNI callbacks.
+ * A <b>search-only</b> DiskANN index backed by Paimon FileIO (local, HDFS, S3, OSS, etc.).
  *
- * <p>This implements the core DiskANN architecture: the Vamana graph is loaded from serialized data
- * at construction time, while full-precision vectors are read on-demand during beam search. The
- * Rust JNI code invokes the reader's {@code readVector(long)} method for each candidate node whose
- * vector is not yet cached.
+ * <p>Both the Vamana graph and full-precision vectors are read on-demand from FileIO-backed storage
+ * during beam search. The Rust JNI code invokes Java reader callbacks:
  *
- * <p>The vector reader must be any Java object with a {@code float[] readVector(long)} method. The
- * Rust JNI layer calls this method via reflection — no specific interface is required.
+ * <ul>
+ *   <li>{@code graphReader.readNeighbors(int)} — fetches graph neighbor lists from the {@code
+ *       .index} file via {@code SeekableInputStream}.
+ *   <li>{@code vectorReader.readVector(long)} — fetches full-precision vectors from the {@code
+ *       .data} file via {@code SeekableInputStream}.
+ * </ul>
+ *
+ * <p>Frequently accessed data is cached (graph neighbors in a {@code DashMap}, vectors in an LRU
+ * cache) to reduce FileIO/JNI round-trips.
  *
  * <p>Thread Safety: instances are <b>not</b> thread-safe.
  */
@@ -54,32 +58,6 @@ public class IndexSearcher implements AutoCloseable {
     }
 
     /**
-     * Create a search-only index from serialized data and a vector reader callback.
-     *
-     * <p>The {@code reader} must expose a {@code float[] readVector(long)} method that the Rust JNI
-     * layer invokes via reflection during beam search. It must also implement {@link Closeable} so
-     * its resources are released when this searcher is closed.
-     *
-     * @param data the serialized byte array (header + graph + vector data).
-     * @param reader a Java object with a {@code readVector(long)} method, also {@link Closeable}.
-     * @return a new IndexSearcher
-     * @throws DiskAnnException if deserialization fails
-     */
-    public static IndexSearcher create(byte[] data, Closeable reader) {
-        long handle = DiskAnnNative.indexCreateSearcher(data, reader);
-        // Parse dimension from the header (bytes 8..12, little-endian).
-        int dim = 0;
-        if (data.length >= 12) {
-            dim =
-                    (data[8] & 0xFF)
-                            | ((data[9] & 0xFF) << 8)
-                            | ((data[10] & 0xFF) << 16)
-                            | ((data[11] & 0xFF) << 24);
-        }
-        return new IndexSearcher(handle, dim, reader);
-    }
-
-    /**
      * Create a search-only index from two on-demand readers.
      *
      * <p>Neither the graph nor the vector data is loaded into Java memory upfront. The Rust JNI
@@ -90,17 +68,18 @@ public class IndexSearcher implements AutoCloseable {
      *   <li>{@code vectorReader.readVector(long)} for full-precision vectors during beam search
      * </ul>
      *
-     * <p>Initialization reads header info and ID mappings from the graph reader (via getter
-     * methods). Both readers must implement {@link Closeable}.
+     * <p>Both readers must implement {@link Closeable}.
      *
      * @param graphReader a graph reader object (e.g. {@code FileIOGraphReader}).
      * @param vectorReader a vector reader object (e.g. {@code FileIOVectorReader}).
-     * @param dimension the vector dimension (obtained from graph reader header).
+     * @param dimension the vector dimension (from {@code DiskAnnIndexMeta}).
+     * @param minExtId minimum external ID for this index (for int_id → ext_id conversion).
      * @return a new IndexSearcher
      */
     public static IndexSearcher createFromReaders(
-            Closeable graphReader, Closeable vectorReader, int dimension) {
-        long handle = DiskAnnNative.indexCreateSearcherFromReaders(graphReader, vectorReader);
+            Closeable graphReader, Closeable vectorReader, int dimension, long minExtId) {
+        long handle =
+                DiskAnnNative.indexCreateSearcherFromReaders(graphReader, vectorReader, minExtId);
         return new IndexSearcher(handle, dimension, graphReader, vectorReader);
     }
 

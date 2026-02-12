@@ -153,43 +153,36 @@ public class DiskAnnVectorGlobalIndexTest {
     }
 
     @Test
-    public void testDifferentIndexTypes() throws IOException {
+    public void testDefaultOptions() throws IOException {
         int dimension = 32;
         int numVectors = 100;
 
-        String[] indexTypes = {"MEMORY"};
+        Options options = createDefaultOptions(dimension);
+        DiskAnnVectorIndexOptions indexOptions = new DiskAnnVectorIndexOptions(options);
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        DiskAnnVectorGlobalIndexWriter writer =
+                new DiskAnnVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
 
-        for (String indexType : indexTypes) {
-            Options options = createDefaultOptions(dimension);
-            options.setString("vector.diskann.index-type", indexType);
-            DiskAnnVectorIndexOptions indexOptions = new DiskAnnVectorIndexOptions(options);
-            Path typeIndexPath = new Path(indexPath, indexType.toLowerCase());
-            GlobalIndexFileWriter fileWriter = createFileWriter(typeIndexPath);
-            DiskAnnVectorGlobalIndexWriter writer =
-                    new DiskAnnVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+        List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
+        testVectors.forEach(writer::write);
 
-            List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-            testVectors.forEach(writer::write);
+        List<ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(1);
 
-            List<ResultEntry> results = writer.finish();
-            assertThat(results).hasSize(1);
+        ResultEntry result = results.get(0);
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        metas.add(
+                new GlobalIndexIOMeta(
+                        new Path(indexPath, result.fileName()),
+                        fileIO.getFileSize(new Path(indexPath, result.fileName())),
+                        result.meta()));
 
-            ResultEntry result = results.get(0);
-            GlobalIndexFileReader fileReader = createFileReader(typeIndexPath);
-            List<GlobalIndexIOMeta> metas = new ArrayList<>();
-            metas.add(
-                    new GlobalIndexIOMeta(
-                            new Path(typeIndexPath, result.fileName()),
-                            fileIO.getFileSize(new Path(typeIndexPath, result.fileName())),
-                            result.meta()));
-
-            try (DiskAnnVectorGlobalIndexReader reader =
-                    new DiskAnnVectorGlobalIndexReader(
-                            fileReader, metas, vectorType, indexOptions)) {
-                VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5, fieldName);
-                GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch).get();
-                assertThat(searchResult).isNotNull();
-            }
+        try (DiskAnnVectorGlobalIndexReader reader =
+                new DiskAnnVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+            VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5, fieldName);
+            GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch).get();
+            assertThat(searchResult).isNotNull();
         }
     }
 
@@ -444,11 +437,94 @@ public class DiskAnnVectorGlobalIndexTest {
         }
     }
 
+    @Test
+    public void testPqFilesProducedWithCorrectStructure() throws IOException {
+        int dimension = 8;
+        int numVectors = 50;
+
+        Options options = createDefaultOptions(dimension);
+        DiskAnnVectorIndexOptions indexOptions = new DiskAnnVectorIndexOptions(options);
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        DiskAnnVectorGlobalIndexWriter writer =
+                new DiskAnnVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+
+        List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
+        testVectors.forEach(writer::write);
+
+        List<ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(1);
+
+        ResultEntry result = results.get(0);
+        DiskAnnIndexMeta meta = DiskAnnIndexMeta.deserialize(result.meta());
+
+        // Verify all four files exist.
+        Path indexFilePath = new Path(indexPath, result.fileName());
+        Path dataFilePath = new Path(indexPath, meta.dataFileName());
+        Path pqPivotsPath = new Path(indexPath, meta.pqPivotsFileName());
+        Path pqCompressedPath = new Path(indexPath, meta.pqCompressedFileName());
+
+        assertThat(fileIO.exists(indexFilePath)).as("Index file should exist").isTrue();
+        assertThat(fileIO.exists(dataFilePath)).as("Data file should exist").isTrue();
+        assertThat(fileIO.exists(pqPivotsPath)).as("PQ pivots file should exist").isTrue();
+        assertThat(fileIO.exists(pqCompressedPath)).as("PQ compressed file should exist").isTrue();
+
+        // Verify PQ pivots header: dim(i32), M(i32), K(i32), subDim(i32)
+        byte[] pivotsData = readAllBytesFromFile(pqPivotsPath);
+        assertThat(pivotsData.length).as("PQ pivots should have data").isGreaterThan(16);
+
+        java.nio.ByteBuffer pivotsBuf =
+                java.nio.ByteBuffer.wrap(pivotsData).order(java.nio.ByteOrder.nativeOrder());
+        int readDim = pivotsBuf.getInt();
+        int readM = pivotsBuf.getInt();
+        int readK = pivotsBuf.getInt();
+        int readSubDim = pivotsBuf.getInt();
+
+        assertThat(readDim).as("PQ pivots dimension").isEqualTo(dimension);
+        int expectedM = indexOptions.pqSubspaces();
+        assertThat(readM).as("PQ pivots num_subspaces").isEqualTo(expectedM);
+        assertThat(readK).as("PQ pivots num_centroids").isGreaterThan(0).isLessThanOrEqualTo(256);
+        assertThat(readSubDim).as("PQ pivots sub_dimension").isEqualTo(dimension / expectedM);
+
+        // Verify total pivots file size: 16 header + M * K * subDim * 4
+        int expectedPivotsSize = 16 + readM * readK * readSubDim * 4;
+        assertThat(pivotsData.length).as("PQ pivots file size").isEqualTo(expectedPivotsSize);
+
+        // Verify PQ compressed header: N(i32), M(i32), then N*M bytes of codes
+        byte[] compressedData = readAllBytesFromFile(pqCompressedPath);
+        assertThat(compressedData.length).as("PQ compressed should have data").isGreaterThan(8);
+
+        java.nio.ByteBuffer compBuf =
+                java.nio.ByteBuffer.wrap(compressedData).order(java.nio.ByteOrder.nativeOrder());
+        int readN = compBuf.getInt();
+        int readCompM = compBuf.getInt();
+
+        assertThat(readN).as("PQ compressed num_vectors").isEqualTo(numVectors);
+        assertThat(readCompM).as("PQ compressed num_subspaces").isEqualTo(expectedM);
+
+        // Verify total compressed file size: 8 header + N * M
+        int expectedCompSize = 8 + readN * readCompM;
+        assertThat(compressedData.length).as("PQ compressed file size").isEqualTo(expectedCompSize);
+
+        // Verify search still works with these PQ files.
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        metas.add(
+                new GlobalIndexIOMeta(
+                        indexFilePath, fileIO.getFileSize(indexFilePath), result.meta()));
+
+        try (DiskAnnVectorGlobalIndexReader reader =
+                new DiskAnnVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+            VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 3, fieldName);
+            GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch).get();
+            assertThat(searchResult).isNotNull();
+            assertThat(searchResult.results().getLongCardinality()).isGreaterThan(0);
+        }
+    }
+
     private Options createDefaultOptions(int dimension) {
         Options options = new Options();
         options.setInteger("vector.dim", dimension);
         options.setString("vector.metric", "L2");
-        options.setString("vector.diskann.index-type", "MEMORY");
         options.setInteger("vector.diskann.max-degree", 64);
         options.setInteger("vector.diskann.build-list-size", 100);
         options.setInteger("vector.diskann.search-list-size", 100);
@@ -476,6 +552,22 @@ public class DiskAnnVectorGlobalIndexTest {
             vectors.add(vector);
         }
         return vectors;
+    }
+
+    private byte[] readAllBytesFromFile(Path path) throws IOException {
+        int fileSize = (int) fileIO.getFileSize(path);
+        byte[] data = new byte[fileSize];
+        try (java.io.InputStream in = fileIO.newInputStream(path)) {
+            int offset = 0;
+            while (offset < fileSize) {
+                int read = in.read(data, offset, fileSize - offset);
+                if (read < 0) {
+                    break;
+                }
+                offset += read;
+            }
+        }
+        return data;
     }
 
     private boolean containsRowId(GlobalIndexResult result, long rowId) {

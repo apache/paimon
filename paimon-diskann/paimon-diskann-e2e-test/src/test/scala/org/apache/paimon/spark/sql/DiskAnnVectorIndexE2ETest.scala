@@ -82,7 +82,7 @@ class DiskAnnVectorIndexE2ETest extends PaimonSparkTestBase {
       spark.sql(s"INSERT INTO T VALUES $values")
 
       val output = spark
-        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'diskann-vector-ann', options => 'vector.dim=3,vector.diskann.index-type=MEMORY')")
+        .sql("CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => 'diskann-vector-ann', options => 'vector.dim=3')")
         .collect()
         .head
       assert(output.getBoolean(0))

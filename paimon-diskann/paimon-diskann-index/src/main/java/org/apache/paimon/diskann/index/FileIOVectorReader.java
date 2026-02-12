@@ -31,18 +31,21 @@ import java.util.Map;
 /**
  * Fetches vectors from a DiskANN data file through a Paimon {@link SeekableInputStream}.
  *
- * <p>The underlying stream can be backed by any Paimon FileIO provider — local, HDFS, S3, OSS (via
- * Jindo SDK), etc. This class adds an LRU cache so that repeated reads for the same vector (common
- * during DiskANN's beam search) do not trigger redundant I/O.
+ * <p>The underlying stream can be backed by any Paimon FileIO provider — local, HDFS, S3, OSS, etc.
+ * This class adds an LRU cache so that repeated reads for the same vector (common during DiskANN's
+ * beam search) do not trigger redundant I/O.
  *
  * <p>The Rust JNI layer invokes {@link #readVector(long)} via reflection during DiskANN's native
  * beam search — no specific Java interface is required.
  *
- * <h3>File layout (vector section)</h3>
+ * <h3>Data file layout</h3>
  *
- * <p>Vectors are stored contiguously. Each vector occupies {@code dimension * 4} bytes
- * (native-order floats). The position of a vector with entry-index {@code i} is: {@code
- * vectorSectionOffset + i * dimension * 4}.
+ * <p>Vectors are stored contiguously in sequential order. Each vector occupies {@code dimension *
+ * 4} bytes (native-order floats). The vector at position {@code i} is at byte offset {@code i *
+ * dimension * 4}. The sequential position IS the ID.
+ *
+ * <p>The start point vector is NOT stored in the data file; it is handled in memory by the Rust
+ * native layer.
  */
 public class FileIOVectorReader implements Closeable {
 
@@ -52,16 +55,7 @@ public class FileIOVectorReader implements Closeable {
     /** Vector dimension. */
     private final int dimension;
 
-    /** Byte offset of the vector section within the file. Vectors start after the graph section. */
-    private final long vectorSectionOffset;
-
-    /**
-     * Mapping from external (user-facing) vector ID to entry index in the file. Entry index
-     * determines the byte offset: {@code vectorSectionOffset + entryIndex * dimension * 4}.
-     */
-    private final Map<Long, Integer> extIdToEntryIndex;
-
-    /** LRU cache: external vector ID → float[]. */
+    /** LRU cache: position → float[]. */
     private final LinkedHashMap<Long, float[]> cache;
 
     /** Reusable byte buffer for reading a single vector. */
@@ -72,20 +66,11 @@ public class FileIOVectorReader implements Closeable {
      *
      * @param input seekable input stream for the data file
      * @param dimension vector dimension
-     * @param vectorSectionOffset byte offset where the vector section starts in the file
-     * @param extIdToEntryIndex mapping from external vector ID to sequential entry index
      * @param cacheSize maximum number of cached vectors (0 disables caching)
      */
-    public FileIOVectorReader(
-            SeekableInputStream input,
-            int dimension,
-            long vectorSectionOffset,
-            Map<Long, Integer> extIdToEntryIndex,
-            int cacheSize) {
+    public FileIOVectorReader(SeekableInputStream input, int dimension, int cacheSize) {
         this.input = input;
         this.dimension = dimension;
-        this.vectorSectionOffset = vectorSectionOffset;
-        this.extIdToEntryIndex = extIdToEntryIndex;
         this.readBuf = new byte[dimension * Float.BYTES];
 
         final int cap = Math.max(cacheSize, 16);
@@ -104,39 +89,40 @@ public class FileIOVectorReader implements Closeable {
      * <p>Called by the Rust JNI layer during DiskANN's native beam search. Returns a <b>defensive
      * copy</b> — callers may freely modify the returned array without corrupting the cache.
      *
-     * @param vectorId the external (user-facing) vector ID
-     * @return the float vector (a fresh copy), or {@code null} if unavailable
+     * <p>The byte offset is computed as {@code position * dimension * Float.BYTES}.
+     *
+     * @param position the 0-based position in the data file (int_id - 1 for user vectors)
+     * @return the float vector (a fresh copy), or {@code null} if position is negative
      */
-    public float[] readVector(long vectorId) {
+    public float[] readVector(long position) {
+        // Start point (position = -1) is not in the data file.
+        if (position < 0) {
+            return null;
+        }
+
         // 1. LRU cache hit — return a defensive copy.
-        float[] cached = cache.get(vectorId);
+        float[] cached = cache.get(position);
         if (cached != null) {
             return Arrays.copyOf(cached, cached.length);
         }
 
-        // 2. Look up entry index.
-        Integer entryIndex = extIdToEntryIndex.get(vectorId);
-        if (entryIndex == null) {
-            return null; // unknown vector
-        }
-
-        // 3. Seek & read from the underlying stream.
-        long byteOffset = vectorSectionOffset + (long) entryIndex * dimension * Float.BYTES;
+        // 2. Compute byte offset: sequential position.
+        long byteOffset = position * dimension * Float.BYTES;
         try {
             input.seek(byteOffset);
             readFully(input, readBuf);
         } catch (IOException e) {
             throw new RuntimeException(
-                    "Failed to read vector " + vectorId + " at offset " + byteOffset, e);
+                    "Failed to read vector at position " + position + " offset " + byteOffset, e);
         }
 
-        // 4. Decode floats.
+        // 3. Decode floats.
         float[] vector = new float[dimension];
         ByteBuffer bb = ByteBuffer.wrap(readBuf).order(ByteOrder.nativeOrder());
         bb.asFloatBuffer().get(vector);
 
-        // 5. Store a separate copy in the cache so the returned array is independent.
-        cache.put(vectorId, Arrays.copyOf(vector, vector.length));
+        // 4. Store a separate copy in the cache so the returned array is independent.
+        cache.put(position, Arrays.copyOf(vector, vector.length));
         return vector;
     }
 
@@ -160,64 +146,5 @@ public class FileIOVectorReader implements Closeable {
             }
             off += n;
         }
-    }
-
-    // ------------------------------------------------------------------
-    // Factory helper — parse header to obtain vectorSectionOffset
-    //                   and extIdToEntryIndex.
-    // ------------------------------------------------------------------
-
-    /**
-     * Parse a serialized byte array (header + graph section) to extract the mapping and vector
-     * section offset needed by this reader.
-     *
-     * <p>This is typically called once when opening the index for search. The byte array only needs
-     * to contain the header and graph section — the vector section is not accessed.
-     *
-     * @param data byte array containing at least the header and graph section
-     * @return a {@link IndexLayout} containing the parsed metadata
-     */
-    public static IndexLayout parseIndexLayout(byte[] data) {
-        // Header: 9 × i32 = 36 bytes.
-        int off = 0;
-        // skip magic(4), version(4), dimension(4), metricType(4), indexType(4),
-        // maxDegree(4), buildListSize(4)
-        off += 28;
-        int count = readInt(data, off);
-        off += 4;
-        // skip startId(4)
-        off += 4;
-
-        // Scan graph section to find the vector section offset.
-        for (int i = 0; i < count; i++) {
-            // skip ext_id(8) + int_id(4)
-            off += 12;
-            int neighborCount = readInt(data, off);
-            off += 4;
-            // skip neighbor IDs
-            off += neighborCount * 4;
-        }
-
-        return new IndexLayout(off);
-    }
-
-    /** Parsed layout metadata. */
-    public static class IndexLayout {
-        private final long vectorSectionOffset;
-
-        IndexLayout(long vectorSectionOffset) {
-            this.vectorSectionOffset = vectorSectionOffset;
-        }
-
-        public long vectorSectionOffset() {
-            return vectorSectionOffset;
-        }
-    }
-
-    private static int readInt(byte[] buf, int off) {
-        return (buf[off] & 0xFF)
-                | ((buf[off + 1] & 0xFF) << 8)
-                | ((buf[off + 2] & 0xFF) << 16)
-                | ((buf[off + 3] & 0xFF) << 24);
     }
 }
