@@ -19,7 +19,6 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder, Transform}
-import org.apache.paimon.spark.util.PredicateUtils.convertToBetweenFunction
 import org.apache.paimon.spark.util.SparkExpressionConverter.{toPaimonLiteral, toPaimonTransform}
 import org.apache.paimon.types.RowType
 
@@ -126,12 +125,7 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
 
       case AND =>
         val and = sparkPredicate.asInstanceOf[And]
-        val leftPredicate = convert(and.left)
-        val rightPredicate = convert(and.right())
-        convertToBetweenFunction(leftPredicate, rightPredicate) match {
-          case Some(predicate) => predicate
-          case _ => PredicateBuilder.and(leftPredicate, rightPredicate)
-        }
+        PredicateBuilder.and(convert(and.left), convert(and.right()))
 
       case OR =>
         val or = sparkPredicate.asInstanceOf[Or]

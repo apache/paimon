@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.PredicateUtils;
 import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
@@ -90,6 +91,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         } else {
             this.filter = PredicateBuilder.and(this.filter, filter);
         }
+        this.filter = PredicateUtils.tryRewriteBetweenPredicate(this.filter);
         return this;
     }
 
