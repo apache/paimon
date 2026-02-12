@@ -1455,7 +1455,7 @@ class DataBlobWriterTest(unittest.TestCase):
         splits = table_scan.plan().splits()
         result = table_read.to_arrow(splits)
 
-        self.assertEqual(sum([s._row_count for s in splits]), 40 * 2)
+        self.assertEqual(sum([s.row_count for s in splits]), 40 * 2)
 
         # Verify the data
         self.assertEqual(result.num_rows, 40, "Should have 40 rows")
@@ -2780,7 +2780,7 @@ class DataBlobWriterTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
 
-        total_split_row_count = sum([s._row_count for s in splits])
+        total_split_row_count = sum([s.row_count for s in splits])
         self.assertEqual(total_split_row_count, num_rows * 2,
                          f"Total split row count should be {num_rows}, got {total_split_row_count}")
         
