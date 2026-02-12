@@ -316,7 +316,7 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
       // 3. >= and <= on same transform should also be converted to between
       val filter2 = "CONCAT(string_col, '_suffix') >= 'a' AND CONCAT(string_col, '_suffix') <= 'r'"
       val actual2 = converter.convert(v2Filter(filter2)).get
-      assert(actual1.isInstanceOf[LeafPredicate])
+      assert(actual2.isInstanceOf[LeafPredicate])
       val function = actual2.asInstanceOf[LeafPredicate].function
       assert(function.isInstanceOf[Between])
       checkAnswer(
