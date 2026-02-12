@@ -17,7 +17,7 @@
 ################################################################################
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
@@ -95,6 +95,50 @@ class DataSplit(Split):
     @property
     def files(self) -> List[DataFileMeta]:
         return self._files
+
+    def filter_file(self, func: Callable[[DataFileMeta], bool]) -> Optional['DataSplit']:
+        """
+        Filter files based on a predicate function and create a new DataSplit.
+        
+        Args:
+            func: A function that takes a DataFileMeta and returns True if the file should be kept
+        
+        Returns:
+            A new DataSplit with filtered files, adjusted file_paths and data_deletion_files
+        """
+        # Filter files based on the predicate
+        filtered_files = [f for f in self._files if func(f)]
+        
+        # If no files match, return None
+        if not filtered_files:
+            return None
+        
+        # Find indices of filtered files to adjust file_paths and data_deletion_files
+        filtered_indices = [i for i, f in enumerate(self._files) if func(f)]
+        
+        # Filter file_paths to match filtered files
+        filtered_file_paths = [self._file_paths[i] for i in filtered_indices]
+        
+        # Filter data_deletion_files to match filtered files
+        filtered_data_deletion_files = None
+        if self.data_deletion_files is not None:
+            filtered_data_deletion_files = [self.data_deletion_files[i] for i in filtered_indices]
+        
+        # Calculate new row_count and file_size
+        new_row_count = sum(f.row_count for f in filtered_files)
+        new_file_size = sum(f.file_size for f in filtered_files)
+        
+        # Create new DataSplit with filtered data
+        return DataSplit(
+            files=filtered_files,
+            partition=self._partition,
+            bucket=self._bucket,
+            file_paths=filtered_file_paths,
+            row_count=new_row_count,
+            file_size=new_file_size,
+            raw_convertible=self.raw_convertible,
+            data_deletion_files=filtered_data_deletion_files
+        )
 
     @property
     def partition(self) -> GenericRow:

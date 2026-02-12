@@ -24,6 +24,7 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
@@ -236,6 +237,70 @@ class DataEvolutionTest(unittest.TestCase):
             0,
             "with_slice(10, 12) on 6 rows should return 0 rows (out of bounds), got %d"
             % len(result_oob),
+        )
+
+    def test_with_slice_partitioned_table(self):
+        pa_schema = pa.schema([
+            ("pt", pa.int64()),
+            ("b", pa.int32()),
+            ("c", pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            partition_keys=["pt"],
+            options={
+                "row-tracking.enabled": "true",
+                "data-evolution.enabled": "true",
+                "source.split.target-size": "512m",
+            },
+        )
+        table_name = "default.test_with_slice_partitioned_table"
+        self.catalog.create_table(table_name, schema, ignore_if_exists=True)
+        table = self.catalog.get_table(table_name)
+
+        for batch in [
+            {"pt": [1, 1], "b": [10, 20], "c": [100, 200]},
+            {"pt": [2, 2], "b": [1011, 2011], "c": [1001, 2001]},
+            {"pt": [2, 2], "b": [-10, -20], "c": [-100, -200]},
+        ]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write()
+            tc = wb.new_commit()
+            tw.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        rb: ReadBuilder = table.new_read_builder()
+        full_splits = rb.new_scan().plan().splits()
+        full_result = rb.new_read().to_pandas(full_splits)
+        self.assertEqual(
+            len(full_result),
+            6,
+            "Full scan should return 6 rows",
+        )
+
+        predicate_builder = rb.new_predicate_builder()
+        rb.with_filter(predicate_builder.equal("pt", 2))
+
+        # 0 to 2
+        scan_oob = rb.new_scan().with_slice(0, 2)
+        splits_oob = scan_oob.plan().splits()
+        result_oob = rb.new_read().to_pandas(splits_oob)
+        self.assertEqual(
+            sorted(result_oob["b"].tolist()),
+            [1011, 2011],
+            "Full set b mismatch",
+        )
+
+        # 2 to 4
+        scan_oob = rb.new_scan().with_slice(2, 4)
+        splits_oob = scan_oob.plan().splits()
+        result_oob = rb.new_read().to_pandas(splits_oob)
+        self.assertEqual(
+            sorted(result_oob["b"].tolist()),
+            [-20, -10],
+            "Full set b mismatch",
         )
 
     def test_multiple_appends(self):
