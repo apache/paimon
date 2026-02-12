@@ -29,6 +29,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.Transform;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -46,8 +48,8 @@ public class PredicateUtils {
      * predicates of an {@code AND}, for example: {@code OR(a >= 1, AND(b >= 1, b <= 2))} will be
      * rewritten to {@code OR(a >= 1, BETWEEN(b, 1, 2))}.
      */
-    public static Predicate tryRewriteBetweenPredicate(Predicate filter) {
-        if (filter instanceof LeafPredicate) {
+    public static Predicate tryRewriteBetweenPredicate(@Nullable Predicate filter) {
+        if (filter == null || filter instanceof LeafPredicate) {
             return filter;
         }
         CompoundPredicate compoundPredicate = (CompoundPredicate) filter;
