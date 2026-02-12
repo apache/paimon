@@ -77,18 +77,12 @@ class DataSplit(Split):
         files: List[DataFileMeta],
         partition: GenericRow,
         bucket: int,
-        file_paths: List[str],
-        row_count: int,
-        file_size: int,
         raw_convertible: bool = False,
         data_deletion_files: Optional[List[DeletionFile]] = None
     ):
         self._files = files
         self._partition = partition
         self._bucket = bucket
-        self._file_paths = file_paths
-        self._row_count = row_count
-        self._file_size = file_size
         self.raw_convertible = raw_convertible
         self.data_deletion_files = data_deletion_files
 
@@ -104,7 +98,7 @@ class DataSplit(Split):
             func: A function that takes a DataFileMeta and returns True if the file should be kept
         
         Returns:
-            A new DataSplit with filtered files, adjusted file_paths and data_deletion_files
+            A new DataSplit with filtered files, adjusted data_deletion_files
         """
         # Filter files based on the predicate
         filtered_files = [f for f in self._files if func(f)]
@@ -113,29 +107,19 @@ class DataSplit(Split):
         if not filtered_files:
             return None
         
-        # Find indices of filtered files to adjust file_paths and data_deletion_files
+        # Find indices of filtered files to adjust data_deletion_files
         filtered_indices = [i for i, f in enumerate(self._files) if func(f)]
-        
-        # Filter file_paths to match filtered files
-        filtered_file_paths = [self._file_paths[i] for i in filtered_indices]
         
         # Filter data_deletion_files to match filtered files
         filtered_data_deletion_files = None
         if self.data_deletion_files is not None:
             filtered_data_deletion_files = [self.data_deletion_files[i] for i in filtered_indices]
         
-        # Calculate new row_count and file_size
-        new_row_count = sum(f.row_count for f in filtered_files)
-        new_file_size = sum(f.file_size for f in filtered_files)
-        
         # Create new DataSplit with filtered data
         return DataSplit(
             files=filtered_files,
             partition=self._partition,
             bucket=self._bucket,
-            file_paths=filtered_file_paths,
-            row_count=new_row_count,
-            file_size=new_file_size,
             raw_convertible=self.raw_convertible,
             data_deletion_files=filtered_data_deletion_files
         )
@@ -150,18 +134,18 @@ class DataSplit(Split):
 
     @property
     def row_count(self) -> int:
-        return self._row_count
+        """Calculate total row count from all files."""
+        return sum(f.row_count for f in self._files)
 
     @property
     def file_size(self) -> int:
-        return self._file_size
+        """Calculate total file size from all files."""
+        return sum(f.file_size for f in self._files)
 
     @property
     def file_paths(self) -> List[str]:
-        return self._file_paths
-
-    def set_row_count(self, row_count: int) -> None:
-        self._row_count = row_count
+        """Get file paths from all files."""
+        return [f.file_path for f in self._files if f.file_path is not None]
 
     def merged_row_count(self) -> Optional[int]:
         """
