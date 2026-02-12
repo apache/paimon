@@ -69,6 +69,7 @@ public class TrimTransform extends StringTransform {
         return new TrimTransform(inputs, this.trimFlag);
     }
 
+    /** Enum of trim functions. */
     public enum Flag {
         LEADING,
         TRAILING,
