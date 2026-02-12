@@ -23,7 +23,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pyarrow
-from pyarrow.fs import S3FileSystem
+import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
@@ -37,7 +37,7 @@ class FileIOTest(unittest.TestCase):
     def test_s3_filesystem_path_conversion(self):
         """Test S3FileSystem path conversion with various formats."""
         file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
-        self.assertIsInstance(file_io.filesystem, S3FileSystem)
+        self.assertIsInstance(file_io.filesystem, pafs.S3FileSystem)
 
         # Test bucket and path
         self.assertEqual(file_io.to_filesystem_path("s3://my-bucket/path/to/file.txt"),
@@ -75,7 +75,7 @@ class FileIOTest(unittest.TestCase):
         expected_path = (
             "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
         self.assertEqual(got, expected_path)
-        nf = MagicMock(type=pyarrow.fs.FileType.NotFound)
+        nf = MagicMock(type=pafs.FileType.NotFound)
         mock_fs = MagicMock()
         mock_fs.get_file_info.side_effect = [[nf], [nf]]
         mock_fs.create_dir = MagicMock()
@@ -244,7 +244,7 @@ class FileIOTest(unittest.TestCase):
             }))
             mock_fs = MagicMock()
             mock_fs.get_file_info.return_value = [
-                MagicMock(type=pyarrow.fs.FileType.NotFound)]
+                MagicMock(type=pafs.FileType.NotFound)]
             oss_io.filesystem = mock_fs
             self.assertFalse(oss_io.exists("oss://test-bucket/path/to/file.txt"))
         finally:
@@ -331,7 +331,7 @@ class FileIOTest(unittest.TestCase):
                 f.write("test content")
             
             file_info = file_io.get_file_status(f"file://{test_file}")
-            self.assertEqual(file_info.type, pyarrow.fs.FileType.File)
+            self.assertEqual(file_info.type, pafs.FileType.File)
             self.assertIsNotNone(file_info.size)
 
             with self.assertRaises(FileNotFoundError) as context:

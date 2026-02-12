@@ -21,7 +21,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
 
-import pyarrow
+import pyarrow  # noqa: F401
+import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 
@@ -97,7 +98,7 @@ class FileIO(ABC):
 
     def is_dir(self, path: str) -> bool:
         file_info = self.get_file_status(path)
-        return file_info.type == pyarrow.fs.FileType.Directory
+        return file_info.type == pafs.FileType.Directory
 
     def check_or_mkdirs(self, path: str):
         if self.exists(path):
@@ -153,7 +154,7 @@ class FileIO(ABC):
     def copy_files(self, source_directory: str, target_directory: str, overwrite: bool = False):
         file_infos = self.list_status(source_directory)
         for file_info in file_infos:
-            if file_info.type == pyarrow.fs.FileType.File:
+            if file_info.type == pafs.FileType.File:
                 source_file = file_info.path
                 file_name = source_file.split('/')[-1]
                 target_file = f"{target_directory.rstrip('/')}/{file_name}" if target_directory else file_name

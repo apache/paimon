@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
 import pyarrow
+import pyarrow.fs as pafs
 from packaging.version import parse
 from pyarrow._fs import FileSystem
 
@@ -81,8 +82,7 @@ class PyArrowFileIO(FileIO):
                 'connect_timeout': connect_timeout
             }
             try:
-                from pyarrow.fs import AwsStandardS3RetryStrategy
-                retry_strategy = AwsStandardS3RetryStrategy(max_attempts=max_attempts)
+                retry_strategy = pafs.AwsStandardS3RetryStrategy(max_attempts=max_attempts)
                 config['retry_strategy'] = retry_strategy
             except ImportError:
                 pass
@@ -111,8 +111,6 @@ class PyArrowFileIO(FileIO):
         return bucket
 
     def _initialize_oss_fs(self, path) -> FileSystem:
-        from pyarrow.fs import S3FileSystem
-
         client_kwargs = {
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
@@ -130,11 +128,9 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return S3FileSystem(**client_kwargs)
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
-        from pyarrow.fs import S3FileSystem
-
         client_kwargs = {
             "endpoint_override": self.properties.get(S3Options.S3_ENDPOINT),
             "access_key": self.properties.get(S3Options.S3_ACCESS_KEY_ID),
@@ -148,11 +144,9 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return S3FileSystem(**client_kwargs)
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_hdfs_fs(self, scheme: str, netloc: Optional[str]) -> FileSystem:
-        from pyarrow.fs import HadoopFileSystem
-
         if 'HADOOP_HOME' not in os.environ:
             raise RuntimeError("HADOOP_HOME environment variable is not set.")
         if 'HADOOP_CONF_DIR' not in os.environ:
@@ -171,7 +165,7 @@ class PyArrowFileIO(FileIO):
         os.environ['CLASSPATH'] = class_paths.stdout.strip()
 
         host, port_str = splitport(netloc)
-        return HadoopFileSystem(
+        return pafs.HadoopFileSystem(
             host=host,
             port=int(port_str),
             user=os.environ.get('HADOOP_USER_NAME', 'hadoop')
@@ -205,35 +199,35 @@ class PyArrowFileIO(FileIO):
         file_infos = self.filesystem.get_file_info([path_str])
         file_info = file_infos[0]
         
-        if file_info.type == pyarrow.fs.FileType.NotFound:
+        if file_info.type == pafs.FileType.NotFound:
             raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
         
         return file_info
 
     def list_status(self, path: str):
         path_str = self.to_filesystem_path(path)
-        selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
+        selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
         return self.filesystem.get_file_info(selector)
 
     def list_directories(self, path: str):
         file_infos = self.list_status(path)
-        return [info for info in file_infos if info.type == pyarrow.fs.FileType.Directory]
+        return [info for info in file_infos if info.type == pafs.FileType.Directory]
 
     def exists(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self.filesystem.get_file_info([path_str])[0]
-        return file_info.type != pyarrow.fs.FileType.NotFound
+        return file_info.type != pafs.FileType.NotFound
 
     def delete(self, path: str, recursive: bool = False) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self.filesystem.get_file_info([path_str])[0]
         
-        if file_info.type == pyarrow.fs.FileType.NotFound:
+        if file_info.type == pafs.FileType.NotFound:
             return False
         
-        if file_info.type == pyarrow.fs.FileType.Directory:
+        if file_info.type == pafs.FileType.Directory:
             if not recursive:
-                selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
+                selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
                 dir_contents = self.filesystem.get_file_info(selector)
                 if len(dir_contents) > 0:
                     raise OSError(f"Directory {path} is not empty")
@@ -250,9 +244,9 @@ class PyArrowFileIO(FileIO):
         path_str = self.to_filesystem_path(path)
         file_info = self.filesystem.get_file_info([path_str])[0]
         
-        if file_info.type == pyarrow.fs.FileType.Directory:
+        if file_info.type == pafs.FileType.Directory:
             return True
-        elif file_info.type == pyarrow.fs.FileType.File:
+        elif file_info.type == pafs.FileType.File:
             raise FileExistsError(f"Path exists but is not a directory: {path}")
         
         self.filesystem.create_dir(path_str, recursive=True)
@@ -271,15 +265,15 @@ class PyArrowFileIO(FileIO):
                 return self.filesystem.rename(src_str, dst_str)
             
             dst_file_info = self.filesystem.get_file_info([dst_str])[0]
-            if dst_file_info.type != pyarrow.fs.FileType.NotFound:
-                if dst_file_info.type == pyarrow.fs.FileType.File:
+            if dst_file_info.type != pafs.FileType.NotFound:
+                if dst_file_info.type == pafs.FileType.File:
                     return False
                 # Make it compatible with HadoopFileIO: if dst is an existing directory,
                 # dst=dst/srcFileName
                 src_name = Path(src_str).name
                 dst_str = str(Path(dst_str) / src_name)
                 final_dst_info = self.filesystem.get_file_info([dst_str])[0]
-                if final_dst_info.type != pyarrow.fs.FileType.NotFound:
+                if final_dst_info.type != pafs.FileType.NotFound:
                     return False
             
             self.filesystem.move(src_str, dst_str)
@@ -317,7 +311,7 @@ class PyArrowFileIO(FileIO):
         if self.exists(path):
             path_str = self.to_filesystem_path(path)
             file_info = self.filesystem.get_file_info([path_str])[0]
-            if file_info.type == pyarrow.fs.FileType.Directory:
+            if file_info.type == pafs.FileType.Directory:
                 return False
         
         temp_path = path + str(uuid.uuid4()) + ".tmp"
