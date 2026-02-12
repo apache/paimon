@@ -260,7 +260,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             filtered_non_blob_entries = []
             non_blob_ranges = []
             for entry in non_blob_entries:
-                file_range = entry.file.row_id_range
+                file_range = entry.file.row_id_range()
 
                 # Check if file overlaps with any of the row ranges
                 overlaps = False
@@ -278,7 +278,7 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
             non_blob_ranges = Range.sort_and_merge_overlap(non_blob_ranges, True, True)
             # Only keep blob files that overlap with merged non-blob ranges
             for entry in blob_entries:
-                blob_range = entry.file.row_id_range
+                blob_range = entry.file.row_id_range()
                 # Check if blob file overlaps with any merged range
                 for merged_range in non_blob_ranges:
                     if merged_range.overlaps(blob_range):
