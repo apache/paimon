@@ -180,6 +180,18 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
           spark.sql(q2),
           Seq(Row(1, 100, "bbc"))
         )
+
+        val q3 =
+          """
+            |SELECT * FROM t
+            |WHERE TRIM(LEADING 'c' FROM dt) = 'aa'
+            |""".stripMargin
+        assert(!checkFilterExists(q2))
+
+        checkAnswer(
+          spark.sql(q3),
+          Seq(Row(1, 100, "caa"))
+        )
       }
     }
   }
