@@ -36,29 +36,29 @@ class TrimTransformTest {
         List<Object> inputs = new ArrayList<>();
         // test for single argument
         inputs.add(null);
-        TrimTransform transform = new TrimTransform(inputs, "TRIM");
+        TrimTransform transform = new TrimTransform(inputs, TrimTransform.Flag.BOTH);
         Object result = transform.transform(GenericRow.of());
         assertThat(result).isNull();
 
-        transform = new TrimTransform(inputs, "LTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.LEADING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isNull();
 
-        transform = new TrimTransform(inputs, "RTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.TRAILING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isNull();
 
         // test for binary argument
         inputs.add(null);
-        transform = new TrimTransform(inputs, "TRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.BOTH);
         result = transform.transform(GenericRow.of());
         assertThat(result).isNull();
 
-        transform = new TrimTransform(inputs, "LTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.LEADING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isNull();
 
-        transform = new TrimTransform(inputs, "RTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.TRAILING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isNull();
     }
@@ -69,34 +69,34 @@ class TrimTransformTest {
         List<Object> inputs = new ArrayList<>();
         inputs.add(BinaryString.fromString("cddcaadccd"));
         inputs.add(BinaryString.fromString("cd"));
-        TrimTransform transform = new TrimTransform(inputs, "TRIM");
+        TrimTransform transform = new TrimTransform(inputs, TrimTransform.Flag.BOTH);
         Object result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("aa"));
 
         // test ltrim('cd', 'cddcaadccd')
-        transform = new TrimTransform(inputs, "LTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.LEADING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("aadccd"));
 
         // test rtrim('cd', 'cddcaadccd')
-        transform = new TrimTransform(inputs, "RTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.TRAILING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("cddcaa"));
 
         // test trim(' aa  ')
         inputs.clear();
         inputs.add(BinaryString.fromString(" aa  "));
-        transform = new TrimTransform(inputs, "TRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.BOTH);
         result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("aa"));
 
         // test trim(' aa  ')
-        transform = new TrimTransform(inputs, "LTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.LEADING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString("aa  "));
 
         // test trim(' aa  ')
-        transform = new TrimTransform(inputs, "RTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.TRAILING);
         result = transform.transform(GenericRow.of());
         assertThat(result).isEqualTo(BinaryString.fromString(" aa"));
     }
@@ -106,7 +106,7 @@ class TrimTransformTest {
         List<Object> inputs = new ArrayList<>();
         inputs.add(new FieldRef(1, "f1", DataTypes.STRING()));
         inputs.add(new FieldRef(2, "f2", DataTypes.STRING()));
-        TrimTransform transform = new TrimTransform(inputs, "TRIM");
+        TrimTransform transform = new TrimTransform(inputs, TrimTransform.Flag.BOTH);
         Object result =
                 transform.transform(
                         GenericRow.of(
@@ -115,7 +115,7 @@ class TrimTransformTest {
                                 BinaryString.fromString("ab")));
         assertThat(result).isEqualTo(BinaryString.fromString("hello"));
 
-        transform = new TrimTransform(inputs, "LTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.LEADING);
         result =
                 transform.transform(
                         GenericRow.of(
@@ -124,7 +124,7 @@ class TrimTransformTest {
                                 BinaryString.fromString("ab")));
         assertThat(result).isEqualTo(BinaryString.fromString("hellob"));
 
-        transform = new TrimTransform(inputs, "RTRIM");
+        transform = new TrimTransform(inputs, TrimTransform.Flag.TRAILING);
         result =
                 transform.transform(
                         GenericRow.of(

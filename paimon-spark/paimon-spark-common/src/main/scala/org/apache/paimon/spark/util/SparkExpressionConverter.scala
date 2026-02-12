@@ -67,8 +67,13 @@ object SparkExpressionConverter {
           case UPPER => convertChildren(s.children()).map(i => new UpperTransform(i))
           case LOWER => convertChildren(s.children()).map(i => new LowerTransform(i))
           case SUBSTRING => convertChildren(s.children()).map(i => new SubstringTransform(i))
-          case TRIM | LTRIM | RTRIM =>
-            convertChildren(s.children()).map(i => new TrimTransform(i, s.name()))
+          case TRIM =>
+            convertChildren(s.children()).map(i => new TrimTransform(i, TrimTransform.Flag.BOTH))
+          case LTRIM =>
+            convertChildren(s.children()).map(i => new TrimTransform(i, TrimTransform.Flag.LEADING))
+          case RTRIM =>
+            convertChildren(s.children()).map(
+              i => new TrimTransform(i, TrimTransform.Flag.TRAILING))
           case _ => None
         }
       case c: Cast =>

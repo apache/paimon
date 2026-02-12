@@ -32,15 +32,11 @@ public class TrimTransform extends StringTransform {
 
     public static final String NAME = "TRIM";
 
-    public static final String LTRIM = "LTRIM";
+    private final Flag trimFlag;
 
-    public static final String RTRIM = "RTRIM";
-
-    private final String trimWay;
-
-    public TrimTransform(List<Object> inputs, String trimWay) {
+    public TrimTransform(List<Object> inputs, Flag trimFlag) {
         super(inputs);
-        this.trimWay = trimWay;
+        this.trimFlag = trimFlag;
         checkArgument(inputs.size() == 1 || inputs.size() == 2);
     }
 
@@ -56,20 +52,26 @@ public class TrimTransform extends StringTransform {
         }
         String sourceString = inputs.get(0).toString();
         String charsToTrim = inputs.size() == 1 ? " " : inputs.get(1).toString();
-        switch (trimWay) {
-            case NAME:
+        switch (trimFlag) {
+            case BOTH:
                 return BinaryString.fromString(StringUtils.trim(sourceString, charsToTrim));
-            case LTRIM:
+            case LEADING:
                 return BinaryString.fromString(StringUtils.ltrim(sourceString, charsToTrim));
-            case RTRIM:
+            case TRAILING:
                 return BinaryString.fromString(StringUtils.rtrim(sourceString, charsToTrim));
             default:
-                throw new IllegalArgumentException("Invalid trim way " + trimWay);
+                throw new IllegalArgumentException("Invalid trim way " + trimFlag.name());
         }
     }
 
     @Override
     public Transform copyWithNewInputs(List<Object> inputs) {
-        return new TrimTransform(inputs, this.trimWay);
+        return new TrimTransform(inputs, this.trimFlag);
+    }
+
+    public enum Flag {
+        LEADING,
+        TRAILING,
+        BOTH
     }
 }

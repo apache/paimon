@@ -546,9 +546,6 @@ public class StringUtils {
     }
 
     public static String trim(String value, String charsToTrim) {
-        if (value == null || charsToTrim == null) {
-            return null;
-        }
         return rtrim(ltrim(value, charsToTrim), charsToTrim);
     }
 
