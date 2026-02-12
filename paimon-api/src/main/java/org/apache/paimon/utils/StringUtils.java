@@ -545,6 +545,33 @@ public class StringUtils {
         return value.trim();
     }
 
+    public static String trim(String value, String charsToTrim) {
+        return rtrim(ltrim(value, charsToTrim), charsToTrim);
+    }
+
+    public static String ltrim(String value, String charsToTrim) {
+        if (value == null || charsToTrim == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value);
+        while (sb.length() > 0 && charsToTrim.contains(sb.substring(0, 1))) {
+            sb.deleteCharAt(0);
+        }
+        return sb.toString();
+    }
+
+    public static String rtrim(String value, String charsToTrim) {
+        if (value == null || charsToTrim == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(value);
+        while (sb.length() > 0
+                && charsToTrim.contains(sb.substring(sb.length() - 1, sb.length()))) {
+            sb.deleteCharAt(sb.length() - 1);
+        }
+        return sb.toString();
+    }
+
     public static String toUpperCase(String value) {
         if (value == null) {
             return null;

@@ -130,6 +130,72 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test(s"Paimon push down: apply TRIM/LTRM/RTRIM") {
+    // Spark support push down TRIM/LTRM/RTRIM since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, 'chelloc'), (1, 100, 'caa'), (1, 100, 'bbc')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE TRIM('c', dt) = 'hello'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "chelloc"))
+        )
+
+        val q1 =
+          """
+            |SELECT * FROM t
+            |WHERE LTRIM('c', dt) = 'aa'
+            |""".stripMargin
+        assert(!checkFilterExists(q1))
+
+        checkAnswer(
+          spark.sql(q1),
+          Seq(Row(1, 100, "caa"))
+        )
+
+        val q2 =
+          """
+            |SELECT * FROM t
+            |WHERE RTRIM('c', dt) = 'bb'
+            |""".stripMargin
+        assert(!checkFilterExists(q2))
+
+        checkAnswer(
+          spark.sql(q2),
+          Seq(Row(1, 100, "bbc"))
+        )
+
+        val q3 =
+          """
+            |SELECT * FROM t
+            |WHERE TRIM(LEADING 'c' FROM dt) = 'aa'
+            |""".stripMargin
+        assert(!checkFilterExists(q2))
+
+        checkAnswer(
+          spark.sql(q3),
+          Seq(Row(1, 100, "caa"))
+        )
+      }
+    }
+  }
+
   test(s"Paimon push down: apply UPPER") {
     // Spark support push down UPPER since Spark 3.4.
     if (gteqSpark3_4) {
