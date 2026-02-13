@@ -92,6 +92,10 @@
                     <artifactId>aws-java-sdk-bundle</artifactId>
                 </exclusion>
                 <exclusion>
+                    <groupId>software.amazon.awssdk</groupId>
+                    <artifactId>bundle</artifactId>
+                </exclusion>
+                <exclusion>
                     <!-- Optional S3A analytics accelerator - only used with fs.s3a.input.stream.type=analytics -->
                     <groupId>software.amazon.s3.analyticsaccelerator</groupId>
                     <artifactId>analyticsaccelerator-s3</artifactId>
@@ -105,6 +109,68 @@
                     <artifactId>slf4j-reload4j</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <!-- AWS SDK v2 dependencies - only include necessary modules -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>auth</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>crt-core</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>http-auth-aws-crt</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>iam</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sso</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>kms</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>glue</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dynamodb</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>lakeformation</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
         </dependency>
 
         <dependency>
