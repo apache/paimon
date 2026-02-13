@@ -26,7 +26,6 @@ import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.bitmap.BitmapIndexResult;
 import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
@@ -59,7 +58,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
 
     private final DataType dataType;
 
-    public BitSliceIndexBitmapFileIndex(DataType dataType, Options options) {
+    public BitSliceIndexBitmapFileIndex(DataType dataType) {
         this.dataType = dataType;
     }
 
@@ -290,7 +289,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         }
 
         @Override
-        public FileIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        public BitmapIndexResult visitLessOrEqual(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
@@ -317,7 +316,7 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
         }
 
         @Override
-        public FileIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        public BitmapIndexResult visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
             return new BitmapIndexResult(
                     () -> {
                         Long value = valueMapper.apply(literal);
@@ -327,6 +326,16 @@ public class BitSliceIndexBitmapFileIndex implements FileIndexer {
                         } else {
                             return positive.gte(value);
                         }
+                    });
+        }
+
+        @Override
+        public FileIndexResult visitBetween(FieldRef fieldRef, Object from, Object to) {
+            return new BitmapIndexResult(
+                    () -> {
+                        RoaringBitmap32 gte = visitGreaterOrEqual(fieldRef, from).get();
+                        RoaringBitmap32 lte = visitLessOrEqual(fieldRef, to).get();
+                        return RoaringBitmap32.and(gte, lte);
                     });
         }
     }

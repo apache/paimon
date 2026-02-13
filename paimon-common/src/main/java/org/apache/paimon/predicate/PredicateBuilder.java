@@ -254,7 +254,11 @@ public class PredicateBuilder {
         if (predicates.size() == 1) {
             return predicates.get(0);
         }
-        return predicates.stream()
+
+        // Optimize by converting LessOrEqual and GreaterOrEqual to Between for same field
+        List<Predicate> optimized = Between.optimize(predicates);
+
+        return optimized.stream()
                 .reduce((a, b) -> new CompoundPredicate(And.INSTANCE, Arrays.asList(a, b)))
                 .get();
     }
