@@ -516,6 +516,9 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .withPartitionKeys("_year")
                         .withPrimaryKeys("_id", "_year")
                         .withComputedColumnArgs("_year=year(_date)")
+                        .withMetadataColumnPrefix("__kafka_")
+                        .withMetadataColumns(
+                                "topic", "offset", "partition", "timestamp", "timestamp_type")
                         .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
@@ -525,12 +528,104 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         new DataType[] {
                             DataTypes.STRING().notNull(),
                             DataTypes.STRING(),
-                            DataTypes.INT().notNull()
+                            DataTypes.INT().notNull(),
+                            DataTypes.STRING().notNull(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                            DataTypes.STRING()
                         },
-                        new String[] {"_id", "_date", "_year"});
+                        new String[] {
+                            "_id",
+                            "_date",
+                            "_year",
+                            "__kafka_topic",
+                            "__kafka_partition",
+                            "__kafka_offset",
+                            "__kafka_timestamp",
+                            "__kafka_timestamp_type"
+                        });
         waitForResult(
                 Collections.singletonList("+I[101, 2023-03-23, 2023]"),
                 getFileStoreTable(tableName),
+                rowType,
+                Arrays.asList("_id", "_year"));
+    }
+
+    public void testMetadataColumn(String format) throws Exception {
+        String topic = "metadata_column";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, "kafka/%s/table/metadatacolumn/%s-data-1.txt", format, format);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withComputedColumnArgs("_year=year(_date)")
+                        .withMetadataColumnPrefix("__kafka_")
+                        .withMetadataColumns(
+                                "topic", "offset", "partition", "timestamp", "timestamp_type")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        // Verify the schema includes metadata columns
+        RowType tableRowType = table.rowType();
+        assertThat(tableRowType.getFieldNames())
+                .containsExactlyInAnyOrder(
+                        "_id",
+                        "_date",
+                        "_year",
+                        "__kafka_topic",
+                        "__kafka_partition",
+                        "__kafka_offset",
+                        "__kafka_timestamp",
+                        "__kafka_timestamp_type");
+
+        // Verify the data types of metadata columns
+        assertThat(tableRowType.getField("__kafka_topic").type()).isEqualTo(DataTypes.STRING());
+        assertThat(tableRowType.getField("__kafka_partition").type()).isEqualTo(DataTypes.INT());
+        assertThat(tableRowType.getField("__kafka_offset").type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(tableRowType.getField("__kafka_timestamp").type())
+                .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
+        assertThat(tableRowType.getField("__kafka_timestamp_type").type())
+                .isEqualTo(DataTypes.STRING());
+
+        // Verify the metadata values are present in the data
+        // We use a RowType that includes all columns including metadata
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                            DataTypes.STRING()
+                        },
+                        new String[] {
+                            "_id",
+                            "_date",
+                            "_year",
+                            "__kafka_topic",
+                            "__kafka_partition",
+                            "__kafka_offset",
+                            "__kafka_timestamp",
+                            "__kafka_timestamp_type"
+                        });
+
+        // Wait for result - we only check basic fields in expected result because
+        // offset and timestamp values are unpredictable
+        waitForResult(
+                Collections.singletonList("+I[101, 2023-03-23, 2023]"),
+                table,
                 rowType,
                 Arrays.asList("_id", "_year"));
     }

@@ -94,6 +94,12 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
 
     @Test
     @Timeout(60)
+    public void testMetadataColumn() throws Exception {
+        testMetadataColumn(DEBEZIUM);
+    }
+
+    @Test
+    @Timeout(60)
     public void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(DEBEZIUM);
     }

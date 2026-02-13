@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.kafka.KafkaMetadataConverter;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.Arrays;
@@ -49,7 +51,14 @@ public enum CdcMetadataProcessor {
             new CdcMetadataConverter.DatabaseNameConverter(),
             new CdcMetadataConverter.TableNameConverter(),
             new CdcMetadataConverter.SchemaNameConverter(),
-            new CdcMetadataConverter.OpTsConverter());
+            new CdcMetadataConverter.OpTsConverter()),
+    KAFKA_METADATA_PROCESSOR(
+            SyncJobHandler.SourceType.KAFKA,
+            new KafkaMetadataConverter.TopicConverter(),
+            new KafkaMetadataConverter.PartitionConverter(),
+            new KafkaMetadataConverter.OffsetConverter(),
+            new KafkaMetadataConverter.TimestampConverter(),
+            new KafkaMetadataConverter.TimestampTypeConverter());
 
     private final SyncJobHandler.SourceType sourceType;
 
