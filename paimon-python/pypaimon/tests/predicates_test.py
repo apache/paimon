@@ -17,6 +17,7 @@
 ################################################################################
 import os
 import random
+import shutil
 import tempfile
 import unittest
 
@@ -82,6 +83,10 @@ class PredicateTest(unittest.TestCase):
         commit.close()
 
         cls.df = df
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_wrong_field_name(self):
         table = self.catalog.get_table('default.test_append')
