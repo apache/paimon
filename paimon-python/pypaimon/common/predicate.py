@@ -66,15 +66,6 @@ class Predicate:
             return tester.test_by_value(field_value, self.literals)
         raise ValueError(f"Unsupported predicate method: {self.method}")
 
-    def has_null_check(self) -> bool:
-        if self.method in ('isNull', 'isNotNull'):
-            return False
-        if self.method not in ('and', 'or') and self.literals and any(lit is None for lit in self.literals):
-            return True
-        if self.method in ('and', 'or') and self.literals:
-            return any(p.has_null_check() for p in self.literals)
-        return False
-
     def test_by_simple_stats(self, stat: SimpleStats, row_count: int) -> bool:
         """Test predicate against BinaryRow stats with denseIndexMapping like Java implementation."""
         if self.method == 'and':

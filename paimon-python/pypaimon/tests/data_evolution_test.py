@@ -699,7 +699,6 @@ class DataEvolutionTest(unittest.TestCase):
 
         # is_null('c'): Arrow and row-by-row must return same rows
         pred_is_null = Predicate(method="isNull", index=1, field="c", literals=None)
-        self.assertFalse(pred_is_null.has_null_check())
         arrow_res = _filter_batch_arrow(batch, pred_is_null)
         row_res = _filter_batch_row_by_row(batch, pred_is_null, ncols)
         self.assertEqual(arrow_res.num_rows, row_res.num_rows)
@@ -717,7 +716,6 @@ class DataEvolutionTest(unittest.TestCase):
         self.assertEqual(arrow_res2.num_rows, 2)
 
         pred_eq_null = Predicate(method="equal", index=1, field="c", literals=[None])
-        self.assertTrue(pred_eq_null.has_null_check())
         row_res3 = _filter_batch_row_by_row(batch, pred_eq_null, ncols)
         self.assertEqual(row_res3.num_rows, 0)  # Paimon: val is None -> False, no row matches
         arrow_res3 = _filter_batch_arrow(batch, pred_eq_null)

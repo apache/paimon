@@ -20,7 +20,6 @@ import logging
 from typing import List, Optional
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.dataset as ds
 
 from pypaimon.common.predicate import Predicate
@@ -61,21 +60,7 @@ class FilterRecordBatchReader(RecordBatchReader):
                 return filtered
             continue
 
-    def _filter_batch_simple_null(
-        self, batch: pa.RecordBatch
-    ) -> Optional[pa.RecordBatch]:
-        if self.predicate.method not in ('isNull', 'isNotNull') or not self.predicate.field:
-            return None
-        if self.predicate.field not in batch.schema.names:
-            return None
-        col = batch.column(self.predicate.field)
-        mask = pc.is_null(col) if self.predicate.method == 'isNull' else pc.is_valid(col)
-        return batch.filter(mask)
-
     def _filter_batch(self, batch: pa.RecordBatch) -> Optional[pa.RecordBatch]:
-        simple_null = self._filter_batch_simple_null(batch)
-        if simple_null is not None:
-            return simple_null
         expr = self.predicate.to_arrow()
         result = ds.InMemoryDataset(pa.Table.from_batches([batch])).scanner(
             filter=expr
