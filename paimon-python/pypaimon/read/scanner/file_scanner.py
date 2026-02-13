@@ -418,13 +418,13 @@ class FileScanner:
             return False
         if self.partition_key_predicate and not self.partition_key_predicate.test(entry.partition):
             return False
-        if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
-            return False
         # Get SimpleStatsEvolution for this schema
         evolution = self.simple_stats_evolutions.get_or_create(entry.file.schema_id)
 
         # Apply evolution to stats
         if self.table.is_primary_key_table:
+            if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
+                return False
             if not self.primary_key_predicate:
                 return True
             return self.primary_key_predicate.test_by_simple_stats(
@@ -434,7 +434,10 @@ class FileScanner:
         else:
             if not self.predicate:
                 return True
-            if self.predicate_for_stats is None or self.data_evolution:
+            if self.predicate_for_stats is None:
+                return True
+            # Data evolution: file stats may be from another schema, skip stats filter and filter in reader.
+            if self.data_evolution:
                 return True
             if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
                 stats_fields = entry.file.write_cols

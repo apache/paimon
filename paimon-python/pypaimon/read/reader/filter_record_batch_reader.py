@@ -17,7 +17,7 @@
 ###############################################################################
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -26,7 +26,6 @@ import pyarrow.dataset as ds
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.schema.data_types import DataField
-from pypaimon.table.row.offset_row import OffsetRow
 
 logger = logging.getLogger(__name__)
 
@@ -62,20 +61,6 @@ class FilterRecordBatchReader(RecordBatchReader):
                 return filtered
             continue
 
-    def _build_col_indices(self, batch: pa.RecordBatch) -> Tuple[List[Optional[int]], int]:
-        names = set(batch.schema.names)
-        if self.schema_fields is not None:
-            fields = self.schema_fields
-        elif self.field_names is not None:
-            fields = self.field_names
-        else:
-            return list(range(batch.num_columns)), batch.num_columns
-        indices = []
-        for f in fields:
-            name = f.name if hasattr(f, 'name') else f
-            indices.append(batch.schema.get_field_index(name) if name in names else None)
-        return indices, len(indices)
-
     def _filter_batch_simple_null(
         self, batch: pa.RecordBatch
     ) -> Optional[pa.RecordBatch]:
@@ -91,49 +76,24 @@ class FilterRecordBatchReader(RecordBatchReader):
         simple_null = self._filter_batch_simple_null(batch)
         if simple_null is not None:
             return simple_null
-        if not self.predicate.has_null_check():
-            try:
-                expr = self.predicate.to_arrow()
-                result = ds.InMemoryDataset(pa.Table.from_batches([batch])).scanner(
-                    filter=expr
-                ).to_table()
-                if result.num_rows == 0:
-                    return None
-                batches = result.to_batches()
-                if not batches:
-                    return None
-                if len(batches) == 1:
-                    return batches[0]
-                concat_batches = getattr(pa, "concat_batches", None)
-                if concat_batches is not None:
-                    return concat_batches(batches)
-                return pa.RecordBatch.from_arrays(
-                    [result.column(i) for i in range(result.num_columns)],
-                    schema=result.schema,
-                )
-            except (TypeError, ValueError, pa.ArrowInvalid) as e:
-                logger.debug(
-                    "PyArrow vectorized filtering failed, fallback to row-by-row: %s", e
-                )
-        nrows = batch.num_rows
-        col_indices, ncols = self._build_col_indices(batch)
-        mask = []
-        row_tuple = [None] * ncols
-        offset_row = OffsetRow(row_tuple, 0, ncols)
-        for i in range(nrows):
-            for j in range(ncols):
-                if col_indices[j] is not None:
-                    row_tuple[j] = batch.column(col_indices[j])[i].as_py()
-                else:
-                    row_tuple[j] = None
-            offset_row.replace(tuple(row_tuple))
-            try:
-                mask.append(self.predicate.test(offset_row))
-            except (TypeError, ValueError):
-                mask.append(False)
-        if not any(mask):
+        expr = self.predicate.to_arrow()
+        result = ds.InMemoryDataset(pa.Table.from_batches([batch])).scanner(
+            filter=expr
+        ).to_table()
+        if result.num_rows == 0:
             return None
-        return batch.filter(pa.array(mask))
+        batches = result.to_batches()
+        if not batches:
+            return None
+        if len(batches) == 1:
+            return batches[0]
+        concat_batches = getattr(pa, "concat_batches", None)
+        if concat_batches is not None:
+            return concat_batches(batches)
+        return pa.RecordBatch.from_arrays(
+            [result.column(i) for i in range(result.num_columns)],
+            schema=result.schema,
+        )
 
     def return_batch_pos(self) -> int:
         pos = getattr(self.reader, 'return_batch_pos', lambda: 0)()

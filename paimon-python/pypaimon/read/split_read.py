@@ -90,6 +90,13 @@ class SplitRead(ABC):
             self.read_fields = self._create_key_value_fields(read_type)
         self.schema_id_2_fields = {}
         self.deletion_file_readers = {}
+        # Only apply filter when all predicate columns are in read schema.
+        read_names = {f.name for f in self.read_fields}
+        self.predicate_for_reader = (
+            self.predicate
+            if self.predicate is not None and _get_all_fields(self.predicate).issubset(read_names)
+            else None
+        )
 
     def _push_down_predicate(self) -> Optional[Predicate]:
         if self.predicate is None:
@@ -384,8 +391,8 @@ class RawFileSplitRead(SplitRead):
 
         concat_reader = ConcatBatchReader(data_readers)
         # if the table is appendonly table, we don't need extra filter, all predicates has pushed down
-        if self.table.is_primary_key_table and self.predicate:
-            return FilterRecordReader(concat_reader, self.predicate)
+        if self.table.is_primary_key_table and self.predicate_for_reader:
+            return FilterRecordReader(concat_reader, self.predicate_for_reader)
         else:
             return concat_reader
 
@@ -426,8 +433,8 @@ class MergeFileSplitRead(SplitRead):
             section_readers.append(supplier)
         concat_reader = ConcatRecordReader(section_readers)
         kv_unwrap_reader = KeyValueUnwrapRecordReader(DropDeleteRecordReader(concat_reader))
-        if self.predicate:
-            return FilterRecordReader(kv_unwrap_reader, self.predicate)
+        if self.predicate_for_reader:
+            return FilterRecordReader(kv_unwrap_reader, self.predicate_for_reader)
         else:
             return kv_unwrap_reader
 
@@ -452,7 +459,8 @@ class DataEvolutionSplitRead(SplitRead):
         super().__init__(table, predicate, read_type, actual_split, row_tracking_enabled)
 
     def _push_down_predicate(self) -> Optional[Predicate]:
-        # Do not push predicate to file readers;
+        # Data evolution: files may have different schemas, so we don't push predicate
+        # to file readers; filtering is done in FilterRecordBatchReader after merge.
         return None
 
     def create_reader(self) -> RecordReader:
@@ -474,19 +482,13 @@ class DataEvolutionSplitRead(SplitRead):
                 )
 
         merge_reader = ConcatBatchReader(suppliers)
-        if self.predicate is not None:
-            # Only apply filter when all predicate columns are in read_type (e.g. projected schema).
-            read_names = {f.name for f in self.read_fields}
-            if _get_all_fields(self.predicate).issubset(read_names):
-                field_names = [f.name for f in self.read_fields]
-                # Row-by-row path uses predicate.index (from read_type); layout must match.
-                schema_fields = self.read_fields
-                return FilterRecordBatchReader(
-                    merge_reader,
-                    self.predicate,
-                    field_names=field_names,
-                    schema_fields=schema_fields,
-                )
+        if self.predicate_for_reader is not None:
+            return FilterRecordBatchReader(
+                merge_reader,
+                self.predicate_for_reader,
+                field_names=[f.name for f in self.read_fields],
+                schema_fields=self.read_fields,
+            )
         return merge_reader
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
