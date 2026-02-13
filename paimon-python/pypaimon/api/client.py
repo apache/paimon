@@ -223,23 +223,23 @@ def _normalize_uri(uri: str) -> str:
 
 
 def _parse_error_response(response_body: Optional[str], status_code: int) -> ErrorResponse:
+    error = None
     if response_body:
         try:
-            return JSON.from_json(response_body, ErrorResponse)
-        except Exception:
-            return ErrorResponse(
-                resource_type=None,
-                resource_name=None,
-                message=response_body,
-                code=status_code
-            )
-    else:
+            error = JSON.from_json(response_body, ErrorResponse)
+        except json.JSONDecodeError:
+            # ignore exception
+            pass
+
+    if error is None or not error.message:
         return ErrorResponse(
-            resource_type=None,
-            resource_name=None,
-            message="response body is null",
-            code=status_code
+            resource_type=error.resource_type if error and error.resource_type else "",
+            resource_name=error.resource_name if error and error.resource_name else "",
+            message=response_body if response_body else "response body is null",
+            code=error.code if error and error.code else status_code
         )
+    
+    return error
 
 
 def _get_headers_with_params(path: str, query_params: Dict[str, str],
