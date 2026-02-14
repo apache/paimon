@@ -335,11 +335,22 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
             FileIOVectorReader vectorReader =
                     new FileIOVectorReader(vectorStream, meta.dim(), meta.maxDegree());
 
-            // 3. Create DiskANN native searcher with on-demand graph + vector access.
+            // 3. Load PQ files into memory for in-memory approximate distance computation.
+            //    Beam search uses PQ-reconstructed vectors; only top-K candidates are
+            //    re-ranked with full-precision vectors from disk.
+            byte[] pqPivots = loadCompanionFile(ioMeta, meta.pqPivotsFileName());
+            byte[] pqCompressed = loadCompanionFile(ioMeta, meta.pqCompressedFileName());
+
+            // 4. Create DiskANN native searcher with on-demand graph + vector access + PQ.
             handle =
                     new DiskAnnSearchHandle(
                             IndexSearcher.createFromReaders(
-                                    graphReader, vectorReader, meta.dim(), meta.minId()));
+                                    graphReader,
+                                    vectorReader,
+                                    meta.dim(),
+                                    meta.minId(),
+                                    pqPivots,
+                                    pqCompressed));
 
             if (handles.size() <= position) {
                 while (handles.size() < position) {
@@ -385,6 +396,35 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
                 throw new RuntimeException(
                         "Failed to close DiskANN vector global index reader", firstException);
             }
+        }
+    }
+
+    /**
+     * Load a companion file (e.g. PQ pivots/compressed) relative to the index file.
+     *
+     * @return the file contents as byte[], or null if the file name is empty or the file does not
+     *     exist.
+     */
+    private byte[] loadCompanionFile(GlobalIndexIOMeta indexIOMeta, String fileName)
+            throws IOException {
+        if (fileName == null || fileName.isEmpty()) {
+            return null;
+        }
+        Path filePath = new Path(indexIOMeta.filePath().getParent(), fileName);
+        GlobalIndexIOMeta fileMeta = new GlobalIndexIOMeta(filePath, 0L, new byte[0]);
+        try (SeekableInputStream in = fileReader.getInputStream(fileMeta)) {
+            // Read the entire file into a byte array.
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream(4096);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                baos.write(buf, 0, n);
+            }
+            byte[] data = baos.toByteArray();
+            return data.length > 0 ? data : null;
+        } catch (Exception e) {
+            // PQ files are optional — if missing, fall back to full-precision search.
+            return null;
         }
     }
 

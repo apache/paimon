@@ -81,6 +81,115 @@ impl From<FileIOProviderError> for ANNError {
 
 diskann::always_escalate!(FileIOProviderError);
 
+// ======================== PQ State ========================
+
+/// In-memory Product Quantization state for approximate distance computation.
+///
+/// During beam search, PQ-reconstructed vectors replace full-precision disk I/O,
+/// making the search almost entirely in-memory.  Only the final top-K candidates
+/// are re-ranked with full-precision vectors from disk.
+#[derive(Debug)]
+pub struct PQState {
+    /// Number of PQ subspaces (M).
+    pub num_subspaces: usize,
+    /// Number of centroids per subspace (K).
+    pub num_centroids: usize,
+    /// Sub-vector dimension (dimension / M).
+    pub sub_dim: usize,
+    /// Full vector dimension.
+    pub dimension: usize,
+    /// Centroid data, laid out as: pivots[m * K * sub_dim + k * sub_dim .. + sub_dim].
+    pub pivots: Vec<f32>,
+    /// Compressed codes: codes[vec_idx * M + m] = centroid index for vector vec_idx, subspace m.
+    pub codes: Vec<u8>,
+    /// Number of encoded vectors.
+    pub num_vectors: usize,
+}
+
+impl PQState {
+    /// Deserialize PQ pivots and compressed codes from the byte arrays written by `pq.rs`.
+    ///
+    /// Pivots format:  i32 dim | i32 M | i32 K | i32 sub_dim | f32[M*K*sub_dim]
+    /// Codes format:   i32 N   | i32 M | byte[N*M]
+    pub fn deserialize(pivots_bytes: &[u8], compressed_bytes: &[u8]) -> Result<Self, String> {
+        if pivots_bytes.len() < 16 {
+            return Err("PQ pivots too small".into());
+        }
+        if compressed_bytes.len() < 8 {
+            return Err("PQ compressed too small".into());
+        }
+
+        let dimension = i32::from_ne_bytes(pivots_bytes[0..4].try_into().unwrap()) as usize;
+        let num_subspaces = i32::from_ne_bytes(pivots_bytes[4..8].try_into().unwrap()) as usize;
+        let num_centroids = i32::from_ne_bytes(pivots_bytes[8..12].try_into().unwrap()) as usize;
+        let sub_dim = i32::from_ne_bytes(pivots_bytes[12..16].try_into().unwrap()) as usize;
+
+        let expected_pivots_data = num_subspaces * num_centroids * sub_dim * 4;
+        if pivots_bytes.len() < 16 + expected_pivots_data {
+            return Err(format!(
+                "PQ pivots data too small: need {}, have {}",
+                16 + expected_pivots_data,
+                pivots_bytes.len()
+            ));
+        }
+
+        // Parse pivots as f32 (native endian).
+        let pivots: Vec<f32> = pivots_bytes[16..16 + expected_pivots_data]
+            .chunks_exact(4)
+            .map(|c| f32::from_ne_bytes(c.try_into().unwrap()))
+            .collect();
+
+        // Parse compressed header.
+        let num_vectors = i32::from_ne_bytes(compressed_bytes[0..4].try_into().unwrap()) as usize;
+        let m_check = i32::from_ne_bytes(compressed_bytes[4..8].try_into().unwrap()) as usize;
+        if m_check != num_subspaces {
+            return Err(format!(
+                "PQ subspace mismatch: pivots M={}, compressed M={}",
+                num_subspaces, m_check
+            ));
+        }
+
+        let expected_codes = num_vectors * num_subspaces;
+        if compressed_bytes.len() < 8 + expected_codes {
+            return Err(format!(
+                "PQ codes too small: need {}, have {}",
+                8 + expected_codes,
+                compressed_bytes.len()
+            ));
+        }
+
+        let codes = compressed_bytes[8..8 + expected_codes].to_vec();
+
+        Ok(Self {
+            num_subspaces,
+            num_centroids,
+            sub_dim,
+            dimension,
+            pivots,
+            codes,
+            num_vectors,
+        })
+    }
+
+    /// Reconstruct an approximate vector for the given 0-based vector index
+    /// by looking up PQ centroid sub-vectors.
+    ///
+    /// Cost: M table lookups + dimension float copies — entirely in L1/L2 cache.
+    #[inline]
+    pub fn reconstruct(&self, vec_idx: usize, out: &mut [f32]) {
+        debug_assert!(vec_idx < self.num_vectors);
+        debug_assert!(out.len() >= self.dimension);
+        let code_base = vec_idx * self.num_subspaces;
+        for m in 0..self.num_subspaces {
+            let code = self.codes[code_base + m] as usize;
+            let src_offset = m * self.num_centroids * self.sub_dim + code * self.sub_dim;
+            let dst_offset = m * self.sub_dim;
+            out[dst_offset..dst_offset + self.sub_dim]
+                .copy_from_slice(&self.pivots[src_offset..src_offset + self.sub_dim]);
+        }
+    }
+}
+
 // ======================== Graph Term ========================
 
 /// One entry in the graph cache: its neighbor list.
@@ -95,15 +204,18 @@ pub struct GraphTerm {
 /// Graph neighbors and vectors are read on demand from FileIO-backed storage
 /// (local, HDFS, S3, OSS, etc.) via JNI callbacks to Java reader objects.
 ///
-/// Two levels of caching reduce FileIO/JNI round-trips:
-///   - **Graph**: `DashMap<u32, GraphTerm>` (lazy, write-once, unbounded).
-///   - **Vectors**: `DashMap<u32, Box<[f32]>>` populated by batch prefetch
-///     after each neighbor expansion, plus per-search LRU in `FileIOAccessor`.
+/// Three levels of vector access (in priority order):
+///   1. **PQ reconstruction** (in-memory, ~O(dim) CPU, no I/O) — used during
+///      beam search when PQ data is available.
+///   2. **Provider-level `vector_cache`** (exact vectors cached from reranking
+///      or disk I/O).
+///   3. **DirectByteBuffer disk I/O** (single JNI call + zero-copy read).
+///
+/// Graph neighbors are cached in a `DashMap<u32, GraphTerm>` (lazy, write-once).
 pub struct FileIOProvider {
     /// Graph cache: internal_id → { neighbors }.
     graph: DashMap<u32, GraphTerm>,
-    /// Provider-level vector cache populated by batch prefetch.
-    /// Keyed by internal node ID (u32).
+    /// Provider-level vector cache (exact vectors from reranking / disk reads).
     vector_cache: DashMap<u32, Box<[f32]>>,
     /// Total number of nodes (start point + user vectors).
     num_nodes: usize,
@@ -122,13 +234,15 @@ pub struct FileIOProvider {
     /// Max degree.
     max_degree: usize,
     /// Native memory address of the single-vector DirectByteBuffer.
-    /// Points to `dim` floats.  Valid for the lifetime of the Java reader.
     single_buf_ptr: *mut f32,
     /// Native memory address of the batch DirectByteBuffer.
-    /// Points to `max_batch_size * dim` floats.
     batch_buf_ptr: *mut f32,
     /// Maximum number of vectors in one batch read.
     max_batch_size: usize,
+    /// PQ state for in-memory approximate distance computation during beam search.
+    /// When present, `get_element` returns PQ-reconstructed vectors for cache misses
+    /// instead of doing disk I/O.
+    pq_state: Option<PQState>,
 }
 
 impl std::fmt::Debug for FileIOProvider {
@@ -139,6 +253,7 @@ impl std::fmt::Debug for FileIOProvider {
             .field("max_degree", &self.max_degree)
             .field("graph_size", &self.graph.len())
             .field("vector_cache_size", &self.vector_cache.len())
+            .field("pq_enabled", &self.pq_state.is_some())
             .finish()
     }
 }
@@ -150,8 +265,8 @@ unsafe impl Send for FileIOProvider {}
 unsafe impl Sync for FileIOProvider {}
 
 impl FileIOProvider {
-    /// Build a search-only provider with on-demand graph reading and zero-copy
-    /// vector access via DirectByteBuffers.
+    /// Build a search-only provider with on-demand graph reading, zero-copy
+    /// vector access, and optional PQ for in-memory approximate search.
     ///
     /// `single_buf_ptr` and `batch_buf_ptr` are native addresses obtained via
     /// JNI `GetDirectBufferAddress` on the Java reader's DirectByteBuffers.
@@ -169,6 +284,7 @@ impl FileIOProvider {
         single_buf_ptr: *mut f32,
         batch_buf_ptr: *mut f32,
         max_batch_size: usize,
+        pq_state: Option<PQState>,
     ) -> Self {
         let graph = DashMap::new();
         let vector_cache = DashMap::new();
@@ -190,7 +306,13 @@ impl FileIOProvider {
             single_buf_ptr,
             batch_buf_ptr,
             max_batch_size,
+            pq_state,
         }
+    }
+
+    /// Whether PQ is available for in-memory approximate distance computation.
+    pub fn has_pq(&self) -> bool {
+        self.pq_state.is_some()
     }
 
     pub fn dim(&self) -> usize {
@@ -493,10 +615,15 @@ impl provider::NeighborAccessor for FileIONeighborAccessor<'_> {
 impl FileIONeighborAccessor<'_> {
     /// Batch-prefetch vectors for neighbors that aren't already in the vector cache.
     ///
-    /// This is the key optimization: after discovering neighbors via graph I/O,
-    /// we batch-fetch all their vectors in a single JNI call.  Subsequent
-    /// `get_element` calls for these neighbors will hit the provider-level cache.
+    /// When PQ is available, this is a no-op — beam search uses PQ-reconstructed
+    /// vectors (in-memory) instead of full-precision disk I/O.  Only when PQ is
+    /// NOT available do we batch-fetch full vectors from disk.
     fn prefetch_neighbor_vectors(&self, adj: &AdjacencyList<u32>) {
+        // When PQ is available, beam search uses PQ reconstruction — skip disk prefetch.
+        if self.provider.has_pq() {
+            return;
+        }
+
         // Collect uncached neighbor IDs (skip start points and already-cached).
         let uncached: Vec<u32> = adj
             .iter()
@@ -594,26 +721,35 @@ impl provider::Accessor for FileIOAccessor<'_> {
             return Ok(&*self.buffer);
         }
 
-        // 2. Provider-level vector cache (populated by batch prefetch).
+        // 2. Provider-level vector cache (exact vectors from reranking / disk).
         if let Some(cached) = self.provider.vector_cache.get(&id) {
             self.buffer.copy_from_slice(&cached);
             return Ok(&*self.buffer);
         }
 
-        // 3. Per-search LRU cache.
+        // 3. Per-search LRU cache (exact vectors).
         if let Some(cached) = self.cache.get(id) {
             self.buffer.copy_from_slice(cached);
             return Ok(&*self.buffer);
         }
 
-        // 4. Fetch via DirectByteBuffer I/O (single JNI call + zero-copy read).
+        // 4. PQ reconstruction: approximate vector, entirely in-memory, no disk I/O.
+        //    During beam search this is the primary hot path when PQ is available.
+        if let Some(pq) = &self.provider.pq_state {
+            let vec_idx = (id as usize).wrapping_sub(1);
+            if vec_idx < pq.num_vectors {
+                pq.reconstruct(vec_idx, &mut self.buffer);
+                return Ok(&*self.buffer);
+            }
+        }
+
+        // 5. Fallback: fetch via DirectByteBuffer I/O (single JNI call + zero-copy read).
         let position = (id as i64) - 1;
         let fetched = self.provider.fetch_vector(position)?;
 
         match fetched {
             Some(vec) if vec.len() == self.provider.dim() => {
                 self.buffer.copy_from_slice(&vec);
-                // Populate both caches.
                 self.provider
                     .vector_cache
                     .insert(id, vec.clone().into_boxed_slice());

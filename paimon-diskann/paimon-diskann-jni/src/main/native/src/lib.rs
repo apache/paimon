@@ -584,6 +584,55 @@ struct SearcherState {
     dimension: i32,
     /// Minimum external ID for this index. ext_id = min_ext_id + (int_id - 1).
     min_ext_id: i64,
+    /// Reranking context: used after PQ-approximate beam search to compute
+    /// exact distances for the top-K candidates with full-precision vectors.
+    rerank: Option<RerankContext>,
+}
+
+/// Context for post-search reranking with full-precision vectors from disk.
+///
+/// When PQ is enabled, beam search uses PQ-approximate distances (in-memory).
+/// After search, we re-read full vectors for the top-K candidates and recompute
+/// exact distances to produce the final ranking.
+struct RerankContext {
+    /// Separate JVM handle for reranking (cheap clone of the pointer).
+    jvm: jni::JavaVM,
+    /// Separate GlobalRef to the vector reader (same Java object, different ref).
+    reader_ref: jni::objects::GlobalRef,
+    /// Native address of the single-vector DirectByteBuffer.
+    single_buf_ptr: *mut f32,
+    /// Vector dimension.
+    dim: usize,
+    /// Distance metric type (0=L2, 1=IP, 2=Cosine).
+    metric_type: i32,
+}
+
+// SAFETY: same justification as FileIOProvider — JavaVM and GlobalRef are
+// Send+Sync, raw pointer access is serialized by single-threaded runtime.
+unsafe impl Send for RerankContext {}
+unsafe impl Sync for RerankContext {}
+
+/// Compute exact distance between two vectors.
+fn compute_exact_distance(a: &[f32], b: &[f32], metric_type: i32) -> f32 {
+    match metric_type {
+        METRIC_INNER_PRODUCT => {
+            // Negative inner product (larger IP = more similar → smaller distance).
+            let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+            -dot
+        }
+        METRIC_COSINE => {
+            // 1 − cos_sim
+            let dot: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+            let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+            let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+            let denom = norm_a * norm_b;
+            if denom < 1e-30 { 1.0 } else { 1.0 - dot / denom }
+        }
+        _ => {
+            // Squared L2 distance.
+            a.iter().zip(b).map(|(x, y)| { let d = x - y; d * d }).sum()
+        }
+    }
 }
 
 struct SearcherRegistry {
@@ -737,13 +786,14 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
 // ======================== indexCreateSearcherFromReaders ========================
 
 /// Create a search-only handle from two on-demand Java readers: one for graph
-/// structure and one for vectors.
+/// structure and one for vectors, with optional PQ data for in-memory
+/// approximate distance computation during beam search.
 ///
-/// `graphReader`:   Java object with `readNeighbors(int)`, `getDimension()`,
-///                  `getCount()`, `getStartId()`, `getMaxDegree()`,
-///                  `getBuildListSize()`, `getMetricValue()`.
-/// `vectorReader`:  Java object with `readVector(long)`.
-/// `min_ext_id`:    Minimum external ID for int_id → ext_id conversion.
+/// `graphReader`:    Java object with `readNeighbors(int)`, `getDimension()`, etc.
+/// `vectorReader`:   Java object with `loadVector(long)`, DirectByteBuffer accessors.
+/// `min_ext_id`:     Minimum external ID for int_id → ext_id conversion.
+/// `pq_pivots`:      Serialized PQ codebook (byte[]), or null to disable PQ.
+/// `pq_compressed`:  Serialized PQ compressed codes (byte[]), or null.
 ///
 /// Returns a searcher handle (≥100000) for use with `indexSearchWithReader`.
 #[no_mangle]
@@ -753,6 +803,8 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
     graph_reader: JObject<'local>,
     vector_reader: JObject<'local>,
     min_ext_id: jlong,
+    pq_pivots: JObject<'local>,
+    pq_compressed: JObject<'local>,
 ) -> jlong {
     // Helper to call int-returning methods on graphReader.
     macro_rules! call_int {
@@ -821,6 +873,62 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         Err(_) => max_degree,
     };
 
+    // ---- Deserialize PQ data (if provided) ----
+
+    let pq_state = if !pq_pivots.is_null() && !pq_compressed.is_null() {
+        let pivots_bytes: Vec<u8> = match env.convert_byte_array(
+            jni::objects::JByteArray::from(pq_pivots),
+        ) {
+            Ok(b) if !b.is_empty() => b,
+            _ => Vec::new(),
+        };
+        let compressed_bytes: Vec<u8> = match env.convert_byte_array(
+            jni::objects::JByteArray::from(pq_compressed),
+        ) {
+            Ok(b) if !b.is_empty() => b,
+            _ => Vec::new(),
+        };
+
+        if !pivots_bytes.is_empty() && !compressed_bytes.is_empty() {
+            match paimon_fileio_provider::PQState::deserialize(&pivots_bytes, &compressed_bytes) {
+                Ok(pq) => Some(pq),
+                Err(e) => {
+                    // PQ deserialization failed — fall back to full-precision search.
+                    eprintln!("PQ deserialization failed (falling back to full search): {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let pq_enabled = pq_state.is_some();
+
+    // ---- Create reranking context (separate GlobalRef + JVM for post-search reranking) ----
+
+    let rerank = if pq_enabled {
+        let rerank_reader_ref = match env.new_global_ref(&vector_reader) {
+            Ok(g) => g,
+            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("rerank reader ref: {}", e)); return 0; }
+        };
+        let rerank_jvm = match env.get_java_vm() {
+            Ok(vm) => vm,
+            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("rerank JVM: {}", e)); return 0; }
+        };
+        Some(RerankContext {
+            jvm: rerank_jvm,
+            reader_ref: rerank_reader_ref,
+            single_buf_ptr,
+            dim,
+            metric_type,
+        })
+    } else {
+        None
+    };
+
     // Start point is not stored in data file; use a dummy vector.
     let start_vec = vec![1.0f32; dim];
 
@@ -838,6 +946,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         single_buf_ptr,
         batch_buf_ptr,
         max_batch_size,
+        pq_state,
     );
 
     // Build DiskANNIndex config.
@@ -871,6 +980,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         runtime,
         dimension,
         min_ext_id,
+        rerank,
     };
 
     match searcher_registry().lock() {
@@ -967,15 +1077,70 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearchW
         };
 
         let rc = stats.result_count as usize;
-        let mut cnt = 0;
-        for ri in 0..rc {
-            if cnt >= top_k { break; }
-            let nb = &neighbors[ri];
-            if nb.id == START_POINT_ID { continue; }
-            let idx = qi * top_k + cnt;
-            result_lbl[idx] = state.min_ext_id + (nb.id as i64) - 1;
-            result_dist[idx] = nb.distance;
-            cnt += 1;
+
+        // ---- Reranking: replace PQ-approximate distances with exact distances ----
+        // When PQ is enabled, beam search used PQ-reconstructed vectors for distance
+        // computation.  Now we read full-precision vectors from disk for the top
+        // candidates and recompute exact distances, then re-sort.
+        if let Some(ref rerank_ctx) = state.rerank {
+            // Collect valid (non-start-point) candidates.
+            let mut valid_indices: Vec<usize> = (0..rc)
+                .filter(|&ri| neighbors[ri].id != START_POINT_ID)
+                .collect();
+
+            // Rerank: read full vector and compute exact distance for each candidate.
+            if let Ok(mut renv) = rerank_ctx.jvm.attach_current_thread() {
+                for &ri in &valid_indices {
+                    let id = neighbors[ri].id;
+                    let position = (id as i64) - 1;
+                    let success = renv.call_method(
+                        &rerank_ctx.reader_ref,
+                        "loadVector",
+                        "(J)Z",
+                        &[jni::objects::JValue::Long(position)],
+                    );
+                    if let Ok(v) = success {
+                        if let Ok(true) = v.z() {
+                            let vec = unsafe {
+                                std::slice::from_raw_parts(rerank_ctx.single_buf_ptr, rerank_ctx.dim)
+                            };
+                            neighbors[ri].distance =
+                                compute_exact_distance(qvec, vec, rerank_ctx.metric_type);
+                        }
+                    }
+                }
+
+                // Re-sort valid candidates by exact distance.
+                valid_indices.sort_by(|&a, &b| {
+                    neighbors[a]
+                        .distance
+                        .partial_cmp(&neighbors[b].distance)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                // Collect results from the re-sorted order.
+                let mut cnt = 0;
+                for &ri in &valid_indices {
+                    if cnt >= top_k { break; }
+                    let nb = &neighbors[ri];
+                    let idx = qi * top_k + cnt;
+                    result_lbl[idx] = state.min_ext_id + (nb.id as i64) - 1;
+                    result_dist[idx] = nb.distance;
+                    cnt += 1;
+                }
+            }
+        } else {
+            // No PQ / no reranking — distances are already exact.
+            let mut cnt = 0;
+            for ri in 0..rc {
+                if cnt >= top_k { break; }
+                let nb = &neighbors[ri];
+                if nb.id == START_POINT_ID { continue; }
+                let idx = qi * top_k + cnt;
+                result_lbl[idx] = state.min_ext_id + (nb.id as i64) - 1;
+                result_dist[idx] = nb.distance;
+                cnt += 1;
+            }
         }
     }
 

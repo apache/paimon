@@ -101,16 +101,26 @@ final class DiskAnnNative {
      *   <li><b>Graph</b>: the Rust side calls {@code graphReader.readNeighbors(int)} via JNI to
      *       fetch neighbor lists on demand during beam search. It also calls getter methods ({@code
      *       getDimension()}, {@code getCount()}, {@code getStartId()}) during initialization.
-     *   <li><b>Vectors</b>: the Rust side calls {@code vectorReader.readVector(long)} via JNI.
+     *   <li><b>Vectors</b>: the Rust side calls {@code vectorReader.loadVector(long)} via JNI
+     *       (zero-copy via DirectByteBuffer).
+     *   <li><b>PQ</b>: the PQ codebook and compressed codes are loaded into native memory for
+     *       in-memory approximate distance computation during beam search. Only the final top-K
+     *       candidates are re-ranked with full-precision vectors from disk.
      * </ul>
      *
      * @param graphReader a Java object providing graph structure on demand.
-     * @param vectorReader a Java object with a {@code float[] readVector(long)} method.
+     * @param vectorReader a Java object with a {@code loadVector(long)} method.
      * @param minExtId minimum external ID for this index (for int_id → ext_id conversion).
+     * @param pqPivots serialized PQ codebook (pivots), or null/empty to disable PQ.
+     * @param pqCompressed serialized PQ compressed codes, or null/empty to disable PQ.
      * @return a searcher handle (>= 100 000) for use with {@link #indexSearchWithReader}.
      */
     static native long indexCreateSearcherFromReaders(
-            Object graphReader, Object vectorReader, long minExtId);
+            Object graphReader,
+            Object vectorReader,
+            long minExtId,
+            byte[] pqPivots,
+            byte[] pqCompressed);
 
     /**
      * Search on a searcher handle created by {@link #indexCreateSearcherFromReaders}.

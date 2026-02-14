@@ -68,8 +68,13 @@ public class IndexSearcher implements AutoCloseable {
      *
      * <ul>
      *   <li>{@code graphReader.readNeighbors(int)} for neighbor lists during beam search
-     *   <li>{@code vectorReader.readVector(long)} for full-precision vectors during beam search
+     *   <li>{@code vectorReader.loadVector(long)} for full-precision vectors (zero-copy via
+     *       DirectByteBuffer)
      * </ul>
+     *
+     * <p>When PQ data is provided, beam search uses PQ-reconstructed vectors for approximate
+     * distance computation (fully in-memory), and only the final top-K candidates are re-ranked
+     * with full-precision vectors from disk I/O.
      *
      * <p>Both readers must implement {@link Closeable}.
      *
@@ -77,12 +82,20 @@ public class IndexSearcher implements AutoCloseable {
      * @param vectorReader a vector reader object (e.g. {@code FileIOVectorReader}).
      * @param dimension the vector dimension (from {@code DiskAnnIndexMeta}).
      * @param minExtId minimum external ID for this index (for int_id → ext_id conversion).
+     * @param pqPivots serialized PQ codebook, or null to disable PQ-accelerated search.
+     * @param pqCompressed serialized PQ compressed codes, or null to disable.
      * @return a new IndexSearcher
      */
     public static IndexSearcher createFromReaders(
-            Closeable graphReader, Closeable vectorReader, int dimension, long minExtId) {
+            Closeable graphReader,
+            Closeable vectorReader,
+            int dimension,
+            long minExtId,
+            byte[] pqPivots,
+            byte[] pqCompressed) {
         long handle =
-                DiskAnnNative.indexCreateSearcherFromReaders(graphReader, vectorReader, minExtId);
+                DiskAnnNative.indexCreateSearcherFromReaders(
+                        graphReader, vectorReader, minExtId, pqPivots, pqCompressed);
         return new IndexSearcher(handle, dimension, graphReader, vectorReader);
     }
 
