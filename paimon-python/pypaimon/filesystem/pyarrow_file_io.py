@@ -188,7 +188,7 @@ class PyArrowFileIO(FileIO):
                 parent_dir = '/'.join(path_str.split('/')[:-1])
             else:
                 parent_dir = ''
-
+            
             if parent_dir and not self.exists(parent_dir):
                 self.mkdirs(parent_dir)
         else:
@@ -212,10 +212,10 @@ class PyArrowFileIO(FileIO):
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-
+        
         if file_info.type == pafs.FileType.NotFound:
             raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
-
+        
         return file_info
 
     def list_status(self, path: str):
@@ -234,10 +234,10 @@ class PyArrowFileIO(FileIO):
     def delete(self, path: str, recursive: bool = False) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-
+        
         if file_info.type == pafs.FileType.NotFound:
             return False
-
+        
         if file_info.type == pafs.FileType.Directory:
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
@@ -256,7 +256,7 @@ class PyArrowFileIO(FileIO):
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-
+        
         if file_info.type == pafs.FileType.NotFound:
             self.filesystem.create_dir(path_str, recursive=True)
             return True
@@ -264,7 +264,7 @@ class PyArrowFileIO(FileIO):
             return True
         elif file_info.type == pafs.FileType.File:
             raise FileExistsError(f"Path exists but is not a directory: {path}")
-
+        
         self.filesystem.create_dir(path_str, recursive=True)
         return True
 
@@ -273,13 +273,13 @@ class PyArrowFileIO(FileIO):
         dst_parent = Path(dst_str).parent
         if str(dst_parent) and not self.exists(str(dst_parent)):
             self.mkdirs(str(dst_parent))
-
+        
         src_str = self.to_filesystem_path(src)
-
+        
         try:
             if hasattr(self.filesystem, 'rename'):
                 return self.filesystem.rename(src_str, dst_str)
-
+            
             dst_file_info = self._get_file_info(dst_str)
             if dst_file_info.type != pafs.FileType.NotFound:
                 if dst_file_info.type == pafs.FileType.File:
@@ -291,7 +291,7 @@ class PyArrowFileIO(FileIO):
                 final_dst_info = self._get_file_info(dst_str)
                 if final_dst_info.type != pafs.FileType.NotFound:
                     return False
-
+            
             self.filesystem.move(src_str, dst_str)
             return True
         except FileNotFoundError:
@@ -329,7 +329,7 @@ class PyArrowFileIO(FileIO):
             file_info = self._get_file_info(path_str)
             if file_info.type == pafs.FileType.Directory:
                 return False
-
+        
         temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
@@ -347,7 +347,7 @@ class PyArrowFileIO(FileIO):
         source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
         target_parent = Path(target_str).parent
-
+        
         if str(target_parent) and not self.exists(str(target_parent)):
             self.mkdirs(str(target_parent))
 
@@ -371,7 +371,7 @@ class PyArrowFileIO(FileIO):
                   zstd_level: int = 1, **kwargs):
         try:
             """Write ORC file using PyArrow ORC writer.
-
+            
             Note: PyArrow's ORC writer doesn't support compression_level parameter.
             ORC files will use zstd compression with default level
             (which is 3, see https://github.com/facebook/zstd/blob/dev/programs/zstdcli.c)
@@ -430,7 +430,7 @@ class PyArrowFileIO(FileIO):
             'zstd': 'zstandard',  # zstd is commonly used in Paimon
         }
         compression_lower = compression.lower()
-
+        
         codec = codec_map.get(compression_lower)
         if codec is None:
             raise ValueError(
