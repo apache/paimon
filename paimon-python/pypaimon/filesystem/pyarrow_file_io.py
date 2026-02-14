@@ -215,14 +215,8 @@ class PyArrowFileIO(FileIO):
 
     def exists(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
-        try:
-            file_info = self.filesystem.get_file_info([path_str])[0]
-            return file_info.type != pafs.FileType.NotFound
-        except OSError:
-            # OSS + PyArrow 6: get_file_info on a key prefix (no object) raises OSError.
-            if self._is_oss and not self._pyarrow_gte_7:
-                return False
-            raise
+        file_info = self.filesystem.get_file_info([path_str])[0]
+        return file_info.type != pafs.FileType.NotFound
 
     def delete(self, path: str, recursive: bool = False) -> bool:
         path_str = self.to_filesystem_path(path)
@@ -247,9 +241,6 @@ class PyArrowFileIO(FileIO):
         return True
 
     def mkdirs(self, path: str) -> bool:
-        if self._is_oss and not self._pyarrow_gte_7:
-            # OSS has no real directories; writing the object key is enough.
-            return True
         path_str = self.to_filesystem_path(path)
         file_info = self.filesystem.get_file_info([path_str])[0]
         
@@ -518,8 +509,9 @@ class PyArrowFileIO(FileIO):
                 if parsed.netloc:
                     path_part = normalized_path.lstrip('/')
                     if self._is_oss and not self._pyarrow_gte_7:
-                        # PyArrow 6 splits on first '/'; return netloc/path_part so bucket=OSS bucket, key=path_part.
-                        return f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+                        # For PyArrow 6.x + OSS, endpoint_override already contains bucket,
+                        result = path_part if path_part else '.'
+                        return result
                     else:
                         result = f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
                         return result
