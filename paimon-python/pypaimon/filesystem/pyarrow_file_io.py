@@ -43,6 +43,7 @@ from pypaimon.write.blob_format_writer import BlobFormatWriter
 def _pyarrow_lt_7():
     return parse(pyarrow.__version__) < parse("7.0.0")
 
+
 class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
