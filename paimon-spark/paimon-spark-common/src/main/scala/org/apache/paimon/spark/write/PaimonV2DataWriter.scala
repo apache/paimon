@@ -45,7 +45,6 @@ case class PaimonV2DataWriter(
 
   val fullCompactionDeltaCommits: Option[Int] =
     Option.apply(coreOptions.fullCompactionDeltaCommits())
-  val blobAsDescriptor: Boolean = coreOptions.blobAsDescriptor()
 
   val write: TableWriteImpl[InternalRow] = {
     writeBuilder
@@ -57,12 +56,8 @@ case class PaimonV2DataWriter(
 
   private val rowConverter: InternalRow => SparkInternalRowWrapper = {
     val numFields = writeSchema.fields.length
-    val reusableWrapper = new SparkInternalRowWrapper(
-      writeSchema,
-      numFields,
-      dataSchema,
-      blobAsDescriptor,
-      catalogContext)
+    val reusableWrapper =
+      new SparkInternalRowWrapper(writeSchema, numFields, dataSchema, catalogContext)
     record => reusableWrapper.replace(record)
   }
 

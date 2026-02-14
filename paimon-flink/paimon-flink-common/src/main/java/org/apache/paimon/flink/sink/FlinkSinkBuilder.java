@@ -207,15 +207,13 @@ public class FlinkSinkBuilder {
     public DataStreamSink<?> build() {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
-        boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
         CatalogContext contextForDescriptor =
                 BlobDescriptorUtils.getCatalogContext(
                         table.catalogEnvironment().catalogContext(),
                         table.coreOptions().toConfiguration());
 
         DataStream<InternalRow> input =
-                mapToInternalRow(
-                        this.input, table.rowType(), blobAsDescriptor, contextForDescriptor);
+                mapToInternalRow(this.input, table.rowType(), contextForDescriptor);
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -247,14 +245,11 @@ public class FlinkSinkBuilder {
     public static DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
-            boolean blobAsDescriptor,
             CatalogContext catalogContext) {
         SingleOutputStreamOperator<InternalRow> result =
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
-                                        r ->
-                                                new FlinkRowWrapper(
-                                                        r, blobAsDescriptor, catalogContext))
+                                        r -> new FlinkRowWrapper(r, catalogContext))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));

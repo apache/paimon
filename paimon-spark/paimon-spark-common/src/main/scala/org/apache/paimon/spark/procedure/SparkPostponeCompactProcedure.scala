@@ -104,7 +104,6 @@ case class SparkPostponeCompactProcedure(
       writeRowTracking = coreOptions.dataEvolutionEnabled(),
       Option.apply(coreOptions.fullCompactionDeltaCommits()),
       None,
-      coreOptions.blobAsDescriptor(),
       table.catalogEnvironment().catalogContext(),
       Some(postponePartitionBucketComputer)
     )

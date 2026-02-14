@@ -37,7 +37,6 @@ case class PaimonDataWrite(
     writeRowTracking: Boolean = false,
     fullCompactionDeltaCommits: Option[Int],
     batchId: Option[Long],
-    blobAsDescriptor: Boolean,
     catalogContext: CatalogContext,
     postponePartitionBucketComputer: Option[BinaryRow => Integer])
   extends abstractInnerTableDataWrite[Row]
@@ -58,7 +57,7 @@ case class PaimonDataWrite(
   }
 
   private val toPaimonRow = {
-    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, blobAsDescriptor, catalogContext)
+    SparkRowUtils.toPaimonRow(writeType, rowKindColIdx, catalogContext)
   }
 
   def write(row: Row): Unit = {

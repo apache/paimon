@@ -28,6 +28,7 @@ import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IteratorResultIterator;
 import org.apache.paimon.utils.IteratorWithException;
 import org.apache.paimon.utils.Pool;
+import org.apache.paimon.utils.UriReader;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.file.DataFileReader;
@@ -77,7 +78,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
         private DataFileReader<InternalRow> createReaderFromPath(Path path, long fileSize)
                 throws IOException {
-            DatumReader<InternalRow> datumReader = new AvroRowDatumReader(projectedRowType);
+            UriReader uriReader = UriReader.fromFile(fileIO);
+            DatumReader<InternalRow> datumReader =
+                    new AvroRowDatumReader(projectedRowType, uriReader);
             SeekableInput in =
                     new SeekableInputStreamWrapper(fileIO.newInputStream(path), fileSize);
             try {

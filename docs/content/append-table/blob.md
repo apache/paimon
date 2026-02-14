@@ -94,7 +94,19 @@ For details about the blob file format structure, see [File Format - BLOB]({{< r
       <td>No</td>
       <td style="word-wrap: break-word;">false</td>
       <td>Boolean</td>
-      <td>When set to true, the blob field input is treated as a serialized BlobDescriptor. Paimon reads from the descriptor's URI and streams the data into Paimon's blob files in small chunks, avoiding loading the entire blob into memory. This is useful for writing very large blobs that cannot fit in memory. When reading, if set to true, returns the BlobDescriptor bytes; if false, returns actual blob bytes.</td>
+      <td>Controls read output format for blob fields. When set to true, queries return serialized BlobDescriptor bytes; when false, queries return actual blob bytes. This option is dynamic and can be changed with <code>ALTER TABLE ... SET</code>.</td>
+    </tr>
+    <tr>
+      <td><h5>blob.stored-descriptor-fields</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>
+        Comma-separated BLOB field names stored as serialized <code>BlobDescriptor</code> bytes inline in normal data files.
+        By default, all blob fields store blob bytes in separate <code>.blob</code> files.
+        If configured, one table can mix:
+        some BLOB fields in <code>.blob</code> files and some as descriptor references.
+      </td>
     </tr>
     <tr>
       <td><h5>blob.target-file-size</h5></td>
@@ -217,31 +229,18 @@ SELECT id, name FROM image_table;
 SELECT * FROM image_table WHERE id = 1;
 ```
 
-### Blob Descriptor Mode
+### Blob Read Output Mode (`blob-as-descriptor`)
 
-When you want to store references from external blob data (stored in object storage) without loading the entire blob into memory, you can use the `blob-as-descriptor` option:
+`blob-as-descriptor` only controls how blob values are returned when reading.
 
 ```sql
--- Create table in descriptor mode
-CREATE TABLE blob_table (
-    id INT,
-    name STRING,
-    image BYTES
-) WITH (
-    'row-tracking.enabled' = 'true',
-    'data-evolution.enabled' = 'true',
-    'blob-field' = 'image',
-    'blob-as-descriptor' = 'true'
-);
+-- Return descriptor bytes
+ALTER TABLE blob_table SET ('blob-as-descriptor' = 'true');
+SELECT image FROM blob_table;
 
--- Insert with serialized BlobDescriptor bytes
--- The BlobDescriptor contains: version (1 byte) + uri_length (4 bytes) + uri_bytes + offset (8 bytes) + length (8 bytes)
--- Paimon will read from the descriptor's URI and stream data into Paimon's blob files in small chunks, avoiding loading the entire blob into memory
-INSERT INTO blob_table VALUES (1, 'photo', X'<serialized_blob_descriptor_hex>');
-
--- Toggle this setting to control read output format:
+-- Return actual blob bytes
 ALTER TABLE blob_table SET ('blob-as-descriptor' = 'false');
-SELECT * FROM blob_table;  -- Returns actual blob bytes from Paimon storage
+SELECT image FROM blob_table;
 ```
 
 ## Java API Usage
@@ -389,7 +388,7 @@ public class BlobTableExample {
 }
 ```
 
-### Inserting Blob Data
+### Construct blob from different sources
 
 ```java
 // From byte array (data already in memory)
@@ -442,17 +441,13 @@ long offset = descriptor.offset();  // Starting position in the file
 long length = descriptor.length();  // Length of the blob data
 ```
 
-### Blob Descriptor Mode
+### Descriptor-Aware Write Behavior
 
-The `blob-as-descriptor` option enables **memory-efficient writing** for very large blobs. When enabled, you provide a `BlobDescriptor` pointing to external data, and Paimon streams the data from the external source into Paimon's `.blob` files without loading the entire blob into memory.
+Paimon write path is descriptor-aware automatically:
 
-**How it works:**
-1. **Writing**: You provide a serialized `BlobDescriptor` (containing URI, offset, length) as the blob field value
-2. **Paimon copies the data**: Paimon reads from the descriptor's URI in small chunks (e.g., 1024 bytes at a time) and writes to Paimon's `.blob` files
-3. **Data is stored in Paimon**: The blob data IS copied to Paimon storage, but in a streaming fashion
-
-**Key benefit:**
-- **Memory efficiency**: For very large blobs (e.g., gigabyte-sized videos), you don't need to load the entire file into memory. Paimon streams the data incrementally.
+1. For blob fields stored in `.blob` files, input can be either blob bytes or a `BlobDescriptor`.
+2. For fields configured in `blob.stored-descriptor-fields`, Paimon stores descriptor bytes inline in data files (no `.blob` files for those fields), and input must be a descriptor.
+3. This behavior does not depend on `blob-as-descriptor`.
 
 ```java
 import org.apache.paimon.catalog.Catalog;
@@ -484,21 +479,21 @@ public class BlobDescriptorExample {
         Catalog catalog = CatalogFactory.createCatalog(catalogContext);
         catalog.createDatabase("my_db", true);
 
-        // Create table with blob-as-descriptor enabled
+        // Create table: store "video" as descriptor bytes inline
         Schema schema = Schema.newBuilder()
                 .column("id", DataTypes.INT())
                 .column("name", DataTypes.STRING())
                 .column("video", DataTypes.BLOB())
                 .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                .option(CoreOptions.BLOB_AS_DESCRIPTOR.key(), "true")  // This is not necessary in java api
+                .option(CoreOptions.BLOB_STORED_DESCRIPTOR_FIELDS.key(), "video")
                 .build();
 
         Identifier tableId = Identifier.create("my_db", "video_table");
         catalog.createTable(tableId, schema, true);
         Table table = catalog.getTable(tableId);
 
-        // Write large blob using descriptor (memory-efficient)
+        // Write blob using descriptor reference
         writeLargeBlobWithDescriptor(table);
 
         // Read blob data
@@ -514,7 +509,7 @@ public class BlobDescriptorExample {
             // For a very large file (e.g., 2GB video), instead of loading into memory:
             //   byte[] hugeVideo = Files.readAllBytes(...);  // This would cause OutOfMemoryError!
             //
-            // Use BlobDescriptor to let Paimon stream the data:
+            // Create a descriptor reference to external blob
             String externalUri = "s3://my-bucket/videos/large_video.mp4";
             long fileSize = 2L * 1024 * 1024 * 1024;  // 2GB
 
@@ -524,8 +519,6 @@ public class BlobDescriptorExample {
             UriReader uriReader = UriReader.fromFile(fileIO);
             Blob blob = Blob.fromDescriptor(uriReader, descriptor);
 
-            // Write the serialized descriptor as blob data
-            // Paimon will read from the URI and copy data to .blob files in chunks
             GenericRow row = GenericRow.of(
                     1,
                     BinaryString.fromString("large_video"),
@@ -535,7 +528,7 @@ public class BlobDescriptorExample {
             commit.commit(write.prepareCommit());
         }
 
-        System.out.println("Successfully wrote large blob using descriptor mode");
+        System.out.println("Successfully wrote large blob using descriptor reference");
     }
 
     private static void readBlobData(Table table) throws Exception {
@@ -548,20 +541,19 @@ public class BlobDescriptorExample {
             String name = row.getString(1).toString();
             Blob blob = row.getBlob(2);
 
-            // The blob data is now stored in Paimon's .blob files
-            // blob.toDescriptor() returns a descriptor pointing to Paimon's internal storage
+            // Field is configured in blob.stored-descriptor-fields, so descriptor is stored inline
             BlobDescriptor descriptor = blob.toDescriptor();
             System.out.println("Row " + id + ": " + name);
-            System.out.println("  Paimon blob URI: " + descriptor.uri());
+            System.out.println("  Blob URI: " + descriptor.uri());
             System.out.println("  Length: " + descriptor.length());
         });
     }
 }
 ```
 
-**Reading blob data with different modes:**
+**Reading blob data with different output modes:**
 
-The `blob-as-descriptor` option also affects how data is returned when reading:
+The `blob-as-descriptor` option affects only read output:
 
 ```sql
 -- When blob-as-descriptor = true: Returns BlobDescriptor bytes (reference to Paimon blob file)
@@ -573,13 +565,22 @@ ALTER TABLE video_table SET ('blob-as-descriptor' = 'false');
 SELECT * FROM video_table;  -- Returns actual blob bytes from Paimon storage
 ```
 
+### Blob storage mode: DESCRIPTOR ONLY
+
+If you want downstream tables to **reuse** upstream blob files (no copying and no new <code>.blob</code> files), configure the target blob field(s):
+
+```sql
+'blob.stored-descriptor-fields' = 'image'
+```
+
+For these configured fields, Paimon stores only serialized <code>BlobDescriptor</code> bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
+
 ## Limitations
 
-1. **Single Blob Field**: Currently, only one blob field per table is supported.
-2. **Append Table Only**: Blob type is designed for append-only tables. Primary key tables are not supported.
-3. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
-4. **No Statistics**: Statistics collection is not supported for blob columns.
-5. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
+1. **Append Table Only**: Blob type is designed for append-only tables. Primary key tables are not supported.
+2. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
+3. **No Statistics**: Statistics collection is not supported for blob columns.
+4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
 
 ## Best Practices
 
@@ -587,7 +588,7 @@ SELECT * FROM video_table;  -- Returns actual blob bytes from Paimon storage
 
 2. **Set Appropriate Target File Size**: Configure `blob.target-file-size` based on your blob sizes. Larger values mean fewer files but larger individual files.
 
-3. **Consider Descriptor Mode**: For very large blobs that cannot fit in memory, use `blob-as-descriptor` mode to stream data from external sources into Paimon without loading the entire blob into memory.
+3. **Use Descriptor Fields When Reusing External Blob Files**: Configure `blob.stored-descriptor-fields` for fields that should keep descriptor references instead of writing new `.blob` files.
 
 4. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.
 
