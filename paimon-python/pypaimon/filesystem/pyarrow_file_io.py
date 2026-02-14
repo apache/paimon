@@ -185,32 +185,35 @@ class PyArrowFileIO(FileIO):
 
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
-        if not (self._is_oss and not self._pyarrow_gte_7):
+        if self._is_oss and not self._pyarrow_gte_7:
+            # For PyArrow 6.x + OSS, path_str is already just the key part.
+            if '/' in path_str:
+                parent_dir = '/'.join(path_str.split('/')[:-1])
+            else:
+                parent_dir = ''
+            if parent_dir and not self.exists(parent_dir):
+                self.mkdirs(parent_dir)
+        else:
             parent_dir = Path(path_str).parent
             if str(parent_dir) and not self.exists(str(parent_dir)):
                 self.mkdirs(str(parent_dir))
-
         return self.filesystem.open_output_stream(path_str)
-
-    @staticmethod
-    def _is_key_not_found_error(e: OSError) -> bool:
-        msg = str(e).lower()
-        return ("does not exist" in msg or "not exist" in msg or "nosuchkey" in msg or "133" in msg)
 
     def _get_file_info(self, path_str: str):
         try:
             file_infos = self.filesystem.get_file_info([path_str])
-            file_info = file_infos[0]
-            return file_info if file_info.type != pafs.FileType.NotFound else None
+            return file_infos[0]
         except OSError as e:
-            if self._is_key_not_found_error(e):
-                return None
+            # this is for compatible with pyarrow < 7
+            msg = str(e).lower()
+            if "does not exist" in msg or "not exist" in msg or "nosuchkey" in msg or "133" in msg:
+                return pafs.FileInfo(path_str, pafs.FileType.NotFound)
             raise
 
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-        if file_info is None:
+        if file_info.type == pafs.FileType.NotFound:
             raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
         return file_info
 
@@ -225,14 +228,13 @@ class PyArrowFileIO(FileIO):
 
     def exists(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
-        return self._get_file_info(path_str) is not None
+        return self._get_file_info(path_str).type != pafs.FileType.NotFound
 
     def delete(self, path: str, recursive: bool = False) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-        if file_info is None:
+        if file_info.type == pafs.FileType.NotFound:
             return False
-        
         if file_info.type == pafs.FileType.Directory:
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
@@ -251,7 +253,7 @@ class PyArrowFileIO(FileIO):
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-        if file_info is None:
+        if file_info.type == pafs.FileType.NotFound:
             self.filesystem.create_dir(path_str, recursive=True)
             return True
         if file_info.type == pafs.FileType.Directory:
@@ -274,7 +276,7 @@ class PyArrowFileIO(FileIO):
                 return self.filesystem.rename(src_str, dst_str)
 
             dst_file_info = self._get_file_info(dst_str)
-            if dst_file_info is not None:
+            if dst_file_info.type != pafs.FileType.NotFound:
                 if dst_file_info.type == pafs.FileType.File:
                     return False
                 # Make it compatible with HadoopFileIO: if dst is an existing directory,
@@ -282,7 +284,7 @@ class PyArrowFileIO(FileIO):
                 src_name = Path(src_str).name
                 dst_str = str(Path(dst_str) / src_name)
                 final_dst_info = self._get_file_info(dst_str)
-                if final_dst_info is not None:
+                if final_dst_info.type != pafs.FileType.NotFound:
                     return False
 
             self.filesystem.move(src_str, dst_str)
@@ -320,7 +322,7 @@ class PyArrowFileIO(FileIO):
         if self.exists(path):
             path_str = self.to_filesystem_path(path)
             file_info = self._get_file_info(path_str)
-            if file_info is None or file_info.type == pafs.FileType.Directory:
+            if file_info.type == pafs.FileType.Directory:
                 return False
         
         temp_path = path + str(uuid.uuid4()) + ".tmp"
