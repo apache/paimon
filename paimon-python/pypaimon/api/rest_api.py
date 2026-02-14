@@ -46,6 +46,7 @@ class RESTApi:
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
     TABLE_NAME_PATTERN = "tableNamePattern"
+    TABLE_TYPE = "tableType"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
     def __init__(self, options: Union[Options, Dict[str, str]], config_required: bool = True):
@@ -228,6 +229,7 @@ class RESTApi:
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             table_name_pattern: Optional[str] = None,
+            table_type: Optional[str] = None,
     ) -> PagedList[str]:
         if not database_name or not database_name.strip():
             raise ValueError("Database name cannot be empty")
@@ -235,7 +237,12 @@ class RESTApi:
         response = self.client.get_with_params(
             self.resource_paths.tables(database_name),
             self.__build_paged_query_params(
-                max_results, page_token, {self.TABLE_NAME_PATTERN: table_name_pattern}
+                max_results,
+                page_token,
+                {
+                    self.TABLE_NAME_PATTERN: table_name_pattern,
+                    self.TABLE_TYPE: table_type,
+                },
             ),
             ListTablesResponse,
             self.rest_auth_function,
