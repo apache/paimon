@@ -532,6 +532,15 @@ under the License.
                 <activeByDefault>true</activeByDefault>
             </activation>
         </profile>
+        <profile>
+            <id>paimon-diskann</id>
+            <modules>
+                <module>paimon-diskann</module>
+            </modules>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+        </profile>
     </profiles>
 
     <build>
