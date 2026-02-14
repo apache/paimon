@@ -79,6 +79,7 @@ AUTHORIZATION_HEADER_KEY = "Authorization"
 # REST API parameter constants
 DATABASE_NAME_PATTERN = "databaseNamePattern"
 TABLE_NAME_PATTERN = "tableNamePattern"
+TABLE_TYPE = "tableType"
 VIEW_NAME_PATTERN = "viewNamePattern"
 FUNCTION_NAME_PATTERN = "functionNamePattern"
 PARTITION_NAME_PATTERN = "partitionNamePattern"
@@ -871,11 +872,22 @@ class RESTCatalogServer:
     def _list_tables(self, database_name: str, parameters: Dict[str, str]) -> List[str]:
         """List tables in database"""
         table_name_pattern = parameters.get(TABLE_NAME_PATTERN)
+        table_type = parameters.get(TABLE_TYPE)
         tables = []
 
         for full_name, metadata in self.table_metadata_store.items():
             identifier = Identifier.from_string(full_name)
+            metadata_table_type = (
+                metadata.schema.options.get(TYPE, "table")
+                if metadata and metadata.schema and metadata.schema.options
+                else "table"
+            )
+            table_type_matches = (
+                not table_type
+                or metadata_table_type == table_type
+            )
             if (identifier.get_database_name() == database_name and
+                    table_type_matches and
                     (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
                                                                         table_name_pattern))):
                 tables.append(identifier.get_table_name())
