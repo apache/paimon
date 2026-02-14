@@ -212,6 +212,7 @@ class PyArrowFileIO(FileIO):
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
+
         if file_info.type == pafs.FileType.NotFound:
             raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
 
@@ -236,6 +237,7 @@ class PyArrowFileIO(FileIO):
 
         if file_info.type == pafs.FileType.NotFound:
             return False
+
         if file_info.type == pafs.FileType.Directory:
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)

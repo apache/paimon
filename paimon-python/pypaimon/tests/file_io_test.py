@@ -94,13 +94,13 @@ class FileIOTest(unittest.TestCase):
         mock_fs.open_output_stream.return_value = MagicMock()
         oss_io.filesystem = mock_fs
         oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
+        mock_fs.create_dir.assert_called_once()
+        path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
         if lt7:
-            mock_fs.create_dir.assert_not_called()
+            expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else ""
         else:
-            mock_fs.create_dir.assert_called_once()
-            path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
             expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
-            self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
+        self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
         if lt7:
             for call_paths in get_file_info_calls:
                 for p in call_paths:
