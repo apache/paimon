@@ -97,7 +97,7 @@ class FileIOTest(unittest.TestCase):
         mock_fs.create_dir.assert_called_once()
         path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
         if lt7:
-            expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else ""
+            expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
         else:
             expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
         self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
