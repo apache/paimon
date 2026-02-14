@@ -83,8 +83,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
-                options.fileIndexReadEnabled(),
-                options.rowTrackingEnabled());
+                options);
     }
 
     public DataEvolutionSplitRead newDataEvolutionRead() {
@@ -93,12 +92,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     "Field merge read is only supported when data-evolution.enabled is true.");
         }
         return new DataEvolutionSplitRead(
-                fileIO,
-                schemaManager,
-                schema,
-                rowType,
-                FileFormatDiscover.of(options),
-                pathFactory());
+                fileIO, schemaManager, schema, rowType, options, pathFactory());
     }
 
     @Override

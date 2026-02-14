@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
@@ -82,6 +83,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final boolean fileIndexReadEnabled;
     private final boolean rowTrackingEnabled;
+    private final boolean ignoreCorruptFiles;
+    private final boolean ignoreLostFiles;
 
     private RowType readRowType;
     @Nullable private List<Predicate> filters;
@@ -95,16 +98,17 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
-            boolean fileIndexReadEnabled,
-            boolean rowTrackingEnabled) {
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
-        this.fileIndexReadEnabled = fileIndexReadEnabled;
-        this.rowTrackingEnabled = rowTrackingEnabled;
+        this.fileIndexReadEnabled = coreOptions.fileIndexReadEnabled();
+        this.ignoreCorruptFiles = coreOptions.scanIgnoreCorruptFile();
+        this.ignoreLostFiles = coreOptions.scanIgnoreLostFile();
+        this.rowTrackingEnabled = coreOptions.rowTrackingEnabled();
         this.readRowType = rowType;
     }
 
@@ -285,6 +289,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                         schema.logicalRowType(),
                         formatReaderMapping.getReaderFactory(),
                         formatReaderContext,
+                        ignoreCorruptFiles,
+                        ignoreLostFiles,
                         formatReaderMapping.getIndexMapping(),
                         formatReaderMapping.getCastMapping(),
                         PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
