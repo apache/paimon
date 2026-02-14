@@ -17,6 +17,7 @@
 ################################################################################
 import logging
 import os
+import re
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -205,7 +206,8 @@ class PyArrowFileIO(FileIO):
         except OSError as e:
             # this is for compatible with pyarrow < 7
             msg = str(e).lower()
-            if "does not exist" in msg or "not exist" in msg or "nosuchkey" in msg or "133" in msg:
+            if ("does not exist" in msg or "not exist" in msg or "nosuchkey" in msg
+                    or re.search(r'\b133\b', msg) or "notfound" in msg):
                 return pafs.FileInfo(path_str, pafs.FileType.NotFound)
             raise
 
