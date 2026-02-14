@@ -336,10 +336,26 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
                     new FileIOVectorReader(vectorStream, meta.dim(), meta.maxDegree());
 
             // 3. Load PQ files into memory for in-memory approximate distance computation.
-            //    Beam search uses PQ-reconstructed vectors; only top-K candidates are
-            //    re-ranked with full-precision vectors from disk.
+            //    PQ is mandatory — beam search uses PQ brute-force scan followed by
+            //    full-precision reranking from disk.
             byte[] pqPivots = loadCompanionFile(ioMeta, meta.pqPivotsFileName());
             byte[] pqCompressed = loadCompanionFile(ioMeta, meta.pqCompressedFileName());
+            if (pqPivots == null || pqPivots.length == 0) {
+                throw new IOException(
+                        "PQ pivots file is missing or empty for index at position "
+                                + position
+                                + ". PQ is required for DiskANN search. "
+                                + "Pivots file: "
+                                + meta.pqPivotsFileName());
+            }
+            if (pqCompressed == null || pqCompressed.length == 0) {
+                throw new IOException(
+                        "PQ compressed file is missing or empty for index at position "
+                                + position
+                                + ". PQ is required for DiskANN search. "
+                                + "Compressed file: "
+                                + meta.pqCompressedFileName());
+            }
 
             // 4. Create DiskANN native searcher with on-demand graph + vector access + PQ.
             handle =
@@ -402,8 +418,8 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
     /**
      * Load a companion file (e.g. PQ pivots/compressed) relative to the index file.
      *
-     * @return the file contents as byte[], or null if the file name is empty or the file does not
-     *     exist.
+     * @return the file contents as byte[], or null if the file name is null/empty.
+     * @throws IOException if the file cannot be read.
      */
     private byte[] loadCompanionFile(GlobalIndexIOMeta indexIOMeta, String fileName)
             throws IOException {
@@ -422,9 +438,6 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
             }
             byte[] data = baos.toByteArray();
             return data.length > 0 ? data : null;
-        } catch (Exception e) {
-            // PQ files are optional — if missing, fall back to full-precision search.
-            return null;
         }
     }
 

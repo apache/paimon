@@ -188,6 +188,112 @@ impl PQState {
                 .copy_from_slice(&self.pivots[src_offset..src_offset + self.sub_dim]);
         }
     }
+
+    // ---- ADC (Asymmetric Distance Computation) for brute-force PQ search ----
+
+    /// Pre-compute a distance table from a query vector to all PQ centroids.
+    ///
+    /// Returns `dt[m * K + k]` where:
+    ///   - L2:  squared L2 distance between query sub-vector m and centroid (m, k)
+    ///   - IP/Cosine: dot product between query sub-vector m and centroid (m, k)
+    ///
+    /// Cost: O(M * K * sub_dim) — computed once per query, amortized over all vectors.
+    pub fn compute_distance_table(&self, query: &[f32], metric_type: i32) -> Vec<f32> {
+        let m = self.num_subspaces;
+        let k = self.num_centroids;
+        let sd = self.sub_dim;
+        let mut table = vec![0.0f32; m * k];
+        for mi in 0..m {
+            let q_start = mi * sd;
+            let q_sub = &query[q_start..q_start + sd];
+            for ki in 0..k {
+                let c_off = mi * k * sd + ki * sd;
+                let centroid = &self.pivots[c_off..c_off + sd];
+                let val = if metric_type == 1 || metric_type == 2 {
+                    // IP or Cosine: dot product per subspace.
+                    q_sub.iter().zip(centroid).map(|(a, b)| a * b).sum::<f32>()
+                } else {
+                    // L2: squared L2 per subspace.
+                    q_sub
+                        .iter()
+                        .zip(centroid)
+                        .map(|(a, b)| {
+                            let d = a - b;
+                            d * d
+                        })
+                        .sum::<f32>()
+                };
+                table[mi * k + ki] = val;
+            }
+        }
+        table
+    }
+
+    /// Compute the approximate PQ distance for one vector using a pre-computed
+    /// distance table.  Cost: O(M) — just M table lookups.
+    #[inline]
+    pub fn adc_distance(&self, vec_idx: usize, table: &[f32], metric_type: i32) -> f32 {
+        let base = vec_idx * self.num_subspaces;
+        let k = self.num_centroids;
+        let mut raw = 0.0f32;
+        for mi in 0..self.num_subspaces {
+            let code = self.codes[base + mi] as usize;
+            raw += table[mi * k + code];
+        }
+        // IP/Cosine: negate dot product so that larger similarity = smaller distance.
+        if metric_type == 1 || metric_type == 2 {
+            -raw
+        } else {
+            raw
+        }
+    }
+
+    /// Brute-force PQ search: scan all vectors with ADC, return the top-K
+    /// closest as `(vec_idx, pq_distance)` sorted by ascending distance.
+    ///
+    /// This replaces the graph-based beam search when PQ data is available.
+    /// The entire search is in-memory — zero graph I/O, zero vector disk I/O.
+    ///
+    /// Cost: O(M * K * sub_dim) for the distance table +
+    ///       O(N * M) for scanning all vectors.
+    pub fn brute_force_search(
+        &self,
+        query: &[f32],
+        top_k: usize,
+        metric_type: i32,
+    ) -> Vec<(usize, f32)> {
+        let table = self.compute_distance_table(query, metric_type);
+        let k = top_k.min(self.num_vectors);
+        if k == 0 {
+            return Vec::new();
+        }
+
+        // Max-heap to keep the top-k smallest distances.
+        // We store (distance, vec_idx) and the heap evicts the largest distance.
+        let mut heap: Vec<(f32, usize)> = Vec::with_capacity(k);
+        let mut heap_max = f32::MAX;
+
+        for i in 0..self.num_vectors {
+            let dist = self.adc_distance(i, &table, metric_type);
+            if heap.len() < k {
+                heap.push((dist, i));
+                if heap.len() == k {
+                    // Find the current maximum after filling the heap.
+                    heap_max = heap.iter().map(|e| e.0).fold(f32::NEG_INFINITY, f32::max);
+                }
+            } else if dist < heap_max {
+                // Replace the worst element.
+                if let Some(pos) = heap.iter().position(|e| e.0 == heap_max) {
+                    heap[pos] = (dist, i);
+                    heap_max = heap.iter().map(|e| e.0).fold(f32::NEG_INFINITY, f32::max);
+                }
+            }
+        }
+
+        // Sort by ascending distance.
+        heap.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        heap.into_iter().map(|(d, i)| (i, d)).collect()
+    }
 }
 
 // ======================== Graph Term ========================
@@ -214,7 +320,7 @@ pub struct GraphTerm {
 /// Graph neighbors are cached in a `DashMap<u32, GraphTerm>` (lazy, write-once).
 pub struct FileIOProvider {
     /// Graph cache: internal_id → { neighbors }.
-    graph: DashMap<u32, GraphTerm>,
+    pub graph: DashMap<u32, GraphTerm>,
     /// Provider-level vector cache (exact vectors from reranking / disk reads).
     vector_cache: DashMap<u32, Box<[f32]>>,
     /// Total number of nodes (start point + user vectors).
@@ -240,9 +346,8 @@ pub struct FileIOProvider {
     /// Maximum number of vectors in one batch read.
     max_batch_size: usize,
     /// PQ state for in-memory approximate distance computation during beam search.
-    /// When present, `get_element` returns PQ-reconstructed vectors for cache misses
-    /// instead of doing disk I/O.
-    pq_state: Option<PQState>,
+    /// PQ is always present — Java validates this before creating the native searcher.
+    pub pq_state: PQState,
 }
 
 impl std::fmt::Debug for FileIOProvider {
@@ -253,7 +358,7 @@ impl std::fmt::Debug for FileIOProvider {
             .field("max_degree", &self.max_degree)
             .field("graph_size", &self.graph.len())
             .field("vector_cache_size", &self.vector_cache.len())
-            .field("pq_enabled", &self.pq_state.is_some())
+            .field("pq_enabled", &true)
             .finish()
     }
 }
@@ -266,10 +371,11 @@ unsafe impl Sync for FileIOProvider {}
 
 impl FileIOProvider {
     /// Build a search-only provider with on-demand graph reading, zero-copy
-    /// vector access, and optional PQ for in-memory approximate search.
+    /// vector access, and PQ for in-memory approximate search.
     ///
     /// `single_buf_ptr` and `batch_buf_ptr` are native addresses obtained via
     /// JNI `GetDirectBufferAddress` on the Java reader's DirectByteBuffers.
+    /// PQ is always required — Java validates this before creating the native searcher.
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_readers(
         num_nodes: usize,
@@ -284,7 +390,7 @@ impl FileIOProvider {
         single_buf_ptr: *mut f32,
         batch_buf_ptr: *mut f32,
         max_batch_size: usize,
-        pq_state: Option<PQState>,
+        pq_state: PQState,
     ) -> Self {
         let graph = DashMap::new();
         let vector_cache = DashMap::new();
@@ -310,9 +416,21 @@ impl FileIOProvider {
         }
     }
 
-    /// Whether PQ is available for in-memory approximate distance computation.
-    pub fn has_pq(&self) -> bool {
-        self.pq_state.is_some()
+    /// PQ brute-force search: scan all PQ codes, return top-K candidates.
+    ///
+    /// Returns `vec of (vec_idx, pq_distance)`.
+    /// `vec_idx` is 0-based (data file position); `int_id = vec_idx + 1`.
+    pub fn pq_brute_force_search(
+        &self,
+        query: &[f32],
+        top_k: usize,
+    ) -> Vec<(usize, f32)> {
+        let metric_type = match self.metric {
+            Metric::InnerProduct => 1i32,
+            Metric::Cosine => 2i32,
+            _ => 0i32,
+        };
+        self.pq_state.brute_force_search(query, top_k, metric_type)
     }
 
     pub fn dim(&self) -> usize {
@@ -615,31 +733,11 @@ impl provider::NeighborAccessor for FileIONeighborAccessor<'_> {
 impl FileIONeighborAccessor<'_> {
     /// Batch-prefetch vectors for neighbors that aren't already in the vector cache.
     ///
-    /// When PQ is available, this is a no-op — beam search uses PQ-reconstructed
-    /// vectors (in-memory) instead of full-precision disk I/O.  Only when PQ is
-    /// NOT available do we batch-fetch full vectors from disk.
-    fn prefetch_neighbor_vectors(&self, adj: &AdjacencyList<u32>) {
-        // When PQ is available, beam search uses PQ reconstruction — skip disk prefetch.
-        if self.provider.has_pq() {
-            return;
-        }
-
-        // Collect uncached neighbor IDs (skip start points and already-cached).
-        let uncached: Vec<u32> = adj
-            .iter()
-            .copied()
-            .filter(|&nid| {
-                !self.provider.start_points.contains_key(&nid)
-                    && !self.provider.vector_cache.contains_key(&nid)
-            })
-            .collect();
-
-        if uncached.is_empty() {
-            return;
-        }
-
-        // Best-effort: don't propagate errors from prefetch.
-        let _ = self.provider.prefetch_vectors(&uncached);
+    /// PQ is always enabled — beam search uses PQ reconstruction (in-memory),
+    /// so disk prefetch is a no-op.  This method is kept for the graph::Strategy
+    /// trait requirement.
+    fn prefetch_neighbor_vectors(&self, _adj: &AdjacencyList<u32>) {
+        // No-op: PQ is always enabled, beam search uses in-memory PQ codes.
     }
 }
 
@@ -734,8 +832,9 @@ impl provider::Accessor for FileIOAccessor<'_> {
         }
 
         // 4. PQ reconstruction: approximate vector, entirely in-memory, no disk I/O.
-        //    During beam search this is the primary hot path when PQ is available.
-        if let Some(pq) = &self.provider.pq_state {
+        //    During beam search this is the primary hot path.
+        {
+            let pq = &self.provider.pq_state;
             let vec_idx = (id as usize).wrapping_sub(1);
             if vec_idx < pq.num_vectors {
                 pq.reconstruct(vec_idx, &mut self.buffer);

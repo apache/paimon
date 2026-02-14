@@ -367,7 +367,7 @@ class DiskAnnVectorIndexE2ETest extends PaimonSparkTestBase {
         .filter(_.indexFile().indexType() == "diskann-vector-ann")
       assert(indexEntries.nonEmpty)
 
-      val searchResult = spark
+      var searchResult = spark
         .sql(
           """
             |SELECT id, name FROM vector_search('T', 'embedding', array(500.0f, 501.0f, 502.0f), 10)
@@ -375,6 +375,15 @@ class DiskAnnVectorIndexE2ETest extends PaimonSparkTestBase {
         .collect()
 
       assert(searchResult.exists(row => row.getInt(0) == 500 && row.getString(1) == "item_500"))
+
+      searchResult = spark
+        .sql(
+          """
+            |SELECT id, name FROM vector_search('T', 'embedding', array(501.0f, 502.0f, 503.0f), 10)
+            |""".stripMargin)
+        .collect()
+
+      assert(searchResult.exists(row => row.getInt(0) == 501 && row.getString(1) == "item_501"))
     }
   }
 }

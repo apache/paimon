@@ -45,7 +45,7 @@ use diskann_vector::distance::Metric;
 
 mod paimon_fileio_provider;
 mod pq;
-use paimon_fileio_provider::{FileIOContext, FileIOProvider, FileIOStrategy};
+use paimon_fileio_provider::FileIOProvider;
 
 // ======================== Constants ========================
 
@@ -578,27 +578,26 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearch<
 // ---- Searcher registry (handles backed by FileIOProvider) ----
 
 struct SearcherState {
+    /// The DiskANN index (holds the FileIOProvider which has PQ data + graph/vector readers).
     index: Arc<DiskANNIndex<FileIOProvider>>,
-    context: FileIOContext,
-    runtime: tokio::runtime::Runtime,
     dimension: i32,
-    /// Minimum external ID for this index. ext_id = min_ext_id + (int_id - 1).
+    /// Minimum external ID for this index. ext_id = min_ext_id + vec_idx (0-based).
     min_ext_id: i64,
-    /// Reranking context: used after PQ-approximate beam search to compute
-    /// exact distances for the top-K candidates with full-precision vectors.
-    rerank: Option<RerankContext>,
+    /// Graph start/entry point (medoid) internal ID.
+    start_id: u32,
+    /// I/O context for beam search: JVM, reader refs, DirectByteBuffer pointers.
+    io_ctx: BeamSearchIOContext,
 }
 
-/// Context for post-search reranking with full-precision vectors from disk.
-///
-/// When PQ is enabled, beam search uses PQ-approximate distances (in-memory).
-/// After search, we re-read full vectors for the top-K candidates and recompute
-/// exact distances to produce the final ranking.
-struct RerankContext {
-    /// Separate JVM handle for reranking (cheap clone of the pointer).
+/// I/O context for beam search.  Provides JNI access to graph reader (for
+/// neighbor lists) and vector reader (for full-precision vectors on disk).
+struct BeamSearchIOContext {
+    /// JVM handle for attaching threads.
     jvm: jni::JavaVM,
-    /// Separate GlobalRef to the vector reader (same Java object, different ref).
-    reader_ref: jni::objects::GlobalRef,
+    /// GlobalRef to the Java vector reader (`FileIOVectorReader`).
+    vector_reader_ref: jni::objects::GlobalRef,
+    /// GlobalRef to the Java graph reader (`FileIOGraphReader`).
+    graph_reader_ref: jni::objects::GlobalRef,
     /// Native address of the single-vector DirectByteBuffer.
     single_buf_ptr: *mut f32,
     /// Vector dimension.
@@ -609,8 +608,8 @@ struct RerankContext {
 
 // SAFETY: same justification as FileIOProvider — JavaVM and GlobalRef are
 // Send+Sync, raw pointer access is serialized by single-threaded runtime.
-unsafe impl Send for RerankContext {}
-unsafe impl Sync for RerankContext {}
+unsafe impl Send for BeamSearchIOContext {}
+unsafe impl Sync for BeamSearchIOContext {}
 
 /// Compute exact distance between two vectors.
 fn compute_exact_distance(a: &[f32], b: &[f32], metric_type: i32) -> f32 {
@@ -786,14 +785,14 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSeriali
 // ======================== indexCreateSearcherFromReaders ========================
 
 /// Create a search-only handle from two on-demand Java readers: one for graph
-/// structure and one for vectors, with optional PQ data for in-memory
-/// approximate distance computation during beam search.
+/// structure and one for vectors, plus PQ data for in-memory approximate
+/// distance computation during beam search.
 ///
 /// `graphReader`:    Java object with `readNeighbors(int)`, `getDimension()`, etc.
 /// `vectorReader`:   Java object with `loadVector(long)`, DirectByteBuffer accessors.
 /// `min_ext_id`:     Minimum external ID for int_id → ext_id conversion.
-/// `pq_pivots`:      Serialized PQ codebook (byte[]), or null to disable PQ.
-/// `pq_compressed`:  Serialized PQ compressed codes (byte[]), or null.
+/// `pq_pivots`:      Serialized PQ codebook (byte[]).  Must not be null.
+/// `pq_compressed`:  Serialized PQ compressed codes (byte[]).  Must not be null.
 ///
 /// Returns a searcher handle (≥100000) for use with `indexSearchWithReader`.
 #[no_mangle]
@@ -873,60 +872,55 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         Err(_) => max_degree,
     };
 
-    // ---- Deserialize PQ data (if provided) ----
+    // ---- Deserialize PQ data (always required — Java has validated this) ----
 
-    let pq_state = if !pq_pivots.is_null() && !pq_compressed.is_null() {
-        let pivots_bytes: Vec<u8> = match env.convert_byte_array(
-            jni::objects::JByteArray::from(pq_pivots),
-        ) {
-            Ok(b) if !b.is_empty() => b,
-            _ => Vec::new(),
-        };
-        let compressed_bytes: Vec<u8> = match env.convert_byte_array(
-            jni::objects::JByteArray::from(pq_compressed),
-        ) {
-            Ok(b) if !b.is_empty() => b,
-            _ => Vec::new(),
-        };
+    if pq_pivots.is_null() || pq_compressed.is_null() {
+        let _ = env.throw_new("java/lang/IllegalArgumentException", "PQ pivots and compressed data must not be null");
+        return 0;
+    }
 
-        if !pivots_bytes.is_empty() && !compressed_bytes.is_empty() {
-            match paimon_fileio_provider::PQState::deserialize(&pivots_bytes, &compressed_bytes) {
-                Ok(pq) => Some(pq),
-                Err(e) => {
-                    // PQ deserialization failed — fall back to full-precision search.
-                    eprintln!("PQ deserialization failed (falling back to full search): {}", e);
-                    None
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
+    let pivots_bytes: Vec<u8> = match env.convert_byte_array(
+        jni::objects::JByteArray::from(pq_pivots),
+    ) {
+        Ok(b) if !b.is_empty() => b,
+        _ => { let _ = env.throw_new("java/lang/IllegalArgumentException", "PQ pivots byte array is empty"); return 0; }
+    };
+    let compressed_bytes: Vec<u8> = match env.convert_byte_array(
+        jni::objects::JByteArray::from(pq_compressed),
+    ) {
+        Ok(b) if !b.is_empty() => b,
+        _ => { let _ = env.throw_new("java/lang/IllegalArgumentException", "PQ compressed byte array is empty"); return 0; }
     };
 
-    let pq_enabled = pq_state.is_some();
+    let pq_state = match paimon_fileio_provider::PQState::deserialize(&pivots_bytes, &compressed_bytes) {
+        Ok(pq) => pq,
+        Err(e) => {
+            let _ = env.throw_new("java/lang/RuntimeException", format!("PQ deserialization failed: {}", e));
+            return 0;
+        }
+    };
 
-    // ---- Create reranking context (separate GlobalRef + JVM for post-search reranking) ----
+    // ---- Create beam search I/O context (separate GlobalRefs + JVM for search I/O) ----
 
-    let rerank = if pq_enabled {
-        let rerank_reader_ref = match env.new_global_ref(&vector_reader) {
-            Ok(g) => g,
-            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("rerank reader ref: {}", e)); return 0; }
-        };
-        let rerank_jvm = match env.get_java_vm() {
-            Ok(vm) => vm,
-            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("rerank JVM: {}", e)); return 0; }
-        };
-        Some(RerankContext {
-            jvm: rerank_jvm,
-            reader_ref: rerank_reader_ref,
-            single_buf_ptr,
-            dim,
-            metric_type,
-        })
-    } else {
-        None
+    let io_vector_ref = match env.new_global_ref(&vector_reader) {
+        Ok(g) => g,
+        Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("io vector ref: {}", e)); return 0; }
+    };
+    let io_graph_ref = match env.new_global_ref(&graph_reader) {
+        Ok(g) => g,
+        Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("io graph ref: {}", e)); return 0; }
+    };
+    let io_jvm = match env.get_java_vm() {
+        Ok(vm) => vm,
+        Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("io JVM: {}", e)); return 0; }
+    };
+    let io_ctx = BeamSearchIOContext {
+        jvm: io_jvm,
+        vector_reader_ref: io_vector_ref,
+        graph_reader_ref: io_graph_ref,
+        single_buf_ptr,
+        dim,
+        metric_type,
     };
 
     // Start point is not stored in data file; use a dummy vector.
@@ -949,7 +943,7 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         pq_state,
     );
 
-    // Build DiskANNIndex config.
+    // Build DiskANNIndex config (still needed for the provider wrapper).
     let md = std::cmp::max(max_degree, 4);
     let bls = std::cmp::max(build_ls, md);
     let metric = map_metric(metric_type);
@@ -964,23 +958,14 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("config: {:?}", e)); return 0; }
     };
 
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(r) => r,
-        Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("runtime: {}", e)); return 0; }
-    };
-
     let index = Arc::new(DiskANNIndex::new(index_config, provider, None));
 
     let searcher = SearcherState {
         index,
-        context: FileIOContext,
-        runtime,
         dimension,
         min_ext_id,
-        rerank,
+        start_id,
+        io_ctx,
     };
 
     match searcher_registry().lock() {
@@ -992,6 +977,18 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
 // ======================== indexSearchWithReader ========================
 
 /// Search on a searcher handle created by `indexCreateSearcherFromReaders`.
+///
+/// Implements the standard DiskANN search algorithm:
+///
+/// 1. **Start** from the medoid (graph entry point).
+/// 2. **Beam Search loop**:
+///    - Pop the unvisited node with the smallest **PQ distance** from the beam.
+///    - **Disk I/O**: read its full vector + neighbor list via JNI.
+///    - **Compute Exact**: use the full vector to compute exact distance, update
+///      the result heap.
+///    - **Expand**: for each neighbor, compute **PQ distance** (in-memory).
+///    - **Push**: add neighbors with good PQ distance to the beam (capped at L).
+/// 3. **Return** the result heap (already exactly sorted).
 #[no_mangle]
 pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearchWithReader<'local>(
     mut env: JNIEnv<'local>,
@@ -1034,116 +1031,189 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexSearchW
     let mut result_dist = vec![f32::MAX; total];
     let mut result_lbl  = vec![-1i64; total];
 
-    let strat = FileIOStrategy::new();
+    let provider = state.index.provider();
+    let pq = &provider.pq_state;
+    let io = &state.io_ctx;
+    let start_id = state.start_id;
+
+    // Attach JNI thread once for all queries.
+    let mut jni_env = match io.jvm.attach_current_thread() {
+        Ok(e) => e,
+        Err(e) => {
+            let _ = env.throw_new("java/lang/RuntimeException", format!("JVM attach: {}", e));
+            return;
+        }
+    };
 
     for qi in 0..num {
         let qvec = &query[qi * dimension..(qi + 1) * dimension];
-        let search_k = top_k + 1;
-        let l = std::cmp::max(search_list_size as usize, search_k);
+        let l = std::cmp::max(search_list_size as usize, top_k);
 
-        let params = match graph::SearchParams::new(search_k, l, None) {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = env.throw_new("java/lang/IllegalArgumentException",
-                    format!("Invalid search params: {}", e));
-                return;
-            }
-        };
+        // ---- Pre-compute PQ distance lookup table for this query ----
+        let distance_table = pq.compute_distance_table(qvec, io.metric_type);
 
-        let mut neighbors = vec![Neighbor::<u32>::default(); search_k];
+        // ---- Beam: sorted candidate list, capped at L entries ----
+        // Each entry: (pq_distance, internal_node_id).
+        // Sorted ascending by pq_distance so beam[0] is always the closest.
+        let mut beam: Vec<(f32, u32)> = Vec::with_capacity(l + 1);
+        let mut visited = std::collections::HashSet::<u32>::with_capacity(l * 2);
 
-        let idx_clone = Arc::clone(&state.index);
-        let search_result = panic::catch_unwind(AssertUnwindSafe(|| {
-            state.runtime.block_on(idx_clone.search(
-                &strat,
-                &state.context,
-                qvec,
-                &params,
-                &mut BackInserter::new(&mut neighbors),
-            ))
-        }));
+        // ---- Result heap: max-heap of (exact_distance, vec_idx) capped at top_k ----
+        let mut results: Vec<(f32, usize)> = Vec::with_capacity(top_k + 1);
+        let mut result_worst = f32::MAX;
 
-        let stats = match search_result {
-            Ok(Ok(s)) => s,
-            Ok(Err(e)) => {
-                let _ = env.throw_new("java/lang/RuntimeException",
-                    format!("Search failed: {}", e));
-                return;
-            }
-            Err(_) => {
-                let _ = env.throw_new("java/lang/RuntimeException", "Search panicked");
-                return;
-            }
-        };
+        // Seed beam with the start point (medoid).
+        // start_id is an internal node ID; vec_idx = start_id - 1.
+        {
+            let start_vec_idx = (start_id as usize).wrapping_sub(1);
+            let start_pq_dist = if start_vec_idx < pq.num_vectors {
+                pq.adc_distance(start_vec_idx, &distance_table, io.metric_type)
+            } else {
+                f32::MAX
+            };
+            beam.push((start_pq_dist, start_id));
+        }
 
-        let rc = stats.result_count as usize;
+        // ---- Beam search loop ----
+        loop {
+            // Find the closest unvisited candidate in the beam.
+            let next = beam.iter()
+                .enumerate()
+                .filter(|(_, (_, id))| !visited.contains(id))
+                .min_by(|a, b| a.1.0.partial_cmp(&b.1.0).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(idx, &(dist, id))| (idx, dist, id));
 
-        // ---- Reranking: replace PQ-approximate distances with exact distances ----
-        // When PQ is enabled, beam search used PQ-reconstructed vectors for distance
-        // computation.  Now we read full-precision vectors from disk for the top
-        // candidates and recompute exact distances, then re-sort.
-        if let Some(ref rerank_ctx) = state.rerank {
-            // Collect valid (non-start-point) candidates.
-            let mut valid_indices: Vec<usize> = (0..rc)
-                .filter(|&ri| neighbors[ri].id != START_POINT_ID)
-                .collect();
+            let (_beam_idx, _pq_dist, node_id) = match next {
+                Some(t) => t,
+                None => break, // No more unvisited candidates — convergence.
+            };
 
-            // Rerank: read full vector and compute exact distance for each candidate.
-            if let Ok(mut renv) = rerank_ctx.jvm.attach_current_thread() {
-                for &ri in &valid_indices {
-                    let id = neighbors[ri].id;
-                    let position = (id as i64) - 1;
-                    let success = renv.call_method(
-                        &rerank_ctx.reader_ref,
-                        "loadVector",
-                        "(J)Z",
-                        &[jni::objects::JValue::Long(position)],
-                    );
-                    if let Ok(v) = success {
-                        if let Ok(true) = v.z() {
-                            let vec = unsafe {
-                                std::slice::from_raw_parts(rerank_ctx.single_buf_ptr, rerank_ctx.dim)
-                            };
-                            neighbors[ri].distance =
-                                compute_exact_distance(qvec, vec, rerank_ctx.metric_type);
+            visited.insert(node_id);
+
+            // ---- Disk I/O: read full vector for this node ----
+            // (skip start point if it has no data vector — int_id 0 is synthetic)
+            let vec_idx = (node_id as usize).wrapping_sub(1);
+
+            if node_id != START_POINT_ID && vec_idx < pq.num_vectors {
+                let position = vec_idx as i64;
+                let load_ok = jni_env.call_method(
+                    &io.vector_reader_ref,
+                    "loadVector",
+                    "(J)Z",
+                    &[jni::objects::JValue::Long(position)],
+                );
+                if let Ok(v) = load_ok {
+                    if let Ok(true) = v.z() {
+                        let full_vec = unsafe {
+                            std::slice::from_raw_parts(io.single_buf_ptr, io.dim)
+                        };
+                        let exact_dist = compute_exact_distance(qvec, full_vec, io.metric_type);
+
+                        // Update result heap (keep top_k smallest exact distances).
+                        if results.len() < top_k {
+                            results.push((exact_dist, vec_idx));
+                            if results.len() == top_k {
+                                result_worst = results.iter()
+                                    .map(|e| e.0)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                            }
+                        } else if exact_dist < result_worst {
+                            // Replace the worst entry.
+                            if let Some(pos) = results.iter().position(|e| e.0 == result_worst) {
+                                results[pos] = (exact_dist, vec_idx);
+                                result_worst = results.iter()
+                                    .map(|e| e.0)
+                                    .fold(f32::NEG_INFINITY, f32::max);
+                            }
                         }
                     }
                 }
+            }
 
-                // Re-sort valid candidates by exact distance.
-                valid_indices.sort_by(|&a, &b| {
-                    neighbors[a]
-                        .distance
-                        .partial_cmp(&neighbors[b].distance)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+            // ---- Read neighbor list for this node ----
+            let neighbors: Vec<u32> = {
+                // Try graph cache first.
+                if let Some(term) = provider.graph.get(&node_id) {
+                    term.neighbors.iter().copied().collect()
+                } else {
+                    // Fetch from graph reader via JNI.
+                    let ret = jni_env.call_method(
+                        &io.graph_reader_ref,
+                        "readNeighbors",
+                        "(I)[I",
+                        &[jni::objects::JValue::Int(node_id as i32)],
+                    );
+                    match ret {
+                        Ok(v) => match v.l() {
+                            Ok(obj) if !obj.is_null() => {
+                                let int_array = jni::objects::JIntArray::from(obj);
+                                let arr_len = jni_env.get_array_length(&int_array).unwrap_or(0) as usize;
+                                let mut buf = vec![0i32; arr_len];
+                                let _ = jni_env.get_int_array_region(&int_array, 0, &mut buf);
+                                let nbrs: Vec<u32> = buf.into_iter().map(|v| v as u32).collect();
+                                // Cache for future queries.
+                                let adj = diskann::graph::AdjacencyList::from_iter_untrusted(nbrs.iter().copied());
+                                provider.graph.insert(node_id, paimon_fileio_provider::GraphTerm { neighbors: adj });
+                                nbrs
+                            }
+                            _ => Vec::new(),
+                        },
+                        Err(_) => {
+                            let _ = jni_env.exception_clear();
+                            Vec::new()
+                        }
+                    }
+                }
+            };
 
-                // Collect results from the re-sorted order.
-                let mut cnt = 0;
-                for &ri in &valid_indices {
-                    if cnt >= top_k { break; }
-                    let nb = &neighbors[ri];
-                    let idx = qi * top_k + cnt;
-                    result_lbl[idx] = state.min_ext_id + (nb.id as i64) - 1;
-                    result_dist[idx] = nb.distance;
-                    cnt += 1;
+            // ---- Expand: compute PQ distance for each neighbor, add to beam ----
+            let beam_worst = if beam.len() >= l {
+                beam.last().map(|e| e.0).unwrap_or(f32::MAX)
+            } else {
+                f32::MAX
+            };
+
+            for &nbr_id in &neighbors {
+                if visited.contains(&nbr_id) {
+                    continue;
+                }
+                // Already in beam? Skip duplicate.
+                if beam.iter().any(|&(_, id)| id == nbr_id) {
+                    continue;
+                }
+
+                let nbr_vec_idx = (nbr_id as usize).wrapping_sub(1);
+                let nbr_pq_dist = if nbr_vec_idx < pq.num_vectors {
+                    pq.adc_distance(nbr_vec_idx, &distance_table, io.metric_type)
+                } else {
+                    f32::MAX
+                };
+
+                if beam.len() < l || nbr_pq_dist < beam_worst {
+                    // Insert in sorted order.
+                    let insert_pos = beam.partition_point(|e| e.0 < nbr_pq_dist);
+                    beam.insert(insert_pos, (nbr_pq_dist, nbr_id));
+                    // Trim to L entries.
+                    if beam.len() > l {
+                        beam.truncate(l);
+                    }
                 }
             }
-        } else {
-            // No PQ / no reranking — distances are already exact.
-            let mut cnt = 0;
-            for ri in 0..rc {
-                if cnt >= top_k { break; }
-                let nb = &neighbors[ri];
-                if nb.id == START_POINT_ID { continue; }
-                let idx = qi * top_k + cnt;
-                result_lbl[idx] = state.min_ext_id + (nb.id as i64) - 1;
-                result_dist[idx] = nb.distance;
-                cnt += 1;
+        }
+
+        // ---- Collect top-K results (sorted by exact distance) ----
+        results.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        for (cnt, &(exact_dist, vec_idx)) in results.iter().enumerate() {
+            if cnt >= top_k {
+                break;
             }
+            let idx = qi * top_k + cnt;
+            result_lbl[idx] = state.min_ext_id + vec_idx as i64;
+            result_dist[idx] = exact_dist;
         }
     }
 
+    drop(jni_env);
     drop(state);
 
     // Write back distances.
