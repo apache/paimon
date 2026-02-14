@@ -43,18 +43,21 @@ public class IndexSearcher implements AutoCloseable {
     /** Native searcher handle (≥100 000, distinct from Index handles). */
     private long nativeHandle;
 
-    /** Resources to close when this searcher is closed. */
-    private final Closeable[] closeables;
+    private final Closeable graphReader;
+
+    private final Closeable vectorReader;
 
     /** Vector dimension. */
     private final int dimension;
 
     private volatile boolean closed = false;
 
-    private IndexSearcher(long nativeHandle, int dimension, Closeable... closeables) {
+    private IndexSearcher(
+            long nativeHandle, int dimension, Closeable graphReader, Closeable vectorReader) {
         this.nativeHandle = nativeHandle;
         this.dimension = dimension;
-        this.closeables = closeables;
+        this.graphReader = graphReader;
+        this.vectorReader = vectorReader;
     }
 
     /**
@@ -135,12 +138,15 @@ public class IndexSearcher implements AutoCloseable {
                 DiskAnnNative.indexDestroySearcher(nativeHandle);
                 nativeHandle = 0;
             }
-            for (Closeable c : closeables) {
-                try {
-                    c.close();
-                } catch (Exception e) {
-                    // best-effort
+            try {
+                if (graphReader != null) {
+                    graphReader.close();
                 }
+                if (vectorReader != null) {
+                    vectorReader.close();
+                }
+            } catch (Exception e) {
+                // best-effort
             }
         }
     }

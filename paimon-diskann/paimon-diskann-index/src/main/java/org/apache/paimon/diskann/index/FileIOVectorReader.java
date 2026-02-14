@@ -24,19 +24,22 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * Fetches vectors from a DiskANN data file through a Paimon {@link SeekableInputStream}.
  *
  * <p>The underlying stream can be backed by any Paimon FileIO provider — local, HDFS, S3, OSS, etc.
- * This class adds an LRU cache so that repeated reads for the same vector (common during DiskANN's
- * beam search) do not trigger redundant I/O.
  *
- * <p>The Rust JNI layer invokes {@link #readVector(long)} via reflection during DiskANN's native
- * beam search — no specific Java interface is required.
+ * <p>The Rust JNI layer uses two access modes:
+ *
+ * <ul>
+ *   <li><b>Single-vector zero-copy</b>: {@link #loadVector(long)} reads a vector into a
+ *       pre-allocated {@link ByteBuffer#allocateDirect DirectByteBuffer}. The Rust side reads
+ *       floats directly from the native memory address — no {@code float[]} allocation and no JNI
+ *       array copy.
+ *   <li><b>Batch prefetch</b>: {@link #readVectorsBatch(long[], int)} reads multiple vectors into a
+ *       larger DirectByteBuffer in a single JNI call, reducing per-vector JNI round-trip overhead.
+ * </ul>
  *
  * <h3>Data file layout</h3>
  *
@@ -55,59 +58,88 @@ public class FileIOVectorReader implements Closeable {
     /** Vector dimension. */
     private final int dimension;
 
-    /** LRU cache: position → float[]. */
-    private final LinkedHashMap<Long, float[]> cache;
+    /** Byte size of a single vector: {@code dimension * Float.BYTES}. */
+    private final int vectorBytes;
 
-    /** Reusable byte buffer for reading a single vector. */
+    /** Reusable heap byte buffer for stream I/O (stream API requires {@code byte[]}). */
     private final byte[] readBuf;
+
+    /**
+     * Pre-allocated DirectByteBuffer for single-vector reads. Rust reads directly from its native
+     * address via {@code GetDirectBufferAddress} — zero JNI array copy.
+     */
+    private final ByteBuffer directBuf;
+
+    /**
+     * Pre-allocated DirectByteBuffer for batch reads. Holds up to {@code maxBatchSize} vectors
+     * packed sequentially.
+     */
+    private final ByteBuffer batchBuf;
+
+    /** Maximum number of vectors that fit in {@link #batchBuf}. */
+    private final int maxBatchSize;
 
     /**
      * Create a reader.
      *
      * @param input seekable input stream for the data file
      * @param dimension vector dimension
-     * @param cacheSize maximum number of cached vectors (0 disables caching)
+     * @param maxBatchSize maximum number of vectors in a batch read (typically max_degree)
      */
-    public FileIOVectorReader(SeekableInputStream input, int dimension, int cacheSize) {
+    public FileIOVectorReader(SeekableInputStream input, int dimension, int maxBatchSize) {
         this.input = input;
         this.dimension = dimension;
-        this.readBuf = new byte[dimension * Float.BYTES];
+        this.vectorBytes = dimension * Float.BYTES;
+        this.readBuf = new byte[vectorBytes];
+        this.maxBatchSize = Math.max(maxBatchSize, 1);
 
-        final int cap = Math.max(cacheSize, 16);
-        this.cache =
-                new LinkedHashMap<Long, float[]>(cap, 0.75f, true) {
-                    @Override
-                    protected boolean removeEldestEntry(Map.Entry<Long, float[]> eldest) {
-                        return size() > cap;
-                    }
-                };
+        // Single-vector DirectByteBuffer — Rust gets its native address once at init.
+        this.directBuf = ByteBuffer.allocateDirect(vectorBytes).order(ByteOrder.nativeOrder());
+
+        // Batch DirectByteBuffer — sized for maxBatchSize vectors.
+        this.batchBuf =
+                ByteBuffer.allocateDirect(this.maxBatchSize * vectorBytes)
+                        .order(ByteOrder.nativeOrder());
     }
 
+    // ------------------------------------------------------------------
+    // DirectByteBuffer accessors (called by Rust JNI during init)
+    // ------------------------------------------------------------------
+
+    /** Return the single-vector DirectByteBuffer. Rust caches its native address. */
+    public ByteBuffer getDirectBuffer() {
+        return directBuf;
+    }
+
+    /** Return the batch DirectByteBuffer. Rust caches its native address. */
+    public ByteBuffer getBatchBuffer() {
+        return batchBuf;
+    }
+
+    /** Return the maximum batch size supported by {@link #batchBuf}. */
+    public int getMaxBatchSize() {
+        return maxBatchSize;
+    }
+
+    // ------------------------------------------------------------------
+    // Single-vector zero-copy read (hot path during beam search)
+    // ------------------------------------------------------------------
+
     /**
-     * Read the vector associated with the given <em>external</em> ID.
+     * Read a single vector into the pre-allocated {@link #directBuf}.
      *
-     * <p>Called by the Rust JNI layer during DiskANN's native beam search. Returns a <b>defensive
-     * copy</b> — callers may freely modify the returned array without corrupting the cache.
+     * <p>After this call returns {@code true}, the vector data is available in the DirectByteBuffer
+     * at offset 0. The Rust side reads floats directly from the native memory address.
      *
-     * <p>The byte offset is computed as {@code position * dimension * Float.BYTES}.
-     *
-     * @param position the 0-based position in the data file (int_id - 1 for user vectors)
-     * @return the float vector (a fresh copy), or {@code null} if position is negative
+     * @param position 0-based position in the data file (int_id − 1)
+     * @return {@code true} if the vector was read successfully, {@code false} if position is
+     *     invalid
      */
-    public float[] readVector(long position) {
-        // Start point (position = -1) is not in the data file.
+    public boolean loadVector(long position) {
         if (position < 0) {
-            return null;
+            return false;
         }
-
-        // 1. LRU cache hit — return a defensive copy.
-        float[] cached = cache.get(position);
-        if (cached != null) {
-            return Arrays.copyOf(cached, cached.length);
-        }
-
-        // 2. Compute byte offset: sequential position.
-        long byteOffset = position * dimension * Float.BYTES;
+        long byteOffset = position * vectorBytes;
         try {
             input.seek(byteOffset);
             readFully(input, readBuf);
@@ -115,20 +147,79 @@ public class FileIOVectorReader implements Closeable {
             throw new RuntimeException(
                     "Failed to read vector at position " + position + " offset " + byteOffset, e);
         }
+        // Copy from heap byte[] into DirectByteBuffer (single memcpy, no float[] allocation).
+        directBuf.clear();
+        directBuf.put(readBuf, 0, vectorBytes);
+        return true;
+    }
 
-        // 3. Decode floats.
+    // ------------------------------------------------------------------
+    // Batch prefetch (reduces JNI call count)
+    // ------------------------------------------------------------------
+
+    /**
+     * Read multiple vectors into the batch DirectByteBuffer in one JNI call.
+     *
+     * <p>Vectors are packed sequentially in the batch buffer: vector i occupies bytes {@code [i *
+     * vectorBytes, (i+1) * vectorBytes)}. The Rust side reads all vectors from the native address
+     * after a single JNI round-trip.
+     *
+     * @param positions array of 0-based positions (int_id − 1 for each vector)
+     * @param count number of positions to read (must be ≤ {@link #maxBatchSize})
+     * @return number of vectors successfully read (always equals {@code count} on success)
+     */
+    public int readVectorsBatch(long[] positions, int count) {
+        int n = Math.min(count, maxBatchSize);
+        batchBuf.clear();
+        for (int i = 0; i < n; i++) {
+            long byteOffset = positions[i] * vectorBytes;
+            try {
+                input.seek(byteOffset);
+                readFully(input, readBuf);
+                batchBuf.put(readBuf, 0, vectorBytes);
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        "Failed to batch-read vector at position "
+                                + positions[i]
+                                + " offset "
+                                + byteOffset,
+                        e);
+            }
+        }
+        return n;
+    }
+
+    // ------------------------------------------------------------------
+    // Legacy read (kept for backward compatibility)
+    // ------------------------------------------------------------------
+
+    /**
+     * Read a vector and return as {@code float[]}. This is the legacy path — prefer {@link
+     * #loadVector(long)} for the zero-copy hot path.
+     *
+     * @param position 0-based position in the data file
+     * @return the float vector, or {@code null} if position is negative
+     */
+    public float[] readVector(long position) {
+        if (position < 0) {
+            return null;
+        }
+        long byteOffset = position * vectorBytes;
+        try {
+            input.seek(byteOffset);
+            readFully(input, readBuf);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to read vector at position " + position + " offset " + byteOffset, e);
+        }
         float[] vector = new float[dimension];
         ByteBuffer bb = ByteBuffer.wrap(readBuf).order(ByteOrder.nativeOrder());
         bb.asFloatBuffer().get(vector);
-
-        // 4. Store a separate copy in the cache so the returned array is independent.
-        cache.put(position, Arrays.copyOf(vector, vector.length));
         return vector;
     }
 
     @Override
     public void close() throws IOException {
-        cache.clear();
         input.close();
     }
 

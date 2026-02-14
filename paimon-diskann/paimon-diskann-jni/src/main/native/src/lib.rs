@@ -787,10 +787,44 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("get JVM: {}", e)); return 0; }
     };
 
+    // ---- Obtain DirectByteBuffer native pointers from the vector reader ----
+
+    // Single-vector DirectByteBuffer: getDirectBuffer() → ByteBuffer
+    let single_buf_ptr: *mut f32 = {
+        let buf_obj = match env.call_method(&vector_reader, "getDirectBuffer", "()Ljava/nio/ByteBuffer;", &[]) {
+            Ok(v) => match v.l() { Ok(o) => o, Err(_) => { let _ = env.throw_new("java/lang/RuntimeException", "Bad return from getDirectBuffer"); return 0; } },
+            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("getDirectBuffer: {}", e)); return 0; }
+        };
+        let byte_buf = jni::objects::JByteBuffer::from(buf_obj);
+        match env.get_direct_buffer_address(&byte_buf) {
+            Ok(ptr) => ptr as *mut f32,
+            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("GetDirectBufferAddress (single): {}", e)); return 0; }
+        }
+    };
+
+    // Batch DirectByteBuffer: getBatchBuffer() → ByteBuffer
+    let batch_buf_ptr: *mut f32 = {
+        let buf_obj = match env.call_method(&vector_reader, "getBatchBuffer", "()Ljava/nio/ByteBuffer;", &[]) {
+            Ok(v) => match v.l() { Ok(o) => o, Err(_) => { let _ = env.throw_new("java/lang/RuntimeException", "Bad return from getBatchBuffer"); return 0; } },
+            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("getBatchBuffer: {}", e)); return 0; }
+        };
+        let byte_buf = jni::objects::JByteBuffer::from(buf_obj);
+        match env.get_direct_buffer_address(&byte_buf) {
+            Ok(ptr) => ptr as *mut f32,
+            Err(e) => { let _ = env.throw_new("java/lang/RuntimeException", format!("GetDirectBufferAddress (batch): {}", e)); return 0; }
+        }
+    };
+
+    // Max batch size from the vector reader.
+    let max_batch_size: usize = match env.call_method(&vector_reader, "getMaxBatchSize", "()I", &[]) {
+        Ok(v) => match v.i() { Ok(i) => i as usize, Err(_) => max_degree },
+        Err(_) => max_degree,
+    };
+
     // Start point is not stored in data file; use a dummy vector.
     let start_vec = vec![1.0f32; dim];
 
-    // Build the FileIOProvider with on-demand graph reading.
+    // Build the FileIOProvider with on-demand graph reading and zero-copy vector access.
     let provider = FileIOProvider::new_with_readers(
         count,
         start_id,
@@ -801,6 +835,9 @@ pub extern "system" fn Java_org_apache_paimon_diskann_DiskAnnNative_indexCreateS
         dim,
         metric_type,
         max_degree,
+        single_buf_ptr,
+        batch_buf_ptr,
+        max_batch_size,
     );
 
     // Build DiskANNIndex config.

@@ -25,11 +25,19 @@
 //!
 //!  - **Graph**: read through `FileIOGraphReader.readNeighbors(int)`, which
 //!    reads from a `SeekableInputStream` over the `.index` file.
-//!  - **Vectors**: read through `FileIOVectorReader.readVector(long)`, which
-//!    reads from a `SeekableInputStream` over the `.data` file.
+//!  - **Vectors**: read through `FileIOVectorReader.loadVector(long)` (zero-copy
+//!    via DirectByteBuffer) or `readVectorsBatch(long[], int)` (batch prefetch).
 //!
-//! Frequently accessed neighbors and vectors are cached in a `DashMap` and
-//! an LRU cache respectively, to reduce FileIO/JNI round-trips.
+//! Performance optimizations:
+//!
+//!  - **Zero-copy vector reads**: `loadVector` writes into a pre-allocated
+//!    DirectByteBuffer.  The Rust side reads floats directly from the native
+//!    memory address — no `float[]` allocation, no JNI array copy.
+//!  - **Batch prefetch**: When a node's neighbors are fetched, all neighbor
+//!    vectors are batch-prefetched in a single JNI call, populating the
+//!    provider-level `vector_cache`.  Subsequent `get_element` calls hit cache.
+//!  - **Graph cache**: A `DashMap` lazily caches graph entries to reduce
+//!    repeated FileIO reads.
 
 use std::collections::HashMap;
 
@@ -41,7 +49,6 @@ use diskann::{ANNError, ANNResult};
 use diskann_vector::distance::Metric;
 
 use jni::objects::GlobalRef;
-use jni::sys::jlong;
 use jni::JavaVM;
 
 use crate::map_metric;
@@ -74,43 +81,6 @@ impl From<FileIOProviderError> for ANNError {
 
 diskann::always_escalate!(FileIOProviderError);
 
-// ======================== LRU Cache ========================
-
-/// Tiny LRU cache for recently fetched vectors to reduce FileIO/JNI round-trips.
-struct VectorCache {
-    map: HashMap<u32, Box<[f32]>>,
-    order: Vec<u32>,
-    capacity: usize,
-}
-
-impl VectorCache {
-    fn new(capacity: usize) -> Self {
-        Self {
-            map: HashMap::with_capacity(capacity),
-            order: Vec::with_capacity(capacity),
-            capacity,
-        }
-    }
-
-    fn get(&self, id: u32) -> Option<&[f32]> {
-        self.map.get(&id).map(|v| &**v)
-    }
-
-    fn put(&mut self, id: u32, vec: Box<[f32]>) {
-        if self.map.contains_key(&id) {
-            return;
-        }
-        if self.order.len() >= self.capacity {
-            if let Some(evicted) = self.order.first().copied() {
-                self.order.remove(0);
-                self.map.remove(&evicted);
-            }
-        }
-        self.order.push(id);
-        self.map.insert(id, vec);
-    }
-}
-
 // ======================== Graph Term ========================
 
 /// One entry in the graph cache: its neighbor list.
@@ -124,11 +94,17 @@ pub struct GraphTerm {
 ///
 /// Graph neighbors and vectors are read on demand from FileIO-backed storage
 /// (local, HDFS, S3, OSS, etc.) via JNI callbacks to Java reader objects.
-/// A `DashMap` lazily caches graph entries to reduce repeated FileIO reads.
+///
+/// Two levels of caching reduce FileIO/JNI round-trips:
+///   - **Graph**: `DashMap<u32, GraphTerm>` (lazy, write-once, unbounded).
+///   - **Vectors**: `DashMap<u32, Box<[f32]>>` populated by batch prefetch
+///     after each neighbor expansion, plus per-search LRU in `FileIOAccessor`.
 pub struct FileIOProvider {
     /// Graph cache: internal_id → { neighbors }.
-    /// Acts as a lazy cache — entries are populated on first access from FileIO.
     graph: DashMap<u32, GraphTerm>,
+    /// Provider-level vector cache populated by batch prefetch.
+    /// Keyed by internal node ID (u32).
+    vector_cache: DashMap<u32, Box<[f32]>>,
     /// Total number of nodes (start point + user vectors).
     num_nodes: usize,
     /// Start-point IDs and their vectors (always kept in memory).
@@ -138,7 +114,6 @@ pub struct FileIOProvider {
     /// Global reference to the Java vector reader object (`FileIOVectorReader`).
     reader_ref: GlobalRef,
     /// Global reference to the Java graph reader object (`FileIOGraphReader`).
-    /// When set, graph neighbors are fetched on demand via JNI callbacks.
     graph_reader_ref: Option<GlobalRef>,
     /// Vector dimension.
     dim: usize,
@@ -146,6 +121,14 @@ pub struct FileIOProvider {
     metric: Metric,
     /// Max degree.
     max_degree: usize,
+    /// Native memory address of the single-vector DirectByteBuffer.
+    /// Points to `dim` floats.  Valid for the lifetime of the Java reader.
+    single_buf_ptr: *mut f32,
+    /// Native memory address of the batch DirectByteBuffer.
+    /// Points to `max_batch_size * dim` floats.
+    batch_buf_ptr: *mut f32,
+    /// Maximum number of vectors in one batch read.
+    max_batch_size: usize,
 }
 
 impl std::fmt::Debug for FileIOProvider {
@@ -155,19 +138,24 @@ impl std::fmt::Debug for FileIOProvider {
             .field("metric", &self.metric)
             .field("max_degree", &self.max_degree)
             .field("graph_size", &self.graph.len())
+            .field("vector_cache_size", &self.vector_cache.len())
             .finish()
     }
 }
 
 // SAFETY: JavaVM is Send+Sync, GlobalRef is Send+Sync.
+// Raw pointers are stable (backed by Java DirectByteBuffer kept alive by GlobalRef).
+// All access is serialized by single-threaded tokio runtime.
 unsafe impl Send for FileIOProvider {}
 unsafe impl Sync for FileIOProvider {}
 
 impl FileIOProvider {
-    /// Build a search-only provider with on-demand graph reading (no pre-loaded graph data).
+    /// Build a search-only provider with on-demand graph reading and zero-copy
+    /// vector access via DirectByteBuffers.
     ///
-    /// The graph `DashMap` starts empty and acts as a lazy cache — entries are populated
-    /// on first access via FileIO through `graphReader.readNeighbors(int)`.
+    /// `single_buf_ptr` and `batch_buf_ptr` are native addresses obtained via
+    /// JNI `GetDirectBufferAddress` on the Java reader's DirectByteBuffers.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_readers(
         num_nodes: usize,
         start_id: u32,
@@ -178,14 +166,19 @@ impl FileIOProvider {
         dim: usize,
         metric_type: i32,
         max_degree: usize,
+        single_buf_ptr: *mut f32,
+        batch_buf_ptr: *mut f32,
+        max_batch_size: usize,
     ) -> Self {
         let graph = DashMap::new();
+        let vector_cache = DashMap::new();
 
         let mut start_points = HashMap::new();
         start_points.insert(start_id, start_vec);
 
         Self {
             graph,
+            vector_cache,
             num_nodes,
             start_points,
             jvm,
@@ -194,6 +187,9 @@ impl FileIOProvider {
             dim,
             metric: map_metric(metric_type),
             max_degree,
+            single_buf_ptr,
+            batch_buf_ptr,
+            max_batch_size,
         }
     }
 
@@ -205,8 +201,10 @@ impl FileIOProvider {
         self.metric
     }
 
+    // ---- Graph I/O ----
+
     /// Fetch neighbor list from FileIO-backed storage via JNI callback to
-    /// `graphReader.readNeighbors(int)`.  Returns None if graphReader is not set.
+    /// `graphReader.readNeighbors(int)`.
     fn fetch_neighbors(&self, int_id: u32) -> Result<Option<Vec<u32>>, FileIOProviderError> {
         let graph_ref = match &self.graph_reader_ref {
             Some(r) => r,
@@ -258,9 +256,13 @@ impl FileIOProvider {
         Ok(Some(buf.into_iter().map(|v| v as u32).collect()))
     }
 
-    /// Fetch a vector from FileIO-backed storage via JNI callback to
-    /// `vectorReader.readVector(long)`.  The `position` is the 0-based index
-    /// in the data file (position = int_id - 1).
+    // ---- Vector I/O (zero-copy via DirectByteBuffer) ----
+
+    /// Fetch a single vector via `loadVector(long)` and read from DirectByteBuffer.
+    ///
+    /// The Java method writes the vector into the pre-allocated DirectByteBuffer.
+    /// We then read floats directly from the native address — no `float[]`
+    /// allocation and no JNI array copy.
     fn fetch_vector(&self, position: i64) -> Result<Option<Vec<f32>>, FileIOProviderError> {
         let mut env = self
             .jvm
@@ -269,45 +271,114 @@ impl FileIOProvider {
 
         let result = env.call_method(
             &self.reader_ref,
-            "readVector",
-            "(J)[F",
-            &[jni::objects::JValue::Long(position as jlong)],
+            "loadVector",
+            "(J)Z",
+            &[jni::objects::JValue::Long(position)],
         );
 
-        let ret_val = match result {
-            Ok(v) => v,
+        let success = match result {
+            Ok(v) => match v.z() {
+                Ok(b) => b,
+                Err(_) => false,
+            },
             Err(e) => {
                 let _ = env.exception_clear();
                 return Err(FileIOProviderError::JniCallFailed(format!(
-                    "readVector({}) failed: {}",
+                    "loadVector({}) failed: {}",
                     position, e
                 )));
             }
         };
 
-        let obj = match ret_val.l() {
-            Ok(o) => o,
-            Err(_) => return Ok(None),
-        };
-
-        if obj.is_null() {
+        if !success {
             return Ok(None);
         }
 
-        // Convert JFloatArray → Vec<f32>.
-        let float_array = jni::objects::JFloatArray::from(obj);
-        let len = env
-            .get_array_length(&float_array)
-            .map_err(|e| FileIOProviderError::JniCallFailed(format!("get_array_length: {}", e)))?
-            as usize;
+        // Read floats directly from the DirectByteBuffer native address.
+        // SAFETY: single_buf_ptr is valid (backed by Java DirectByteBuffer kept alive
+        // by GlobalRef), and access is serialized (single-threaded tokio runtime).
+        let vec = unsafe {
+            let slice = std::slice::from_raw_parts(self.single_buf_ptr, self.dim);
+            slice.to_vec()
+        };
 
-        let mut buf = vec![0f32; len];
-        env.get_float_array_region(&float_array, 0, &mut buf)
-            .map_err(|e| {
-                FileIOProviderError::JniCallFailed(format!("get_float_array_region: {}", e))
-            })?;
+        Ok(Some(vec))
+    }
 
-        Ok(Some(buf))
+    /// Batch-prefetch vectors into the provider-level `vector_cache`.
+    ///
+    /// Calls `readVectorsBatch(long[], int)` once via JNI, then reads all vectors
+    /// from the batch DirectByteBuffer native address.  Each vector is inserted
+    /// into `vector_cache` keyed by its internal node ID.
+    ///
+    /// `ids` contains internal node IDs (not positions).  Position = id − 1.
+    fn prefetch_vectors(&self, ids: &[u32]) -> Result<(), FileIOProviderError> {
+        if ids.is_empty() || self.batch_buf_ptr.is_null() {
+            return Ok(());
+        }
+
+        let count = std::cmp::min(ids.len(), self.max_batch_size);
+
+        let mut env = self
+            .jvm
+            .attach_current_thread()
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("attach failed: {}", e)))?;
+
+        // Build Java long[] of positions (position = int_id − 1).
+        let positions: Vec<i64> = ids[..count].iter().map(|&id| (id as i64) - 1).collect();
+        let java_positions = env
+            .new_long_array(count as i32)
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("new_long_array: {}", e)))?;
+        env.set_long_array_region(&java_positions, 0, &positions)
+            .map_err(|e| FileIOProviderError::JniCallFailed(format!("set_long_array_region: {}", e)))?;
+
+        // Single JNI call: readVectorsBatch(long[], int) → int
+        // SAFETY: JLongArray wraps a JObject; we reinterpret the raw pointer.
+        let positions_obj = unsafe {
+            jni::objects::JObject::from_raw(java_positions.as_raw())
+        };
+        let result = env.call_method(
+            &self.reader_ref,
+            "readVectorsBatch",
+            "([JI)I",
+            &[
+                jni::objects::JValue::Object(&positions_obj),
+                jni::objects::JValue::Int(count as i32),
+            ],
+        );
+        // Prevent double-free: positions_obj shares the raw handle with java_positions.
+        std::mem::forget(positions_obj);
+
+        let read_count = match result {
+            Ok(v) => match v.i() {
+                Ok(n) => n as usize,
+                Err(_) => 0,
+            },
+            Err(e) => {
+                let _ = env.exception_clear();
+                return Err(FileIOProviderError::JniCallFailed(format!(
+                    "readVectorsBatch failed: {}",
+                    e
+                )));
+            }
+        };
+
+        // Read vectors from batch DirectByteBuffer native address and populate cache.
+        // SAFETY: batch_buf_ptr is valid, access is serialized.
+        for i in 0..read_count {
+            let int_id = ids[i];
+            if self.vector_cache.contains_key(&int_id) {
+                continue; // already cached
+            }
+            let offset = i * self.dim;
+            let vec = unsafe {
+                let slice = std::slice::from_raw_parts(self.batch_buf_ptr.add(offset), self.dim);
+                slice.to_vec()
+            };
+            self.vector_cache.insert(int_id, vec.into_boxed_slice());
+        }
+
+        Ok(())
     }
 }
 
@@ -393,9 +464,11 @@ impl provider::NeighborAccessor for FileIONeighborAccessor<'_> {
         id: Self::Id,
         neighbors: &mut AdjacencyList<Self::Id>,
     ) -> ANNResult<Self> {
-        // 1. Try cached graph (populated upfront or cached from previous FileIO reads).
+        // 1. Try cached graph.
         if let Some(term) = self.provider.graph.get(&id) {
             neighbors.overwrite_trusted(&term.neighbors);
+            // Batch-prefetch neighbor vectors that aren't cached yet.
+            self.prefetch_neighbor_vectors(&term.neighbors);
             return Ok(self);
         }
 
@@ -406,12 +479,40 @@ impl provider::NeighborAccessor for FileIONeighborAccessor<'_> {
                 let adj = AdjacencyList::from_iter_untrusted(neighbor_ids.iter().copied());
                 neighbors.overwrite_trusted(&adj);
                 // Cache in the DashMap for subsequent accesses.
-                self.provider.graph.insert(id, GraphTerm { neighbors: adj });
+                self.provider.graph.insert(id, GraphTerm { neighbors: adj.clone() });
+                // Batch-prefetch neighbor vectors.
+                self.prefetch_neighbor_vectors(&adj);
                 return Ok(self);
             }
         }
 
         Err(ANNError::opaque(FileIOProviderError::InvalidId(id)))
+    }
+}
+
+impl FileIONeighborAccessor<'_> {
+    /// Batch-prefetch vectors for neighbors that aren't already in the vector cache.
+    ///
+    /// This is the key optimization: after discovering neighbors via graph I/O,
+    /// we batch-fetch all their vectors in a single JNI call.  Subsequent
+    /// `get_element` calls for these neighbors will hit the provider-level cache.
+    fn prefetch_neighbor_vectors(&self, adj: &AdjacencyList<u32>) {
+        // Collect uncached neighbor IDs (skip start points and already-cached).
+        let uncached: Vec<u32> = adj
+            .iter()
+            .copied()
+            .filter(|&nid| {
+                !self.provider.start_points.contains_key(&nid)
+                    && !self.provider.vector_cache.contains_key(&nid)
+            })
+            .collect();
+
+        if uncached.is_empty() {
+            return;
+        }
+
+        // Best-effort: don't propagate errors from prefetch.
+        let _ = self.provider.prefetch_vectors(&uncached);
     }
 }
 
@@ -450,9 +551,12 @@ impl provider::DefaultAccessor for FileIOProvider {
 
 // ======================== Accessor ========================
 
-/// Accessor that fetches vectors from FileIO-backed storage via JNI callback.
+/// Accessor that fetches vectors with three cache levels:
 ///
-/// Keeps a local buffer and an LRU cache to reduce FileIO/JNI round-trips.
+/// 1. **Start-point** (always in memory)
+/// 2. **Provider-level `vector_cache`** (populated by batch prefetch)
+/// 3. **Per-search LRU cache** (local to this accessor)
+/// 4. **DirectByteBuffer I/O** (fallback: single JNI call + zero-copy read)
 pub struct FileIOAccessor<'a> {
     provider: &'a FileIOProvider,
     buffer: Box<[f32]>,
@@ -490,26 +594,34 @@ impl provider::Accessor for FileIOAccessor<'_> {
             return Ok(&*self.buffer);
         }
 
-        // 2. Check LRU cache.
+        // 2. Provider-level vector cache (populated by batch prefetch).
+        if let Some(cached) = self.provider.vector_cache.get(&id) {
+            self.buffer.copy_from_slice(&cached);
+            return Ok(&*self.buffer);
+        }
+
+        // 3. Per-search LRU cache.
         if let Some(cached) = self.cache.get(id) {
             self.buffer.copy_from_slice(cached);
             return Ok(&*self.buffer);
         }
 
-        // 3. Fetch from FileIO-backed storage via FileIOVectorReader.readVector(position).
-        //    position = int_id - 1 (start point is int_id=0, user vectors start at 1).
+        // 4. Fetch via DirectByteBuffer I/O (single JNI call + zero-copy read).
         let position = (id as i64) - 1;
-
         let fetched = self.provider.fetch_vector(position)?;
 
         match fetched {
             Some(vec) if vec.len() == self.provider.dim() => {
                 self.buffer.copy_from_slice(&vec);
+                // Populate both caches.
+                self.provider
+                    .vector_cache
+                    .insert(id, vec.clone().into_boxed_slice());
                 self.cache.put(id, vec.into_boxed_slice());
                 Ok(&*self.buffer)
             }
             Some(vec) => Err(FileIOProviderError::JniCallFailed(format!(
-                "readVector({}) returned {} floats, expected {}",
+                "loadVector({}) returned {} floats, expected {}",
                 position,
                 vec.len(),
                 self.provider.dim()
@@ -602,7 +714,7 @@ impl glue::SearchStrategy<FileIOProvider, [f32]> for FileIOStrategy {
         provider: &'a FileIOProvider,
         _context: &'a FileIOContext,
     ) -> Result<FileIOAccessor<'a>, diskann::error::Infallible> {
-        // Cache up to 1024 recently fetched vectors to reduce FileIO round-trips.
+        // Per-search LRU as last-resort cache (most hits come from vector_cache).
         Ok(FileIOAccessor::new(provider, 1024))
     }
 
@@ -653,5 +765,43 @@ impl<'a> glue::AsElement<&'a [f32]> for FileIOAccessor<'a> {
         _id: Self::Id,
     ) -> impl std::future::Future<Output = Result<Self::Element<'_>, Self::Error>> + Send {
         std::future::ready(Ok(vector))
+    }
+}
+
+// ======================== VectorCache (per-search LRU) ========================
+
+/// Tiny LRU cache for per-search vector access.  Most hits should come from the
+/// provider-level `vector_cache`; this is a last-resort fallback.
+struct VectorCache {
+    map: HashMap<u32, Box<[f32]>>,
+    order: Vec<u32>,
+    capacity: usize,
+}
+
+impl VectorCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            map: HashMap::with_capacity(capacity),
+            order: Vec::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn get(&self, id: u32) -> Option<&[f32]> {
+        self.map.get(&id).map(|v| &**v)
+    }
+
+    fn put(&mut self, id: u32, vec: Box<[f32]>) {
+        if self.map.contains_key(&id) {
+            return;
+        }
+        if self.order.len() >= self.capacity {
+            if let Some(evicted) = self.order.first().copied() {
+                self.order.remove(0);
+                self.map.remove(&evicted);
+            }
+        }
+        self.order.push(id);
+        self.map.insert(id, vec);
     }
 }

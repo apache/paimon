@@ -333,7 +333,7 @@ public class DiskAnnVectorGlobalIndexReader implements GlobalIndexReader {
             GlobalIndexIOMeta dataIOMeta = new GlobalIndexIOMeta(dataPath, 0L, new byte[0]);
             SeekableInputStream vectorStream = fileReader.getInputStream(dataIOMeta);
             FileIOVectorReader vectorReader =
-                    new FileIOVectorReader(vectorStream, meta.dim(), VECTOR_CACHE_SIZE);
+                    new FileIOVectorReader(vectorStream, meta.dim(), meta.maxDegree());
 
             // 3. Create DiskANN native searcher with on-demand graph + vector access.
             handle =
