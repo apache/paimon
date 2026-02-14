@@ -22,19 +22,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pyarrow
 import pyarrow.fs as pafs
 
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 from pypaimon.filesystem.local_file_io import LocalFileIO
-from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO, _pyarrow_lt_7
 
 
 class FileIOTest(unittest.TestCase):
     """Test cases for FileIO.to_filesystem_path method."""
 
-    def test_s3_filesystem_path_conversion(self):
+    def test_filesystem_path_conversion(self):
         """Test S3FileSystem path conversion with various formats."""
         file_io = PyArrowFileIO("s3://bucket/warehouse", Options({}))
         self.assertIsInstance(file_io.filesystem, pafs.S3FileSystem)
@@ -66,29 +65,76 @@ class FileIOTest(unittest.TestCase):
         parent_str = str(Path(converted_path).parent)
         self.assertEqual(file_io.to_filesystem_path(parent_str), parent_str)
 
-        from packaging.version import parse as parse_version
+        lt7 = _pyarrow_lt_7()
         oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
             OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com'
         }))
-        lt7 = parse_version(pyarrow.__version__) < parse_version("7.0.0")
         got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
-        expected_path = (
-            "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
-        self.assertEqual(got, expected_path)
+        self.assertEqual(got, "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
+        if lt7:
+            self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx/data.parquet"),
+                             "db-xxx.db/tbl-xxx/data.parquet")
+            self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx"), "db-xxx.db/tbl-xxx")
+            manifest_uri = "oss://test-bucket/warehouse/db.db/table/manifest/manifest-list-abc-0"
+            manifest_key = oss_io.to_filesystem_path(manifest_uri)
+            self.assertEqual(manifest_key, "warehouse/db.db/table/manifest/manifest-list-abc-0",
+                             "OSS+PyArrow6 must pass key only to PyArrow so manifest is written to correct bucket")
+            self.assertFalse(manifest_key.startswith("test-bucket/"),
+                             "path must not start with bucket name or PyArrow 6 writes to wrong bucket")
         nf = MagicMock(type=pafs.FileType.NotFound)
+        get_file_info_calls = []
+
+        def record_get_file_info(paths):
+            get_file_info_calls.append(list(paths))
+            return [MagicMock(type=pafs.FileType.NotFound) for _ in paths]
+
         mock_fs = MagicMock()
-        mock_fs.get_file_info.side_effect = [[nf], [nf]]
+        mock_fs.get_file_info.side_effect = record_get_file_info if lt7 else [[nf], [nf]]
         mock_fs.create_dir = MagicMock()
         mock_fs.open_output_stream.return_value = MagicMock()
         oss_io.filesystem = mock_fs
         oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
-        mock_fs.create_dir.assert_called_once()
-        path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
         if lt7:
-            expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
+            mock_fs.create_dir.assert_not_called()
         else:
-            expected_parent = str(Path(path_str).parent)
-        self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
+            mock_fs.create_dir.assert_called_once()
+            path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
+            expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
+            self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
+        if lt7:
+            for call_paths in get_file_info_calls:
+                for p in call_paths:
+                    self.assertFalse(
+                        p.startswith("test-bucket/"),
+                        "OSS+PyArrow<7 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
+                    )
+
+    def test_exists(self):
+        lt7 = _pyarrow_lt_7()
+        with tempfile.TemporaryDirectory(prefix="file_io_nonexistent_") as tmpdir:
+            file_io = LocalFileIO("file://" + tmpdir, Options({}))
+            missing_uri = "file://" + os.path.join(tmpdir, "nonexistent_xyz")
+            path_str = file_io.to_filesystem_path(missing_uri)
+            raised = None
+            infos = None
+            try:
+                infos = file_io.filesystem.get_file_info([path_str])
+            except OSError as e:
+                raised = e
+            if lt7:
+                if raised is not None:
+                    err = str(raised).lower()
+                    self.assertTrue("133" in err or "does not exist" in err or "not exist" in err, str(raised))
+                else:
+                    self.assertEqual(len(infos), 1)
+                    self.assertEqual(infos[0].type, pafs.FileType.NotFound)
+            else:
+                self.assertIsNone(raised)
+                self.assertEqual(len(infos), 1)
+                self.assertEqual(infos[0].type, pafs.FileType.NotFound)
+            self.assertFalse(file_io.exists(missing_uri))
+            with self.assertRaises(FileNotFoundError):
+                file_io.get_file_status(missing_uri)
 
     def test_local_filesystem_path_conversion(self):
         file_io = LocalFileIO("file:///tmp/warehouse", Options({}))

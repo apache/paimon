@@ -40,18 +40,26 @@ from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
+def _pyarrow_lt_7():
+    return parse(pyarrow.__version__) < parse("7.0.0")
+
+
 class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        self._pyarrow_gte_7 = parse(pyarrow.__version__) >= parse("7.0.0")
+        self._pyarrow_gte_7 = not _pyarrow_lt_7()
         self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._oss_bucket = None
+        self._oss_base_key = ""
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
+            uri = urlparse(path)
+            if uri.scheme and uri.netloc and uri.path:
+                self._oss_base_key = uri.path.strip("/")
             self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
             self.filesystem = self._initialize_s3_fs()
@@ -177,31 +185,33 @@ class PyArrowFileIO(FileIO):
 
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
-
-        if self._is_oss and not self._pyarrow_gte_7:
-            # For PyArrow 6.x + OSS, path_str is already just the key part
-            if '/' in path_str:
-                parent_dir = '/'.join(path_str.split('/')[:-1])
-            else:
-                parent_dir = ''
-            
-            if parent_dir and not self.exists(parent_dir):
-                self.mkdirs(parent_dir)
-        else:
+        if not (self._is_oss and not self._pyarrow_gte_7):
             parent_dir = Path(path_str).parent
             if str(parent_dir) and not self.exists(str(parent_dir)):
                 self.mkdirs(str(parent_dir))
 
         return self.filesystem.open_output_stream(path_str)
 
+    @staticmethod
+    def _is_key_not_found_error(e: OSError) -> bool:
+        msg = str(e).lower()
+        return ("does not exist" in msg or "not exist" in msg or "nosuchkey" in msg or "133" in msg)
+
+    def _get_file_info(self, path_str: str):
+        try:
+            file_infos = self.filesystem.get_file_info([path_str])
+            file_info = file_infos[0]
+            return file_info if file_info.type != pafs.FileType.NotFound else None
+        except OSError as e:
+            if self._is_key_not_found_error(e):
+                return None
+            raise
+
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
-        file_infos = self.filesystem.get_file_info([path_str])
-        file_info = file_infos[0]
-        
-        if file_info.type == pafs.FileType.NotFound:
+        file_info = self._get_file_info(path_str)
+        if file_info is None:
             raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
-        
         return file_info
 
     def list_status(self, path: str):
@@ -215,14 +225,12 @@ class PyArrowFileIO(FileIO):
 
     def exists(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
-        file_info = self.filesystem.get_file_info([path_str])[0]
-        return file_info.type != pafs.FileType.NotFound
+        return self._get_file_info(path_str) is not None
 
     def delete(self, path: str, recursive: bool = False) -> bool:
         path_str = self.to_filesystem_path(path)
-        file_info = self.filesystem.get_file_info([path_str])[0]
-        
-        if file_info.type == pafs.FileType.NotFound:
+        file_info = self._get_file_info(path_str)
+        if file_info is None:
             return False
         
         if file_info.type == pafs.FileType.Directory:
@@ -242,13 +250,14 @@ class PyArrowFileIO(FileIO):
 
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
-        file_info = self.filesystem.get_file_info([path_str])[0]
-        
+        file_info = self._get_file_info(path_str)
+        if file_info is None:
+            self.filesystem.create_dir(path_str, recursive=True)
+            return True
         if file_info.type == pafs.FileType.Directory:
             return True
         elif file_info.type == pafs.FileType.File:
             raise FileExistsError(f"Path exists but is not a directory: {path}")
-        
         self.filesystem.create_dir(path_str, recursive=True)
         return True
 
@@ -263,19 +272,19 @@ class PyArrowFileIO(FileIO):
         try:
             if hasattr(self.filesystem, 'rename'):
                 return self.filesystem.rename(src_str, dst_str)
-            
-            dst_file_info = self.filesystem.get_file_info([dst_str])[0]
-            if dst_file_info.type != pafs.FileType.NotFound:
+
+            dst_file_info = self._get_file_info(dst_str)
+            if dst_file_info is not None:
                 if dst_file_info.type == pafs.FileType.File:
                     return False
                 # Make it compatible with HadoopFileIO: if dst is an existing directory,
                 # dst=dst/srcFileName
                 src_name = Path(src_str).name
                 dst_str = str(Path(dst_str) / src_name)
-                final_dst_info = self.filesystem.get_file_info([dst_str])[0]
-                if final_dst_info.type != pafs.FileType.NotFound:
+                final_dst_info = self._get_file_info(dst_str)
+                if final_dst_info is not None:
                     return False
-            
+
             self.filesystem.move(src_str, dst_str)
             return True
         except FileNotFoundError:
@@ -310,8 +319,8 @@ class PyArrowFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         if self.exists(path):
             path_str = self.to_filesystem_path(path)
-            file_info = self.filesystem.get_file_info([path_str])[0]
-            if file_info.type == pafs.FileType.Directory:
+            file_info = self._get_file_info(path_str)
+            if file_info is None or file_info.type == pafs.FileType.Directory:
                 return False
         
         temp_path = path + str(uuid.uuid4()) + ".tmp"
@@ -504,17 +513,21 @@ class PyArrowFileIO(FileIO):
             path_part = normalized_path.lstrip('/')
             return f"{drive_letter}:/{path_part}" if path_part else f"{drive_letter}:"
 
+        # OSS+PyArrow<7: endpoint_override already contains bucket (bucket.endpoint), so pass key only.
+        if self._is_oss and not self._pyarrow_gte_7:
+            if parsed.scheme and parsed.netloc:
+                path_part = normalized_path.lstrip('/')
+                return path_part if path_part else '.'
+            else:
+                # No scheme: path is already the key part (e.g. from Path.parent). Use as-is.
+                return str(path)
+
         if isinstance(self.filesystem, S3FileSystem):
             if parsed.scheme:
                 if parsed.netloc:
                     path_part = normalized_path.lstrip('/')
-                    if self._is_oss and not self._pyarrow_gte_7:
-                        # For PyArrow 6.x + OSS, endpoint_override already contains bucket,
-                        result = path_part if path_part else '.'
-                        return result
-                    else:
-                        result = f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
-                        return result
+                    result = f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+                    return result
                 else:
                     result = normalized_path.lstrip('/')
                     return result if result else '.'
