@@ -388,7 +388,7 @@ public class BlobTableExample {
 }
 ```
 
-### Inserting Blob Data
+### Construct blob from different sources
 
 ```java
 // From byte array (data already in memory)
@@ -565,7 +565,7 @@ ALTER TABLE video_table SET ('blob-as-descriptor' = 'false');
 SELECT * FROM video_table;  -- Returns actual blob bytes from Paimon storage
 ```
 
-### Descriptor Fields: Reuse by Descriptor (No Copy)
+### Blob storage mode: DESCRIPTOR ONLY
 
 If you want downstream tables to **reuse** upstream blob files (no copying and no new <code>.blob</code> files), configure the target blob field(s):
 
