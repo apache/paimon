@@ -154,6 +154,16 @@ public class RangeBitmapFileIndex implements FileIndexer {
         }
 
         @Override
+        public FileIndexResult visitBetween(FieldRef fieldRef, Object from, Object to) {
+            return new BitmapIndexResult(
+                    () -> {
+                        RoaringBitmap32 gte = bitmap.gte(converter.apply(from));
+                        RoaringBitmap32 lte = bitmap.lte(converter.apply(to));
+                        return RoaringBitmap32.and(gte, lte);
+                    });
+        }
+
+        @Override
         public FileIndexResult visitTopN(TopN topN, FileIndexResult result) {
             RoaringBitmap32 foundSet =
                     result instanceof BitmapIndexResult ? ((BitmapIndexResult) result).get() : null;

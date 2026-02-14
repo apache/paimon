@@ -43,9 +43,11 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
+from pypaimon.table.iceberg.iceberg_table import IcebergTable
 
 
 FORMAT_TABLE_TYPE = "format-table"
+ICEBERG_TABLE_TYPE = "iceberg-table"
 
 
 class RESTCatalog(Catalog):
@@ -224,10 +226,11 @@ class RESTCatalog(Catalog):
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
         table = self.get_table(identifier)
-        if isinstance(table, FormatTable):
+        if isinstance(table, (FormatTable, IcebergTable)):
+            unsupported_type = type(table).__name__
             raise ValueError(
-                "drop_partitions is not supported for format tables. "
-                "Only Paimon (FileStore) tables support partition drop."
+                f"drop_partitions is not supported for table type '{unsupported_type}'. "
+                "Only Paimon (FileStore) tables support this operation."
             )
         commit = table.new_batch_write_builder().new_commit()
         try:
@@ -295,6 +298,8 @@ class RESTCatalog(Catalog):
         if table_type == FORMAT_TABLE_TYPE:
             return self._create_format_table(identifier, metadata, internal_file_io, external_file_io)
         data_file_io = external_file_io if metadata.is_external else internal_file_io
+        if table_type == ICEBERG_TABLE_TYPE:
+            return self._create_iceberg_table(identifier, metadata, data_file_io)
         catalog_env = CatalogEnvironment(
             identifier=identifier,
             uuid=metadata.uuid,
@@ -331,6 +336,24 @@ class RESTCatalog(Catalog):
             format=fmt,
             options=dict(schema.options),
             comment=schema.comment,
+        )
+
+    def _create_iceberg_table(self,
+                              identifier: Identifier,
+                              metadata: TableMetadata,
+                              file_io: Callable[[str], Any],
+                              ) -> IcebergTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        file_io = file_io(location)
+        return IcebergTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            options=dict(schema.options),
+            comment=schema.comment,
+            uuid=metadata.uuid,
         )
 
     @staticmethod

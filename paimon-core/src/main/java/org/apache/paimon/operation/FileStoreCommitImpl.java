@@ -255,15 +255,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     "Committables must be sorted according to identifiers before filtering. This is unexpected.");
         }
 
-        Optional<Snapshot> latestSnapshot =
-                options.commitStrictModeLastSafeSnapshot()
-                        .map(
-                                id ->
-                                        snapshotManager.latestSnapshotOfUser(
-                                                commitUser,
-                                                snapshotManager.latestSnapshotId(),
-                                                id + 1))
-                        .orElse(snapshotManager.latestSnapshotOfUser(commitUser));
+        Optional<Long> optionalStrictSnapshot = options.commitStrictModeLastSafeSnapshot();
+        Optional<Snapshot> latestSnapshot;
+        if (optionalStrictSnapshot.isPresent()) {
+            latestSnapshot =
+                    snapshotManager.latestSnapshotOfUser(
+                            commitUser,
+                            snapshotManager.latestSnapshotId(),
+                            optionalStrictSnapshot.get() + 1);
+        } else {
+            latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
+        }
+
         if (latestSnapshot.isPresent()) {
             List<ManifestCommittable> result = new ArrayList<>();
             for (ManifestCommittable committable : committables) {
