@@ -71,6 +71,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -1214,5 +1215,95 @@ public class FieldAggregatorTest {
             result.put(keyArray.getInt(i), valueArray.getString(i));
         }
         return result;
+    }
+
+    @Test
+    public void testFieldMergeMapWithKeyTimeAgg() {
+        MapType mapType =
+                DataTypes.MAP(
+                        DataTypes.STRING(),
+                        DataTypes.ROW(
+                                DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
+                                DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType);
+
+        GenericMap map1 =
+                createTestMap(
+                        createEntry("key1", "A", "17682882903686900100"),
+                        createEntry("key2", "B", "17682882903686900100"));
+        GenericMap map2 =
+                createTestMap(
+                        createEntry("key1", "A1", "17682882903686900200"),
+                        createEntry("key3", "C", "17682882903686900200"));
+        GenericMap map3 = createTestMap(createEntry("key2", "B2", "17682882903686900050"));
+
+        Object acc = agg.agg(null, map1);
+        assertTestMap(acc, createExpectedEntry("key1", "A"), createExpectedEntry("key2", "B"));
+
+        acc = agg.agg(acc, map2);
+        assertTestMap(
+                acc,
+                createExpectedEntry("key1", "A1"),
+                createExpectedEntry("key2", "B"),
+                createExpectedEntry("key3", "C"));
+
+        acc = agg.agg(acc, map3);
+        assertTestMap(
+                acc,
+                createExpectedEntry("key1", "A1"),
+                createExpectedEntry("key2", "B"),
+                createExpectedEntry("key3", "C"));
+    }
+
+    private Map.Entry<BinaryString, InternalRow> createEntry(String key, String value, String ts) {
+        return new AbstractMap.SimpleEntry<>(
+                BinaryString.fromString(key),
+                GenericRow.of(
+                        value == null ? null : BinaryString.fromString(value),
+                        ts == null ? null : BinaryString.fromString(ts)));
+    }
+
+    private Map.Entry<String, String> createExpectedEntry(String key, String value) {
+        return new AbstractMap.SimpleEntry<>(key, value);
+    }
+
+    @SafeVarargs
+    private final GenericMap createTestMap(Map.Entry<BinaryString, InternalRow>... entries) {
+        Map<BinaryString, InternalRow> map = new HashMap<>();
+        for (Map.Entry<BinaryString, InternalRow> entry : entries) {
+            map.put(entry.getKey(), entry.getValue());
+        }
+        return new GenericMap(map);
+    }
+
+    @SafeVarargs
+    private final void assertTestMap(Object mapObj, Map.Entry<String, String>... expected) {
+        InternalMap map = (InternalMap) mapObj;
+        Map<String, String> actual = new HashMap<>();
+
+        InternalArray keyArray = map.keyArray();
+        InternalArray valueArray = map.valueArray();
+
+        for (int i = 0; i < map.size(); i++) {
+            BinaryString keyBinary = keyArray.getString(i);
+            String key = keyBinary.toString();
+
+            InternalRow row = valueArray.getRow(i, 2);
+
+            String value = null;
+            if (!row.isNullAt(0)) {
+                BinaryString valueBinary = row.getString(0);
+                value = valueBinary != null ? valueBinary.toString() : null;
+            }
+            actual.put(key, value);
+        }
+
+        Map<String, String> expectedMap = new HashMap<>();
+        for (Map.Entry<String, String> e : expected) {
+            expectedMap.put(e.getKey(), e.getValue());
+        }
+
+        // 断言
+        assertThat(actual).containsExactlyInAnyOrderEntriesOf(expectedMap);
     }
 }
