@@ -2230,6 +2230,29 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The interval for checking visibility when visibility-callback enabled.");
 
+    public static final ConfigOption<String> VECTOR_STORE_FORMAT =
+            key("vector.file.format")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the vector store file format.");
+
+    public static final ConfigOption<String> VECTOR_STORE_FIELDS =
+            key("vector-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the vector store fields.");
+
+    public static final ConfigOption<MemorySize> VECTOR_STORE_TARGET_FILE_SIZE =
+            key("vector.target-file-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Target size of a vector-store file."
+                                                    + " Default is 10 * TARGET_FILE_SIZE.")
+                                    .build());
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -3467,6 +3490,26 @@ public class CoreOptions implements Serializable {
 
     public Duration visibilityCallbackCheckInterval() {
         return options.get(VISIBILITY_CALLBACK_CHECK_INTERVAL);
+    }
+
+    public String vectorStoreFileFormatString() {
+        return normalizeFileFormat(options.get(VECTOR_STORE_FORMAT));
+    }
+
+    public List<String> vectorStoreFieldNames() {
+        String vectorStoreFields = options.get(CoreOptions.VECTOR_STORE_FIELDS);
+        if (vectorStoreFields == null || vectorStoreFields.trim().isEmpty()) {
+            return new ArrayList<>();
+        } else {
+            return Arrays.asList(vectorStoreFields.split(","));
+        }
+    }
+
+    public long vectorStoreTargetFileSize() {
+        // Since vectors are large, it would be better to set a larger target size for vectors.
+        return options.getOptional(VECTOR_STORE_TARGET_FILE_SIZE)
+                .map(MemorySize::getBytes)
+                .orElse(10 * targetFileSize(false));
     }
 
     /** Specifies the merge engine for table with primary key. */
