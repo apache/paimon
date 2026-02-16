@@ -488,20 +488,28 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             totalBuckets = restoredTotalBuckets;
         }
         if (!ignoreNumBucketCheck && totalBuckets != numBuckets) {
-            String partInfo =
-                    partitionType.getFieldCount() > 0
-                            ? "partition "
-                                    + getPartitionComputer(
-                                                    partitionType,
-                                                    PARTITION_DEFAULT_NAME.defaultValue(),
-                                                    legacyPartitionName)
-                                            .generatePartValues(partition)
-                            : "table";
-            throw new RuntimeException(
-                    String.format(
-                            "Try to write %s with a new bucket num %d, but the previous bucket num is %d. "
-                                    + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
-                            partInfo, numBuckets, totalBuckets));
+            if (partitionType.getFieldCount() > 0) {
+                // For partitioned tables, allow per-partition bucket counts.
+                // The partition's existing bucket count takes precedence over the
+                // table-level default. This supports rescale operations where different
+                // partitions may have different bucket counts.
+                LOG.info(
+                        "Partition {} uses {} buckets (table default: {}). "
+                                + "Accepting per-partition bucket count.",
+                        getPartitionComputer(
+                                        partitionType,
+                                        PARTITION_DEFAULT_NAME.defaultValue(),
+                                        legacyPartitionName)
+                                .generatePartValues(partition),
+                        totalBuckets,
+                        numBuckets);
+            } else {
+                throw new RuntimeException(
+                        String.format(
+                                "Try to write table with a new bucket num %d, but the previous bucket num is %d. "
+                                        + "Please switch to batch mode, and perform INSERT OVERWRITE to rescale current data layout first.",
+                                numBuckets, totalBuckets));
+            }
         }
         return restored;
     }

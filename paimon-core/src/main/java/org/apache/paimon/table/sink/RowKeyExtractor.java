@@ -24,11 +24,17 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 
-/** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
-public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalRow> {
+import java.io.Serializable;
 
-    private final RowPartitionKeyExtractor partitionKeyExtractor;
-    private final Projection logPrimaryKeyProjection;
+/** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
+public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalRow>, Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    private transient Projection logPrimaryKeyProjection;
+    private transient RowPartitionKeyExtractor partitionKeyExtractor;
+
+    protected final TableSchema schema;
 
     protected InternalRow record;
 
@@ -37,10 +43,7 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     private BinaryRow logPrimaryKey;
 
     public RowKeyExtractor(TableSchema schema) {
-        partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
-        logPrimaryKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.primaryKeys()));
+        this.schema = schema;
     }
 
     @Override
@@ -54,7 +57,7 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            partition = partitionKeyExtractor.partition(record);
+            partition = partitionKeyExtractor().partition(record);
         }
         return partition;
     }
@@ -62,7 +65,7 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     @Override
     public BinaryRow trimmedPrimaryKey() {
         if (trimmedPrimaryKey == null) {
-            trimmedPrimaryKey = partitionKeyExtractor.trimmedPrimaryKey(record);
+            trimmedPrimaryKey = partitionKeyExtractor().trimmedPrimaryKey(record);
         }
         return trimmedPrimaryKey;
     }
@@ -70,8 +73,24 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     @Override
     public BinaryRow logPrimaryKey() {
         if (logPrimaryKey == null) {
-            logPrimaryKey = logPrimaryKeyProjection.apply(record);
+            logPrimaryKey = logPrimaryKeyProjection().apply(record);
         }
         return logPrimaryKey;
+    }
+
+    private Projection logPrimaryKeyProjection() {
+        if (logPrimaryKeyProjection == null) {
+            logPrimaryKeyProjection =
+                    CodeGenUtils.newProjection(
+                            schema.logicalRowType(), schema.projection(schema.primaryKeys()));
+        }
+        return logPrimaryKeyProjection;
+    }
+
+    private RowPartitionKeyExtractor partitionKeyExtractor() {
+        if (partitionKeyExtractor == null) {
+            partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
+        }
+        return partitionKeyExtractor;
     }
 }

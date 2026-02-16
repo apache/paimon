@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -159,11 +160,17 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser, @Nullable Integer writeId) {
+        return newWrite(commitUser, writeId, createRowKeyExtractor());
+    }
+
+    @Override
+    public TableWriteImpl<KeyValue> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor) {
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 rowType(),
                 store().newWrite(commitUser, writeId),
-                createRowKeyExtractor(),
+                rowKeyExtractor,
                 (record, rowKind) ->
                         kv.replace(
                                 record.primaryKey(),

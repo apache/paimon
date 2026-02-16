@@ -39,6 +39,7 @@ import org.apache.paimon.table.sink.AppendTableRowKeyExtractor;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketWriteSelector;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.sink.PostponeBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.RowKindGenerator;
@@ -218,7 +219,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public Optional<WriteSelector> newWriteSelector() {
         switch (bucketMode()) {
             case HASH_FIXED:
-                return Optional.of(new FixedBucketWriteSelector(schema()));
+                return Optional.of(
+                        new FixedBucketWriteSelector(
+                                schema(), PartitionBucketMapping.loadFromTable(this)));
             case BUCKET_UNAWARE:
             case POSTPONE_MODE:
                 return Optional.empty();
@@ -236,7 +239,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public RowKeyExtractor createRowKeyExtractor() {
         switch (bucketMode()) {
             case HASH_FIXED:
-                return new FixedBucketRowKeyExtractor(schema());
+                return new FixedBucketRowKeyExtractor(
+                        schema(), PartitionBucketMapping.loadFromTable(this));
             case HASH_DYNAMIC:
             case KEY_DYNAMIC:
                 return new DynamicBucketRowKeyExtractor(schema());

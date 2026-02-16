@@ -101,6 +101,30 @@ public class FixedBucketRowKeyExtractorTest {
         }
     }
 
+    @Test
+    public void testPerPartitionBucketCount() {
+        int defaultBuckets = 100;
+        int partition1Buckets = 4;
+
+        // Build a BinaryRow for partition value = 1
+        BinaryRow partitionRow = BinaryRow.singleColumn(1);
+
+        Map<BinaryRow, Integer> partitionMap = new HashMap<>();
+        partitionMap.put(partitionRow, partition1Buckets);
+        PartitionBucketMapping mapping = new PartitionBucketMapping(defaultBuckets, partitionMap);
+
+        // Schema: partition key "a", bucket key "b", primary key "a,b"
+        FixedBucketRowKeyExtractor extractor = extractor("a", "b", "a,b", defaultBuckets, mapping);
+
+        // Same bucket key (b=456) in both partitions, different bucket counts produce
+        // different bucket assignments: hash(456) % 4 = 3, hash(456) % 100 = 47
+        GenericRow rowInMappedPartition = GenericRow.of(1, 456, 7);
+        assertThat(bucket(extractor, rowInMappedPartition)).isEqualTo(3);
+
+        GenericRow rowInDefaultPartition = GenericRow.of(99, 456, 7);
+        assertThat(bucket(extractor, rowInDefaultPartition)).isEqualTo(47);
+    }
+
     private int bucket(FixedBucketRowKeyExtractor extractor, InternalRow row) {
         extractor.setRecord(row);
         return extractor.bucket();
@@ -126,7 +150,28 @@ public class FixedBucketRowKeyExtractorTest {
     }
 
     private FixedBucketRowKeyExtractor extractor(
+            String partK, String bk, String pk, int numBucket, PartitionBucketMapping mapping) {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new IntType()),
+                                new DataField(1, "b", new IntType()),
+                                new DataField(2, "c", new IntType())));
+        return extractor(rowType, partK, bk, pk, numBucket, mapping);
+    }
+
+    private FixedBucketRowKeyExtractor extractor(
             RowType rowType, String partK, String bk, String pk, int numBucket) {
+        return extractor(rowType, partK, bk, pk, numBucket, new PartitionBucketMapping(numBucket));
+    }
+
+    private FixedBucketRowKeyExtractor extractor(
+            RowType rowType,
+            String partK,
+            String bk,
+            String pk,
+            int numBucket,
+            PartitionBucketMapping mapping) {
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET_KEY.key(), bk);
@@ -142,6 +187,6 @@ public class FixedBucketRowKeyExtractorTest {
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");
-        return new FixedBucketRowKeyExtractor(schema);
+        return new FixedBucketRowKeyExtractor(schema, mapping);
     }
 }

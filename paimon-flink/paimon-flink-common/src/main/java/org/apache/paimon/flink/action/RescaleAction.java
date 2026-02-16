@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.RescaleFileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -111,7 +112,6 @@ public class RescaleAction extends TableActionBase {
                                         : scanParallelism)
                         .partitionPredicate(partitionPredicate)
                         .build();
-
         Map<String, String> bucketOptions = new HashMap<>(fileStoreTable.options());
         if (bucketNum == null) {
             Preconditions.checkArgument(
@@ -120,8 +120,11 @@ public class RescaleAction extends TableActionBase {
         } else {
             bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
         }
-        FileStoreTable rescaledTable =
-                fileStoreTable.copy(fileStoreTable.schema().copy(bucketOptions));
+
+        RescaleFileStoreTable rescaledTable =
+                new RescaleFileStoreTable(
+                        fileStoreTable.copy(fileStoreTable.schema().copy(bucketOptions)));
+
         new FlinkSinkBuilder(rescaledTable)
                 .overwrite(partition)
                 .parallelism(sinkParallelism == null ? bucketNum : sinkParallelism)

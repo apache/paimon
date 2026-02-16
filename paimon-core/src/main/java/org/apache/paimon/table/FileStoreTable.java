@@ -118,6 +118,13 @@ public interface FileStoreTable extends DataTable {
 
     TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId);
 
+    /**
+     * Create a new write with a custom {@link RowKeyExtractor}. This is useful for scenarios like
+     * rescaling where the bucket assignment logic needs to be overridden.
+     */
+    TableWriteImpl<?> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor);
+
     @Override
     TableCommitImpl newCommit(String commitUser);
 

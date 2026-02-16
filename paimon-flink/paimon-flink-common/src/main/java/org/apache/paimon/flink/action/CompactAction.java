@@ -51,6 +51,8 @@ import org.apache.paimon.predicate.PredicateProjectionConverter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -426,7 +428,7 @@ public class CompactAction extends TableActionBase {
         String commitUser = CoreOptions.createCommitUser(options);
         List<DataStream<Committable>> dataStreams = new ArrayList<>();
         for (BinaryRow partition : partitions) {
-            int bucketNum = defaultBucketNum;
+            int partitionBucketNum = defaultBucketNum;
 
             Iterator<ManifestEntry> it =
                     table.newSnapshotReader()
@@ -434,11 +436,11 @@ public class CompactAction extends TableActionBase {
                             .onlyReadRealBuckets()
                             .readFileIterator();
             if (it.hasNext()) {
-                bucketNum = it.next().totalBuckets();
+                partitionBucketNum = it.next().totalBuckets();
             }
 
             bucketOptions = new HashMap<>(table.options());
-            bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(bucketNum));
+            bucketOptions.put(CoreOptions.BUCKET.key(), String.valueOf(partitionBucketNum));
             FileStoreTable realTable = table.copy(table.schema().copy(bucketOptions));
 
             LinkedHashMap<String, String> partitionSpec =
@@ -450,11 +452,16 @@ public class CompactAction extends TableActionBase {
                             partitionSpec,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
+            PartitionBucketMapping partitionBucketMapping =
+                    new PartitionBucketMapping(partitionBucketNum);
+            FixedBucketRowKeyExtractor extractor =
+                    new FixedBucketRowKeyExtractor(realTable.schema(), partitionBucketMapping);
+
             DataStream<InternalRow> partitioned =
                     FlinkStreamPartitioner.partition(
                             FlinkSinkBuilder.mapToInternalRow(
                                     sourcePair.getLeft(), realTable.rowType()),
-                            new RowDataChannelComputer(realTable.schema(), false),
+                            new RowDataChannelComputer(false, extractor),
                             null);
             FixedBucketSink sink = new FixedBucketSink(realTable, null, null);
             DataStream<Committable> written =

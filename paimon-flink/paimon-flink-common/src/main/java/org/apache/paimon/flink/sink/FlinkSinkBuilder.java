@@ -271,7 +271,8 @@ public class FlinkSinkBuilder {
         DataStream<InternalRow> partitioned =
                 partition(
                         input,
-                        new RowDataChannelComputer(table.schema(), logSinkFunction != null),
+                        new RowDataChannelComputer(
+                                logSinkFunction != null, table.createRowKeyExtractor()),
                         parallelism);
         FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, logSinkFunction);
         return sink.sinkFrom(partitioned);

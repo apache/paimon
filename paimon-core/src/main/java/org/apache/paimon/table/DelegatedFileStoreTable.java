@@ -310,6 +310,12 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public TableWriteImpl<?> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor) {
+        return wrapped.newWrite(commitUser, writeId, rowKeyExtractor);
+    }
+
+    @Override
     public TableCommitImpl newCommit(String commitUser) {
         return wrapped.newCommit(commitUser);
     }

@@ -1095,6 +1095,48 @@ public class FileStoreCommitTest {
         return createStore(failing, 1, CoreOptions.ChangelogProducer.NONE, options);
     }
 
+    @Test
+    public void testBucketCountConsistencyValidation() throws Exception {
+        TestFileStore store = createStore(false);
+
+        // Commit initial data
+        List<KeyValue> data = generateDataList(10);
+        store.commitData(data, gen::getPartition, kv -> 0);
+
+        // Re-commit the same data but with a different totalBuckets value.
+        // This simulates a stale writer that loaded an old bucket mapping.
+        assertThatThrownBy(
+                        () ->
+                                store.commitDataImpl(
+                                        data,
+                                        gen::getPartition,
+                                        kv -> 0,
+                                        false,
+                                        null,
+                                        null,
+                                        Collections.emptyList(),
+                                        (commit, committable) -> {
+                                            ManifestCommittable tampered =
+                                                    new ManifestCommittable(
+                                                            committable.identifier(),
+                                                            committable.watermark());
+                                            for (CommitMessage msg :
+                                                    committable.fileCommittables()) {
+                                                CommitMessageImpl impl = (CommitMessageImpl) msg;
+                                                tampered.addFileCommittable(
+                                                        new CommitMessageImpl(
+                                                                impl.partition(),
+                                                                impl.bucket(),
+                                                                99,
+                                                                impl.newFilesIncrement(),
+                                                                impl.compactIncrement()));
+                                            }
+                                            commit.commit(tampered, true);
+                                        }))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("without overwrite");
+    }
+
     private TestFileStore createStore(boolean failing) throws Exception {
         return createStore(failing, 1);
     }

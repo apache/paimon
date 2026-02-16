@@ -27,6 +27,7 @@ import org.apache.paimon.table.DelegatedFileStoreTable;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.sink.WriteSelector;
@@ -238,6 +239,13 @@ public class PrivilegedFileStoreTable extends DelegatedFileStoreTable {
     public TableWriteImpl<?> newWrite(String commitUser, @Nullable Integer writeId) {
         privilegeChecker.assertCanInsert(identifier);
         return wrapped.newWrite(commitUser, writeId);
+    }
+
+    @Override
+    public TableWriteImpl<?> newWrite(
+            String commitUser, @Nullable Integer writeId, RowKeyExtractor rowKeyExtractor) {
+        privilegeChecker.assertCanInsert(identifier);
+        return wrapped.newWrite(commitUser, writeId, rowKeyExtractor);
     }
 
     @Override

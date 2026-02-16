@@ -27,6 +27,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.PartitionBucketMapping;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -110,11 +111,14 @@ public class RowDataChannelComputerTest {
 
     private void testImpl(TableSchema schema, List<InternalRow> input) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        FixedBucketRowKeyExtractor extractor = new FixedBucketRowKeyExtractor(schema);
+        PartitionBucketMapping partitionBucketMapping =
+                new PartitionBucketMapping(schema.numBuckets());
+        FixedBucketRowKeyExtractor extractor =
+                new FixedBucketRowKeyExtractor(schema, partitionBucketMapping);
 
         int numChannels = random.nextInt(10) + 1;
         boolean hasLogSink = random.nextBoolean();
-        RowDataChannelComputer channelComputer = new RowDataChannelComputer(schema, hasLogSink);
+        RowDataChannelComputer channelComputer = new RowDataChannelComputer(hasLogSink, extractor);
         channelComputer.setup(numChannels);
 
         // assert that channel(record) and channel(partition, bucket) gives the same result
