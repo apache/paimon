@@ -19,14 +19,17 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.FileStoreTable;
 
 import java.io.Serializable;
+import java.util.AbstractMap;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A mapping that resolves the number of buckets for each partition in a table.
@@ -39,7 +42,7 @@ import java.util.Map;
  * FixedBucketWriteSelector} to correctly determine the bucket assignment for rows in tables where
  * partitions may have been rescaled independently.
  *
- * @see #loadFromTable(FileStoreTable)
+ * @see #lazyLoadFromTable(FileStoreTable)
  * @see #resolveNumBuckets(BinaryRow)
  */
 public class PartitionBucketMapping implements Serializable {
@@ -74,39 +77,25 @@ public class PartitionBucketMapping implements Serializable {
     }
 
     /**
-     * Loads a {@link PartitionBucketMapping} by scanning the manifest entries of the given table.
+     * Creates a {@link PartitionBucketMapping} that lazily loads per-partition bucket counts on
+     * demand.
+     *
+     * <p>This method defers IO to the point where a specific partition's bucket count is requested.
+     * Each partition's manifest entries are fetched only once and cached.
      *
      * <p>For non-partitioned tables, this returns a mapping with only the schema-defined default
-     * bucket count and an empty partition map.
+     * bucket count and an empty partition map (no lazy loading needed).
      *
-     * <p>For partitioned tables, the method scans all manifest entries and records the {@code
-     * totalBuckets} value for each partition. If the scan fails for any reason, a fallback mapping
-     * with only the default bucket count is returned.
-     *
-     * @param table the {@link FileStoreTable} to load the mapping from
-     * @return a {@link PartitionBucketMapping} reflecting the current bucket layout of the table
+     * @param table the {@link FileStoreTable} to lazily load the mapping from
+     * @return a {@link PartitionBucketMapping} that fetches partition bucket counts on demand
      */
-    public static PartitionBucketMapping loadFromTable(FileStoreTable table) {
+    public static PartitionBucketMapping lazyLoadFromTable(FileStoreTable table) {
         int defaultBuckets = table.schema().numBuckets();
         if (table.partitionKeys().isEmpty()) {
             return new PartitionBucketMapping(defaultBuckets, Collections.emptyMap());
         }
 
-        try {
-            List<ManifestEntry> entries = table.store().newScan().plan().files();
-            Map<BinaryRow, Integer> partitionBucketMap = new HashMap<>();
-            for (ManifestEntry entry : entries) {
-                int totalBuckets = entry.totalBuckets();
-                if (totalBuckets > 0) {
-                    BinaryRow partition = entry.partition();
-                    partitionBucketMap.putIfAbsent(partition.copy(), totalBuckets);
-                }
-            }
-
-            return new PartitionBucketMapping(defaultBuckets, partitionBucketMap);
-        } catch (Exception e) {
-            return new PartitionBucketMapping(defaultBuckets, Collections.emptyMap());
-        }
+        return new PartitionBucketMapping(defaultBuckets, new LazyPartitionBucketMap(table));
     }
 
     /**
@@ -126,5 +115,88 @@ public class PartitionBucketMapping implements Serializable {
             }
         }
         return defaultBucketCount;
+    }
+
+    /**
+     * A lazily-populated map from partition ({@link BinaryRow}) to bucket count.
+     *
+     * <p>When {@link #get(Object)} is called for a partition not yet in the cache, a
+     * partition-filtered scan is performed to read only that partition's manifest entries and
+     * extract the {@code totalBuckets} value. Results are cached in a {@link ConcurrentHashMap} so
+     * each partition is scanned at most once.
+     *
+     * <p>This avoids the upfront cost of reading all manifest files when only a subset of
+     * partitions will actually be queried.
+     */
+    static class LazyPartitionBucketMap extends AbstractMap<BinaryRow, Integer>
+            implements Serializable {
+
+        private static final long serialVersionUID = 1L;
+
+        private final transient FileStoreTable table;
+        private final ConcurrentHashMap<BinaryRow, Integer> cache;
+
+        LazyPartitionBucketMap(FileStoreTable table) {
+            this.table = table;
+            this.cache = new ConcurrentHashMap<>();
+        }
+
+        @Override
+        public Integer get(Object key) {
+            if (!(key instanceof BinaryRow) || table == null) {
+                return null;
+            }
+            BinaryRow partition = (BinaryRow) key;
+            Integer cached = cache.get(partition);
+            if (cached != null) {
+                return cached;
+            }
+            return loadPartition(partition);
+        }
+
+        private Integer loadPartition(BinaryRow partition) {
+            try {
+                List<SimpleFileEntry> entries =
+                        table.store()
+                                .newScan()
+                                .onlyReadRealBuckets()
+                                .withPartitionFilter(Collections.singletonList(partition))
+                                .readSimpleEntries();
+                for (SimpleFileEntry entry : entries) {
+                    int totalBuckets = entry.totalBuckets();
+                    if (totalBuckets > 0) {
+                        cache.put(partition.copy(), totalBuckets);
+                        return totalBuckets;
+                    }
+                }
+            } catch (Exception ignored) {
+                // Fall through to return null, same as the eager fallback behavior
+            }
+            // Partition not found or has no totalBuckets — return null so
+            // resolveNumBuckets falls back to the default. We intentionally do not
+            // cache absent results: the partition may appear in a later snapshot.
+            return null;
+        }
+
+        @Override
+        public boolean containsKey(Object key) {
+            return get(key) != null;
+        }
+
+        @Override
+        public Set<Entry<BinaryRow, Integer>> entrySet() {
+            // Return only the currently cached entries. This does not trigger lazy loading.
+            return Collections.unmodifiableMap(new HashMap<>(cache)).entrySet();
+        }
+
+        @Override
+        public int size() {
+            return cache.size();
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return cache.isEmpty();
+        }
     }
 }
