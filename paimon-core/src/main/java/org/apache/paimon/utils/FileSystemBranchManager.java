@@ -127,7 +127,7 @@ public class FileSystemBranchManager implements BranchManager {
     }
 
     /** Check if path exists. */
-    private boolean fileExists(Path path) {
+    private boolean pathExists(Path path) {
         try {
             return fileIO.exists(path);
         } catch (IOException e) {
@@ -196,7 +196,7 @@ public class FileSystemBranchManager implements BranchManager {
     /** Check if a branch exists. */
     public boolean branchExists(String branchName) {
         Path branchPath = branchPath(branchName);
-        return fileExists(branchPath);
+        return pathExists(branchPath);
     }
 
     public void validateBranch(String branchName) {

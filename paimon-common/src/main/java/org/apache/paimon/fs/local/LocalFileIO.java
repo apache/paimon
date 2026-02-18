@@ -209,7 +209,7 @@ public class LocalFileIO implements FileIO {
     }
 
     @Override
-    public boolean rename(Path src, Path dst) throws IOException {
+    public boolean renameImpl(Path src, Path dst) throws IOException {
         LOG.debug("Invoking rename for {} to {}", src, dst);
         File srcFile = toFile(src);
         File dstFile = toFile(dst);

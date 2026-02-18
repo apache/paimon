@@ -277,7 +277,7 @@ public class FileIOTest {
         }
 
         @Override
-        public boolean rename(Path src, Path dst) throws IOException {
+        public boolean renameImpl(Path src, Path dst) throws IOException {
             File srcFile = toFile(src);
             File dstFile = toFile(dst);
             File dstParent = dstFile.getParentFile();

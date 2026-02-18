@@ -145,8 +145,8 @@ public class RESTTokenFileIO implements FileIO {
     }
 
     @Override
-    public boolean rename(Path src, Path dst) throws IOException {
-        return fileIO().rename(src, dst);
+    public boolean renameImpl(Path src, Path dst) throws IOException {
+        return fileIO().renameImpl(src, dst);
     }
 
     @Override
