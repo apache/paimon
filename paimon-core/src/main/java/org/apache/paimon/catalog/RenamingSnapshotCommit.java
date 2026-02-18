@@ -25,6 +25,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -57,6 +58,20 @@ public class RenamingSnapshotCommit implements SnapshotCommit {
         Callable<Boolean> callable =
                 () -> {
                     boolean committed = fileIO.tryToWriteAtomic(newSnapshotPath, snapshot.toJson());
+                    if (!committed) {
+                        if (!fileIO.exists(newSnapshotPath)) {
+                            throw new IOException(
+                                    "Commit snapshot "
+                                            + snapshot.id()
+                                            + " failed and "
+                                            + newSnapshotPath
+                                            + " not found");
+                        }
+                        committed =
+                                snapshot.equals(
+                                        Snapshot.fromJson(fileIO.readFileUtf8(newSnapshotPath)));
+                    }
+
                     if (committed) {
                         snapshotManager.commitLatestHint(snapshot.id());
                     }
