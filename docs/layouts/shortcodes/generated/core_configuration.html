@@ -1200,6 +1200,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether to try to clean empty directories when expiring snapshots, if enabled, please note:<ul><li>hdfs: may print exceptions in NameNode.</li><li>oss/s3: may cause performance issue.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>snapshot.expire.detect-config.enabled</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether detect changes to expiration settings.</td>
+        </tr>
+        <tr>
             <td><h5>snapshot.expire.execution-mode</h5></td>
             <td style="word-wrap: break-word;">sync</td>
             <td><p>Enum</p></td>

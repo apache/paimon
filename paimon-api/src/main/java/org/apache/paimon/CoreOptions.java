@@ -513,6 +513,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The maximum number of snapshots allowed to expire at a time.");
 
+    public static final ConfigOption<Boolean> DETECT_EXPIRATION_SETTING_ENABLED =
+            key("snapshot.expire.detect-config.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether detect changes to expiration settings.");
+
     public static final ConfigOption<Boolean> SNAPSHOT_CLEAN_EMPTY_DIRECTORIES =
             key("snapshot.clean-empty-directories")
                     .booleanType()
@@ -2549,6 +2555,10 @@ public class CoreOptions implements Serializable {
 
     public int snapshotExpireLimit() {
         return options.get(SNAPSHOT_EXPIRE_LIMIT);
+    }
+
+    public boolean detectExpirationSettingEnabled() {
+        return options.get(DETECT_EXPIRATION_SETTING_ENABLED);
     }
 
     public boolean cleanEmptyDirectories() {
