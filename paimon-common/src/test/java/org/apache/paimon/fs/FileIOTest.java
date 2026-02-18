@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 
@@ -56,7 +57,7 @@ public class FileIOTest {
         try {
             FileIO.get(
                     new Path("require-options://" + tempDir.toString()),
-                    CatalogContext.create(options));
+                    CatalogHadoopContext.create(options));
             Assertions.fail();
         } catch (UnsupportedSchemeException e) {
             assertThat(e.getSuppressed()[0])
@@ -68,7 +69,7 @@ public class FileIOTest {
         FileIO fileIO =
                 FileIO.get(
                         new Path("require-options://" + tempDir.toString()),
-                        CatalogContext.create(options));
+                        CatalogHadoopContext.create(options));
         assertThat(fileIO).isInstanceOf(RequireOptionsFileIOLoader.MyFileIO.class);
     }
 

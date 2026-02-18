@@ -20,6 +20,7 @@ package org.apache.paimon.vfs.hadoop;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
@@ -71,7 +72,7 @@ public abstract class VirtualFileSystemTest {
         warehouse = tempFile.toUri().toString();
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
-        CatalogContext catalogContext = CatalogContext.create(catalogOptions);
+        CatalogContext catalogContext = CatalogHadoopContext.create(catalogOptions);
         fileIO = new ResolvingFileIO();
         fileIO.configure(catalogContext);
     }

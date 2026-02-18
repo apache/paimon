@@ -20,8 +20,8 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.function.Function;
@@ -125,8 +125,8 @@ public class SparkCatalog extends SparkBaseCatalog
         checkRequiredConfigurations();
         SparkSession sparkSession = PaimonSparkSession$.MODULE$.active();
         this.catalogName = name;
-        CatalogContext catalogContext =
-                CatalogContext.create(
+        CatalogHadoopContext catalogContext =
+                CatalogHadoopContext.create(
                         Options.fromMap(options.asCaseSensitiveMap()),
                         sparkSession.sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);

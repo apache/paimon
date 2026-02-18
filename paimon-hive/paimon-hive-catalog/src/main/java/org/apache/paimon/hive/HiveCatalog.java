@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogLoader;
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.catalog.HadoopAware;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
@@ -1790,8 +1791,14 @@ public class HiveCatalog extends AbstractCatalog {
         String uri = context.options().get(CatalogOptions.URI);
         String hiveConfDir = context.options().get(HIVE_CONF_DIR);
         String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
+        if (!(context instanceof HadoopAware)) {
+            throw new IllegalArgumentException(
+                    "HiveCatalog requires a HadoopAware context, but got: "
+                            + context.getClass().getName());
+        }
         HiveConf hiveConf =
-                HiveCatalog.createHiveConf(hiveConfDir, hadoopConfDir, context.hadoopConf());
+                HiveCatalog.createHiveConf(
+                        hiveConfDir, hadoopConfDir, ((HadoopAware) context).hadoopConf());
 
         // always using user-set parameters overwrite hive-site.xml parameters
         context.options().toMap().forEach(hiveConf::set);
