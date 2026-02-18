@@ -80,8 +80,8 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
 
     private final FileStoreTable wrapped;
     private final boolean isContinuous;
-
     @Nullable private final String databaseName;
+    private final long baseSchemaId;
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -111,6 +111,7 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
         this.wrapped = wrapped;
         this.isContinuous = isContinuous;
         this.databaseName = databaseName;
+        this.baseSchemaId = wrapped.schema().id();
     }
 
     @Override
@@ -260,6 +261,19 @@ public class CompactBucketsTable implements DataTable, ReadonlyTable {
             }
 
             DataSplit dataSplit = (DataSplit) split;
+            // in case of schema evolution
+            for (DataFileMeta file : dataSplit.dataFiles()) {
+                System.out.println(
+                        "File schema id " + file.schemaId() + ", base schema id " + baseSchemaId);
+                if (file.schemaId() > baseSchemaId) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "File %s has schema id %d, "
+                                            + "which is larger than the base schema id %d. "
+                                            + "Trying to restart the job.",
+                                    file.fileName(), file.schemaId(), baseSchemaId));
+                }
+            }
 
             List<DataFileMeta> files = Collections.emptyList();
             if (isContinuous) {
