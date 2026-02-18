@@ -105,4 +105,59 @@ public class PartitionTimeExtractorTest {
                                 DateTimeParseException.class,
                                 "Text 'unknown' could not be parsed at index 0"));
     }
+
+    @Test
+    public void testExtractFromIntegerDateType() {
+        // Test INTEGER type representing days since epoch (DATE type in Paimon)
+        // 2025-10-10 = 20371 days since 1970-01-01
+        PartitionTimeExtractor extractor = new PartitionTimeExtractor(null, null);
+        assertThat(
+                        extractor.extract(
+                                Collections.singletonList("order_date"),
+                                Collections.singletonList(20371)))
+                .isEqualTo(LocalDateTime.parse("2025-10-10T00:00:00"));
+
+        // Test with pattern
+        extractor = new PartitionTimeExtractor("$order_date", "yyyy-MM-dd");
+        assertThat(
+                        extractor.extract(
+                                Collections.singletonList("order_date"),
+                                Collections.singletonList(20371)))
+                .isEqualTo(LocalDateTime.parse("2025-10-10T00:00:00"));
+    }
+
+    @Test
+    public void testExtractFromLocalDateType() {
+        // Test java.time.LocalDate type
+        PartitionTimeExtractor extractor = new PartitionTimeExtractor(null, null);
+        assertThat(
+                        extractor.extract(
+                                Collections.singletonList("dt"),
+                                Collections.singletonList(java.time.LocalDate.of(2023, 1, 15))))
+                .isEqualTo(LocalDateTime.parse("2023-01-15T00:00:00"));
+    }
+
+    @Test
+    public void testExtractFromLocalDateTimeType() {
+        // Test java.time.LocalDateTime type
+        PartitionTimeExtractor extractor = new PartitionTimeExtractor(null, null);
+        assertThat(
+                        extractor.extract(
+                                Collections.singletonList("ts"),
+                                Collections.singletonList(
+                                        java.time.LocalDateTime.of(2023, 1, 15, 10, 30, 45))))
+                .isEqualTo(LocalDateTime.parse("2023-01-15T10:30:45"));
+    }
+
+    @Test
+    public void testExtractFromMultiplePartitionWithTypedDate() {
+        // Test pattern with multiple partitions, one of which is DATE type
+        PartitionTimeExtractor extractor =
+                new PartitionTimeExtractor("$year-$month-$day 00:00:00", null);
+        assertThat(
+                        extractor.extract(
+                                Arrays.asList("year", "month", "day"),
+                                Arrays.asList("2023", "01", "15")))
+                .isEqualTo(LocalDateTime.parse("2023-01-15T00:00:00"));
+    }
 }
