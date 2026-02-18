@@ -830,7 +830,6 @@ public class HiveCatalog extends AbstractCatalog {
         Table hiveTable =
                 org.apache.hadoop.hive.ql.metadata.Table.getEmptyTable(
                         identifier.getDatabaseName(), identifier.getObjectName());
-        hiveTable.setCreateTime((int) (System.currentTimeMillis() / 1000));
 
         Map<String, String> properties = new HashMap<>(view.options());
         // Table comment
