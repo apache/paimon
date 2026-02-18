@@ -184,4 +184,14 @@ public class CatalogOptions {
                             "Whether to allow static cache in file io implementation. If not allowed, this means that "
                                     + "there may be a large number of FileIO instances generated, enabling caching can "
                                     + "lead to resource leakage.");
+
+    public static final ConfigOption<Boolean> FILE_IO_ATOMIC_RENAME_ENABLED =
+            ConfigOptions.key("file-io.atomic-rename.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to enable atomic rename for file overwrite operations. "
+                                    + "When enabled, Paimon attempts atomic rename via temp file, supported on HDFS (DistributedFileSystem, ViewFileSystem). "
+                                    + "Falls back to direct overwrite on object stores like S3/OSS. "
+                                    + "Set to false to skip atomic rename and avoid reflection/temp file overhead.");
 }
