@@ -89,6 +89,18 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
      */
     private boolean meetInsert;
 
+    /**
+     * Flag indicating whether the latest processed record is a retract operation. Used to determine
+     * the correct behavior when the last record in a sequence is a retract.
+     */
+    private boolean latestRetract = false;
+
+    /**
+     * Stores the latest KeyValue processed. This is used when we need to initialize the row based
+     * on the last retract record in case the final result should be a deletion.
+     */
+    private KeyValue latestKV;
+
     protected PartialUpdateMergeFunction(
             InternalRow.FieldGetter[] getters,
             boolean ignoreDelete,
@@ -115,6 +127,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.notNullColumnFilled = false;
         this.row = new GenericRow(getters.length);
         this.latestSequenceNumber = 0;
+        this.latestRetract = false;
+        this.latestKV = null;
         fieldAggregators.forEach(w -> w.getValue().reset());
     }
 
@@ -122,6 +136,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public void add(KeyValue kv) {
         // refresh key object to avoid reference overwritten
         currentKey = kv.key();
+
+        // Update latestKV and latestRetract status
+        latestKV = kv;
+        latestRetract = false;
+
         currentDeleteRow = false;
         if (kv.valueKind().isRetract()) {
 
@@ -146,9 +165,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             if (removeRecordOnDelete) {
                 if (kv.valueKind() == RowKind.DELETE) {
                     currentDeleteRow = true;
-                    row = new GenericRow(getters.length);
-                    initRow(row, kv.value());
+                    // We don't immediately reset the row here anymore, instead we handle it in
+                    // getResult()
                 }
+                latestRetract = true;
                 return;
             }
 
@@ -308,12 +328,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 if (kv.valueKind() == RowKind.DELETE
                                         && sequenceGroupPartialDelete.contains(field)) {
                                     currentDeleteRow = true;
-                                    row = new GenericRow(getters.length);
-                                    initRow(row, kv.value());
+                                    // We don't immediately reset the row here anymore, instead we
+                                    // handle it in getResult()
                                     return;
                                 } else {
                                     row.setField(field, getters[field].getFieldOrNull(kv.value()));
                                     updatedSequenceFields.add(field);
+                                }
+                                if (sequenceGroupPartialDelete.contains(field)) {
+                                    latestRetract = true;
                                 }
                             }
                         }
@@ -358,6 +381,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public KeyValue getResult() {
         if (reused == null) {
             reused = new KeyValue();
+        }
+
+        // If the current row should be deleted (currentDeleteRow is true)
+        // or there is a latest retract signal (latestRetract is true),
+        // we emit a delete row to retract previously emitted data.
+        if (currentDeleteRow || latestRetract) {
+            row = new GenericRow(getters.length);
+            initRow(row, latestKV.value());
+            currentDeleteRow = true;
         }
 
         RowKind rowKind = currentDeleteRow || !meetInsert ? RowKind.DELETE : RowKind.INSERT;

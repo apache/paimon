@@ -872,6 +872,102 @@ public class PartialUpdateMergeFunctionTest {
         assertThat(func.getResult().sequenceNumber()).isEqualTo(1);
     }
 
+    @Test
+    public void testUpdateBeforeRetract() {
+        Options options = new Options();
+        options.set("partial-update.remove-record-on-delete", "true");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"));
+
+        MergeFunction<KeyValue> func = factory.create();
+
+        func.reset();
+
+        add(func, RowKind.INSERT, 1, 1, 1, 1, 1);
+        add(func, RowKind.UPDATE_BEFORE, 1, 1, 1, 1, 1);
+
+        validate(func, null, null, null, null, null);
+    }
+
+    @Test
+    public void testUpdateBeforeRetractSequenceGroup() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2");
+        options.set("fields.f6.sequence-group", "f4,f5");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        add(func, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 1, 2, 2, 2, 2, 2, null);
+        validate(func, 1, 2, 2, 2, 1, 1, 1);
+        add(func, 1, 3, 3, 1, 3, 3, 3);
+        validate(func, 1, 2, 2, 2, 3, 3, 3);
+
+        // delete
+        add(func, RowKind.UPDATE_BEFORE, 1, 1, 1, 3, 1, 1, null);
+        validate(func, 1, null, null, 3, 3, 3, 3);
+        add(func, RowKind.UPDATE_BEFORE, 1, 1, 1, 3, 1, 1, 4);
+        validate(func, 1, null, null, 3, null, null, 4);
+        add(func, 1, 4, 4, 4, 5, 5, 5);
+        validate(func, 1, 4, 4, 4, 5, 5, 5);
+        add(func, RowKind.UPDATE_BEFORE, 1, 1, 1, 6, 1, 1, 6);
+        validate(func, 1, null, null, 6, null, null, 6);
+    }
+
+    @Test
+    public void testUpdateBeforeRetractSequenceGroupPartialDelete() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2");
+        options.set("fields.f6.sequence-group", "f4,f5");
+        options.set("partial-update.remove-record-on-sequence-group", "f6");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+        func.reset();
+        add(func, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 1, 2, 2, 2, 2, 2, null);
+        validate(func, 1, 2, 2, 2, 1, 1, 1);
+        add(func, 1, 3, 3, 1, 3, 3, 3);
+        validate(func, 1, 2, 2, 2, 3, 3, 3);
+
+        // delete
+        add(func, RowKind.UPDATE_BEFORE, 1, 1, 1, 3, 1, 1, null);
+        validate(func, 1, null, null, 3, 3, 3, 3);
+        add(func, RowKind.UPDATE_BEFORE, 1, 1, 1, 3, 1, 1, 4);
+        validate(func, null, null, null, null, null, null, null);
+        add(func, 1, 4, 4, 4, 5, 5, 5);
+        validate(func, 1, 4, 4, 4, 5, 5, 5);
+        add(func, RowKind.UPDATE_BEFORE, 1, 1, 1, 6, 1, 1, 6);
+        validate(func, null, null, null, null, null, null, null);
+    }
+
     private void add(MergeFunction<KeyValue> function, Integer... f) {
         add(function, RowKind.INSERT, f);
     }
