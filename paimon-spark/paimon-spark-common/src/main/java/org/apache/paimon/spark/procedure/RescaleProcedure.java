@@ -106,9 +106,10 @@ public class RescaleProcedure extends BaseProcedure {
                 "partitions and where cannot be used together.");
         String finalWhere = partitions != null ? SparkProcedureUtils.toWhere(partitions) : where;
 
-        return modifyPaimonTable(
+        return modifySparkTable(
                 tableIdent,
-                table -> {
+                sparkTable -> {
+                    org.apache.paimon.table.Table table = sparkTable.getTable();
                     checkArgument(table instanceof FileStoreTable);
                     FileStoreTable fileStoreTable = (FileStoreTable) table;
 
@@ -130,7 +131,7 @@ public class RescaleProcedure extends BaseProcedure {
                             String.valueOf(snapshot.id()));
                     fileStoreTable = fileStoreTable.copy(dynamicOptions);
 
-                    DataSourceV2Relation relation = createRelation(tableIdent);
+                    DataSourceV2Relation relation = createRelation(tableIdent, sparkTable);
                     PartitionPredicate partitionPredicate =
                             SparkProcedureUtils.convertToPartitionPredicate(
                                     finalWhere,
@@ -144,7 +145,7 @@ public class RescaleProcedure extends BaseProcedure {
                                 "When rescaling postpone bucket tables, you must provide the resulting bucket number.");
                     }
 
-                    execute(fileStoreTable, bucketNum, partitionPredicate, tableIdent);
+                    execute(fileStoreTable, bucketNum, partitionPredicate, relation);
 
                     InternalRow internalRow = newInternalRow(true);
                     return new InternalRow[] {internalRow};
@@ -155,9 +156,7 @@ public class RescaleProcedure extends BaseProcedure {
             FileStoreTable table,
             @Nullable Integer bucketNum,
             PartitionPredicate partitionPredicate,
-            Identifier tableIdent) {
-        DataSourceV2Relation relation = createRelation(tableIdent);
-
+            DataSourceV2Relation relation) {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
             snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
