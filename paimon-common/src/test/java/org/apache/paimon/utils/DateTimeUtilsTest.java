@@ -67,6 +67,10 @@ public class DateTimeUtilsTest {
         ts = DateTimeUtils.parseTimestampData(dt, 3);
         assertThat(dt)
                 .isEqualTo(ts.toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
+
+        dt = "2025-04-22 17:49:21";
+        LocalDateTime ld = DateTimeUtils.toLocalDateTime(dt, 3);
+        assertThat(dt).isEqualTo(ld.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
     }
 
     @Test
