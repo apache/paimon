@@ -30,6 +30,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.SegmentsCache;
+import org.apache.paimon.view.View;
+import org.apache.paimon.view.ViewChange;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -324,6 +326,40 @@ public class CachingCatalog extends DelegateCatalog {
         if (partitionCache != null) {
             partitionCache.invalidate(identifier);
         }
+    }
+
+    @Override
+    public void createView(Identifier identifier, View view, boolean ignoreIfExists)
+            throws ViewAlreadyExistException, DatabaseNotExistException {
+        wrapped.createView(identifier, view, ignoreIfExists);
+    }
+
+    @Override
+    public View getView(Identifier identifier) throws ViewNotExistException {
+        return wrapped.getView(identifier);
+    }
+
+    @Override
+    public List<String> listViews(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listViews(databaseName);
+    }
+
+    @Override
+    public void dropView(Identifier identifier, boolean ignoreIfNotExists)
+            throws ViewNotExistException {
+        wrapped.dropView(identifier, ignoreIfNotExists);
+    }
+
+    @Override
+    public void renameView(Identifier fromView, Identifier toView, boolean ignoreIfNotExists)
+            throws ViewNotExistException, ViewAlreadyExistException {
+        wrapped.renameView(fromView, toView, ignoreIfNotExists);
+    }
+
+    @Override
+    public void alterView(Identifier view, List<ViewChange> viewChanges, boolean ignoreIfNotExists)
+            throws ViewNotExistException, DialectAlreadyExistException, DialectNotExistException {
+        wrapped.alterView(view, viewChanges, ignoreIfNotExists);
     }
 
     // ================================== Cache Public API
