@@ -272,14 +272,21 @@ All available procedures are listed below.
    <tr>
       <td>trigger_tag_automatic_creation</td>
       <td>
+         -- Use named argument
+         CALL [catalog.]sys.trigger_tag_automatic_creation(`table` => 'identifier')
+         CALL [catalog.]sys.trigger_tag_automatic_creation(`table` => 'identifier', force => false)<br/><br/>
+         -- Use indexed argument
          CALL [catalog.]sys.trigger_tag_automatic_creation('identifier')
+         CALL [catalog.]sys.trigger_tag_automatic_creation('identifier', false)
       </td>
       <td>
          Trigger the tag automatic creation. Arguments:
             <li>table: the target table identifier. Cannot be empty.</li>
+            <li>force: force creating the auto-tag when it's after tag.creation-delay even no data exits. Default false.</li>
       </td>
       <td>
-         CALL sys.trigger_tag_automatic_creation(table => 'default.T')
+         CALL sys.trigger_tag_automatic_creation(table => 'default.T')<br/>
+         CALL sys.trigger_tag_automatic_creation(table => 'default.T', force => false)
       </td>
    </tr>
    <tr>
