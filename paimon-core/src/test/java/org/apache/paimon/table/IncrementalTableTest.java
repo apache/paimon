@@ -24,6 +24,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
@@ -510,6 +512,53 @@ public class IncrementalTableTest extends TableTestBase {
                                                 "%s,%s",
                                                 earliestTimestamp - 2, earliestTimestamp - 1))))
                 .isEmpty();
+    }
+
+    @Test
+    public void testIncrementalWithInputChangeLogAndMoW() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option("bucket", "1")
+                        .option("changelog-producer", "input")
+                        .option("deletion-vectors.enabled", "true")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        IOManager ioManager = new IOManagerImpl(tempPath.toString());
+        Table table = catalog.getTable(identifier);
+        // snapshot 1: append
+        write(
+                table,
+                ioManager,
+                GenericRow.of(1, 1, 1),
+                GenericRow.of(1, 2, 1),
+                GenericRow.of(1, 3, 1),
+                GenericRow.of(2, 1, 1));
+
+        // snapshot 2: compact
+        compact(table, row(1), 0, ioManager, true);
+
+        // snapshot 3: append + and -
+        write(
+                table,
+                ioManager,
+                GenericRow.ofKind(RowKind.DELETE, 1, 1, 1),
+                GenericRow.ofKind(RowKind.DELETE, 1, 2, 1),
+                GenericRow.of(1, 4, 1),
+                GenericRow.of(2, 1, 2));
+
+        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "1,3"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        GenericRow.ofKind(RowKind.DELETE, 1, 1, 1),
+                        GenericRow.ofKind(RowKind.DELETE, 1, 2, 1),
+                        GenericRow.of(1, 4, 1),
+                        GenericRow.of(2, 1, 2));
     }
 
     private static long utcMills(String timestamp) {
