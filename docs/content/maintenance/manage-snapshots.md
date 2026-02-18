@@ -263,6 +263,7 @@ Run the following command:
     --max_deletes <max-deletes> \
     --retain_max <retain-max> \
     --retain_min <retain-min> \
+    [--parallelism <parallelism>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 

@@ -62,7 +62,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -77,8 +76,8 @@ public class ExpireSnapshotsTest {
 
     protected final FileIO fileIO = new LocalFileIO();
     protected TestKeyValueGenerator gen;
-    @TempDir java.nio.file.Path tempDir;
-    @TempDir java.nio.file.Path tempExternalPath;
+    @TempDir protected java.nio.file.Path tempDir;
+    @TempDir protected java.nio.file.Path tempExternalPath;
     protected TestFileStore store;
     protected SnapshotManager snapshotManager;
     protected ChangelogManager changelogManager;
@@ -102,7 +101,12 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireWithMissingFiles() throws Exception {
-        ExpireSnapshots expire = store.newExpire(1, 1, 1);
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(1)
+                        .snapshotTimeRetain(Duration.ofMillis(1))
+                        .build();
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -132,7 +136,7 @@ public class ExpireSnapshotsTest {
             fileIO.deleteQuietly(unusedFileList.get(i));
         }
 
-        expire.expire();
+        doExpire(config);
 
         for (int i = 1; i < latestSnapshotId; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isFalse();
@@ -150,7 +154,12 @@ public class ExpireSnapshotsTest {
                 .set(
                         CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY,
                         ExternalPathStrategy.ROUND_ROBIN);
-        ExpireSnapshots expire = store.newExpire(1, 1, 1);
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(1)
+                        .snapshotTimeRetain(Duration.ofMillis(1))
+                        .build();
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -193,7 +202,7 @@ public class ExpireSnapshotsTest {
             fileIO.deleteQuietly(unusedFileList.get(i));
         }
 
-        expire.expire();
+        doExpire(config);
 
         for (int i = 1; i < latestSnapshotId; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isFalse();
@@ -226,7 +235,13 @@ public class ExpireSnapshotsTest {
         // randomly expire snapshots
         int expired = random.nextInt(latestSnapshotId / 2) + 1;
         int retained = latestSnapshotId - expired;
-        store.newExpire(retained, retained, Long.MAX_VALUE).expire();
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(retained)
+                        .snapshotRetainMax(retained)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build();
+        doExpire(config);
 
         // randomly delete tags
         for (int id = 1; id <= latestSnapshotId; id++) {
@@ -251,8 +266,6 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireExtraFiles() throws IOException {
-        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(1, 3, Long.MAX_VALUE);
-
         // write test files
         BinaryRow partition = gen.getPartition(gen.next());
         Path bucketPath = store.pathFactory().bucketPath(partition, 0);
@@ -290,8 +303,8 @@ public class ExpireSnapshotsTest {
         ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
 
-        // expire
-        expire.snapshotDeletion()
+        // expire using SnapshotDeletion directly
+        store.newSnapshotDeletion()
                 .cleanUnusedDataFile(
                         Arrays.asList(ExpireFileEntry.from(add), ExpireFileEntry.from(delete)));
 
@@ -312,7 +325,7 @@ public class ExpireSnapshotsTest {
                 .set(
                         CoreOptions.DATA_FILE_EXTERNAL_PATHS_STRATEGY,
                         ExternalPathStrategy.ROUND_ROBIN);
-        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(1, 3, Long.MAX_VALUE);
+
         // write test files
         BinaryRow partition = gen.getPartition(gen.next());
 
@@ -353,8 +366,8 @@ public class ExpireSnapshotsTest {
         ManifestEntry add = ManifestEntry.create(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = ManifestEntry.create(FileKind.DELETE, partition, 0, 1, dataFile);
 
-        // expire
-        expire.snapshotDeletion()
+        // expire using SnapshotDeletion directly
+        store.newSnapshotDeletion()
                 .cleanUnusedDataFile(
                         Arrays.asList(ExpireFileEntry.from(add), ExpireFileEntry.from(delete)));
 
@@ -367,9 +380,14 @@ public class ExpireSnapshotsTest {
     }
 
     @Test
-    public void testNoSnapshot() throws IOException {
-        ExpireSnapshots expire = store.newExpire(1, 3, Long.MAX_VALUE);
-        expire.expire();
+    public void testNoSnapshot() throws Exception {
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(3)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build();
+        doExpire(config);
 
         assertThat(snapshotManager.latestSnapshotId()).isNull();
 
@@ -382,8 +400,13 @@ public class ExpireSnapshotsTest {
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(2, allData, snapshotPositions);
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
-        ExpireSnapshots expire = store.newExpire(1, latestSnapshotId + 1, Long.MAX_VALUE);
-        expire.expire();
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(latestSnapshotId + 1)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build();
+        doExpire(config);
 
         for (int i = 1; i <= latestSnapshotId; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isTrue();
@@ -399,8 +422,13 @@ public class ExpireSnapshotsTest {
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
-        ExpireSnapshots expire = store.newExpire(1, Integer.MAX_VALUE, Long.MAX_VALUE);
-        expire.expire();
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(Integer.MAX_VALUE)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build();
+        doExpire(config);
 
         for (int i = 1; i <= latestSnapshotId; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isTrue();
@@ -420,8 +448,13 @@ public class ExpireSnapshotsTest {
         commit(numRetainedMin + random.nextInt(5), allData, snapshotPositions);
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         Thread.sleep(100);
-        ExpireSnapshots expire = store.newExpire(numRetainedMin, Integer.MAX_VALUE, 1);
-        expire.expire();
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(numRetainedMin)
+                        .snapshotRetainMax(Integer.MAX_VALUE)
+                        .snapshotTimeRetain(Duration.ofMillis(1))
+                        .build();
+        doExpire(config);
 
         for (int i = 1; i <= latestSnapshotId - numRetainedMin; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isFalse();
@@ -436,31 +469,21 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireEmptySnapshot() throws Exception {
-        Random random = new Random();
-
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(100, allData, snapshotPositions);
-        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
 
         List<Thread> s = new ArrayList<>();
-        s.add(
-                new Thread(
-                        () -> {
-                            final ExpireSnapshotsImpl expire =
-                                    (ExpireSnapshotsImpl) store.newExpire(1, Integer.MAX_VALUE, 1);
-                            expire.expireUntil(89, latestSnapshotId);
-                        }));
+        // Create multiple threads that concurrently expire snapshots
         for (int i = 0; i < 10; i++) {
-            final ExpireSnapshotsImpl expire =
-                    (ExpireSnapshotsImpl) store.newExpire(1, Integer.MAX_VALUE, 1);
-            s.add(
-                    new Thread(
-                            () -> {
-                                int start = random.nextInt(latestSnapshotId - 10);
-                                int end = start + random.nextInt(10);
-                                expire.expireUntil(start, end);
-                            }));
+            ExpireConfig config =
+                    ExpireConfig.builder()
+                            .snapshotRetainMin(1)
+                            .snapshotRetainMax(Integer.MAX_VALUE)
+                            .snapshotTimeRetain(Duration.ofMillis(1))
+                            .build();
+
+            s.add(new Thread(() -> doExpire(config)));
         }
 
         Assertions.assertThatCode(
@@ -480,13 +503,18 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireWithNumber() throws Exception {
-        ExpireSnapshots expire = store.newExpire(1, 3, Long.MAX_VALUE);
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(3)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build();
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         for (int i = 1; i <= 3; i++) {
             commit(ThreadLocalRandom.current().nextInt(5) + 1, allData, snapshotPositions);
-            expire.expire();
+            doExpire(config);
 
             int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
             for (int j = 1; j <= latestSnapshotId; j++) {
@@ -518,11 +546,12 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireWithTime() throws Exception {
-        ExpireConfig.Builder builder = ExpireConfig.builder();
-        builder.snapshotRetainMin(1)
-                .snapshotRetainMax(Integer.MAX_VALUE)
-                .snapshotTimeRetain(Duration.ofMillis(1000));
-        ExpireSnapshots expire = store.newExpire(builder.build());
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(Integer.MAX_VALUE)
+                        .snapshotTimeRetain(Duration.ofMillis(1000))
+                        .build();
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -532,8 +561,8 @@ public class ExpireSnapshotsTest {
         long expireMillis = System.currentTimeMillis();
         // expire twice to check for idempotence
 
-        expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
-        expire.config(builder.snapshotTimeRetain(Duration.ofMillis(1000)).build()).expire();
+        doExpire(config);
+        doExpire(config);
 
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -583,8 +612,13 @@ public class ExpireSnapshotsTest {
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
 
         // the data file still exists after expire
-        ExpireSnapshots expire = store.newExpire(1, 1, Long.MAX_VALUE);
-        expire.expire();
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(1)
+                        .snapshotRetainMax(1)
+                        .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .build();
+        doExpire(config);
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
 
         store.assertCleaned();
@@ -603,11 +637,11 @@ public class ExpireSnapshotsTest {
                         .changelogRetainMax(3)
                         .build();
 
-        ExpireSnapshots snapshot = store.newExpire(config);
+        doExpire(config);
         ExpireSnapshots changelog = store.newChangelogExpire(config);
         // expire twice to check for idempotence
-        snapshot.expire();
-        snapshot.expire();
+        doExpire(config);
+        doExpire(config);
 
         int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         int earliestSnapshotId = snapshotManager.earliestSnapshotId().intValue();
@@ -655,7 +689,7 @@ public class ExpireSnapshotsTest {
                         .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
                         .build();
 
-        store.newExpire(config).expire();
+        doExpire(config);
 
         int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
@@ -719,5 +753,12 @@ public class ExpireSnapshotsTest {
         gen.sort(actualKvs);
         Map<BinaryRow, BinaryRow> actual = store.toKvMap(actualKvs);
         assertThat(actual).isEqualTo(expected);
+    }
+
+    // ==================== Expire Method (can be overridden by subclass) ====================
+
+    /** Subclass can override this method to test different expire implementations. */
+    protected int doExpire(ExpireConfig config) {
+        return store.newExpire(config).expire();
     }
 }
