@@ -26,6 +26,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -47,6 +48,8 @@ public class HashBucketAssigner implements BucketAssigner {
     private final long targetBucketRowNumber;
     private final int maxBucketsNum;
     private int maxBucketId;
+    private int minEmptyBucketsBeforeAsyncCheck;
+    private Duration minRefreshInterval;
 
     private final Map<BinaryRow, PartitionIndex> partitionIndex;
 
@@ -58,7 +61,9 @@ public class HashBucketAssigner implements BucketAssigner {
             int numAssigners,
             int assignId,
             long targetBucketRowNumber,
-            int maxBucketsNum) {
+            int maxBucketsNum,
+            int minEmptyBucketsBeforeAsyncCheck,
+            Duration minRefreshInterval) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.indexFileHandler = indexFileHandler;
@@ -68,6 +73,8 @@ public class HashBucketAssigner implements BucketAssigner {
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.partitionIndex = new HashMap<>();
         this.maxBucketsNum = maxBucketsNum;
+        this.minEmptyBucketsBeforeAsyncCheck = minEmptyBucketsBeforeAsyncCheck;
+        this.minRefreshInterval = minRefreshInterval;
     }
 
     /** Assign a bucket for key hash of a record. */
@@ -88,7 +95,14 @@ public class HashBucketAssigner implements BucketAssigner {
             this.partitionIndex.put(partition, index);
         }
 
-        int assigned = index.assign(hash, this::isMyBucket, maxBucketsNum, maxBucketId);
+        int assigned =
+                index.assign(
+                        hash,
+                        this::isMyBucket,
+                        maxBucketsNum,
+                        maxBucketId,
+                        minEmptyBucketsBeforeAsyncCheck,
+                        minRefreshInterval);
         if (LOG.isDebugEnabled()) {
             LOG.debug("Assign {} to the partition {} key hash {}", assigned, partition, hash);
         }

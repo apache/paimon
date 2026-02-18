@@ -27,6 +27,8 @@ import org.apache.paimon.utils.ListUtils;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -34,6 +36,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.IntPredicate;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
@@ -43,7 +47,7 @@ public class PartitionIndex {
 
     public final Int2ShortHashMap hash2Bucket;
 
-    public final Map<Integer, Long> nonFullBucketInformation;
+    public final ConcurrentHashMap<Integer, Long> nonFullBucketInformation;
 
     public final Set<Integer> totalBucketSet;
     public final List<Integer> totalBucketArray;
@@ -54,10 +58,20 @@ public class PartitionIndex {
 
     public long lastAccessedCommitIdentifier;
 
+    private final IndexFileHandler indexFileHandler;
+
+    private final BinaryRow partition;
+
+    private volatile CompletableFuture<Void> refreshFuture;
+
+    private Instant lastRefreshTime;
+
     public PartitionIndex(
             Int2ShortHashMap hash2Bucket,
-            Map<Integer, Long> bucketInformation,
-            long targetBucketRowNumber) {
+            ConcurrentHashMap<Integer, Long> bucketInformation,
+            long targetBucketRowNumber,
+            IndexFileHandler indexFileHandler,
+            BinaryRow partition) {
         this.hash2Bucket = hash2Bucket;
         this.nonFullBucketInformation = bucketInformation;
         this.totalBucketSet = new LinkedHashSet<>(bucketInformation.keySet());
@@ -65,14 +79,28 @@ public class PartitionIndex {
         this.targetBucketRowNumber = targetBucketRowNumber;
         this.lastAccessedCommitIdentifier = Long.MIN_VALUE;
         this.accessed = true;
+        this.indexFileHandler = indexFileHandler;
+        this.partition = partition;
+        this.lastRefreshTime = Instant.now();
     }
 
-    public int assign(int hash, IntPredicate bucketFilter, int maxBucketsNum, int maxBucketId) {
+    public int assign(
+            int hash,
+            IntPredicate bucketFilter,
+            int maxBucketsNum,
+            int maxBucketId,
+            int minEmptyBucketsBeforeAsyncCheck,
+            Duration minRefreshInterval) {
         accessed = true;
 
         // 1. is it a key that has appeared before
         if (hash2Bucket.containsKey(hash)) {
             return hash2Bucket.get(hash);
+        }
+
+        if (shouldRefreshEmptyBuckets(maxBucketId, minEmptyBucketsBeforeAsyncCheck)
+                && isReachedTheMinRefreshInterval(minRefreshInterval)) {
+            refreshBucketsFromDisk();
         }
 
         // 2. find bucket from existing buckets
@@ -91,6 +119,7 @@ public class PartitionIndex {
             }
         }
 
+        // from onwards is to create new bucket
         int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
         if (totalBucketSet.isEmpty() || maxBucketId < globalMaxBucketId) {
             // 3. create a new bucket
@@ -110,7 +139,7 @@ public class PartitionIndex {
                                 maxBucketId, targetBucketRowNumber));
             }
         }
-
+        // todo: check this part
         // 4. exceed buckets upper bound
         int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, (short) bucket);
@@ -125,7 +154,7 @@ public class PartitionIndex {
             IntPredicate bucketFilter) {
         List<IndexManifestEntry> files = indexFileHandler.scanEntries(HASH_INDEX, partition);
         Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
-        Map<Integer, Long> buckets = new HashMap<>();
+        ConcurrentHashMap<Integer, Long> buckets = new ConcurrentHashMap<>();
         for (IndexManifestEntry file : files) {
             try (IntIterator iterator =
                     indexFileHandler
@@ -150,6 +179,50 @@ public class PartitionIndex {
                 throw new UncheckedIOException(e);
             }
         }
-        return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
+        return new PartitionIndex(
+                mapBuilder.build(), buckets, targetBucketRowNumber, indexFileHandler, partition);
+    }
+
+    private boolean shouldRefreshEmptyBuckets(
+            int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
+        return maxBucketId != -1
+                && minEmptyBucketsBeforeAsyncCheck != -1
+                && (nonFullBucketInformation.size()
+                == maxBucketId - minEmptyBucketsBeforeAsyncCheck);
+    }
+
+    private boolean isReachedTheMinRefreshInterval(final Duration duration) {
+        return Instant.now().isAfter(lastRefreshTime.plus(duration));
+    }
+
+
+    private void refreshBucketsFromDisk() {
+        // Only start refresh if not already in progress
+        if (refreshFuture == null || refreshFuture.isDone()) {
+            refreshFuture =
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try {
+                                    List<IndexManifestEntry> files =
+                                            indexFileHandler.scanEntries(HASH_INDEX, partition);
+                                    Map<Integer, Long> tempBucketInfo = new HashMap<>();
+
+                                    for (IndexManifestEntry file : files) {
+                                        long currentNumberOfRows = file.indexFile().rowCount();
+                                        if (currentNumberOfRows < targetBucketRowNumber) {
+                                            tempBucketInfo.put(file.bucket(), currentNumberOfRows);
+                                        }
+                                    }
+
+                                    nonFullBucketInformation.putAll(tempBucketInfo);
+                                    lastRefreshTime = Instant.now();
+                                } catch (Exception e) {
+                                    // Log error instead of throwing
+                                    System.err.println(
+                                            "Error refreshing buckets from disk: "
+                                                    + e.getMessage());
+                                }
+                            });
+        }
     }
 }
