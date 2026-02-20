@@ -172,14 +172,16 @@ class RESTCatalog(Catalog):
             database_name: str,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
-            table_name_pattern: Optional[str] = None
+            table_name_pattern: Optional[str] = None,
+            table_type: Optional[str] = None
     ) -> PagedList[str]:
         try:
             return self.rest_api.list_tables_paged(
                 database_name,
                 max_results,
                 page_token,
-                table_name_pattern
+                table_name_pattern,
+                table_type
             )
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
