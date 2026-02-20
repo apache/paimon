@@ -87,6 +87,10 @@ public class HadoopFileIO implements FileIO {
         return hadoopConf.get();
     }
 
+    public org.apache.paimon.options.Options hadoopOptions() {
+        return new org.apache.paimon.options.Options(hadoopConf.get());
+    }
+
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
         org.apache.hadoop.fs.Path hadoopPath = path(path);
