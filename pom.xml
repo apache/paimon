@@ -612,8 +612,7 @@ under the License.
                         <exclude>**/*.prefs</exclude>
                         <exclude>**/*.log</exclude>
                         <!-- Administrative files in the main trunk. -->
-                        <exclude>**/README.md</exclude>
-                        <exclude>**/CODE_OF_CONDUCT.md</exclude>
+                        <exclude>**/*.md</exclude>
                         <exclude>.github/**</exclude>
                         <!-- IDE files. -->
                         <exclude>**/*.iml</exclude>
