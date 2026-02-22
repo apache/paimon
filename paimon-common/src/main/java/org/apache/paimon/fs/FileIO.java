@@ -246,6 +246,73 @@ public interface FileIO extends Serializable, Closeable {
      */
     boolean rename(Path src, Path dst) throws IOException;
 
+    // -------------------------------------------------------------------------
+    //                            Archive Operations
+    // -------------------------------------------------------------------------
+
+    /**
+     * Archive a file or directory to the specified storage type.
+     *
+     * <p>This method moves files to a different storage tier (e.g., Archive or ColdArchive) in
+     * object stores. For in-place archiving (like S3 Intelligent-Tiering), the file path remains
+     * unchanged and this method returns {@code Optional.empty()}. For non-in-place archiving, this
+     * method may return a new path.
+     *
+     * <p>Metadata paths remain unchanged - FileIO implementations handle storage tier changes
+     * transparently.
+     *
+     * @param path the file or directory to archive
+     * @param type the storage type to archive to (Archive or ColdArchive)
+     * @return Optional containing the new path if archiving requires a path change, or
+     *     Optional.empty() for in-place archiving
+     * @throws IOException if the archive operation fails
+     * @throws UnsupportedOperationException if the FileIO implementation does not support archiving
+     */
+    default Optional<Path> archive(Path path, StorageType type) throws IOException {
+        throw new UnsupportedOperationException(
+                "Archive operation is not supported by " + this.getClass().getName());
+    }
+
+    /**
+     * Restore archived files to make them accessible for reading.
+     *
+     * <p>Some storage tiers (like Archive and ColdArchive) require files to be restored before they
+     * can be accessed. This method initiates the restore process. The restore operation may take
+     * time depending on the storage tier.
+     *
+     * <p>For implementations that support automatic restore on access, this method may be a no-op.
+     *
+     * @param path the file or directory to restore
+     * @param duration the duration to keep the file restored (may be ignored by some
+     *     implementations)
+     * @throws IOException if the restore operation fails
+     * @throws UnsupportedOperationException if the FileIO implementation does not support restore
+     */
+    default void restoreArchive(Path path, java.time.Duration duration) throws IOException {
+        throw new UnsupportedOperationException(
+                "Restore archive operation is not supported by " + this.getClass().getName());
+    }
+
+    /**
+     * Unarchive a file or directory, moving it back to standard storage.
+     *
+     * <p>This method moves files from archive storage tiers back to standard storage. For in-place
+     * archiving, this method returns {@code Optional.empty()}. For non-in-place archiving, this
+     * method may return a new path.
+     *
+     * @param path the file or directory to unarchive
+     * @param type the current storage type of the file (Archive or ColdArchive)
+     * @return Optional containing the new path if unarchiving requires a path change, or
+     *     Optional.empty() for in-place unarchiving
+     * @throws IOException if the unarchive operation fails
+     * @throws UnsupportedOperationException if the FileIO implementation does not support
+     *     unarchiving
+     */
+    default Optional<Path> unarchive(Path path, StorageType type) throws IOException {
+        throw new UnsupportedOperationException(
+                "Unarchive operation is not supported by " + this.getClass().getName());
+    }
+
     /**
      * Override this method to empty, many FileIO implementation classes rely on static variables
      * and do not have the ability to close them.

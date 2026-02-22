@@ -190,6 +190,86 @@ The following SQL drops the partitions of the paimon table. For spark sql, you n
 ALTER TABLE my_table DROP PARTITION (`id` = 1, `name` = 'paimon');
 ```
 
+## Archiving Partitions
+
+Paimon supports archiving partition files to different storage tiers (Archive, ColdArchive) in object stores like S3 and OSS. This feature helps optimize storage costs by moving infrequently accessed data to lower-cost storage tiers.
+
+{{< hint info >}}
+Archive operations are only supported for object stores (S3, OSS, etc.). The feature is not available for local file systems.
+{{< /hint >}}
+
+### Archive Partition
+
+The following SQL archives a partition to Archive storage tier:
+
+```sql
+ALTER TABLE my_table PARTITION (dt='2024-01-01') ARCHIVE;
+```
+
+### Cold Archive Partition
+
+The following SQL archives a partition to ColdArchive storage tier (lowest cost, longest access time):
+
+```sql
+ALTER TABLE my_table PARTITION (dt='2024-01-01') COLD ARCHIVE;
+```
+
+### Restore Archived Partition
+
+The following SQL restores an archived partition to make it accessible for reading:
+
+```sql
+ALTER TABLE my_table PARTITION (dt='2024-01-01') RESTORE ARCHIVE;
+```
+
+You can optionally specify a duration to keep the partition restored:
+
+```sql
+ALTER TABLE my_table PARTITION (dt='2024-01-01') RESTORE ARCHIVE WITH DURATION 7 DAYS;
+```
+
+### Unarchive Partition
+
+The following SQL moves an archived partition back to standard storage:
+
+```sql
+ALTER TABLE my_table PARTITION (dt='2024-01-01') UNARCHIVE;
+```
+
+### Examples
+
+Archive old partitions for cost optimization:
+
+```sql
+-- Create a partitioned table
+CREATE TABLE sales (id INT, amount DOUBLE, dt STRING) 
+PARTITIONED BY (dt) USING paimon;
+
+-- Insert data
+INSERT INTO sales VALUES (1, 100.0, '2024-01-01');
+INSERT INTO sales VALUES (2, 200.0, '2024-01-02');
+
+-- Archive old partition
+ALTER TABLE sales PARTITION (dt='2024-01-01') ARCHIVE;
+
+-- Data is still accessible (may require restore first depending on storage tier)
+SELECT * FROM sales WHERE dt='2024-01-01';
+
+-- Restore archived partition when needed
+ALTER TABLE sales PARTITION (dt='2024-01-01') RESTORE ARCHIVE;
+
+-- Move back to standard storage
+ALTER TABLE sales PARTITION (dt='2024-01-01') UNARCHIVE;
+```
+
+### Notes
+
+- Archive operations preserve all files in the partition including data files, manifest files, and extra files
+- Metadata paths remain unchanged - FileIO implementations handle storage tier changes transparently
+- Reading archived data may require restoring the partition first, depending on the storage tier
+- Archive operations are distributed and can process large partitions efficiently using Spark
+- Supported object stores: S3, OSS (other object stores may be added in future versions)
+
 ## Changing Column Comment
 
 The following SQL changes comment of column `buy_count` to `buy count`.
