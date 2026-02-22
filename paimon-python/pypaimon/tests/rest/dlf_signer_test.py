@@ -15,6 +15,8 @@
 #  limitations under the License.
 
 import unittest
+import re
+import threading
 from datetime import datetime, timezone
 
 from pypaimon.api.auth import (
@@ -149,6 +151,103 @@ class DLFSignerTest(unittest.TestCase):
         self.assertEqual("default", parse("127.0.0.1"))
         self.assertEqual("default", parse(""))
         self.assertEqual("default", parse(None))
+
+    def test_openapi_sign_headers_with_enhanced_nonce(self):
+        """Test enhanced nonce generation."""
+        signer = DLFOpenApiSigner()
+        body = '{"CategoryName":"test","CategoryType":"UNSTRUCTURED"}'
+        now = datetime(2025, 4, 16, 3, 44, 46, tzinfo=timezone.utc)
+        host = "dlfnext.cn-beijing.aliyuncs.com"
+
+        headers = signer.sign_headers(body, now, None, host)
+
+        self.assertIsNotNone(headers.get("Date"))
+        self.assertEqual("application/json", headers.get("Accept"))
+        self.assertIsNotNone(headers.get("Content-MD5"))
+        self.assertEqual("application/json", headers.get("Content-Type"))
+        self.assertEqual(host, headers.get("Host"))
+        self.assertEqual("HMAC-SHA1", headers.get("x-acs-signature-method"))
+
+        nonce_value = headers.get("x-acs-signature-nonce")
+        self.assertIsNotNone(nonce_value)
+
+        uuid_pattern = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+        uuid_match = uuid_pattern.search(nonce_value)
+        self.assertIsNotNone(uuid_match, f"No UUID pattern found in nonce: {nonce_value}")
+
+        digit_pattern = re.compile(r'\d+')
+        digit_matches = digit_pattern.findall(nonce_value)
+        self.assertGreater(len(digit_matches), 0, f"No numeric parts found in nonce: {nonce_value}")
+
+        timestamp_found = any(len(part) >= 10 for part in digit_matches)
+        self.assertTrue(timestamp_found, f"No timestamp-like part found in nonce: {nonce_value}")
+
+        self.assertEqual("1.0", headers.get("x-acs-signature-version"))
+        self.assertEqual("2026-01-18", headers.get("x-acs-version"))
+
+    def test_concurrent_nonce_generation(self):
+        """Test nonce generation thread safety."""
+        signer = DLFOpenApiSigner()
+        body = '{"test":"data"}'
+        now = datetime.now(timezone.utc)
+        host = "test-host"
+        thread_count = 10
+        iterations_per_thread = 50
+
+        nonces = set()
+
+        def worker():
+            for _ in range(iterations_per_thread):
+                headers = signer.sign_headers(body, now, None, host)
+                nonce = headers.get("x-acs-signature-nonce")
+                nonces.add(nonce)
+
+        threads = []
+        for _ in range(thread_count):
+            thread = threading.Thread(target=worker)
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        expected_total = thread_count * iterations_per_thread
+        self.assertEqual(expected_total, len(nonces),
+                         f"Expected {expected_total} unique nonces, but got {len(nonces)}. "
+                         f"Possible duplicate nonces generated.")
+
+    def test_parameter_validation(self):
+        """Test parameter validation."""
+        signer = DLFOpenApiSigner()
+        
+        with self.assertRaises(ValueError) as context:
+            signer.sign_headers("body", None, "token", "host")
+        self.assertIn("'now' cannot be None", str(context.exception))
+        
+        now = datetime.now(timezone.utc)
+        with self.assertRaises(ValueError) as context:
+            signer.sign_headers("body", now, "token", None)
+        self.assertIn("'host' cannot be None", str(context.exception))
+        
+        token = DLFToken("ak", "sk", "token", None)
+        rest_param = RESTAuthParameter("GET", "/", "", {})
+        headers = signer.sign_headers("", now, "", "host")
+        
+        with self.assertRaises(ValueError) as context:
+            signer.authorization(None, token, "host", headers)
+        self.assertIn("'rest_auth_parameter' cannot be None", str(context.exception))
+        
+        with self.assertRaises(ValueError) as context:
+            signer.authorization(rest_param, None, "host", headers)
+        self.assertIn("'token' cannot be None", str(context.exception))
+        
+        with self.assertRaises(ValueError) as context:
+            signer.authorization(rest_param, token, None, headers)
+        self.assertIn("'host' cannot be None", str(context.exception))
+        
+        with self.assertRaises(ValueError) as context:
+            signer.authorization(rest_param, token, "host", None)
+        self.assertIn("'sign_headers' cannot be None", str(context.exception))
 
 
 if __name__ == '__main__':
