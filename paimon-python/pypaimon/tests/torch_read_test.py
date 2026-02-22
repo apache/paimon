@@ -100,6 +100,42 @@ class TorchReadTest(unittest.TestCase):
 
         print(f"✓ Test passed: Successfully read {len(all_user_ids)} rows with correct data")
 
+    def test_torch_streaming_prefetch_concurrency(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
+        self.catalog.create_table('default.test_torch_prefetch_concurrency', schema, False)
+        table = self.catalog.get_table('default.test_torch_prefetch_concurrency')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['user_id', 'behavior'])
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        self.assertGreater(len(splits), 0, "Need at least one split to test prefetch")
+
+        dataset = table_read.to_torch(splits, streaming=True, prefetch_concurrency=4)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=0,
+            shuffle=False
+        )
+
+        all_user_ids = []
+        all_behaviors = []
+        for batch_data in dataloader:
+            all_user_ids.extend(batch_data['user_id'].tolist())
+            all_behaviors.extend(batch_data['behavior'])
+
+        sorted_data = sorted(zip(all_user_ids, all_behaviors), key=lambda x: x[0])
+        sorted_user_ids = [x[0] for x in sorted_data]
+        sorted_behaviors = [x[1] for x in sorted_data]
+
+        expected_user_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+        expected_behaviors = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+        self.assertEqual(len(all_user_ids), 8, "Should read 8 rows with prefetch_concurrency")
+        self.assertEqual(sorted_user_ids, expected_user_ids)
+        self.assertEqual(sorted_behaviors, expected_behaviors)
+
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""
         import random
