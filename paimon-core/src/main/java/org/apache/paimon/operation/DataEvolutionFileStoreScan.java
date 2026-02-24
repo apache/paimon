@@ -57,7 +57,6 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -133,7 +132,9 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     public Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifestFileMetas, boolean useSequential) {
 
-        if (limit != null
+        if (inputFilter == null
+                && limit != null
+                && limit > 0
                 && manifestFileMetas.stream()
                         .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null)) {
             List<ManifestEntry> filtered = new ArrayList<>();
