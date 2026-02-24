@@ -170,7 +170,12 @@ public class BlobDescriptor implements Serializable {
 
         byte version = buffer.get();
         if (version == 1) {
-            return true;
+            try {
+                deserialize(bytes);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
         } else if (version > CURRENT_VERSION) {
             return false;
         } else {
