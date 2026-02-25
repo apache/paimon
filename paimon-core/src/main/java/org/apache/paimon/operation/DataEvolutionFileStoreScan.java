@@ -139,7 +139,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                         .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null)) {
             List<ManifestEntry> filtered = new ArrayList<>();
             RangeHelper<ManifestFileMeta> rangeHelper =
-                    new RangeHelper<>(ManifestFileMeta::minRowId, ManifestFileMeta::maxRowId);
+                    new RangeHelper<>(meta -> new Range(meta.minRowId(), meta.maxRowId()));
             Queue<List<ManifestFileMeta>> queue =
                     new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFileMetas));
 
@@ -149,9 +149,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 List<ManifestEntry> entries = new ArrayList<>();
                 super.readManifestEntries(groupMetas, useSequential).forEachRemaining(entries::add);
                 RangeHelper<ManifestEntry> rangeHelper2 =
-                        new RangeHelper<>(
-                                e -> e.file().nonNullFirstRowId(),
-                                e -> e.file().nonNullFirstRowId() + e.file().rowCount() - 1);
+                        new RangeHelper<>(e -> e.file().nonNullRowIdRange());
                 List<List<ManifestEntry>> splitByRowId =
                         rangeHelper2.mergeOverlappingRanges(entries);
 
