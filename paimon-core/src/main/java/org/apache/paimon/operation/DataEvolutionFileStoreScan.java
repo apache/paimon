@@ -131,7 +131,6 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     @Override
     public Iterator<ManifestEntry> readManifestEntries(
             List<ManifestFileMeta> manifestFileMetas, boolean useSequential) {
-
         if (inputFilter == null
                 && limit != null
                 && limit > 0
@@ -149,7 +148,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 List<ManifestEntry> entries = new ArrayList<>();
                 super.readManifestEntries(groupMetas, useSequential).forEachRemaining(entries::add);
                 RangeHelper<ManifestEntry> rangeHelper2 =
-                        new RangeHelper<>(e -> e.file().nonNullRowIdRange());
+                        new RangeHelper<>(
+                                e -> e.file().nonNullRowIdRange());
                 List<List<ManifestEntry>> splitByRowId =
                         rangeHelper2.mergeOverlappingRanges(entries);
 
