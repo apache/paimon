@@ -36,7 +36,6 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -315,7 +314,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         }
 
         // If rowRanges is null, all entries should be kept
-        if (this.rowRanges == null) {
+        if (this.rowRangeIndex == null) {
             return true;
         }
 
@@ -328,16 +327,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         // Check if any value in indices is in the range [firstRowId, firstRowId + rowCount - 1]
         long rowCount = file.rowCount();
         long endRowId = firstRowId + rowCount - 1;
-        Range fileRowRange = new Range(firstRowId, endRowId);
-
-        for (Range expected : rowRanges) {
-            if (Range.intersection(fileRowRange, expected) != null) {
-                return true;
-            }
-        }
-
-        // No matching indices found, skip this entry
-        return false;
+        return rowRangeIndex.intersects(firstRowId, endRowId);
     }
 
     /** Statistics for data evolution. */

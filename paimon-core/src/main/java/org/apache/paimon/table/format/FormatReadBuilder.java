@@ -43,6 +43,7 @@ import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -240,6 +241,11 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withRowRanges(List<Range> rowRanges) {
         throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
+    }
+
+    @Override
+    public ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRangeIndex.");
     }
 
     @Override
