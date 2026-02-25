@@ -172,6 +172,11 @@
             <artifactId>lakeformation</artifactId>
             <version>${fs.s3.awssdk.version}</version>
         </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3-transfer-manager</artifactId>
+            <version>${fs.s3.awssdk.version}</version>
+        </dependency>
 
         <dependency>
             <!-- Hadoop requires jaxb-api for javax.xml.bind.JAXBException -->
