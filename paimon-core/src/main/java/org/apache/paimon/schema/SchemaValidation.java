@@ -160,10 +160,9 @@ public class SchemaValidation {
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
         RowType tableRowType = new RowType(schema.fields());
-        Set<String> blobStoredDescriptorFields =
-                validateBlobStoredDescriptorFields(tableRowType, options);
+        Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         fileFormat.validateDataFields(
-                BlobType.splitBlob(tableRowType, blobStoredDescriptorFields).getLeft());
+                BlobType.splitBlob(tableRowType, blobDescriptorFields).getLeft());
 
         // Check column names in schema
         schema.fieldNames()
@@ -626,8 +625,7 @@ public class SchemaValidation {
         }
     }
 
-    private static Set<String> validateBlobStoredDescriptorFields(
-            RowType rowType, CoreOptions options) {
+    private static Set<String> validateBlobDescriptorFields(RowType rowType, CoreOptions options) {
         Set<String> blobFieldNames =
                 rowType.getFields().stream()
                         .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)

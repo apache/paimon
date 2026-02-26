@@ -95,7 +95,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
     @Nullable private final BlobConsumer blobConsumer;
-    private final Set<String> blobStoredDescriptorFields;
+    private final Set<String> blobDescriptorFields;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -126,7 +126,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean asyncFileWrite,
             boolean statsDenseStore,
             @Nullable BlobConsumer blobConsumer,
-            Set<String> blobStoredDescriptorFields,
+            Set<String> blobDescriptorFields,
             boolean dataEvolutionEnabled) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
@@ -155,7 +155,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.statsCollectorFactories = statsCollectorFactories;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
-        this.blobStoredDescriptorFields = blobStoredDescriptorFields;
+        this.blobDescriptorFields = blobDescriptorFields;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -307,8 +307,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (BlobType.splitBlob(writeSchema, blobStoredDescriptorFields).getRight().getFieldCount()
-                > 0) {
+        if (BlobType.splitBlob(writeSchema, blobDescriptorFields).getRight().getFieldCount() > 0) {
             return new RollingBlobFileWriter(
                     fileIO,
                     schemaId,
@@ -329,7 +328,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     false,
                     statsDenseStore,
                     blobConsumer,
-                    blobStoredDescriptorFields);
+                    blobDescriptorFields);
         }
         return new RowDataRollingFileWriter(
                 fileIO,

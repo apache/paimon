@@ -84,7 +84,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             writerFactory;
     private final Supplier<MultipleBlobFileWriter> blobWriterFactory;
     private final long targetFileSize;
-    private final Set<String> blobStoredDescriptorFields;
+    private final Set<String> blobDescriptorFields;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -112,12 +112,12 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             boolean asyncFileWrite,
             boolean statsDenseStore,
             @Nullable BlobConsumer blobConsumer,
-            Set<String> blobStoredDescriptorFields) {
+            Set<String> blobDescriptorFields) {
         // Initialize basic fields
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
-        this.blobStoredDescriptorFields = blobStoredDescriptorFields;
+        this.blobDescriptorFields = blobDescriptorFields;
 
         // Initialize writer factory for normal data
         this.writerFactory =
@@ -125,7 +125,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                         fileIO,
                         schemaId,
                         fileFormat,
-                        BlobType.splitBlob(writeSchema, blobStoredDescriptorFields).getLeft(),
+                        BlobType.splitBlob(writeSchema, blobDescriptorFields).getLeft(),
                         writeSchema,
                         pathFactory,
                         seqNumCounterSupplier,
@@ -150,7 +150,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                                 statsDenseStore,
                                 blobTargetFileSize,
                                 blobConsumer,
-                                this.blobStoredDescriptorFields);
+                                this.blobDescriptorFields);
     }
 
     /** Creates a factory for normal data writers. */

@@ -79,14 +79,14 @@ public final class BlobType extends DataType {
      * fields.
      */
     public static Pair<RowType, RowType> splitBlob(
-            RowType rowType, Set<String> blobStoredDescriptorFields) {
+            RowType rowType, Set<String> blobDescriptorFields) {
         List<DataField> fields = rowType.getFields();
         List<DataField> normalFields = new ArrayList<>();
         List<DataField> blobFields = new ArrayList<>();
 
         for (DataField field : fields) {
             DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB && !blobStoredDescriptorFields.contains(field.name())) {
+            if (type == DataTypeRoot.BLOB && !blobDescriptorFields.contains(field.name())) {
                 blobFields.add(field);
             } else {
                 normalFields.add(field);

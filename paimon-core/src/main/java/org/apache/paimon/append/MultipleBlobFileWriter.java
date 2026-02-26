@@ -63,9 +63,8 @@ public class MultipleBlobFileWriter implements Closeable {
             boolean statsDenseStore,
             long targetFileSize,
             @Nullable BlobConsumer blobConsumer,
-            Set<String> blobStoredDescriptorFields) {
-        RowType blobRowType =
-                BlobType.splitBlob(writeSchema, blobStoredDescriptorFields).getRight();
+            Set<String> blobDescriptorFields) {
+        RowType blobRowType = BlobType.splitBlob(writeSchema, blobDescriptorFields).getRight();
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
             BlobFileFormat blobFileFormat = new BlobFileFormat();

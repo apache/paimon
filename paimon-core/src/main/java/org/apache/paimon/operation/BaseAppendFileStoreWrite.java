@@ -86,7 +86,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private boolean forceBufferSpill = false;
     private boolean withBlob;
     private @Nullable BlobConsumer blobConsumer;
-    private final Set<String> blobStoredDescriptorFields;
+    private final Set<String> blobDescriptorFields;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -110,7 +110,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
         this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
-        this.blobStoredDescriptorFields = options.blobDescriptorField();
+        this.blobDescriptorFields = options.blobDescriptorField();
 
         this.fileIndexOptions = options.indexColumnsOptions();
     }
@@ -156,7 +156,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
                 blobConsumer,
-                blobStoredDescriptorFields,
+                blobDescriptorFields,
                 options.dataEvolutionEnabled());
     }
 
