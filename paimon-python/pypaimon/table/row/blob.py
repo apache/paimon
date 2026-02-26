@@ -125,13 +125,7 @@ class BlobDescriptor:
             return False
 
         version = raw[0]
-        if version == 1:
-            try:
-                cls.deserialize(raw)
-                return True
-            except Exception:
-                return False
-        if version != cls.CURRENT_VERSION:
+        if version > cls.CURRENT_VERSION:
             return False
 
         try:
