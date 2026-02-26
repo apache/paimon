@@ -3704,7 +3704,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     protected void generateTokenAndWriteToFile(String tokenPath) throws IOException {
         File tokenFile = new File(tokenPath);
-        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC).plusMinutes(5);
         String expiration = now.format(TOKEN_DATE_FORMATTER);
         String secret = UUID.randomUUID().toString();
         DLFToken token = new DLFToken("accessKeyId", secret, "securityToken", expiration);
