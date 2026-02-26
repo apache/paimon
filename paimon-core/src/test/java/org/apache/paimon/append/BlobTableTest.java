@@ -43,6 +43,8 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nonnull;
 
@@ -55,6 +57,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
@@ -278,9 +281,10 @@ public class BlobTableTest extends TableTestBase {
                 .hasMessageContaining("blob-descriptor-field");
     }
 
-    @Test
-    public void testMixedBlobStorageModeByFields() throws Exception {
-        createMixedModeTable();
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "avro", "orc"})
+    public void testMixedBlobStorageModeByFields(String format) throws Exception {
+        createMixedModeTable(format);
         FileStoreTable table = getTableDefault();
 
         byte[] descriptorBytes = randomBytes();
@@ -302,6 +306,7 @@ public class BlobTableTest extends TableTestBase {
 
         readDefault(
                 row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("mixed");
                     assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
                     assertThat(row.getBlob(3).toDescriptor()).isEqualTo(descriptor);
                     assertThat(row.getBlob(3).toData()).isEqualTo(descriptorBytes);
@@ -341,6 +346,10 @@ public class BlobTableTest extends TableTestBase {
     }
 
     private void createMixedModeTable() throws Exception {
+        createMixedModeTable(FILE_FORMAT_PARQUET);
+    }
+
+    private void createMixedModeTable(String format) throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
         schemaBuilder.column("f1", DataTypes.STRING());
@@ -350,6 +359,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3");
+        schemaBuilder.option(CoreOptions.FILE_FORMAT.key(), format);
         catalog.createTable(identifier(), schemaBuilder.build(), true);
     }
 
