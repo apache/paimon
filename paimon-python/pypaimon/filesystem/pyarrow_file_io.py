@@ -445,10 +445,8 @@ class PyArrowFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
 
-    def write_blob(self, path: str, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
+    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
-            # Kept for API compatibility. Write behavior is adaptive and does not depend on this flag.
-            _ = blob_as_descriptor
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
             column = data.column(0)

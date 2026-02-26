@@ -180,7 +180,7 @@ class CoreOptions:
         .with_description("Whether to return blob values as serialized BlobDescriptor bytes when reading.")
     )
 
-    BLOB_STORED_DESCRIPTOR_FIELDS: ConfigOption[str] = (
+    BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
         ConfigOptions.key("blob-descriptor-field")
         .string_type()
         .no_default_value()
@@ -495,7 +495,7 @@ class CoreOptions:
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
     def blob_stored_descriptor_fields(self, default=None):
-        value = self.options.get(CoreOptions.BLOB_STORED_DESCRIPTOR_FIELDS, default)
+        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
         if value is None:
             return set()
         if isinstance(value, str):
