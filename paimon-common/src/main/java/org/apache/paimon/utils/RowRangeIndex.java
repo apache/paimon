@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Index for row ranges. */
 public class RowRangeIndex {
 
@@ -41,6 +43,7 @@ public class RowRangeIndex {
     }
 
     public static RowRangeIndex create(List<Range> ranges) {
+        checkArgument(ranges != null, "Ranges cannot be null");
         return new RowRangeIndex(Range.sortAndMergeOverlap(ranges, true));
     }
 
