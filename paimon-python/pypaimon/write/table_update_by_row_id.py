@@ -207,13 +207,10 @@ class TableUpdateByRowId:
         # Find the split that contains files with this first_row_id
         target_split = None
         target_files = []
-        target_deletion_files = []
         for split in self.splits:
             for file_idx, file in enumerate(split.files):
                 if file.first_row_id == first_row_id:
                     target_files.append(file)
-                    if split.data_deletion_files is not None:
-                        target_deletion_files.append(split.data_deletion_files[file_idx])
                     if target_split is None:
                         target_split = split
             if target_split is not None:
@@ -227,8 +224,7 @@ class TableUpdateByRowId:
             files=target_files,
             partition=target_split.partition,
             bucket=target_split.bucket,
-            raw_convertible=True,
-            data_deletion_files=target_deletion_files if not target_deletion_files else None
+            raw_convertible=True
         )
 
         # Create TableRead and read the data
