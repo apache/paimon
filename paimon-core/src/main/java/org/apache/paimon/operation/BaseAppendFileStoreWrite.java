@@ -110,7 +110,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
         this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
-        this.blobStoredDescriptorFields = options.blobStoredDescriptorFields();
+        this.blobStoredDescriptorFields = options.blobDescriptorField();
 
         this.fileIndexOptions = options.indexColumnsOptions();
     }

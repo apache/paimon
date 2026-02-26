@@ -633,7 +633,7 @@ public class SchemaValidation {
                         .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
                         .map(DataField::name)
                         .collect(Collectors.toCollection(HashSet::new));
-        Set<String> configured = options.blobStoredDescriptorFields();
+        Set<String> configured = options.blobDescriptorField();
         for (String field : configured) {
             checkArgument(
                     blobFieldNames.contains(field),

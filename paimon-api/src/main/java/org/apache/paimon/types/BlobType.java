@@ -74,9 +74,9 @@ public final class BlobType extends DataType {
     /**
      * Split row fields into normal fields and blob-file fields.
      *
-     * <p>Blob fields contained in {@code blobStoredDescriptorFields} are treated as normal fields
-     * (stored inline as serialized descriptor bytes), while other blob fields are treated as
-     * blob-file fields.
+     * <p>Blob fields contained in {@code blobDescriptorField} are treated as normal fields (stored
+     * inline as serialized descriptor bytes), while other blob fields are treated as blob-file
+     * fields.
      */
     public static Pair<RowType, RowType> splitBlob(
             RowType rowType, Set<String> blobStoredDescriptorFields) {

@@ -2725,7 +2725,7 @@ public class CoreOptions implements Serializable {
      *
      * <p>If this option is not set, all blob fields are stored in '.blob' files by default.
      */
-    public Set<String> blobStoredDescriptorFields() {
+    public Set<String> blobDescriptorField() {
         return options.getOptional(BLOB_DESCRIPTOR_FIELD)
                 .map(
                         s ->

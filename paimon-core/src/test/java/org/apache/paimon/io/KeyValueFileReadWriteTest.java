@@ -292,7 +292,7 @@ public class KeyValueFileReadWriteTest {
                         true,
                         false,
                         null,
-                        options.blobStoredDescriptorFields(),
+                        options.blobDescriptorField(),
                         options.dataEvolutionEnabled());
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
