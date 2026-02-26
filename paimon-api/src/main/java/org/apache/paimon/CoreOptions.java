@@ -2147,7 +2147,7 @@ public class CoreOptions implements Serializable {
                                     + "This is used when you want to treat a BYTES column as a BLOB.");
 
     @Immutable
-    public static final ConfigOption<String> BLOB_STORED_DESCRIPTOR_FIELDS =
+    public static final ConfigOption<String> BLOB_DESCRIPTOR_FIELD =
             key("blob-descriptor-field")
                     .stringType()
                     .noDefaultValue()
@@ -2726,7 +2726,7 @@ public class CoreOptions implements Serializable {
      * <p>If this option is not set, all blob fields are stored in '.blob' files by default.
      */
     public Set<String> blobStoredDescriptorFields() {
-        return options.getOptional(BLOB_STORED_DESCRIPTOR_FIELDS)
+        return options.getOptional(BLOB_DESCRIPTOR_FIELD)
                 .map(
                         s ->
                                 Arrays.stream(s.split(","))

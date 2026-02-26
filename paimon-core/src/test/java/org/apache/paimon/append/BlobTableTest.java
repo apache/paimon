@@ -336,7 +336,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.BLOB_STORED_DESCRIPTOR_FIELDS.key(), "f2");
+        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
         catalog.createTable(identifier(), schemaBuilder.build(), true);
     }
 
@@ -349,7 +349,7 @@ public class BlobTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.BLOB_STORED_DESCRIPTOR_FIELDS.key(), "f3");
+        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3");
         catalog.createTable(identifier(), schemaBuilder.build(), true);
     }
 

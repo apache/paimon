@@ -639,7 +639,7 @@ public class SchemaValidation {
                     blobFieldNames.contains(field),
                     "Field '%s' in '%s' must be a BLOB field in table schema.",
                     field,
-                    CoreOptions.BLOB_STORED_DESCRIPTOR_FIELDS.key());
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
         }
         return configured;
     }
