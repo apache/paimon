@@ -18,6 +18,8 @@
 
 package org.apache.paimon.data;
 
+import org.apache.paimon.utils.IOUtils;
+
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
@@ -93,7 +95,23 @@ public class BlobDescriptorTest {
         serialized[0] = 3;
         assertThatThrownBy(() -> BlobDescriptor.deserialize(serialized))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining("Expecting BlobDescriptor version to be 2, but found 3.");
+                .hasMessageContaining(
+                        "Expecting BlobDescriptor version to be less than or equal to 2, but found 3.");
+    }
+
+    @Test
+    public void testBlobVersionCompatible() throws Exception {
+        byte[] serialized =
+                IOUtils.readFully(
+                        BlobDescriptorTest.class
+                                .getClassLoader()
+                                .getResourceAsStream("compatible/blob_descriptor_v1"),
+                        true);
+
+        BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(serialized);
+        assertThat(blobDescriptor.uri()).isEqualTo("/test/path");
+        assertThat(blobDescriptor.offset()).isEqualTo(100L);
+        assertThat(blobDescriptor.length()).isEqualTo(200L);
     }
 
     private BlobDescriptor createDescriptorWithVersion(
