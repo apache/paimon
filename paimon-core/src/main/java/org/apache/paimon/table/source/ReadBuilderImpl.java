@@ -147,6 +147,10 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withRowRanges(List<Range> indices) {
+        if (indices == null) {
+            this.rowRangeIndex = null;
+            return this;
+        }
         this.rowRangeIndex = RowRangeIndex.create(indices);
         return this;
     }
