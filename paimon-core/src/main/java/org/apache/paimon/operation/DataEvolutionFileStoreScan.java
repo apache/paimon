@@ -36,6 +36,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 import org.apache.paimon.utils.SnapshotManager;
 
