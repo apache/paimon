@@ -30,6 +30,10 @@ class BlobDescriptor:
     MAGIC = 0x424C4F4244455343  # "BLOBDESC"
 
     def __init__(self, uri: str, offset: int, length: int, version: int = CURRENT_VERSION):
+        if version != self.CURRENT_VERSION:
+            raise ValueError(
+                f"Expecting BlobDescriptor version to be {self.CURRENT_VERSION}, but found {version}."
+            )
         self._version = version
         self._uri = uri
         self._offset = offset
@@ -55,8 +59,7 @@ class BlobDescriptor:
         uri_bytes = self._uri.encode('utf-8')
         uri_length = len(uri_bytes)
         data = struct.pack('<B', self._version)  # version (1 byte)
-        if self._version > 1:
-            data += struct.pack('<Q', self.MAGIC)  # magic (8 bytes, unsigned)
+        data += struct.pack('<Q', self.MAGIC)  # magic (8 bytes, unsigned)
         data += struct.pack('<I', uri_length)  # uri length (4 bytes)
         data += uri_bytes  # uri bytes
         data += struct.pack('<q', self._offset)  # offset (8 bytes, signed)
@@ -65,7 +68,7 @@ class BlobDescriptor:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'BlobDescriptor':
-        if len(data) < 5:
+        if len(data) < 13:
             raise ValueError("Invalid BlobDescriptor data: too short")
 
         offset = 0
@@ -74,22 +77,18 @@ class BlobDescriptor:
         version = struct.unpack('<B', data[offset:offset + 1])[0]
         offset += 1
 
-        if version > cls.CURRENT_VERSION:
+        if version != cls.CURRENT_VERSION:
             raise ValueError(
-                f"Expecting BlobDescriptor version to be less than or equal to "
-                f"{cls.CURRENT_VERSION}, but found {version}."
+                f"Expecting BlobDescriptor version to be {cls.CURRENT_VERSION}, but found {version}."
             )
 
-        if version > 1:
-            if offset + 8 > len(data):
-                raise ValueError("Invalid BlobDescriptor data: too short")
-            magic = struct.unpack('<Q', data[offset:offset + 8])[0]
-            offset += 8
-            if magic != cls.MAGIC:
-                raise ValueError(
-                    f"Invalid BlobDescriptor: missing magic header. Expected magic: "
-                    f"{cls.MAGIC}, but found: {magic}"
-                )
+        magic = struct.unpack('<Q', data[offset:offset + 8])[0]
+        offset += 8
+        if magic != cls.MAGIC:
+            raise ValueError(
+                f"Invalid BlobDescriptor: missing magic header. Expected magic: "
+                f"{cls.MAGIC}, but found: {magic}"
+            )
 
         # Read URI length
         if offset + 4 > len(data):
@@ -125,16 +124,8 @@ class BlobDescriptor:
             return False
 
         version = raw[0]
-        if version < 1:
+        if version != cls.CURRENT_VERSION:
             return False
-        if version > cls.CURRENT_VERSION:
-            return False
-        if version == 1:
-            try:
-                cls.deserialize(raw)
-                return True
-            except Exception:
-                return False
 
         try:
             magic = struct.unpack('<Q', raw[1:9])[0]

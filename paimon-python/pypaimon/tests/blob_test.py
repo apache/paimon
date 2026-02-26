@@ -17,6 +17,7 @@ limitations under the License.
 """
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -418,17 +419,17 @@ class BlobTest(unittest.TestCase):
         """Test BlobDescriptor deserialization with invalid data."""
         # Test with too short data
         with self.assertRaises(ValueError) as context:
-            BlobDescriptor.deserialize(b"sho")  # Only 3 bytes, need at least 5
+            BlobDescriptor.deserialize(b"sho")
         self.assertIn("too short", str(context.exception))
 
-        # Test with unsupported version (> current version)
+        # Test with unsupported version (!= current version)
         valid_descriptor = BlobDescriptor("test://uri", 0, 100)
         valid_data = bytearray(valid_descriptor.serialize())
         valid_data[0] = 3  # Set unsupported version
 
         with self.assertRaises(ValueError) as context:
             BlobDescriptor.deserialize(bytes(valid_data))
-        self.assertIn("less than or equal to 2, but found 3", str(context.exception))
+        self.assertIn("version to be 2, but found 3", str(context.exception))
 
         # Test with invalid magic for version 2 descriptor
         invalid_magic_data = bytearray(valid_descriptor.serialize())
@@ -438,7 +439,7 @@ class BlobTest(unittest.TestCase):
         self.assertIn("missing magic header", str(context.exception))
 
         # Test with incomplete data (missing URI bytes)
-        incomplete_data = b'\x01\x00\x00\x00\x10'  # Version 1, URI length 16, but no URI bytes
+        incomplete_data = bytes([2]) + struct.pack('<Q', BlobDescriptor.MAGIC) + struct.pack('<I', 16)
         with self.assertRaises(ValueError) as context:
             BlobDescriptor.deserialize(incomplete_data)
         self.assertIn("URI length exceeds data size", str(context.exception))
@@ -492,14 +493,9 @@ class BlobTest(unittest.TestCase):
         deserialized = BlobDescriptor.deserialize(serialized)
         self.assertEqual(deserialized.version, 2)
 
-        # v1 payloads should remain deserializable for compatibility
-        descriptor_v1 = BlobDescriptor("test://uri", 0, 100, version=1)
-        serialized_v1 = descriptor_v1.serialize()
-        deserialized_v1 = BlobDescriptor.deserialize(serialized_v1)
-        self.assertEqual(deserialized_v1.version, 1)
-        self.assertEqual(deserialized_v1.uri, descriptor_v1.uri)
-        self.assertEqual(deserialized_v1.offset, descriptor_v1.offset)
-        self.assertEqual(deserialized_v1.length, descriptor_v1.length)
+        with self.assertRaises(ValueError) as context:
+            BlobDescriptor("test://uri", 0, 100, version=1)
+        self.assertIn("version to be 2, but found 1", str(context.exception))
 
     def test_blob_descriptor_edge_cases(self):
         """Test BlobDescriptor with edge cases."""
@@ -560,13 +556,11 @@ class BlobTest(unittest.TestCase):
         import struct
 
         descriptor_v2 = BlobDescriptor("test://uri", 1, 2)
-        descriptor_v1 = BlobDescriptor("test://uri", 1, 2, version=1)
         random_bytes = b"not-a-descriptor"
         fake_v1_prefix = b"\x01not-a-descriptor"
         v2_magic_only = bytes([2]) + struct.pack('<Q', BlobDescriptor.MAGIC)
 
         self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v2.serialize()))
-        self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v1.serialize()))
         self.assertTrue(BlobDescriptor.is_blob_descriptor(v2_magic_only))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(random_bytes))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(fake_v1_prefix))
