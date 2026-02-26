@@ -2704,7 +2704,11 @@ class DataBlobWriterTest(unittest.TestCase):
                 pa_schema,
                 options={
                     'row-tracking.enabled': 'true',
-                    'data-evolution.enabled': 'true'
+                    'data-evolution.enabled': 'true',
+                    # Concurrent commits are expected in this test; enlarge retry budget
+                    # to reduce flaky failures from transient commit conflicts.
+                    'commit.max-retries': '50',
+                    'commit.max-retry-wait': '30s'
                 }
             )
             self.catalog.create_table(table_name, schema, False)

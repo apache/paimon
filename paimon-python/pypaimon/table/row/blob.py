@@ -29,8 +29,8 @@ class BlobDescriptor:
     CURRENT_VERSION = 2
     MAGIC = 0x424C4F4244455343  # "BLOBDESC"
 
-    def __init__(self, uri: str, offset: int, length: int, version: int = CURRENT_VERSION):
-        self._version = version
+    def __init__(self, uri: str, offset: int, length: int):
+        self._version = self.CURRENT_VERSION
         self._uri = uri
         self._offset = offset
         self._length = length
@@ -114,7 +114,9 @@ class BlobDescriptor:
 
         blob_length = struct.unpack('<q', data[offset:offset + 8])[0]
 
-        return cls(uri, blob_offset, blob_length, version)
+        descriptor = cls(uri, blob_offset, blob_length)
+        descriptor._version = version
+        return descriptor
 
     @classmethod
     def is_blob_descriptor(cls, data: bytes) -> bool:
@@ -125,6 +127,10 @@ class BlobDescriptor:
             return False
 
         version = raw[0]
+        # v1 descriptors remain deserializable for compatibility,
+        # but descriptor detection is v2-only.
+        if version == 1:
+            return False
         if version > cls.CURRENT_VERSION:
             return False
 

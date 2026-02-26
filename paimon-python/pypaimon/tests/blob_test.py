@@ -17,6 +17,7 @@ limitations under the License.
 """
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -361,9 +362,9 @@ class BlobTest(unittest.TestCase):
         self.assertEqual(descriptor.length, 200)
         self.assertEqual(descriptor.version, BlobDescriptor.CURRENT_VERSION)
 
-    def test_blob_descriptor_creation_with_version(self):
-        """Test BlobDescriptor creation with explicit version."""
-        descriptor = BlobDescriptor("test://example.uri", 50, 150, version=2)
+    def test_blob_descriptor_creation_without_version_arg(self):
+        """Test BlobDescriptor creation without explicit version argument."""
+        descriptor = BlobDescriptor("test://example.uri", 50, 150)
 
         self.assertEqual(descriptor.uri, "test://example.uri")
         self.assertEqual(descriptor.offset, 50)
@@ -483,23 +484,25 @@ class BlobTest(unittest.TestCase):
         descriptor = BlobDescriptor("test://uri", 0, 100)
         self.assertEqual(descriptor.version, BlobDescriptor.CURRENT_VERSION)
 
-        # Test explicit version
-        descriptor_v2 = BlobDescriptor("test://uri", 0, 100, version=2)
-        self.assertEqual(descriptor_v2.version, 2)
-
         # Serialize and deserialize should preserve version
-        serialized = descriptor_v2.serialize()
+        serialized = descriptor.serialize()
         deserialized = BlobDescriptor.deserialize(serialized)
         self.assertEqual(deserialized.version, 2)
 
         # v1 payloads should remain deserializable for compatibility
-        descriptor_v1 = BlobDescriptor("test://uri", 0, 100, version=1)
-        serialized_v1 = descriptor_v1.serialize()
+        uri = b"test://uri"
+        serialized_v1 = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 0)
+            + struct.pack('<q', 100)
+        )
         deserialized_v1 = BlobDescriptor.deserialize(serialized_v1)
         self.assertEqual(deserialized_v1.version, 1)
-        self.assertEqual(deserialized_v1.uri, descriptor_v1.uri)
-        self.assertEqual(deserialized_v1.offset, descriptor_v1.offset)
-        self.assertEqual(deserialized_v1.length, descriptor_v1.length)
+        self.assertEqual(deserialized_v1.uri, "test://uri")
+        self.assertEqual(deserialized_v1.offset, 0)
+        self.assertEqual(deserialized_v1.length, 100)
 
     def test_blob_descriptor_edge_cases(self):
         """Test BlobDescriptor with edge cases."""
@@ -560,13 +563,21 @@ class BlobTest(unittest.TestCase):
         import struct
 
         descriptor_v2 = BlobDescriptor("test://uri", 1, 2)
-        descriptor_v1 = BlobDescriptor("test://uri", 1, 2, version=1)
+        uri = b"test://uri"
+        descriptor_v1_bytes = (
+            bytes([1])
+            + struct.pack('<I', len(uri))
+            + uri
+            + struct.pack('<q', 1)
+            + struct.pack('<q', 2)
+        )
         random_bytes = b"not-a-descriptor"
         fake_v1_prefix = b"\x01not-a-descriptor"
         v2_magic_only = bytes([2]) + struct.pack('<Q', BlobDescriptor.MAGIC)
 
         self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v2.serialize()))
-        self.assertTrue(BlobDescriptor.is_blob_descriptor(descriptor_v1.serialize()))
+        # v1 descriptors are supported for deserialization, but detection only checks v2 magic.
+        self.assertFalse(BlobDescriptor.is_blob_descriptor(descriptor_v1_bytes))
         self.assertTrue(BlobDescriptor.is_blob_descriptor(v2_magic_only))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(random_bytes))
         self.assertFalse(BlobDescriptor.is_blob_descriptor(fake_v1_prefix))
