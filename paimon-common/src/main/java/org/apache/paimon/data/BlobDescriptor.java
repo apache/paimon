@@ -131,6 +131,7 @@ public class BlobDescriptor implements Serializable {
     public static BlobDescriptor deserialize(byte[] bytes) {
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
+
         byte version = buffer.get();
         if (version > CURRENT_VERSION) {
             throw new UnsupportedOperationException(
