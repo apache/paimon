@@ -66,7 +66,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                     .build();
 
     private static final long TARGET_FILE_SIZE = 2 * 1024 * 1024L; // 2 MB
-    private static final long VECTOR_STORE_TARGET_FILE_SIZE = 4 * 1024 * 1024L; // 4 MB
+    private static final long VECTOR_TARGET_FILE_SIZE = 4 * 1024 * 1024L; // 4 MB
     private static final long SCHEMA_ID = 1L;
     private static final String COMPRESSION = "none";
     private static final Random RANDOM = new Random(System.currentTimeMillis());
@@ -103,7 +103,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         Arrays.asList("f3", "f4"),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
-                        VECTOR_STORE_TARGET_FILE_SIZE,
+                        VECTOR_TARGET_FILE_SIZE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,
@@ -166,8 +166,8 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
             long fileSize = file.fileSize();
             assertThat(fileSize)
                     .as("Vector-store file size should be close to target size")
-                    .isGreaterThanOrEqualTo(VECTOR_STORE_TARGET_FILE_SIZE)
-                    .isLessThanOrEqualTo(VECTOR_STORE_TARGET_FILE_SIZE + 256 * 1024);
+                    .isGreaterThanOrEqualTo(VECTOR_TARGET_FILE_SIZE)
+                    .isLessThanOrEqualTo(VECTOR_TARGET_FILE_SIZE + 256 * 1024);
         }
 
         // Verify total record count
@@ -253,7 +253,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         Arrays.asList("f3", "f4"),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
-                        VECTOR_STORE_TARGET_FILE_SIZE,
+                        VECTOR_TARGET_FILE_SIZE,
                         schema,
                         pathFactory,
                         () -> seqNumCounter,
@@ -324,7 +324,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         Arrays.asList("f2", "f3"),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
-                        VECTOR_STORE_TARGET_FILE_SIZE,
+                        VECTOR_TARGET_FILE_SIZE,
                         schema,
                         pathFactory,
                         () -> seqNumCounter,
@@ -381,7 +381,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         Arrays.asList("f3", "f4"),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
-                        VECTOR_STORE_TARGET_FILE_SIZE,
+                        VECTOR_TARGET_FILE_SIZE,
                         SCHEMA,
                         pathFactory,
                         () -> seqNumCounter,

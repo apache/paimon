@@ -22,7 +22,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.operation.DataEvolutionSplitRead.FieldBunch;
-import org.apache.paimon.operation.DataEvolutionSplitRead.SplitBunch;
+import org.apache.paimon.operation.DataEvolutionSplitRead.SpecialFieldBunch;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -42,14 +42,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link SplitBunch}. */
+/** Tests for {@link SpecialFieldBunch}. */
 public class DataEvolutionReadTest {
 
-    private SplitBunch blobBunch;
+    private SpecialFieldBunch blobBunch;
 
     @BeforeEach
     public void setUp() {
-        blobBunch = new SplitBunch(Long.MAX_VALUE, false);
+        blobBunch = new SpecialFieldBunch(Long.MAX_VALUE, false);
     }
 
     @Test
@@ -223,7 +223,7 @@ public class DataEvolutionReadTest {
                 splitFieldBunches(batch, file -> makeBlobRowType(file.writeCols(), f -> 0));
         assertThat(fieldBunches.size()).isEqualTo(2);
 
-        SplitBunch blobBunch = (SplitBunch) fieldBunches.get(1);
+        SpecialFieldBunch blobBunch = (SpecialFieldBunch) fieldBunches.get(1);
         assertThat(blobBunch.files).hasSize(4);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
         assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
@@ -275,14 +275,14 @@ public class DataEvolutionReadTest {
                         batch, file -> makeBlobRowType(file.writeCols(), String::hashCode));
         assertThat(fieldBunches.size()).isEqualTo(3);
 
-        SplitBunch blobBunch = (SplitBunch) fieldBunches.get(1);
+        SpecialFieldBunch blobBunch = (SpecialFieldBunch) fieldBunches.get(1);
         assertThat(blobBunch.files).hasSize(4);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob5");
         assertThat(blobBunch.files.get(1).fileName()).contains("blob9");
         assertThat(blobBunch.files.get(2).fileName()).contains("blob7");
         assertThat(blobBunch.files.get(3).fileName()).contains("blob8");
 
-        blobBunch = (SplitBunch) fieldBunches.get(2);
+        blobBunch = (SpecialFieldBunch) fieldBunches.get(2);
         assertThat(blobBunch.files).hasSize(4);
         assertThat(blobBunch.files.get(0).fileName()).contains("blob15");
         assertThat(blobBunch.files.get(1).fileName()).contains("blob19");
@@ -329,22 +329,22 @@ public class DataEvolutionReadTest {
 
     @Test
     public void testRowIdPushDown() {
-        SplitBunch blobBunch = new SplitBunch(Long.MAX_VALUE, true);
+        SpecialFieldBunch blobBunch = new SpecialFieldBunch(Long.MAX_VALUE, true);
         DataFileMeta blobEntry1 = createBlobFile("blob1", 0, 100, 1);
         DataFileMeta blobEntry2 = createBlobFile("blob2", 200, 300, 1);
         blobBunch.add(blobEntry1);
-        SplitBunch finalBlobBunch = blobBunch;
+        SpecialFieldBunch finalBlobBunch = blobBunch;
         DataFileMeta finalBlobEntry = blobEntry2;
         assertThatCode(() -> finalBlobBunch.add(finalBlobEntry)).doesNotThrowAnyException();
 
-        blobBunch = new SplitBunch(Long.MAX_VALUE, true);
+        blobBunch = new SpecialFieldBunch(Long.MAX_VALUE, true);
         blobEntry1 = createBlobFile("blob1", 0, 100, 1);
         blobEntry2 = createBlobFile("blob2", 50, 200, 2);
         blobBunch.add(blobEntry1);
         blobBunch.add(blobEntry2);
         assertThat(blobBunch.files).containsExactlyInAnyOrder(blobEntry2);
 
-        SplitBunch finalBlobBunch2 = blobBunch;
+        SpecialFieldBunch finalBlobBunch2 = blobBunch;
         DataFileMeta blobEntry3 = createBlobFile("blob2", 250, 100, 2);
         assertThatCode(() -> finalBlobBunch2.add(blobEntry3)).doesNotThrowAnyException();
     }

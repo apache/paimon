@@ -228,11 +228,11 @@ public class VectorStoreTableTest extends TableTestBase {
         schemaBuilder.column("f3", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()));
         schemaBuilder.column("f4", DataTypes.INT());
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "2 MB");
-        schemaBuilder.option(CoreOptions.VECTOR_STORE_TARGET_FILE_SIZE.key(), "4 MB");
+        schemaBuilder.option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "4 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.VECTOR_STORE_FIELDS.key(), "f3,f4");
-        schemaBuilder.option(CoreOptions.VECTOR_STORE_FORMAT.key(), "json");
+        schemaBuilder.option(CoreOptions.VECTOR_FIELDS.key(), "f3,f4");
+        schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
         return schemaBuilder.build();
     }
@@ -244,11 +244,11 @@ public class VectorStoreTableTest extends TableTestBase {
         schemaBuilder.column("f2", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()));
         schemaBuilder.column("f3", DataTypes.INT());
         schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "2 MB");
-        schemaBuilder.option(CoreOptions.VECTOR_STORE_TARGET_FILE_SIZE.key(), "4 MB");
+        schemaBuilder.option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "4 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.VECTOR_STORE_FIELDS.key(), "f2,f3");
-        schemaBuilder.option(CoreOptions.VECTOR_STORE_FORMAT.key(), "json");
+        schemaBuilder.option(CoreOptions.VECTOR_FIELDS.key(), "f2,f3");
+        schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
         return schemaBuilder.build();
     }

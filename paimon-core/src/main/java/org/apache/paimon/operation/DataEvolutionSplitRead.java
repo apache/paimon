@@ -420,8 +420,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             Function<DataFileMeta, RowType> fileToRowType,
             boolean rowIdPushDown) {
         List<FieldBunch> fieldsFiles = new ArrayList<>();
-        Map<Integer, SplitBunch> blobBunchMap = new HashMap<>();
-        Map<VectorStoreBunchKey, SplitBunch> vectorStoreBunchMap = new TreeMap<>();
+        Map<Integer, SpecialFieldBunch> blobBunchMap = new HashMap<>();
+        Map<VectorStoreBunchKey, SpecialFieldBunch> vectorStoreBunchMap = new TreeMap<>();
         long rowCount = -1;
         for (DataFileMeta file : needMergeFiles) {
             if (isBlobFile(file.fileName())) {
@@ -430,7 +430,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 final long expectedRowCount = rowCount;
                 blobBunchMap
                         .computeIfAbsent(
-                                fieldId, key -> new SplitBunch(expectedRowCount, rowIdPushDown))
+                                fieldId,
+                                key -> new SpecialFieldBunch(expectedRowCount, rowIdPushDown))
                         .add(file);
             } else if (isVectorStoreFile(file.fileName())) {
                 RowType rowType = fileToRowType.apply(file);
@@ -442,7 +443,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 vectorStoreBunchMap
                         .computeIfAbsent(
                                 vectorStoreKey,
-                                key -> new SplitBunch(expectedRowCount, rowIdPushDown))
+                                key -> new SpecialFieldBunch(expectedRowCount, rowIdPushDown))
                         .add(file);
             } else {
                 // Normal file, just add it to the current merge split
@@ -483,7 +484,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @VisibleForTesting
-    static class SplitBunch implements FieldBunch {
+    static class SpecialFieldBunch implements FieldBunch {
 
         final List<DataFileMeta> files;
         final long expectedRowCount;
@@ -494,7 +495,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         long latestMaxSequenceNumber = -1;
         long rowCount;
 
-        SplitBunch(long expectedRowCount, boolean rowIdPushDown) {
+        SpecialFieldBunch(long expectedRowCount, boolean rowIdPushDown) {
             this.files = new ArrayList<>();
             this.rowCount = 0;
             this.expectedRowCount = expectedRowCount;

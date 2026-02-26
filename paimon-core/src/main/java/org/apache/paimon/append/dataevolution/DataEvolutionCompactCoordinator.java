@@ -58,14 +58,16 @@ public class DataEvolutionCompactCoordinator {
     private final CompactScanner scanner;
     private final CompactPlanner planner;
 
-    public DataEvolutionCompactCoordinator(FileStoreTable table, boolean compactBlob) {
-        this(table, null, compactBlob);
+    public DataEvolutionCompactCoordinator(
+            FileStoreTable table, boolean compactBlob, boolean compactVector) {
+        this(table, null, compactBlob, compactVector);
     }
 
     public DataEvolutionCompactCoordinator(
             FileStoreTable table,
             @Nullable PartitionPredicate partitionPredicate,
-            boolean compactBlob) {
+            boolean compactBlob,
+            boolean compactVector) {
         CoreOptions options = table.coreOptions();
         long targetFileSize = options.targetFileSize(false);
         long openFileCost = options.splitOpenFileCost();
@@ -76,7 +78,12 @@ public class DataEvolutionCompactCoordinator {
                         table.newSnapshotReader().withPartitionFilter(partitionPredicate),
                         table.store().newScan());
         this.planner =
-                new CompactPlanner(compactBlob, targetFileSize, openFileCost, compactMinFileNum);
+                new CompactPlanner(
+                        compactBlob,
+                        compactVector,
+                        targetFileSize,
+                        openFileCost,
+                        compactMinFileNum);
     }
 
     public List<DataEvolutionCompactTask> plan() {
@@ -132,16 +139,19 @@ public class DataEvolutionCompactCoordinator {
     static class CompactPlanner {
 
         private final boolean compactBlob;
+        private final boolean compactVector;
         private final long targetFileSize;
         private final long openFileCost;
         private final long compactMinFileNum;
 
         CompactPlanner(
                 boolean compactBlob,
+                boolean compactVector,
                 long targetFileSize,
                 long openFileCost,
                 long compactMinFileNum) {
             this.compactBlob = compactBlob;
+            this.compactVector = compactVector;
             this.targetFileSize = targetFileSize;
             this.openFileCost = openFileCost;
             this.compactMinFileNum = compactMinFileNum;
@@ -207,7 +217,7 @@ public class DataEvolutionCompactCoordinator {
                             }
                         }
                     }
-                    if (false) {
+                    if (compactVector) {
                         // associate vector-store files to data files
                         for (DataFileMeta vectorStoreFile : vectorStoreFiles) {
                             Long key = treeMap.floorKey(vectorStoreFile.nonNullFirstRowId());
@@ -307,7 +317,7 @@ public class DataEvolutionCompactCoordinator {
                 }
             }
 
-            if (false) {
+            if (compactVector) {
                 List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
                 for (DataFileMeta dataFile : dataFiles) {
                     vectorStoreFiles.addAll(
