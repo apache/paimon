@@ -486,7 +486,7 @@ public class BlobDescriptorExample {
                 .column("video", DataTypes.BLOB())
                 .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
                 .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
-                .option(CoreOptions.BLOB_STORED_DESCRIPTOR_FIELDS.key(), "video")
+                .option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "video")
                 .build();
 
         Identifier tableId = Identifier.create("my_db", "video_table");
