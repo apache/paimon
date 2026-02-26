@@ -50,7 +50,7 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
             'blob-field': 'video',
-            'blob.stored-descriptor-fields': 'video'
+            'blob-descriptor-field': 'video'
         },
         comment='Table with blob column using descriptor-stored field')
 

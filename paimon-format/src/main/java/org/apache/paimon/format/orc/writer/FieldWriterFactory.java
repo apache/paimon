@@ -257,7 +257,7 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
                 return bytes.length;
             } catch (Throwable t) {
                 throw new IllegalArgumentException(
-                        "blob.stored-descriptor-fields requires blob field value to be a "
+                        "blob-descriptor-field requires blob field value to be a "
                                 + "serialized BlobDescriptor (magic 'BLOBDESC').",
                         t);
             }

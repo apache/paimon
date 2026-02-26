@@ -275,7 +275,7 @@ public class BlobTableTest extends TableTestBase {
                                                         BinaryString.fromString("bad"),
                                                         new BlobData(blobBytes)))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("blob.stored-descriptor-fields");
+                .hasMessageContaining("blob-descriptor-field");
     }
 
     @Test
@@ -325,7 +325,7 @@ public class BlobTableTest extends TableTestBase {
                                                         new BlobData(blobBytes),
                                                         new BlobData(randomBytes())))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("blob.stored-descriptor-fields");
+                .hasMessageContaining("blob-descriptor-field");
     }
 
     private void createDescriptorTable() throws Exception {

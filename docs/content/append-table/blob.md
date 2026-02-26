@@ -97,7 +97,7 @@ For details about the blob file format structure, see [File Format - BLOB]({{< r
       <td>Controls read output format for blob fields. When set to true, queries return serialized BlobDescriptor bytes; when false, queries return actual blob bytes. This option is dynamic and can be changed with <code>ALTER TABLE ... SET</code>.</td>
     </tr>
     <tr>
-      <td><h5>blob.stored-descriptor-fields</h5></td>
+      <td><h5>blob-descriptor-field</h5></td>
       <td>No</td>
       <td style="word-wrap: break-word;">(none)</td>
       <td>String</td>
@@ -446,7 +446,7 @@ long length = descriptor.length();  // Length of the blob data
 Paimon write path is descriptor-aware automatically:
 
 1. For blob fields stored in `.blob` files, input can be either blob bytes or a `BlobDescriptor`.
-2. For fields configured in `blob.stored-descriptor-fields`, Paimon stores descriptor bytes inline in data files (no `.blob` files for those fields), and input must be a descriptor.
+2. For fields configured in `blob-descriptor-field`, Paimon stores descriptor bytes inline in data files (no `.blob` files for those fields), and input must be a descriptor.
 3. This behavior does not depend on `blob-as-descriptor`.
 
 ```java
@@ -541,7 +541,7 @@ public class BlobDescriptorExample {
             String name = row.getString(1).toString();
             Blob blob = row.getBlob(2);
 
-            // Field is configured in blob.stored-descriptor-fields, so descriptor is stored inline
+            // Field is configured in blob-descriptor-field, so descriptor is stored inline
             BlobDescriptor descriptor = blob.toDescriptor();
             System.out.println("Row " + id + ": " + name);
             System.out.println("  Blob URI: " + descriptor.uri());
@@ -570,7 +570,7 @@ SELECT * FROM video_table;  -- Returns actual blob bytes from Paimon storage
 If you want downstream tables to **reuse** upstream blob files (no copying and no new <code>.blob</code> files), configure the target blob field(s):
 
 ```sql
-'blob.stored-descriptor-fields' = 'image'
+'blob-descriptor-field' = 'image'
 ```
 
 For these configured fields, Paimon stores only serialized <code>BlobDescriptor</code> bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
@@ -588,6 +588,6 @@ For these configured fields, Paimon stores only serialized <code>BlobDescriptor<
 
 2. **Set Appropriate Target File Size**: Configure `blob.target-file-size` based on your blob sizes. Larger values mean fewer files but larger individual files.
 
-3. **Use Descriptor Fields When Reusing External Blob Files**: Configure `blob.stored-descriptor-fields` for fields that should keep descriptor references instead of writing new `.blob` files.
+3. **Use Descriptor Fields When Reusing External Blob Files**: Configure `blob-descriptor-field` for fields that should keep descriptor references instead of writing new `.blob` files.
 
 4. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.

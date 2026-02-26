@@ -29,6 +29,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.UriReader;
 
@@ -44,27 +45,17 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     private RowKind rowKind = RowKind.INSERT;
     private VectorizedColumnBatch vectorizedColumnBatch;
-    private UriReader uriReader;
+    private FileIO fileIO;
     private int rowId;
 
     public ColumnarRow() {}
 
     public ColumnarRow(VectorizedColumnBatch vectorizedColumnBatch) {
-        this(vectorizedColumnBatch, null, 0);
+        this(vectorizedColumnBatch, 0);
     }
 
     public ColumnarRow(VectorizedColumnBatch vectorizedColumnBatch, int rowId) {
-        this(vectorizedColumnBatch, null, rowId);
-    }
-
-    public ColumnarRow(VectorizedColumnBatch vectorizedColumnBatch, UriReader uriReader) {
-        this(vectorizedColumnBatch, uriReader, 0);
-    }
-
-    public ColumnarRow(
-            VectorizedColumnBatch vectorizedColumnBatch, UriReader uriReader, int rowId) {
         this.vectorizedColumnBatch = vectorizedColumnBatch;
-        this.uriReader = uriReader;
         this.rowId = rowId;
     }
 
@@ -73,8 +64,8 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
         this.rowId = 0;
     }
 
-    public void setUriReader(UriReader uriReader) {
-        this.uriReader = uriReader;
+    public void setFileIO(FileIO fileIO) {
+        this.fileIO = fileIO;
     }
 
     public VectorizedColumnBatch batch() {
@@ -171,12 +162,13 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
         if (bytes == null) {
             return null;
         }
-        if (uriReader == null) {
-            throw new IllegalStateException("UriReader is null, cannot read blob data from uri!");
+        if (fileIO == null) {
+            throw new IllegalStateException("FileIO is null, cannot read blob data from uri!");
         }
 
         // Only blob descriptor could be able to stored in columnar format.
         BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
+        UriReader uriReader = UriReader.fromFile(fileIO);
         return Blob.fromDescriptor(uriReader, blobDescriptor);
     }
 
@@ -264,7 +256,8 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     public ColumnarRow copy(ColumnVector[] vectors) {
         VectorizedColumnBatch vectorizedColumnBatchCopy = vectorizedColumnBatch.copy(vectors);
-        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, uriReader, rowId);
+        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, rowId);
+        columnarRow.setFileIO(fileIO);
         columnarRow.setRowKind(rowKind);
         return columnarRow;
     }

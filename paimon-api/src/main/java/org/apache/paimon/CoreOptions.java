@@ -2148,9 +2148,10 @@ public class CoreOptions implements Serializable {
 
     @Immutable
     public static final ConfigOption<String> BLOB_STORED_DESCRIPTOR_FIELDS =
-            key("blob.stored-descriptor-fields")
+            key("blob-descriptor-field")
                     .stringType()
                     .noDefaultValue()
+                    .withFallbackKeys("blob.stored-descriptor-fields")
                     .withDescription(
                             "Comma-separated BLOB field names to store as serialized BlobDescriptor "
                                     + "bytes inline in data files.");

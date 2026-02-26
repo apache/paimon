@@ -86,7 +86,7 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
                     encoder.writeBytes(descriptor.serialize());
                 } catch (Throwable t) {
                     throw new IllegalArgumentException(
-                            "blob.stored-descriptor-fields requires blob field value to be a "
+                            "blob-descriptor-field requires blob field value to be a "
                                     + "serialized BlobDescriptor (magic 'BLOBDESC').",
                             t);
                 }

@@ -1100,7 +1100,7 @@ class DataBlobWriterTest(unittest.TestCase):
             options={
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
-                'blob.stored-descriptor-fields': 'pic2'
+                'blob-descriptor-field': 'pic2'
             }
         )
         self.catalog.create_table('test_db.blob_mixed_mode_test', schema, False)
@@ -1152,7 +1152,7 @@ class DataBlobWriterTest(unittest.TestCase):
             options={
                 'row-tracking.enabled': 'true',
                 'data-evolution.enabled': 'true',
-                'blob.stored-descriptor-fields': 'pic2'
+                'blob-descriptor-field': 'pic2'
             }
         )
         self.catalog.create_table('test_db.blob_mixed_mode_reject_test', schema, False)
@@ -1169,7 +1169,7 @@ class DataBlobWriterTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as context:
             writer.write_arrow(bad_data)
-        self.assertIn("blob.stored-descriptor-fields", str(context.exception))
+        self.assertIn("blob-descriptor-field", str(context.exception))
 
     def test_blob_write_read_large_data_end_to_end(self):
         """Test end-to-end blob functionality with large blob data (1MB per blob)."""

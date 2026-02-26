@@ -132,23 +132,22 @@ public class BlobDescriptor implements Serializable {
         ByteBuffer buffer = ByteBuffer.wrap(bytes);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         byte version = buffer.get();
-        if (version > CURRENT_VERSION) {
+        if (version != CURRENT_VERSION) {
             throw new UnsupportedOperationException(
-                    "Expecting BlobDescriptor version to be less than or equal to "
+                    "Expecting BlobDescriptor version to be "
                             + CURRENT_VERSION
                             + ", but found "
                             + version
                             + ".");
         }
 
-        if (version > 1) {
-            if (MAGIC != buffer.getLong()) {
-                throw new IllegalArgumentException(
-                        "Invalid BlobDescriptor: missing magic header. Expected magic: "
-                                + MAGIC
-                                + ", but found: "
-                                + buffer.getLong());
-            }
+        long magic = buffer.getLong();
+        if (MAGIC != magic) {
+            throw new IllegalArgumentException(
+                    "Invalid BlobDescriptor: missing magic header. Expected magic: "
+                            + MAGIC
+                            + ", but found: "
+                            + magic);
         }
 
         int uriLength = buffer.getInt();
@@ -169,17 +168,9 @@ public class BlobDescriptor implements Serializable {
         buffer.order(ByteOrder.LITTLE_ENDIAN);
 
         byte version = buffer.get();
-        if (version == 1) {
-            try {
-                deserialize(bytes);
-                return true;
-            } catch (Exception e) {
-                return false;
-            }
-        } else if (version > CURRENT_VERSION) {
+        if (version != CURRENT_VERSION) {
             return false;
-        } else {
-            return MAGIC == buffer.getLong();
         }
+        return MAGIC == buffer.getLong();
     }
 }

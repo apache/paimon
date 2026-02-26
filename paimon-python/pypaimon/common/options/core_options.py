@@ -181,7 +181,7 @@ class CoreOptions:
     )
 
     BLOB_STORED_DESCRIPTOR_FIELDS: ConfigOption[str] = (
-        ConfigOptions.key("blob.stored-descriptor-fields")
+        ConfigOptions.key("blob-descriptor-field")
         .string_type()
         .no_default_value()
         .with_description(

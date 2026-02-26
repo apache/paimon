@@ -89,7 +89,7 @@ class DataBlobWriter(DataWriter):
         )
         if unknown_descriptor_fields:
             raise ValueError(
-                "Fields in 'blob.stored-descriptor-fields' must be blob fields in schema. "
+                "Fields in 'blob-descriptor-field' must be blob fields in schema. "
                 f"Unknown fields: {sorted(unknown_descriptor_fields)}"
             )
 
@@ -237,7 +237,7 @@ class DataBlobWriter(DataWriter):
                     value = value.encode('utf-8')
                 if not isinstance(value, (bytes, bytearray)):
                     raise ValueError(
-                        "blob.stored-descriptor-fields requires blob field value to be a serialized "
+                        "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     )
                 try:
@@ -247,7 +247,7 @@ class DataBlobWriter(DataWriter):
                         raise ValueError("Descriptor payload contains trailing bytes.")
                 except Exception as e:
                     raise ValueError(
-                        "blob.stored-descriptor-fields requires blob field value to be a serialized "
+                        "blob-descriptor-field requires blob field value to be a serialized "
                         "BlobDescriptor."
                     ) from e
 
