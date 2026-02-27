@@ -64,6 +64,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -558,12 +560,72 @@ public class LocalOrphanFilesCleanTest {
         assertThat(fileIO.exists(emptyDirectory1)).isTrue();
         assertThat(fileIO.exists(emptyDirectory2)).isTrue();
 
+        Files.setLastModifiedTime(
+                tempDir.resolve("part1=1/part2=2/bucket-0"),
+                FileTime.fromMillis(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2)));
+        Files.setLastModifiedTime(
+                tempDir.resolve("part1=1/part2=2/bucket-1"),
+                FileTime.fromMillis(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2)));
+
         LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
         List<Path> deleted = orphanFilesClean.clean().getDeletedFilesPath();
         assertThat(fileIO.exists(emptyDirectory1)).isFalse();
         assertThat(fileIO.exists(emptyDirectory2)).isFalse();
 
         validate(deleted, snapshotData, new HashMap<>());
+    }
+
+    @Test
+    void testEmptyPartitionDirectories() throws Exception {
+        commit(Collections.singletonList(new TestPojo(1, 0, "a", "v1")));
+        commit(Collections.singletonList(new TestPojo(2, 0, "b", "v2")));
+
+        Path partitionPath1 = new Path(tablePath, "part1=0/part2=a");
+        Path partitionPath2 = new Path(tablePath, "part1=0/part2=b");
+        assertThat(fileIO.exists(partitionPath1)).isTrue();
+        assertThat(fileIO.exists(partitionPath2)).isTrue();
+
+        FileStatus[] partition2Files = fileIO.listStatus(partitionPath2);
+        assertThat(partition2Files).isNotEmpty();
+        for (FileStatus file : partition2Files) {
+            if (file.isDir() && file.getPath().getName().startsWith("bucket-")) {
+                FileStatus[] bucketFiles = fileIO.listStatus(file.getPath());
+                for (FileStatus bucketFile : bucketFiles) {
+                    fileIO.deleteQuietly(bucketFile.getPath());
+                }
+                fileIO.deleteQuietly(file.getPath());
+            }
+        }
+        assertThat(fileIO.listStatus(partitionPath2)).isEmpty();
+        assertThat(fileIO.exists(partitionPath2)).isTrue();
+
+        Path emptyNonLeafPartitionPath = new Path(tablePath, "part1=1");
+        fileIO.mkdirs(emptyNonLeafPartitionPath);
+
+        long oldTime = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(2);
+        Files.setLastModifiedTime(tempDir.resolve("part1=0/part2=b"), FileTime.fromMillis(oldTime));
+        Files.setLastModifiedTime(tempDir.resolve("part1=1"), FileTime.fromMillis(oldTime));
+
+        LocalOrphanFilesClean orphanFilesClean = new LocalOrphanFilesClean(table);
+        orphanFilesClean.clean();
+
+        assertThat(fileIO.exists(partitionPath2))
+                .as("Empty partition (no bucket subdirs) is cleaned by orphan files clean.")
+                .isFalse();
+        assertThat(fileIO.exists(emptyNonLeafPartitionPath))
+                .as(
+                        "Empty non-leaf partition dir (e.g. part1=1 with no part2) is cleaned by orphan files clean.")
+                .isFalse();
+        assertThat(fileIO.exists(partitionPath1)).isTrue();
+
+        Path recentEmptyPath = new Path(tablePath, "part1=2");
+        fileIO.mkdirs(recentEmptyPath);
+        LocalOrphanFilesClean cleanRecent =
+                new LocalOrphanFilesClean(table, System.currentTimeMillis() - 1, false);
+        cleanRecent.clean();
+        assertThat(fileIO.exists(recentEmptyPath))
+                .as("Recent empty partition dir must not be deleted (age safeguard).")
+                .isTrue();
     }
 
     private void writeData(

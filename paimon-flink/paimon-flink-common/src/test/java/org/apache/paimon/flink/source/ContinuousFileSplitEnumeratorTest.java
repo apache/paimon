@@ -880,6 +880,7 @@ public class ContinuousFileSplitEnumeratorTest
         private int maxSnapshotCount = -1;
 
         private int splitMaxPerTask = 10;
+        private int sourceParallelismUpperBound = 10;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {
@@ -927,7 +928,8 @@ public class ContinuousFileSplitEnumeratorTest
                     unawareBucket,
                     this.splitMaxPerTask,
                     false,
-                    maxSnapshotCount);
+                    maxSnapshotCount,
+                    sourceParallelismUpperBound);
         }
     }
 

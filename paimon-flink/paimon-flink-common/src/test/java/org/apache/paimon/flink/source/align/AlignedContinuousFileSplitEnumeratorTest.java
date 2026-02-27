@@ -252,7 +252,8 @@ public class AlignedContinuousFileSplitEnumeratorTest
                     timeout,
                     10,
                     false,
-                    -1);
+                    -1,
+                    10);
         }
     }
 

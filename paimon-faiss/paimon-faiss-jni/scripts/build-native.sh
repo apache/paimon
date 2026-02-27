@@ -288,22 +288,27 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
         if ! find_and_bundle "libgcc_s.so*" "libgcc_s.so.1"; then
            echo "  Note: libgcc_s not found as shared library - likely statically linked"
         fi
-        
-        # 2. Quadmath (needed by gfortran)
+
+        # 2. C++ standard library (needed by FAISS/JNI)
+        if ! find_and_bundle "libstdc++.so*" "libstdc++.so.6"; then
+            echo "  Note: libstdc++ not found as shared library - likely statically linked"
+        fi
+
+        # 3. Quadmath (needed by gfortran)
         if ! find_and_bundle "libquadmath.so*" "libquadmath.so.0"; then
             echo "  Note: libquadmath not found as shared library - likely statically linked"
         fi
 
-        # 3. Fortran runtime (needed by OpenBLAS)
+        # 4. Fortran runtime (needed by OpenBLAS)
         if ! find_and_bundle "libgfortran.so*" "libgfortran.so.3"; then
            echo "  Note: libgfortran not found as shared library - likely statically linked"
         fi
-        # 4. OpenMP runtime
+        # 5. OpenMP runtime
         if ! find_and_bundle "libgomp.so*" "libgomp.so.1"; then
            echo "  Note: libgomp not found as shared library - likely statically linked"
         fi
         
-        # 5. BLAS/LAPACK
+        # 6. BLAS/LAPACK
         if ! find_and_bundle "libblas.so*" "libblas.so.3"; then
            echo "  Note: libblas not found as shared library - likely statically linked"
         fi
@@ -311,12 +316,12 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
            echo "  Note: liblapack not found as shared library - likely statically linked"
         fi
         
-        # 6. OpenBLAS
+        # 7. OpenBLAS
         if ! find_and_bundle "libopenblas*.so*" "libopenblas.so.0"; then
            echo "  Note: libopenblas not found as shared library - likely statically linked"
         fi
 
-        # 7. FAISS library (may be statically linked)
+        # 8. FAISS library (may be statically linked)
         if ! find_and_bundle "libfaiss.so*" "libfaiss.so"; then
             echo "  Note: libfaiss not found as shared library - likely statically linked"
         fi
@@ -353,7 +358,7 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
                 
                 # Skip system libraries that are universally available
                 case "$DEP_NAME" in
-                    linux-vdso.so*|libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*|libstdc++*)
+                    linux-vdso.so*|libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*)
                         continue
                         ;;
                 esac
@@ -381,6 +386,9 @@ if [ "$FAT_LIB" = true ] && [ "$OS" = "Linux" ]; then
                         ;;
                     libgcc_s*)
                         bundle_lib "$DEP_PATH" "libgcc_s.so.1"
+                        ;;
+                    libstdc++*)
+                        bundle_lib "$DEP_PATH" "libstdc++.so.6"
                         ;;
                     libblas*)
                         bundle_lib "$DEP_PATH" "libblas.so.3"

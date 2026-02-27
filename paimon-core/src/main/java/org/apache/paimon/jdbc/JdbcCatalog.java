@@ -53,6 +53,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.AbstractMap;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +62,9 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.catalog.CatalogUtils.checkNotBranch;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemDatabase;
+import static org.apache.paimon.catalog.CatalogUtils.checkNotSystemTable;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
 import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.deleteProperties;
@@ -110,6 +114,10 @@ public class JdbcCatalog extends AbstractCatalog {
     @VisibleForTesting
     public JdbcClientPool getConnections() {
         return connections;
+    }
+
+    public String getCatalogKey() {
+        return catalogKey;
     }
 
     /** Initialize catalog tables. */
@@ -301,19 +309,11 @@ public class JdbcCatalog extends AbstractCatalog {
             runWithLock(identifier, () -> schemaManager.createTable(schema));
             // Update schema metadata
             Path path = getTableLocation(identifier);
-            int insertRecord =
-                    connections.run(
-                            conn -> {
-                                try (PreparedStatement sql =
-                                        conn.prepareStatement(
-                                                JdbcUtils.DO_COMMIT_CREATE_TABLE_SQL)) {
-                                    sql.setString(1, catalogKey);
-                                    sql.setString(2, identifier.getDatabaseName());
-                                    sql.setString(3, identifier.getTableName());
-                                    return sql.executeUpdate();
-                                }
-                            });
-            if (insertRecord == 1) {
+            if (JdbcUtils.insertTable(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName())) {
                 LOG.debug("Successfully committed to new table: {}", identifier);
             } else {
                 try {
@@ -413,6 +413,80 @@ public class JdbcCatalog extends AbstractCatalog {
                         checkMaxSleep(options.toMap()),
                         acquireTimeout(options.toMap()));
         return Lock.fromCatalog(lock, identifier).runWithLock(callable);
+    }
+
+    @Override
+    public void repairCatalog() {
+        List<String> databases;
+        try {
+            databases = listDatabasesInFileSystem(new Path(warehouse));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list databases in file system", e);
+        }
+        for (String database : databases) {
+            repairDatabase(database);
+        }
+    }
+
+    @Override
+    public void repairDatabase(String databaseName) {
+        checkNotSystemDatabase(databaseName);
+
+        // First check if database exists in file system
+        Path databasePath = newDatabasePath(databaseName);
+        List<String> tables;
+        try {
+            if (!fileIO.exists(databasePath)) {
+                throw new RuntimeException("Database directory does not exist: " + databasePath);
+            }
+            tables = listTablesInFileSystem(databasePath);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        if (!JdbcUtils.databaseExists(connections, catalogKey, databaseName)) {
+            createDatabaseImpl(databaseName, Collections.emptyMap());
+        }
+
+        // Repair tables
+        for (String table : tables) {
+            try {
+                repairTable(Identifier.create(databaseName, table));
+            } catch (TableNotExistException ignore) {
+                // Table might not exist due to concurrent operations
+            }
+        }
+    }
+
+    @Override
+    public void repairTable(Identifier identifier) throws TableNotExistException {
+        checkNotBranch(identifier, "repairTable");
+        checkNotSystemTable(identifier, "repairTable");
+
+        // First check if table exists in file system
+        Path tableLocation = getTableLocation(identifier);
+        TableSchema tableSchema =
+                tableSchemaInFileSystem(tableLocation, identifier.getBranchNameOrDefault())
+                        .orElseThrow(() -> new TableNotExistException(identifier));
+
+        if (!JdbcUtils.databaseExists(connections, catalogKey, identifier.getDatabaseName())) {
+            createDatabaseImpl(identifier.getDatabaseName(), Collections.emptyMap());
+        }
+        // Table exists in file system, now check if it exists in JDBC catalog
+        if (!JdbcUtils.tableExists(
+                connections, catalogKey, identifier.getDatabaseName(), identifier.getTableName())) {
+            // Table missing from JDBC catalog, repair it
+            if (JdbcUtils.insertTable(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName())) {
+                LOG.debug("Successfully repaired table: {}", identifier);
+            } else {
+                LOG.error("Failed to repair table: {}", identifier);
+            }
+        }
+        // If table exists in both file system and JDBC catalog, nothing to repair
     }
 
     @Override

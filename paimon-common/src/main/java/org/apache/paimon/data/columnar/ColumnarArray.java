@@ -146,7 +146,7 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     @Override
     public InternalVector getVector(int pos) {
-        throw new UnsupportedOperationException("Unsupported type: VectorType");
+        return ((VecColumnVector) data).getVector(offset + pos);
     }
 
     @Override

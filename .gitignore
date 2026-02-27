@@ -1,39 +1,52 @@
-.cache
-.classpath
+### OS ###
+.DS_Store
+
+### IDE ###
+# IntelliJ IDEA
 .idea/*
 !.idea/vcs.xml
 !.idea/icon.png
-.metadata
-.settings
-.project
-target
-.version.properties
-*.class
 *.iml
-*.swp
+*.ipr
+*.iws
+paimon-lucene/.idea/
+paimon-python/.idea/
+# VS Code
+.vscode/
+# Eclipse
+.classpath
+.metadata
+.project
+.settings
+
+### AI Assistants ###
+.claude
+.cursor
+.qoder
+
+### Java / Maven ###
+target
+dependency-reduced-pom.xml
+metastore_db/
+*.class
 *.jar
 !**/resources/**/*.jar
 *.log
-*.pyc
-*.ipr
-*.iws
 .java-version
-dependency-reduced-pom.xml
-metastore_db/
-paimon-python/.idea/
+.version.properties
+
+### Python ###
+*.pyc
 paimon-python/dist/
 paimon-python/*.egg-info/
 paimon-python/dev/log
-paimon-lucene/.idea/
-
-### VS Code ###
-.vscode/
-
-### Mac OS ###
-.DS_Store
 
 ### Native build artifacts ###
 paimon-faiss/paimon-faiss-jni/build/
 paimon-faiss/paimon-faiss-jni/src/main/resources/darwin*
 paimon-faiss/paimon-faiss-jni/src/main/resources/linux*
 paimon-faiss/paimon-faiss-jni/src/main/native/cmake-build-debug/
+
+### Misc ###
+*.swp
+.cache

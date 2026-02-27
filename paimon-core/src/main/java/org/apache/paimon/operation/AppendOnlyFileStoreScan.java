@@ -22,6 +22,7 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -34,11 +35,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
@@ -48,6 +48,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private final boolean fileIndexReadEnabled;
     private final boolean deletionVectorsEnabled;
+    private final boolean dataEvolutionEnabled;
 
     protected Predicate inputFilter;
 
@@ -66,7 +67,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             ManifestFile.Factory manifestFileFactory,
             Integer scanManifestParallelism,
             boolean fileIndexReadEnabled,
-            boolean deletionVectorsEnabled) {
+            boolean deletionVectorsEnabled,
+            boolean dataEvolutionEnabled) {
         super(
                 manifestsReader,
                 snapshotManager,
@@ -79,6 +81,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 new SimpleStatsEvolutions(sid -> scanTableSchema(sid).fields(), schema.id());
         this.fileIndexReadEnabled = fileIndexReadEnabled;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.dataEvolutionEnabled = dataEvolutionEnabled;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
@@ -88,23 +91,24 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
-    protected boolean postFilterManifestEntriesEnabled() {
-        return limit != null && limit > 0 && !deletionVectorsEnabled;
-    }
+    public Iterator<ManifestEntry> readManifestEntries(
+            List<ManifestFileMeta> manifestFiles, boolean useSequential) {
+        Iterator<ManifestEntry> result = super.readManifestEntries(manifestFiles, useSequential);
+        if (limit == null || limit <= 0 || deletionVectorsEnabled || dataEvolutionEnabled) {
+            return result;
+        }
 
-    @Override
-    protected List<ManifestEntry> postFilterManifestEntries(List<ManifestEntry> entries) {
-        checkArgument(limit != null && limit > 0 && !deletionVectorsEnabled);
-        List<ManifestEntry> result = new ArrayList<>();
+        List<ManifestEntry> filtered = new ArrayList<>();
         long accumulatedRowCount = 0;
-        for (ManifestEntry entry : entries) {
-            result.add(entry);
-            accumulatedRowCount += entry.file().rowCount();
+        while (result.hasNext()) {
+            ManifestEntry next = result.next();
+            filtered.add(next);
+            accumulatedRowCount += next.file().rowCount();
             if (accumulatedRowCount >= limit) {
                 break;
             }
         }
-        return result;
+        return filtered.iterator();
     }
 
     /** Note: Keep this thread-safe. */

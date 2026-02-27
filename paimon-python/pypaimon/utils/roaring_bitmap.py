@@ -79,7 +79,7 @@ class RoaringBitmap64:
         """
         Convert the bitmap to a list of Range objects.
         """
-        from pypaimon.globalindex.range import Range
+        from pypaimon.utils.range import Range
 
         if self.is_empty():
             return []

@@ -17,11 +17,12 @@
 ################################################################################
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.source.deletion_file import DeletionFile
+from pypaimon.utils.range import Range
 
 
 class Split(ABC):
@@ -77,24 +78,52 @@ class DataSplit(Split):
         files: List[DataFileMeta],
         partition: GenericRow,
         bucket: int,
-        file_paths: List[str],
-        row_count: int,
-        file_size: int,
         raw_convertible: bool = False,
         data_deletion_files: Optional[List[DeletionFile]] = None
     ):
         self._files = files
         self._partition = partition
         self._bucket = bucket
-        self._file_paths = file_paths
-        self._row_count = row_count
-        self._file_size = file_size
         self.raw_convertible = raw_convertible
         self.data_deletion_files = data_deletion_files
 
     @property
     def files(self) -> List[DataFileMeta]:
         return self._files
+
+    def filter_file(self, func: Callable[[DataFileMeta], bool]) -> Optional['DataSplit']:
+        """
+        Filter files based on a predicate function and create a new DataSplit.
+        
+        Args:
+            func: A function that takes a DataFileMeta and returns True if the file should be kept
+        
+        Returns:
+            A new DataSplit with filtered files, adjusted data_deletion_files
+        """
+        # Filter files based on the predicate
+        filtered_files = [f for f in self._files if func(f)]
+        
+        # If no files match, return None
+        if not filtered_files:
+            return None
+        
+        # Find indices of filtered files to adjust data_deletion_files
+        filtered_indices = [i for i, f in enumerate(self._files) if func(f)]
+        
+        # Filter data_deletion_files to match filtered files
+        filtered_data_deletion_files = None
+        if self.data_deletion_files is not None:
+            filtered_data_deletion_files = [self.data_deletion_files[i] for i in filtered_indices]
+        
+        # Create new DataSplit with filtered data
+        return DataSplit(
+            files=filtered_files,
+            partition=self._partition,
+            bucket=self._bucket,
+            raw_convertible=self.raw_convertible,
+            data_deletion_files=filtered_data_deletion_files
+        )
 
     @property
     def partition(self) -> GenericRow:
@@ -106,18 +135,18 @@ class DataSplit(Split):
 
     @property
     def row_count(self) -> int:
-        return self._row_count
+        """Calculate total row count from all files."""
+        return sum(f.row_count for f in self._files)
 
     @property
     def file_size(self) -> int:
-        return self._file_size
+        """Calculate total file size from all files."""
+        return sum(f.file_size for f in self._files)
 
     @property
     def file_paths(self) -> List[str]:
-        return self._file_paths
-
-    def set_row_count(self, row_count: int) -> None:
-        self._row_count = row_count
+        """Get file paths from all files."""
+        return [f.file_path for f in self._files if f.file_path is not None]
 
     def merged_row_count(self) -> Optional[int]:
         """
@@ -164,39 +193,10 @@ class DataSplit(Split):
         
         file_ranges = []
         for file in self._files:
-            if file.first_row_id is not None and file.row_count > 0:
-                start = file.first_row_id
-                end = file.first_row_id + file.row_count - 1
-                file_ranges.append((file, start, end))
+            file_ranges.append(file.row_id_range())
         
         if not file_ranges:
             return 0
-        
-        file_ranges.sort(key=lambda x: (x[1], x[2]))
-        
-        groups = []
-        current_group = [file_ranges[0]]
-        current_end = file_ranges[0][2]
-        
-        for file_range in file_ranges[1:]:
-            file, start, end = file_range
-            if start <= current_end:
-                current_group.append(file_range)
-                if end > current_end:
-                    current_end = end
-            else:
-                groups.append(current_group)
-                current_group = [file_range]
-                current_end = end
-        
-        if current_group:
-            groups.append(current_group)
-        
-        sum_rows = 0
-        for group in groups:
-            max_count = 0
-            for file, _, _ in group:
-                max_count = max(max_count, file.row_count)
-            sum_rows += max_count
-        
-        return sum_rows
+
+        ranges = Range.sort_and_merge_overlap(file_ranges, True, True)
+        return sum([r.count() for r in ranges])

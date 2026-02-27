@@ -23,7 +23,7 @@ from typing import List, Optional, Collection
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pypaimon.globalindex import GlobalIndexIOMeta, GlobalIndexReader, GlobalIndexEvaluator
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.schema.data_types import DataField
 

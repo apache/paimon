@@ -16,6 +16,7 @@
 #  under the License.
 
 import sys
+
 if sys.version_info[:2] == (3, 6):
     try:
         from pypaimon.manifest import fastavro_py36_compat  # noqa: F401
@@ -25,9 +26,13 @@ if sys.version_info[:2] == (3, 6):
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.schema.schema import Schema
+from pypaimon.tag.tag import Tag
+from pypaimon.tag.tag_manager import TagManager
 
 __all__ = [
     "PaimonVirtualFileSystem",
     "CatalogFactory",
     "Schema",
+    "Tag",
+    "TagManager",
 ]

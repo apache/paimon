@@ -131,19 +131,14 @@ public class HttpClient implements RESTClient {
                     response -> {
                         String responseBodyStr = RESTUtil.extractResponseBodyAsString(response);
                         if (!RESTUtil.isSuccessful(response)) {
-                            ErrorResponse error;
+                            ErrorResponse error = null;
                             try {
                                 error = RESTApi.fromJson(responseBodyStr, ErrorResponse.class);
                             } catch (JsonProcessingException e) {
-                                error =
-                                        new ErrorResponse(
-                                                null,
-                                                null,
-                                                responseBodyStr != null
-                                                        ? responseBodyStr
-                                                        : "response body is null",
-                                                response.getCode());
+                                // ignore exception
                             }
+                            error = buildErrorResponse(error, responseBodyStr, response.getCode());
+
                             errorHandler.accept(error, extractRequestId(response));
                         }
                         if (responseType != null && responseBodyStr != null) {
@@ -227,5 +222,23 @@ public class HttpClient implements RESTClient {
         return headers.entrySet().stream()
                 .map(entry -> new BasicHeader(entry.getKey(), entry.getValue()))
                 .toArray(Header[]::new);
+    }
+
+    private static ErrorResponse buildErrorResponse(
+            ErrorResponse error, String responseBodyStr, int errorCode) {
+        if (error == null || error.getMessage() == null || error.getMessage().isEmpty()) {
+            String resourceType =
+                    (error != null && error.getResourceType() != null)
+                            ? error.getResourceType()
+                            : "";
+            String resourceName =
+                    (error != null && error.getResourceName() != null)
+                            ? error.getResourceName()
+                            : "";
+            String message = responseBodyStr != null ? responseBodyStr : "response body is null";
+            int code = (error != null && error.getCode() != null) ? error.getCode() : errorCode;
+            error = new ErrorResponse(resourceType, resourceName, message, code);
+        }
+        return error;
     }
 }

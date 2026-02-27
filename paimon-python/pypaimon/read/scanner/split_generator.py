@@ -98,21 +98,14 @@ class AbstractSplitGenerator(ABC):
             else:
                 raw_convertible = True
 
-            file_paths = []
-            total_file_size = 0
-            total_record_count = 0
-
             for data_file in file_group:
                 data_file.set_file_path(
                     self.table.table_path,
                     file_entries[0].partition,
                     file_entries[0].bucket
                 )
-                file_paths.append(data_file.file_path)
-                total_file_size += data_file.file_size
-                total_record_count += data_file.row_count
 
-            if file_paths:
+            if file_group:
                 # Get deletion files for this split
                 data_deletion_files = None
                 if self.deletion_files_map:
@@ -126,9 +119,6 @@ class AbstractSplitGenerator(ABC):
                     files=file_group,
                     partition=file_entries[0].partition,
                     bucket=file_entries[0].bucket,
-                    file_paths=file_paths,
-                    row_count=total_record_count,
-                    file_size=total_file_size,
                     raw_convertible=raw_convertible,
                     data_deletion_files=data_deletion_files
                 )
@@ -240,8 +230,3 @@ class AbstractSplitGenerator(ABC):
             return -1, -1
         # File is completely within the shard range
         return None
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file."""
-        return file_name.endswith('.blob')

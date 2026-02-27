@@ -20,6 +20,7 @@ from typing import Any, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
@@ -66,7 +67,7 @@ class TableRead:
         num_rows = batch.num_rows
 
         for field in target_schema:
-            if field.name in batch.column_names:
+            if field.name in batch.schema.names:
                 col = batch.column(field.name)
             else:
                 col = pyarrow.nulls(num_rows, type=field.type)
@@ -87,7 +88,56 @@ class TableRead:
         if not table_list:
             return pyarrow.Table.from_arrays([pyarrow.array([], type=field.type) for field in schema], schema=schema)
         else:
-            return pyarrow.Table.from_batches(table_list)
+            table = pyarrow.Table.from_batches(table_list)
+            return self._convert_descriptor_stored_fields_for_read(table)
+
+    def _convert_descriptor_stored_fields_for_read(self, table: pyarrow.Table) -> pyarrow.Table:
+        if CoreOptions.blob_as_descriptor(self.table.options):
+            return table
+
+        descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
+        if not descriptor_fields:
+            return table
+
+        from pypaimon.table.row.blob import Blob, BlobDescriptor
+
+        result = table
+        for field_name in descriptor_fields:
+            if field_name not in result.column_names:
+                continue
+            values = result.column(field_name).to_pylist()
+            converted_values = []
+            for value in values:
+                if value is None:
+                    converted_values.append(None)
+                    continue
+                if hasattr(value, 'as_py'):
+                    value = value.as_py()
+                if isinstance(value, str):
+                    value = value.encode('utf-8')
+                if isinstance(value, bytearray):
+                    value = bytes(value)
+                if not isinstance(value, bytes):
+                    converted_values.append(value)
+                    continue
+
+                try:
+                    descriptor = BlobDescriptor.deserialize(value)
+                    if descriptor.serialize() != value:
+                        converted_values.append(value)
+                        continue
+                    uri_reader = self.table.file_io.uri_reader_factory.create(descriptor.uri)
+                    converted_values.append(Blob.from_descriptor(uri_reader, descriptor).to_data())
+                except Exception:
+                    converted_values.append(value)
+
+            column_idx = result.column_names.index(field_name)
+            result = result.set_column(
+                column_idx,
+                pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
+                pyarrow.array(converted_values, type=pyarrow.large_binary()),
+            )
+        return result
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema) -> Iterator[pyarrow.RecordBatch]:
         chunk_size = 65536
@@ -175,11 +225,16 @@ class TableRead:
             **read_args
         )
 
-    def to_torch(self, splits: List[Split], streaming: bool = False) -> "torch.utils.data.Dataset":
+    def to_torch(
+        self,
+        splits: List[Split],
+        streaming: bool = False,
+        prefetch_concurrency: int = 1,
+    ) -> "torch.utils.data.Dataset":
         """Wrap Paimon table data to PyTorch Dataset."""
         if streaming:
             from pypaimon.read.datasource.torch_dataset import TorchIterDataset
-            dataset = TorchIterDataset(self, splits)
+            dataset = TorchIterDataset(self, splits, prefetch_concurrency)
             return dataset
         else:
             from pypaimon.read.datasource.torch_dataset import TorchDataset
@@ -198,7 +253,7 @@ class TableRead:
         elif self.table.options.data_evolution_enabled():
             return DataEvolutionSplitRead(
                 table=self.table,
-                predicate=None,  # Never push predicate to split read
+                predicate=self.predicate,
                 read_type=self.read_type,
                 split=split,
                 row_tracking_enabled=True

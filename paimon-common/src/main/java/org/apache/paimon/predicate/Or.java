@@ -27,8 +27,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link CompoundPredicate.Function} to eval or. */
-public class Or extends CompoundPredicate.Function {
+/** A {@link CompoundFunction} to eval or. */
+public class Or extends CompoundFunction {
 
     private static final long serialVersionUID = 1L;
 

@@ -28,6 +28,7 @@ import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -62,7 +63,7 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Filter<Integer> bucketFilter;
 
     private @Nullable RowType readType;
-    private @Nullable List<Range> rowRanges;
+    private @Nullable RowRangeIndex rowRangeIndex;
     private @Nullable VectorSearch vectorSearch;
 
     private boolean dropStats = false;
@@ -146,7 +147,17 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withRowRanges(List<Range> indices) {
-        this.rowRanges = indices;
+        if (indices == null) {
+            this.rowRangeIndex = null;
+            return this;
+        }
+        this.rowRangeIndex = RowRangeIndex.create(indices);
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        this.rowRangeIndex = rowRangeIndex;
         return this;
     }
 
@@ -198,7 +209,7 @@ public class ReadBuilderImpl implements ReadBuilder {
         scan.withFilter(filter)
                 .withReadType(readType)
                 .withPartitionFilter(partitionFilter)
-                .withRowRanges(rowRanges)
+                .withRowRangeIndex(rowRangeIndex)
                 .withVectorSearch(vectorSearch);
 
         checkState(

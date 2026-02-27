@@ -89,6 +89,66 @@ class FileStoreTable(Table):
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
         return SnapshotManager(self)
 
+    def tag_manager(self):
+        """Get the tag manager for this table."""
+        from pypaimon import TagManager
+        return TagManager(self.file_io, self.table_path, self.current_branch())
+
+    def create_tag(
+            self,
+            tag_name: str,
+            snapshot_id: Optional[int] = None,
+            ignore_if_exists: bool = False
+    ) -> None:
+        """
+        Create a tag for a snapshot.
+        
+        Args:
+            tag_name: Name for the tag
+            snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
+            ignore_if_exists: If True, don't raise error if tag already exists
+            
+        Raises:
+            ValueError: If no snapshot exists or tag already exists (when ignore_if_exists=False)
+        """
+
+        snapshot_mgr = self.snapshot_manager()
+
+        if snapshot_id is not None:
+            snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+            if snapshot is None:
+                raise ValueError(f"Snapshot with id {snapshot_id} doesn't exist.")
+        else:
+            snapshot = snapshot_mgr.get_latest_snapshot()
+            if snapshot is None:
+                raise ValueError("No snapshot exists in this table.")
+
+        tag_mgr = self.tag_manager()
+        tag_mgr.create_tag(snapshot, tag_name, ignore_if_exists)
+
+    def delete_tag(self, tag_name: str) -> bool:
+        """
+        Delete a tag.
+        
+        Args:
+            tag_name: Name of the tag to delete
+            
+        Returns:
+            True if tag was deleted, False if tag didn't exist
+        """
+        tag_mgr = self.tag_manager()
+        return tag_mgr.delete_tag(tag_name)
+
+    def list_tags(self):
+        """
+        List all tags.
+
+        Returns:
+            List of name of tag
+        """
+        tag_mgr = self.tag_manager()
+        return tag_mgr.list_tags()
+
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
@@ -186,9 +246,35 @@ class FileStoreTable(Table):
                 new_options.pop(k)
             else:
                 new_options[k] = v
+
         new_table_schema = self.table_schema.copy(new_options=new_options)
+
+        time_travel_schema = self._try_time_travel(Options(new_options))
+        if time_travel_schema is not None:
+            new_table_schema = time_travel_schema
+
         return FileStoreTable(self.file_io, self.identifier, self.table_path, new_table_schema,
                               self.catalog_environment)
+
+    def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
+        """
+        Try to resolve time travel options and return the corresponding schema.
+        
+        Supports the following time travel options:
+        - scan.tag-name: Travel to a specific tag
+        
+        Returns:
+            The TableSchema at the time travel point, or None if no time travel option is set.
+        """
+
+        try:
+            from pypaimon.snapshot.time_travel_util import TimeTravelUtil
+            snapshot = TimeTravelUtil.try_travel_to_snapshot(options, self.tag_manager())
+            if snapshot is None:
+                return None
+            return self.schema_manager.get_schema(snapshot.schema_id).copy(new_options=options.to_map())
+        except Exception:
+            return None
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse

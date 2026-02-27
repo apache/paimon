@@ -17,6 +17,7 @@
 ################################################################################
 import os
 import random
+import shutil
 import tempfile
 import unittest
 from typing import List
@@ -75,6 +76,10 @@ class BinaryRowTest(unittest.TestCase):
         commit.commit(write.prepare_commit())
         write.close()
         commit.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_not_equal_append(self):
         table = self.catalog.get_table('default.test_append')

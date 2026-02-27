@@ -76,6 +76,22 @@ class Range:
         return result
 
     @staticmethod
+    def to_ranges(values: List[int]) -> List['Range']:
+        if not values:
+            return []
+        sorted_ids = sorted(values)
+        result = []
+        range_start = sorted_ids[0]
+        range_end = range_start
+        for current in sorted_ids[1:]:
+            if current != range_end + 1:
+                result.append(Range(range_start, range_end))
+                range_start = current
+            range_end = current
+        result.append(Range(range_start, range_end))
+        return result
+
+    @staticmethod
     def intersect(start1: int, end1: int, start2: int, end2: int) -> bool:
         """Check if two ranges intersect."""
         return not (end1 < start2 or end2 < start1)

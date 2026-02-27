@@ -554,10 +554,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     public static List<List<DataFileMeta>> mergeRangesAndSort(List<DataFileMeta> files) {
         // group by row id range
-        ToLongFunction<DataFileMeta> firstRowIdFunc = DataFileMeta::nonNullFirstRowId;
-        ToLongFunction<DataFileMeta> endRowIdF = f -> f.nonNullFirstRowId() + f.rowCount() - 1;
         ToLongFunction<DataFileMeta> maxSeqF = DataFileMeta::maxSequenceNumber;
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(firstRowIdFunc, endRowIdF);
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> result = rangeHelper.mergeOverlappingRanges(files);
 
         // in group, sort by blob file and max_seq
@@ -582,7 +580,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
             // blob files sort by first row id then by reversed max sequence number
             blobFiles.sort(
-                    comparingLong(firstRowIdFunc)
+                    comparingLong(DataFileMeta::nonNullFirstRowId)
                             .thenComparing(reverseOrder(comparingLong(maxSeqF))));
 
             // concat data files and blob files

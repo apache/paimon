@@ -95,7 +95,8 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             long alignTimeout,
             int splitPerTaskMax,
             boolean shuffleBucketWithPartition,
-            int maxSnapshotCount) {
+            int maxSnapshotCount,
+            int sourceParallelismUpperBound) {
         super(
                 context,
                 remainSplits,
@@ -105,7 +106,8 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
                 unawareBucket,
                 splitPerTaskMax,
                 shuffleBucketWithPartition,
-                maxSnapshotCount);
+                maxSnapshotCount,
+                sourceParallelismUpperBound);
         this.pendingPlans = new ArrayBlockingQueue<>(MAX_PENDING_PLAN);
         this.alignedAssigner = (AlignedSplitAssigner) super.splitAssigner;
         this.nextSnapshotId = nextSnapshotId;

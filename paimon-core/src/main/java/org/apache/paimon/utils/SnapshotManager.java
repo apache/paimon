@@ -587,23 +587,26 @@ public class SnapshotManager implements Serializable {
     }
 
     public Optional<Snapshot> latestSnapshotOfUser(String user) {
-        return latestSnapshotOfUser(user, latestSnapshotId());
+        return latestSnapshotOfUser(user, latestSnapshotId(), null);
     }
 
     public Optional<Snapshot> latestSnapshotOfUserFromFilesystem(String user) {
-        return latestSnapshotOfUser(user, latestSnapshotIdFromFileSystem());
+        return latestSnapshotOfUser(user, latestSnapshotIdFromFileSystem(), null);
     }
 
-    private Optional<Snapshot> latestSnapshotOfUser(String user, Long latestId) {
+    public Optional<Snapshot> latestSnapshotOfUser(
+            String user, Long latestId, @Nullable Long earliestId) {
         if (latestId == null) {
             return Optional.empty();
         }
+        if (earliestId == null) {
+            earliestId =
+                    Preconditions.checkNotNull(
+                            earliestSnapshotId(),
+                            "Latest snapshot id is not null, but earliest snapshot id is null. "
+                                    + "This is unexpected.");
+        }
 
-        long earliestId =
-                Preconditions.checkNotNull(
-                        earliestSnapshotId(),
-                        "Latest snapshot id is not null, but earliest snapshot id is null. "
-                                + "This is unexpected.");
         for (long id = latestId; id >= earliestId; id--) {
             Snapshot snapshot;
             try {

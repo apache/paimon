@@ -191,7 +191,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 manifestFileFactory(),
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled(),
-                options.deletionVectorsEnabled());
+                options.deletionVectorsEnabled(),
+                options.dataEvolutionEnabled());
     }
 
     @Override

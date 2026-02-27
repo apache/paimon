@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
@@ -75,6 +76,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
     private ColumnarBatch columnarBatch;
 
     private final Path filePath;
+    private final FileIO fileIO;
     private final MessageType fileSchema;
     private final List<ParquetField> fields;
     private final RowIndexGenerator rowIndexGenerator;
@@ -88,7 +90,8 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
             MessageType fileSchema,
             List<ParquetField> fields,
             WritableColumnVector[] vectors,
-            int batchSize)
+            int batchSize,
+            FileIO fileIO)
             throws IOException {
         this.filePath = filePath;
         this.reader = reader;
@@ -96,6 +99,7 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
         this.fields = fields;
         this.totalRowCount = reader.getFilteredRecordCount();
         this.batchSize = batchSize;
+        this.fileIO = fileIO;
         this.rowIndexGenerator = new RowIndexGenerator();
 
         // fetch writer version from file metadata
@@ -120,7 +124,8 @@ public class VectorizedParquetRecordReader implements FileRecordReader<InternalR
                                 fields.stream()
                                         .map(ParquetField::getType)
                                         .collect(Collectors.toList()),
-                                vectors));
+                                vectors),
+                        fileIO);
         columnVectors = new ParquetColumnVector[fields.size()];
         for (int i = 0; i < columnVectors.length; i++) {
             columnVectors[i] =

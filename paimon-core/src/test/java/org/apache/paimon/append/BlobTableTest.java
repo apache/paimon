@@ -43,10 +43,13 @@ import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.UriReader;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nonnull;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -54,7 +57,9 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Tests for table with blob. */
 public class BlobTableTest extends TableTestBase {
@@ -231,6 +236,151 @@ public class BlobTableTest extends TableTestBase {
                     }
                 });
         assertThat(integer.get()).isEqualTo(1025);
+    }
+
+    @Test
+    public void testDescriptorStorageModeReuseUpstreamBlobWithoutCopy() throws Exception {
+        createDescriptorTable();
+        FileStoreTable table = getTableDefault();
+
+        // prepare an "upstream blob file" (any file) and write blob bytes into it
+        Path external = new Path(tempPath.resolve("upstream-blob.bin").toString());
+        writeFile(table.fileIO(), external, blobBytes);
+
+        BlobDescriptor descriptor = new BlobDescriptor(external.toString(), 0, blobBytes.length);
+        UriReader uriReader = UriReader.fromFile(table.fileIO());
+        Blob blobRef = Blob.fromDescriptor(uriReader, descriptor);
+
+        writeDataDefault(
+                Collections.singletonList(
+                        GenericRow.of(1, BinaryString.fromString("nice"), blobRef)));
+
+        readDefault(
+                row -> {
+                    assertThat(row.getBlob(2).toDescriptor()).isEqualTo(descriptor);
+                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
+                });
+
+        long blobFiles = countFilesWithSuffix(table.fileIO(), table.location(), ".blob");
+        assertThat(blobFiles).isEqualTo(0);
+    }
+
+    @Test
+    public void testDescriptorStorageModeRejectsNonDescriptorInput() throws Exception {
+        createDescriptorTable();
+
+        assertThatThrownBy(
+                        () ->
+                                writeDataDefault(
+                                        Collections.singletonList(
+                                                GenericRow.of(
+                                                        1,
+                                                        BinaryString.fromString("bad"),
+                                                        new BlobData(blobBytes)))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blob-descriptor-field");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "avro", "orc"})
+    public void testMixedBlobStorageModeByFields(String format) throws Exception {
+        createMixedModeTable(format);
+        FileStoreTable table = getTableDefault();
+
+        byte[] descriptorBytes = randomBytes();
+        Path external = new Path(tempPath.resolve("upstream-mixed-blob.bin").toString());
+        writeFile(table.fileIO(), external, descriptorBytes);
+
+        BlobDescriptor descriptor =
+                new BlobDescriptor(external.toString(), 0, descriptorBytes.length);
+        UriReader uriReader = UriReader.fromFile(table.fileIO());
+        Blob blobRef = Blob.fromDescriptor(uriReader, descriptor);
+
+        writeDataDefault(
+                Collections.singletonList(
+                        GenericRow.of(
+                                1,
+                                BinaryString.fromString("mixed"),
+                                new BlobData(blobBytes),
+                                blobRef)));
+
+        readDefault(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("mixed");
+                    assertThat(row.getBlob(2).toData()).isEqualTo(blobBytes);
+                    assertThat(row.getBlob(3).toDescriptor()).isEqualTo(descriptor);
+                    assertThat(row.getBlob(3).toData()).isEqualTo(descriptorBytes);
+                });
+
+        long blobFiles = countFilesWithSuffix(table.fileIO(), table.location(), ".blob");
+        assertThat(blobFiles).isEqualTo(1);
+    }
+
+    @Test
+    public void testMixedBlobStorageModeRejectsNonDescriptorInput() throws Exception {
+        createMixedModeTable();
+
+        assertThatThrownBy(
+                        () ->
+                                writeDataDefault(
+                                        Collections.singletonList(
+                                                GenericRow.of(
+                                                        1,
+                                                        BinaryString.fromString("bad"),
+                                                        new BlobData(blobBytes),
+                                                        new BlobData(randomBytes())))))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("blob-descriptor-field");
+    }
+
+    private void createDescriptorTable() throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f2");
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+    }
+
+    private void createMixedModeTable() throws Exception {
+        createMixedModeTable(FILE_FORMAT_PARQUET);
+    }
+
+    private void createMixedModeTable(String format) throws Exception {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BLOB());
+        schemaBuilder.column("f3", DataTypes.BLOB());
+        schemaBuilder.option(CoreOptions.TARGET_FILE_SIZE.key(), "25 MB");
+        schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        schemaBuilder.option(CoreOptions.BLOB_DESCRIPTOR_FIELD.key(), "f3");
+        schemaBuilder.option(CoreOptions.FILE_FORMAT.key(), format);
+        catalog.createTable(identifier(), schemaBuilder.build(), true);
+    }
+
+    private static void writeFile(FileIO fileIO, Path path, byte[] bytes) throws IOException {
+        try (org.apache.paimon.fs.PositionOutputStream out = fileIO.newOutputStream(path, true)) {
+            out.write(bytes);
+        }
+    }
+
+    private static long countFilesWithSuffix(FileIO fileIO, Path root, String suffix)
+            throws IOException {
+        long count = 0;
+        org.apache.paimon.fs.RemoteIterator<org.apache.paimon.fs.FileStatus> it =
+                fileIO.listFilesIterative(root, true);
+        while (it.hasNext()) {
+            org.apache.paimon.fs.FileStatus status = it.next();
+            if (status.getPath().getName().endsWith(suffix)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     protected Schema schemaDefault() {

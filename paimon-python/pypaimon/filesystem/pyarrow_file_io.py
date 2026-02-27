@@ -17,13 +17,16 @@
 ################################################################################
 import logging
 import os
+import re
 import subprocess
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import splitport, urlparse
 
 import pyarrow
+import pyarrow.fs as pafs
 from packaging.version import parse
 from pyarrow._fs import FileSystem
 
@@ -38,11 +41,15 @@ from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
 
 
+def _pyarrow_lt_7():
+    return parse(pyarrow.__version__) < parse("7.0.0")
+
+
 class PyArrowFileIO(FileIO):
     def __init__(self, path: str, catalog_options: Options):
         self.properties = catalog_options
         self.logger = logging.getLogger(__name__)
-        self._pyarrow_gte_7 = parse(pyarrow.__version__) >= parse("7.0.0")
+        self._pyarrow_gte_7 = not _pyarrow_lt_7()
         self._pyarrow_gte_8 = parse(pyarrow.__version__) >= parse("8.0.0")
         scheme, netloc, _ = self.parse_location(path)
         self.uri_reader_factory = UriReaderFactory(catalog_options)
@@ -80,8 +87,7 @@ class PyArrowFileIO(FileIO):
                 'connect_timeout': connect_timeout
             }
             try:
-                from pyarrow.fs import AwsStandardS3RetryStrategy
-                retry_strategy = AwsStandardS3RetryStrategy(max_attempts=max_attempts)
+                retry_strategy = pafs.AwsStandardS3RetryStrategy(max_attempts=max_attempts)
                 config['retry_strategy'] = retry_strategy
             except ImportError:
                 pass
@@ -110,8 +116,6 @@ class PyArrowFileIO(FileIO):
         return bucket
 
     def _initialize_oss_fs(self, path) -> FileSystem:
-        from pyarrow.fs import S3FileSystem
-
         client_kwargs = {
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
@@ -129,11 +133,9 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return S3FileSystem(**client_kwargs)
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
-        from pyarrow.fs import S3FileSystem
-
         client_kwargs = {
             "endpoint_override": self.properties.get(S3Options.S3_ENDPOINT),
             "access_key": self.properties.get(S3Options.S3_ACCESS_KEY_ID),
@@ -147,11 +149,9 @@ class PyArrowFileIO(FileIO):
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
 
-        return S3FileSystem(**client_kwargs)
+        return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_hdfs_fs(self, scheme: str, netloc: Optional[str]) -> FileSystem:
-        from pyarrow.fs import HadoopFileSystem
-
         if 'HADOOP_HOME' not in os.environ:
             raise RuntimeError("HADOOP_HOME environment variable is not set.")
         if 'HADOOP_CONF_DIR' not in os.environ:
@@ -170,7 +170,7 @@ class PyArrowFileIO(FileIO):
         os.environ['CLASSPATH'] = class_paths.stdout.strip()
 
         host, port_str = splitport(netloc)
-        return HadoopFileSystem(
+        return pafs.HadoopFileSystem(
             host=host,
             port=int(port_str),
             user=os.environ.get('HADOOP_USER_NAME', 'hadoop')
@@ -199,40 +199,50 @@ class PyArrowFileIO(FileIO):
 
         return self.filesystem.open_output_stream(path_str)
 
+    def _get_file_info(self, path_str: str):
+        try:
+            file_infos = self.filesystem.get_file_info([path_str])
+            return file_infos[0]
+        except OSError as e:
+            # this is for compatible with pyarrow < 7
+            msg = str(e).lower()
+            if ("does not exist" in msg or "not exist" in msg or "nosuchkey" in msg
+                    or re.search(r'\b133\b', msg) or "notfound" in msg):
+                return pafs.FileInfo(path_str, pafs.FileType.NotFound)
+            raise
+
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
-        file_infos = self.filesystem.get_file_info([path_str])
-        file_info = file_infos[0]
+        file_info = self._get_file_info(path_str)
         
-        if file_info.type == pyarrow.fs.FileType.NotFound:
+        if file_info.type == pafs.FileType.NotFound:
             raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
         
         return file_info
 
     def list_status(self, path: str):
         path_str = self.to_filesystem_path(path)
-        selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
+        selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
         return self.filesystem.get_file_info(selector)
 
     def list_directories(self, path: str):
         file_infos = self.list_status(path)
-        return [info for info in file_infos if info.type == pyarrow.fs.FileType.Directory]
+        return [info for info in file_infos if info.type == pafs.FileType.Directory]
 
     def exists(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
-        file_info = self.filesystem.get_file_info([path_str])[0]
-        return file_info.type != pyarrow.fs.FileType.NotFound
+        return self._get_file_info(path_str).type != pafs.FileType.NotFound
 
     def delete(self, path: str, recursive: bool = False) -> bool:
         path_str = self.to_filesystem_path(path)
-        file_info = self.filesystem.get_file_info([path_str])[0]
+        file_info = self._get_file_info(path_str)
         
-        if file_info.type == pyarrow.fs.FileType.NotFound:
+        if file_info.type == pafs.FileType.NotFound:
             return False
         
-        if file_info.type == pyarrow.fs.FileType.Directory:
+        if file_info.type == pafs.FileType.Directory:
             if not recursive:
-                selector = pyarrow.fs.FileSelector(path_str, recursive=False, allow_not_found=True)
+                selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
                 dir_contents = self.filesystem.get_file_info(selector)
                 if len(dir_contents) > 0:
                     raise OSError(f"Directory {path} is not empty")
@@ -247,11 +257,14 @@ class PyArrowFileIO(FileIO):
 
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
-        file_info = self.filesystem.get_file_info([path_str])[0]
+        file_info = self._get_file_info(path_str)
         
-        if file_info.type == pyarrow.fs.FileType.Directory:
+        if file_info.type == pafs.FileType.NotFound:
+            self.filesystem.create_dir(path_str, recursive=True)
             return True
-        elif file_info.type == pyarrow.fs.FileType.File:
+        if file_info.type == pafs.FileType.Directory:
+            return True
+        elif file_info.type == pafs.FileType.File:
             raise FileExistsError(f"Path exists but is not a directory: {path}")
         
         self.filesystem.create_dir(path_str, recursive=True)
@@ -269,16 +282,16 @@ class PyArrowFileIO(FileIO):
             if hasattr(self.filesystem, 'rename'):
                 return self.filesystem.rename(src_str, dst_str)
             
-            dst_file_info = self.filesystem.get_file_info([dst_str])[0]
-            if dst_file_info.type != pyarrow.fs.FileType.NotFound:
-                if dst_file_info.type == pyarrow.fs.FileType.File:
+            dst_file_info = self._get_file_info(dst_str)
+            if dst_file_info.type != pafs.FileType.NotFound:
+                if dst_file_info.type == pafs.FileType.File:
                     return False
                 # Make it compatible with HadoopFileIO: if dst is an existing directory,
                 # dst=dst/srcFileName
                 src_name = Path(src_str).name
                 dst_str = str(Path(dst_str) / src_name)
-                final_dst_info = self.filesystem.get_file_info([dst_str])[0]
-                if final_dst_info.type != pyarrow.fs.FileType.NotFound:
+                final_dst_info = self._get_file_info(dst_str)
+                if final_dst_info.type != pafs.FileType.NotFound:
                     return False
             
             self.filesystem.move(src_str, dst_str)
@@ -315,8 +328,8 @@ class PyArrowFileIO(FileIO):
     def try_to_write_atomic(self, path: str, content: str) -> bool:
         if self.exists(path):
             path_str = self.to_filesystem_path(path)
-            file_info = self.filesystem.get_file_info([path_str])[0]
-            if file_info.type == pyarrow.fs.FileType.Directory:
+            file_info = self._get_file_info(path_str)
+            if file_info.type == pafs.FileType.Directory:
                 return False
         
         temp_path = path + str(uuid.uuid4()) + ".tmp"
@@ -399,7 +412,13 @@ class PyArrowFileIO(FileIO):
         def record_generator():
             num_rows = len(list(records_dict.values())[0])
             for i in range(num_rows):
-                yield {col: records_dict[col][i] for col in records_dict.keys()}
+                record = {}
+                for col in records_dict.keys():
+                    value = records_dict[col][i]
+                    if isinstance(value, datetime) and value.tzinfo is None:
+                        value = value.replace(tzinfo=timezone.utc)
+                    record[col] = value
+                yield record
 
         records = record_generator()
 
@@ -444,7 +463,7 @@ class PyArrowFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
 
-    def write_blob(self, path: str, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
+    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
@@ -465,18 +484,24 @@ class PyArrowFileIO(FileIO):
                 for i in range(num_rows):
                     col_data = records_dict[field_name][i]
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
-                        if blob_as_descriptor:
-                            blob_descriptor = BlobDescriptor.deserialize(col_data)
-                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
-                            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
-                        elif isinstance(col_data, bytes):
-                            blob_data = BlobData(col_data)
+                        if hasattr(col_data, 'as_py'):
+                            col_data = col_data.as_py()
+                        if isinstance(col_data, str):
+                            col_data = col_data.encode('utf-8')
+                        if isinstance(col_data, bytearray):
+                            col_data = bytes(col_data)
+
+                        if isinstance(col_data, bytes):
+                            if BlobDescriptor.is_blob_descriptor(col_data):
+                                descriptor = BlobDescriptor.deserialize(col_data)
+                                uri_reader = self.uri_reader_factory.create(descriptor.uri)
+                                blob_data = Blob.from_descriptor(uri_reader, descriptor)
+                            else:
+                                blob_data = BlobData(col_data)
                         else:
-                            if hasattr(col_data, 'as_py'):
-                                col_data = col_data.as_py()
-                            if isinstance(col_data, str):
-                                col_data = col_data.encode('utf-8')
-                            blob_data = BlobData(col_data)
+                            raise RuntimeError(
+                                "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
+                            )
                         row_values = [blob_data]
                     else:
                         row_values = [col_data]
@@ -507,13 +532,11 @@ class PyArrowFileIO(FileIO):
             if parsed.scheme:
                 if parsed.netloc:
                     path_part = normalized_path.lstrip('/')
+                    # OSS+PyArrow<7: endpoint_override has bucket, pass key only.
                     if self._is_oss and not self._pyarrow_gte_7:
-                        # For PyArrow 6.x + OSS, endpoint_override already contains bucket,
-                        result = path_part if path_part else '.'
-                        return result
-                    else:
-                        result = f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
-                        return result
+                        return path_part if path_part else '.'
+                    result = f"{parsed.netloc}/{path_part}" if path_part else parsed.netloc
+                    return result
                 else:
                     result = normalized_path.lstrip('/')
                     return result if result else '.'

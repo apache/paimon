@@ -754,4 +754,39 @@ public class SparkChainTableITCase {
 
         spark.close();
     }
+
+    @Test
+    public void testChainTableCacheInvalidation(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+        spark.sql(
+                "CREATE TABLE chain_test_t ("
+                        + "    `t1` string ,"
+                        + "    `t2` string ,"
+                        + "    `t3` string"
+                        + ") PARTITIONED BY (`date` string)"
+                        + "TBLPROPERTIES ("
+                        + "   'chain-table.enabled' = 'true'"
+                        + "  ,'primary-key' = 'date,t1'"
+                        + "  ,'sequence.field' = 't2'"
+                        + "  ,'bucket-key' = 't1'"
+                        + "  ,'bucket' = '1'"
+                        + "  ,'partition.timestamp-pattern' = '$date'"
+                        + "  ,'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches(spark, "chain_test_t");
+        spark.sql(
+                "insert overwrite `chain_test_t$branch_delta` partition (date = '20260224') values ('1', '1', '1');");
+        assertThat(
+                        spark.sql("SELECT * FROM `chain_test_t`").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,1,1,20260224]");
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test_t`;");
+        spark.close();
+    }
 }

@@ -218,7 +218,7 @@ def main():
         # print("Step 7: Blob data handling (Optional)")
         # print("="*60)
         # print("Paimon supports storing blob data (images, audio, etc.)")
-        # print("For blob data examples, see: pypaimon/sample/oss_blob_as_descriptor.py")
+        # print("For blob data examples, see: pypaimon/sample/rest_catalog_blob_as_descriptor_sample.py")
 
         print("\n" + "="*60)
         print("Summary")
@@ -232,7 +232,7 @@ def main():
         print("  - Scalable data processing with Ray operations")
         print("  - Integration with Ray ecosystem (Ray Train, Ray Serve, etc.)")
         print("\nFor blob data (images, audio) examples, see:")
-        print("  - pypaimon/sample/oss_blob_as_descriptor.py")
+        print("  - pypaimon/sample/rest_catalog_blob_as_descriptor_sample.py")
 
     finally:
         server.shutdown()

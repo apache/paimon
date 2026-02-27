@@ -15,9 +15,12 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
+import logging
 from typing import Optional
 
 from pypaimon.common.file_io import FileIO
+
+logger = logging.getLogger(__name__)
 from pypaimon.common.json_util import JSON
 from pypaimon.snapshot.snapshot import Snapshot
 
@@ -115,9 +118,14 @@ class SnapshotManager:
         if self.file_io.exists(earliest_file):
             earliest_content = self.file_io.read_file_utf8(earliest_file)
             earliest_snapshot_id = int(earliest_content.strip())
-            return self.get_snapshot_by_id(earliest_snapshot_id)
-        else:
-            return self.get_snapshot_by_id(1)
+            snapshot = self.get_snapshot_by_id(earliest_snapshot_id)
+            if snapshot is None:
+                logger.warning(
+                    "The earliest snapshot or changelog was once identified but disappeared. "
+                    "It might have been expired by other jobs operating on this table."
+                )
+            return snapshot
+        return self.get_snapshot_by_id(1)
 
     def earlier_or_equal_time_mills(self, timestamp: int) -> Optional[Snapshot]:
         """

@@ -258,7 +258,7 @@ predicate_5 = predicate_builder.and_predicates([predicate3, predicate4])
 read_builder = read_builder.with_filter(predicate_5)
 ```
 
-See [Predicate]({{< ref "python-api#predicate" >}}) for all supported filters and building methods.
+See [Predicate]({{< ref "python-api#predicate" >}}) for all supported filters and building methods. Filter by `_ROW_ID`: see [Data Evolution]({{< ref "pypaimon/data-evolution#filter-by-_row_id" >}}).
 
 You can also pushdown projection by `ReadBuilder`:
 

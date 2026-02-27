@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 import os
+import shutil
 import tempfile
 import unittest
 
@@ -57,6 +58,10 @@ class AOPredicatePy36Test(unittest.TestCase):
         commit.close()
 
         cls.df = df
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_wrong_field_name(self):
         table = self.catalog.get_table('default.test_append')

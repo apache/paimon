@@ -177,7 +177,17 @@ class CoreOptions:
         ConfigOptions.key("blob-as-descriptor")
         .boolean_type()
         .default_value(False)
-        .with_description("Whether to use blob as descriptor.")
+        .with_description("Whether to return blob values as serialized BlobDescriptor bytes when reading.")
+    )
+
+    BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-descriptor-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names that should be stored as serialized BlobDescriptor bytes "
+            "inline in normal data files."
+        )
     )
 
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
@@ -212,6 +222,13 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("The timestamp range for incremental reading.")
+    )
+
+    SCAN_TAG_NAME: ConfigOption[str] = (
+        ConfigOptions.key("scan.tag-name")
+        .string_type()
+        .no_default_value()
+        .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
     )
 
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
@@ -477,6 +494,16 @@ class CoreOptions:
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
 
+    def blob_descriptor_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {field.strip() for field in value.split(",") if field.strip()}
+        if isinstance(value, (list, set, tuple)):
+            return {str(field).strip() for field in value if str(field).strip()}
+        return set()
+
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,
                                 MemorySize.of_mebi_bytes(
@@ -504,6 +531,9 @@ class CoreOptions:
 
     def incremental_between_timestamp(self, default=None):
         return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP, default)
+
+    def scan_tag_name(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TAG_NAME, default)
 
     def source_split_target_size(self, default=None):
         return self.options.get(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, default).get_bytes()

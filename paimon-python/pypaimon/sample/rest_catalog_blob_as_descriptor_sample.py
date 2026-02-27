@@ -16,7 +16,7 @@
 #  limitations under the License.
 ################################################################################
 """
-Sample demonstrating how to use blob-as-descriptor mode with REST catalog.
+Sample demonstrating descriptor-stored blob fields with REST catalog.
 """
 from pypaimon import CatalogFactory
 import pyarrow as pa
@@ -50,9 +50,9 @@ def write_table_with_blob(catalog, video_file_path: str, external_oss_options: d
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
             'blob-field': 'video',
-            'blob-as-descriptor': 'true'
+            'blob-descriptor-field': 'video'
         },
-        comment='Table with blob column using blob-as-descriptor mode')
+        comment='Table with blob column using descriptor-stored field')
 
     table_identifier = f'{database_name}.{table_name}'
     catalog.create_table(

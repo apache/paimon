@@ -737,6 +737,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListTableDetails() throws Exception {
+        // List table details returns an empty list when there are no tables in the database
+        String databaseName = "table_details_db";
+        catalog.createDatabase(databaseName, false);
+        List<Table> tableDetails = catalog.listTableDetails(databaseName);
+        assertThat(tableDetails).isEmpty();
+
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr", "table_name"};
+        String[] expectedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
+        for (String tableName : tableNames) {
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        tableDetails = catalog.listTableDetails(databaseName);
+        assertThat(tableDetails).hasSize(tableNames.length);
+        List<String> actualTableNames =
+                tableDetails.stream().map(Table::name).sorted().collect(Collectors.toList());
+        assertThat(actualTableNames).containsExactly(expectedTableNames);
+
+        // List table details throws DatabaseNotExistException when the database does not exist
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(() -> catalog.listTableDetails("non_existing_db"));
+    }
+
+    @Test
     public void testListTablesPagedWithTableType() throws Exception {
         String databaseName = "tables_paged_table_type_db";
         catalog.createDatabase(databaseName, false);

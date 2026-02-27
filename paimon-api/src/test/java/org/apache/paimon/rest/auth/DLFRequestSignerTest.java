@@ -23,8 +23,14 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -216,5 +222,88 @@ public class DLFRequestSignerTest {
                 DLFDefaultSigner.IDENTIFIER, DLFAuthProviderFactory.parseSigningAlgoFromUri(""));
         assertEquals(
                 DLFDefaultSigner.IDENTIFIER, DLFAuthProviderFactory.parseSigningAlgoFromUri(null));
+    }
+
+    @Test
+    public void testOpenApiSignHeadersWithEnhancedNonce() throws Exception {
+        DLFOpenApiSigner signer = new DLFOpenApiSigner();
+        String body = "{\"CategoryName\":\"test\",\"CategoryType\":\"UNSTRUCTURED\"}";
+        Instant now = ZonedDateTime.of(2025, 4, 16, 3, 44, 46, 0, ZoneOffset.UTC).toInstant();
+        String host = "dlfnext.cn-beijing.aliyuncs.com";
+
+        Map<String, String> headers = signer.signHeaders(body, now, null, host);
+
+        assertNotNull(headers.get("Date"));
+        assertEquals("application/json", headers.get("Accept"));
+        assertNotNull(headers.get("Content-MD5"));
+        assertEquals("application/json", headers.get("Content-Type"));
+        assertEquals(host, headers.get("Host"));
+        assertEquals("HMAC-SHA1", headers.get("x-acs-signature-method"));
+
+        // Verify nonce format inspired by Alibaba Cloud DataLake SDK
+        String nonceValue = headers.get("x-acs-signature-nonce");
+        assertNotNull(nonceValue);
+
+        // Verify nonce contains UUID part (should be 32 hex chars + 4 dashes = 36 chars)
+        // Find the UUID part by looking for the typical UUID pattern
+        java.util.regex.Pattern uuidPattern =
+                java.util.regex.Pattern.compile(
+                        "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+        java.util.regex.Matcher matcher = uuidPattern.matcher(nonceValue);
+        assertTrue(matcher.find(), "No UUID pattern found in nonce: " + nonceValue);
+
+        // Verify that nonce contains timestamp-like numbers (long digits)
+        // Should contain millisecond timestamp (at least 10 digits)
+        java.util.regex.Pattern digitPattern = java.util.regex.Pattern.compile("\\d+");
+        java.util.regex.Matcher digitMatcher = digitPattern.matcher(nonceValue);
+        boolean timestampFound = false;
+        boolean threadIdFound = false;
+        while (digitMatcher.find()) {
+            String digitSequence = digitMatcher.group();
+            if (digitSequence.length() >= 10) { // At least 10 digits for timestamp
+                timestampFound = true;
+            }
+            if (digitSequence.length() >= 1) { // Thread ID could be shorter
+                threadIdFound = true;
+            }
+        }
+        assertTrue(timestampFound, "No timestamp-like part found in nonce: " + nonceValue);
+        assertTrue(threadIdFound, "No thread ID-like part found in nonce: " + nonceValue);
+
+        assertEquals("1.0", headers.get("x-acs-signature-version"));
+        assertEquals("2026-01-18", headers.get("x-acs-version"));
+    }
+
+    @Test
+    public void testConcurrentNonceGeneration() throws InterruptedException {
+        DLFOpenApiSigner signer = new DLFOpenApiSigner();
+        String body = "{\"test\":\"data\"}";
+        Instant now = Instant.now();
+        String host = "test-host";
+        int threadCount = 10;
+        int iterationsPerThread = 50;
+
+        Set<String> nonces = Collections.synchronizedSet(new HashSet<>());
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+        CountDownLatch latch = new CountDownLatch(threadCount);
+
+        for (int i = 0; i < threadCount; i++) {
+            executor.submit(
+                    () -> {
+                        for (int j = 0; j < iterationsPerThread; j++) {
+                            Map<String, String> headers = signer.signHeaders(body, now, null, host);
+                            String nonce = headers.get("x-acs-signature-nonce");
+                            nonces.add(nonce);
+                        }
+                        latch.countDown();
+                    });
+        }
+
+        latch.await();
+        executor.shutdown();
+
+        // Verify all generated nonces are unique
+        assertEquals((long) threadCount * iterationsPerThread, nonces.size());
     }
 }

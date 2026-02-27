@@ -17,6 +17,7 @@
 ################################################################################
 
 import io
+import struct
 from abc import ABC, abstractmethod
 from typing import Optional, Union
 from urllib.parse import urlparse
@@ -25,10 +26,11 @@ from pypaimon.common.uri_reader import UriReader, FileUriReader
 
 
 class BlobDescriptor:
-    CURRENT_VERSION = 1
+    CURRENT_VERSION = 2
+    MAGIC = 0x424C4F4244455343  # "BLOBDESC"
 
-    def __init__(self, uri: str, offset: int, length: int, version: int = CURRENT_VERSION):
-        self._version = version
+    def __init__(self, uri: str, offset: int, length: int):
+        self._version = self.CURRENT_VERSION
         self._uri = uri
         self._offset = offset
         self._length = length
@@ -50,25 +52,20 @@ class BlobDescriptor:
         return self._version
 
     def serialize(self) -> bytes:
-        import struct
-
         uri_bytes = self._uri.encode('utf-8')
         uri_length = len(uri_bytes)
-
-        # Pack using little endian format
         data = struct.pack('<B', self._version)  # version (1 byte)
+        if self._version > 1:
+            data += struct.pack('<Q', self.MAGIC)  # magic (8 bytes, unsigned)
         data += struct.pack('<I', uri_length)  # uri length (4 bytes)
         data += uri_bytes  # uri bytes
         data += struct.pack('<q', self._offset)  # offset (8 bytes, signed)
         data += struct.pack('<q', self._length)  # length (8 bytes, signed)
-
         return data
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'BlobDescriptor':
-        import struct
-
-        if len(data) < 5:  # minimum size: version(1) + uri_length(4)
+        if len(data) < 5:
             raise ValueError("Invalid BlobDescriptor data: too short")
 
         offset = 0
@@ -77,11 +74,26 @@ class BlobDescriptor:
         version = struct.unpack('<B', data[offset:offset + 1])[0]
         offset += 1
 
-        # For now, we only support version 1, but allow flexibility for future versions
-        if version < 1:
-            raise ValueError(f"Unsupported BlobDescriptor version: {version}")
+        if version > cls.CURRENT_VERSION:
+            raise ValueError(
+                f"Expecting BlobDescriptor version to be less than or equal to "
+                f"{cls.CURRENT_VERSION}, but found {version}."
+            )
+
+        if version > 1:
+            if offset + 8 > len(data):
+                raise ValueError("Invalid BlobDescriptor data: too short")
+            magic = struct.unpack('<Q', data[offset:offset + 8])[0]
+            offset += 8
+            if magic != cls.MAGIC:
+                raise ValueError(
+                    f"Invalid BlobDescriptor: missing magic header. Expected magic: "
+                    f"{cls.MAGIC}, but found: {magic}"
+                )
 
         # Read URI length
+        if offset + 4 > len(data):
+            raise ValueError("Invalid BlobDescriptor data: too short")
         uri_length = struct.unpack('<I', data[offset:offset + 4])[0]
         offset += 4
 
@@ -102,7 +114,31 @@ class BlobDescriptor:
 
         blob_length = struct.unpack('<q', data[offset:offset + 8])[0]
 
-        return cls(uri, blob_offset, blob_length, version)
+        descriptor = cls(uri, blob_offset, blob_length)
+        descriptor._version = version
+        return descriptor
+
+    @classmethod
+    def is_blob_descriptor(cls, data: bytes) -> bool:
+        if not isinstance(data, (bytes, bytearray)):
+            return False
+        raw = bytes(data)
+        if len(raw) < 9:
+            return False
+
+        version = raw[0]
+        # v1 descriptors remain deserializable for compatibility,
+        # but descriptor detection is v2-only.
+        if version == 1:
+            return False
+        if version > cls.CURRENT_VERSION:
+            return False
+
+        try:
+            magic = struct.unpack('<Q', raw[1:9])[0]
+            return magic == cls.MAGIC
+        except Exception:
+            return False
 
     def __eq__(self, other) -> bool:
         """Check equality with another BlobDescriptor."""
