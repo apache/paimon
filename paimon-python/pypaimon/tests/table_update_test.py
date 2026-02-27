@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
 import os
 import shutil
 import tempfile
@@ -858,6 +859,197 @@ class TableUpdateTest(unittest.TestCase):
         expected_cities = ['NYC', 'LA', 'Chicago', 'Houston', 'Phoenix',
                            'Seattle', 'Boston', 'Denver', 'Miami', 'Atlanta']
         self.assertEqual(expected_cities, cities, "Cities should remain unchanged")
+
+    def test_concurrent_updates_with_retry(self):
+        """Test data evolution with multiple threads performing concurrent updates.
+
+        Each thread updates different rows of the same column. If a conflict occurs,
+        the thread retries until the update succeeds. After all threads complete,
+        the final result is verified to ensure all updates were applied correctly.
+        """
+        import threading
+        import traceback
+        table = self._create_table()
+
+        # Table has 5 rows (row_id 0-4) after _create_table:
+        #   row 0: age=25, row 1: age=30, row 2: age=35, row 3: age=40, row 4: age=45
+
+        # Thread 1 updates rows 0 and 1
+        # Thread 2 updates rows 2 and 3
+        # Thread 3 updates row 4
+        thread_updates = [
+            {'row_ids': [0, 1], 'ages': [100, 200]},
+            {'row_ids': [2, 3], 'ages': [300, 400]},
+            {'row_ids': [4], 'ages': [500]},
+        ]
+
+        errors = []
+        success_counts = [0] * len(thread_updates)
+
+        def update_worker(thread_index, update_spec):
+            max_retries = 20
+            for attempt in range(max_retries):
+                try:
+                    print("hello0")
+                    write_builder = table.new_batch_write_builder()
+                    table_update = write_builder.new_update().with_update_type(['age'])
+
+                    update_data = pa.Table.from_pydict({
+                        '_ROW_ID': update_spec['row_ids'],
+                        'age': update_spec['ages'],
+                    })
+
+                    commit_messages, snapshot_id = table_update.update_by_arrow_with_row_id(update_data)
+
+                    table_commit = write_builder.new_commit().row_id_check_conflict(snapshot_id)
+                    table_commit.commit(commit_messages)
+                    table_commit.close()
+
+                    success_counts[thread_index] = attempt + 1
+                    return
+                except Exception as e:
+                    print(
+                        "Thread-{} attempt {} failed: {}\n{}".format(
+                            thread_index, attempt + 1, e, traceback.format_exc()
+                        )
+                    )
+                    if attempt == max_retries - 1:
+                        errors.append(
+                            "Thread-{} failed after {} retries: {}".format(
+                                thread_index, max_retries, e
+                            )
+                        )
+
+        threads = []
+        for idx, spec in enumerate(thread_updates):
+            thread = threading.Thread(target=update_worker, args=(idx, spec))
+            threads.append(thread)
+
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join(timeout=120)
+
+        if errors:
+            self.fail("Some threads failed:\n" + "\n".join(errors))
+
+        for idx, count in enumerate(success_counts):
+            self.assertGreater(
+                count, 0,
+                "Thread-{} did not succeed".format(idx)
+            )
+
+        # Verify the final data
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        result = table_read.to_arrow(splits)
+
+        ages = result['age'].to_pylist()
+        expected_ages = [100, 200, 300, 400, 500]
+        self.assertEqual(expected_ages, ages,
+                         "Concurrent updates did not produce correct final result")
+
+    def test_concurrent_updates_same_rows_with_retry(self):
+        """Test data evolution with multiple threads updating overlapping rows.
+
+        Multiple threads compete to update the same rows. Each thread retries
+        on conflict until success. The final result should reflect one of the
+        successful updates for each row (last-writer-wins).
+        """
+        import threading
+        import traceback
+
+        table = self._create_table()
+
+        # All threads update the same rows but with different values
+        thread_updates = [
+            {'row_ids': [0, 1, 2], 'ages': [101, 201, 301], 'thread_name': 'A'},
+            {'row_ids': [0, 1, 2], 'ages': [102, 202, 302], 'thread_name': 'B'},
+            {'row_ids': [0, 1, 2], 'ages': [103, 203, 303], 'thread_name': 'C'},
+        ]
+
+        errors = []
+        completion_order = []
+        order_lock = threading.Lock()
+
+        def update_worker(thread_index, update_spec):
+            max_retries = 30
+            for attempt in range(max_retries):
+                try:
+                    write_builder = table.new_batch_write_builder()
+                    table_update = write_builder.new_update().with_update_type(['age'])
+
+                    update_data = pa.Table.from_pydict({
+                        '_ROW_ID': update_spec['row_ids'],
+                        'age': update_spec['ages'],
+                    })
+
+                    commit_messages = table_update.update_by_arrow_with_row_id(update_data)
+
+                    table_commit = write_builder.new_commit()
+                    table_commit.commit(commit_messages)
+                    table_commit.close()
+
+                    with order_lock:
+                        completion_order.append(thread_index)
+                    return
+                except Exception as e:
+                    print(
+                        "Thread-{} ({}) attempt {} failed: {}".format(
+                            thread_index, update_spec['thread_name'],
+                            attempt + 1, e
+                        )
+                    )
+                    if attempt == max_retries - 1:
+                        errors.append(
+                            "Thread-{} ({}) failed after {} retries: {}".format(
+                                thread_index, update_spec['thread_name'],
+                                max_retries, e
+                            )
+                        )
+
+        threads = []
+        for idx, spec in enumerate(thread_updates):
+            thread = threading.Thread(target=update_worker, args=(idx, spec))
+            threads.append(thread)
+
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join(timeout=120)
+
+        if errors:
+            self.fail("Some threads failed:\n" + "\n".join(errors))
+
+        self.assertEqual(
+            len(completion_order), len(thread_updates),
+            "Not all threads completed successfully"
+        )
+
+        # Verify the final data: the last thread to commit wins
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        result = table_read.to_arrow(splits)
+
+        ages = result['age'].to_pylist()
+
+        # The last thread to successfully commit determines rows 0-2
+        last_winner = completion_order[-1]
+        winner_ages = thread_updates[last_winner]['ages']
+        self.assertEqual(winner_ages[0], ages[0],
+                         "Row 0 should reflect last writer's value")
+        self.assertEqual(winner_ages[1], ages[1],
+                         "Row 1 should reflect last writer's value")
+        self.assertEqual(winner_ages[2], ages[2],
+                         "Row 2 should reflect last writer's value")
+
+        # Rows 3 and 4 should remain unchanged
+        self.assertEqual(40, ages[3], "Row 3 should remain unchanged")
+        self.assertEqual(45, ages[4], "Row 4 should remain unchanged")
 
 
 if __name__ == '__main__':

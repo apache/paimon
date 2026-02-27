@@ -47,7 +47,8 @@ class TableUpdateByRowId:
         self.commit_user = commit_user
 
         # Load existing first_row_ids and build partition map
-        (self.first_row_ids,
+        (self.snapshot_id,
+         self.first_row_ids,
          self.first_row_id_to_partition_map,
          self.first_row_id_to_row_count_map,
          self.total_row_count,
@@ -76,7 +77,9 @@ class TableUpdateByRowId:
 
         total_row_count = sum(first_row_id_to_row_count_map.values())
 
-        return (sorted(list(set(first_row_ids))),
+        snapshot_id = self.table.snapshot_manager().get_latest_snapshot().id
+        return (snapshot_id,
+                sorted(list(set(first_row_ids))),
                 first_row_id_to_partition_map,
                 first_row_id_to_row_count_map,
                 total_row_count,

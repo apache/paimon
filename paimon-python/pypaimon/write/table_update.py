@@ -122,10 +122,10 @@ class TableUpdate:
             total_shard_count,
         )
 
-    def update_by_arrow_with_row_id(self, table: pa.Table) -> List[CommitMessage]:
+    def update_by_arrow_with_row_id(self, table: pa.Table) -> (List[CommitMessage], int):
         update_by_row_id = TableUpdateByRowId(self.table, self.commit_user)
         update_by_row_id.update_columns(table, self.update_cols)
-        return update_by_row_id.commit_messages
+        return update_by_row_id.commit_messages, update_by_row_id.snapshot_id
 
 
 class ShardTableUpdator:

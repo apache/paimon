@@ -27,6 +27,9 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.tag.tag_manager import TagManager
+from pypaimon.write.commit_rollback import CommitRollback
+from pypaimon.write.conflict_detection import ConflictDetection
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.file_scanner import FileScanner
@@ -93,6 +96,28 @@ class FileStoreCommit:
         self.commit_min_retry_wait = table.options.commit_min_retry_wait()
         self.commit_max_retry_wait = table.options.commit_max_retry_wait()
 
+        self.conflict_detection = ConflictDetection(
+            data_evolution_enabled=table.options.data_evolution_enabled(),
+            snapshot_manager=self.snapshot_manager,
+            manifest_list_manager=self.manifest_list_manager,
+            table=table,
+        )
+        self.tag_manager = TagManager(
+            file_io=table.file_io,
+            table_path=table.table_path,
+        )
+        self.rollback = CommitRollback(
+            snapshot_manager=self.snapshot_manager,
+            tag_manager=self.tag_manager,
+            file_io=table.file_io,
+        )
+
+    def row_id_check_conflict(self, row_id_check_from_snapshot):
+        """Set the snapshot ID from which to check row ID conflicts."""
+        self.conflict_detection.set_row_id_check_from_snapshot(
+            row_id_check_from_snapshot)
+        return self
+
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
         if not commit_messages:
@@ -116,9 +141,20 @@ class FileStoreCommit:
                 ))
 
         logger.info("Finished collecting changes, including: %d entries", len(commit_entries))
-        self._try_commit(commit_kind="APPEND",
+
+        commit_kind = "APPEND"
+        detect_conflicts = False
+        allow_rollback = False
+        if self.conflict_detection.should_be_overwrite_commit(commit_entries):
+            # commit_kind = "OVERWRITE"
+            detect_conflicts = True
+            allow_rollback = True
+
+        self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
-                         commit_entries_plan=lambda snapshot: commit_entries)
+                         commit_entries_plan=lambda snapshot: commit_entries,
+                         detect_conflicts=detect_conflicts,
+                         allow_rollback=allow_rollback)
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -149,7 +185,9 @@ class FileStoreCommit:
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
             commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
-                snapshot, partition_filter, commit_messages)
+                snapshot, partition_filter, commit_messages),
+            detect_conflicts=True,
+            allow_rollback=True,
         )
 
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
@@ -187,10 +225,13 @@ class FileStoreCommit:
             commit_kind="OVERWRITE",
             commit_identifier=commit_identifier,
             commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
-                snapshot, partition_filter, [])
+                snapshot, partition_filter, []),
+            detect_conflicts=True,
+            allow_rollback=True,
         )
 
-    def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan):
+    def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
+                    detect_conflicts=False, allow_rollback=False):
         import threading
 
         retry_count = 0
@@ -211,7 +252,9 @@ class FileStoreCommit:
                 commit_kind=commit_kind,
                 commit_entries=commit_entries,
                 commit_identifier=commit_identifier,
-                latest_snapshot=latest_snapshot
+                latest_snapshot=latest_snapshot,
+                detect_conflicts=detect_conflicts,
+                allow_rollback=allow_rollback,
             )
 
             if result.is_success():
@@ -267,11 +310,13 @@ class FileStoreCommit:
 
     def _try_commit_once(self, retry_result: Optional[RetryResult], commit_kind: str,
                          commit_entries: List[ManifestEntry], commit_identifier: int,
-                         latest_snapshot: Optional[Snapshot]) -> CommitResult:
+                         latest_snapshot: Optional[Snapshot],
+                         detect_conflicts: bool = False,
+                         allow_rollback: bool = False) -> CommitResult:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
-        
+
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
@@ -296,8 +341,20 @@ class FileStoreCommit:
             # Assign row IDs to new files and get the next row ID for the snapshot
             commit_entries, next_row_id = self._assign_row_tracking_meta(first_row_id_start, commit_entries)
 
+        # Conflict detection: read base entries from latest snapshot, then check conflicts
+        if detect_conflicts and latest_snapshot is not None:
+            base_entries = self._read_all_entries_from_changed_partitions(
+                latest_snapshot, commit_entries)
+            conflict_exception = self.conflict_detection.check_conflicts(
+                latest_snapshot, base_entries, commit_entries, commit_kind)
+
+            if conflict_exception is not None:
+                if allow_rollback:
+                    if self.rollback.try_to_rollback(latest_snapshot):
+                        return RetryResult(latest_snapshot, conflict_exception)
+                raise conflict_exception
+
         try:
-            # TODO: implement noConflictsOrFail logic
             new_manifest_file_meta = self._write_manifest_file(commit_entries, new_manifest_file)
             self.manifest_list_manager.write(delta_manifest_list, [new_manifest_file_meta])
 
@@ -451,6 +508,38 @@ class FileStoreCommit:
                     )
                     return True
         return False
+
+    def _read_all_entries_from_changed_partitions(self, latest_snapshot, delta_entries):
+        """Read all entries from the latest snapshot for partitions that are changed.
+
+        Follows Java CommitScanner.readAllEntriesFromChangedPartitions logic:
+        extracts changed partitions from delta entries, then reads all entries
+        from the latest snapshot filtered by those partitions.
+
+        Args:
+            latest_snapshot: The latest snapshot to read entries from.
+            delta_entries: The delta entries being committed, used to determine
+                which partitions have changed.
+
+        Returns:
+            List of ManifestEntry from the latest snapshot for changed partitions.
+        """
+        if latest_snapshot is None:
+            return []
+
+        changed_partition_set = set()
+        for entry in delta_entries:
+            changed_partition_set.add(tuple(entry.partition.values))
+
+        all_manifests = self.manifest_list_manager.read_all(latest_snapshot)
+        all_entries = FileScanner(
+            self.table, lambda: [], None
+        ).read_manifest_entries(all_manifests)
+
+        return [
+            entry for entry in all_entries
+            if tuple(entry.partition.values) in changed_partition_set
+        ]
 
     def _generate_overwrite_entries(self, latestSnapshot, partition_filter, commit_messages):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
