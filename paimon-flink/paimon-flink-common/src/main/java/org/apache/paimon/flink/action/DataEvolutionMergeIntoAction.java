@@ -37,6 +37,7 @@ import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -68,6 +69,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -416,6 +418,9 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                         .collect(Collectors.toMap(DataField::name, Function.identity()));
         List<String> partitionKeys = ((FileStoreTable) table).schema().partitionKeys();
 
+        // Get updatable BLOB fields (descriptor-based fields that support partial updates)
+        Set<String> updatableBlobFields = coreOptions.updatableBlobFields();
+
         List<Column> flinkColumns = source.getResolvedSchema().getColumns();
         boolean foundRowIdColumn = false;
         for (Column flinkColumn : flinkColumns) {
@@ -434,15 +439,33 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                     throw new IllegalStateException(
                             "Column not found in target table: " + flinkColumn.getName());
                 }
-                if (targetField.type().getTypeRoot() == DataTypeRoot.BLOB) {
+                if (targetField.type().getTypeRoot() == DataTypeRoot.BLOB
+                        && !updatableBlobFields.contains(flinkColumn.getName())) {
                     throw new IllegalStateException(
-                            "Should not append/update new BLOB column through MERGE INTO.");
+                            "Should not append/update raw-data BLOB column '"
+                                    + flinkColumn.getName()
+                                    + "' through MERGE INTO. "
+                                    + "Only descriptor-based BLOB columns (configured via '"
+                                    + CoreOptions.BLOB_DESCRIPTOR_FIELD.key()
+                                    + "' or '"
+                                    + CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key()
+                                    + "') can be updated.");
                 }
 
                 DataType paimonType =
                         LogicalTypeConversion.toDataType(
                                 flinkColumn.getDataType().getLogicalType());
-                if (!DataTypeCasts.supportsCompatibleCast(paimonType, targetField.type())) {
+                // For descriptor-based BLOB fields, allow BYTES (VARBINARY/BINARY) source
+                // since BLOB is represented as BYTES in Flink SQL
+                boolean blobCompatible =
+                        targetField.type().getTypeRoot() == DataTypeRoot.BLOB
+                                && updatableBlobFields.contains(flinkColumn.getName())
+                                && paimonType
+                                        .getTypeRoot()
+                                        .getFamilies()
+                                        .contains(DataTypeFamily.BINARY_STRING);
+                if (!blobCompatible
+                        && !DataTypeCasts.supportsCompatibleCast(paimonType, targetField.type())) {
                     throw new IllegalStateException(
                             String.format(
                                     "DataType incompatible of field %s: %s is not compatible with %s",
