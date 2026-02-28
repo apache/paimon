@@ -27,6 +27,7 @@ class CommitMessage:
     partition: Tuple
     bucket: int
     new_files: List[DataFileMeta]
+    snapshot_for_update: int = -1
 
     def is_empty(self):
         return not self.new_files

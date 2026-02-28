@@ -19,7 +19,7 @@ limitations under the License.
 from typing import Optional
 
 from pypaimon.catalog.catalog_loader import CatalogLoader
-from pypaimon.catalog.table_rollback import TableRollback, CatalogTableRollback
+from pypaimon.catalog.table_rollback import CatalogTableRollback
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.catalog_snapshot_commit import CatalogSnapshotCommit
 from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit

@@ -55,10 +55,6 @@ class ConflictDetection:
         self.table = table
         self._row_id_check_from_snapshot = None
 
-    def set_row_id_check_from_snapshot(self, row_id_check_from_snapshot):
-        """Set the snapshot ID from which to check row ID conflicts."""
-        self._row_id_check_from_snapshot = row_id_check_from_snapshot
-
     def should_be_overwrite_commit(self):
         """Check if the commit should be treated as an overwrite commit.
 

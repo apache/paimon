@@ -309,8 +309,9 @@ class TableUpdateByRowId:
         # Prepare commit and assign first_row_id
         commit_messages = file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
-        # Assign first_row_id to the new files
+        # Assign first_row_id to the new files and snapshot_for_update
         for msg in commit_messages:
+            msg.snapshot_for_update = self.snapshot_id
             for file in msg.new_files:
                 # Assign the same first_row_id as the original file
                 file.first_row_id = first_row_id

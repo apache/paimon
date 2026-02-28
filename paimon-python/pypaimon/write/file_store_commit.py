@@ -107,16 +107,13 @@ class FileStoreCommit:
         if table_rollback is not None:
             self.rollback = CommitRollback(table_rollback)
 
-    def row_id_check_conflict(self, row_id_check_from_snapshot):
-        """Set the snapshot ID from which to check row ID conflicts."""
-        self.conflict_detection.set_row_id_check_from_snapshot(
-            row_id_check_from_snapshot)
-        return self
-
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
         if not commit_messages:
             return
+
+        # Extract snapshot_for_update from commit messages
+        self._apply_row_id_check(commit_messages)
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
@@ -150,6 +147,17 @@ class FileStoreCommit:
                          commit_entries_plan=lambda snapshot: commit_entries,
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback)
+
+    def _apply_row_id_check(self, commit_messages: List[CommitMessage]):
+        """Extract snapshot_for_update from commit messages and apply to conflict detection.
+
+        If any commit message has a snapshot_for_update != -1, set it on the
+        conflict detection instance for row ID conflict checking.
+        """
+        for msg in commit_messages:
+            if msg.snapshot_for_update != -1:
+                self.conflict_detection._row_id_check_from_snapshot = msg.snapshot_for_update
+                return
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""

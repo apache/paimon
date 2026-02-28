@@ -73,22 +73,6 @@ class TableCommit:
     def close(self):
         self.file_store_commit.close()
 
-    def row_id_check_conflict(self, row_id_check_from_snapshot):
-        """Set the snapshot ID from which to check row ID conflicts.
-
-        Follows Java TableCommitImpl.rowIdCheckConflict logic:
-        forwards the call to FileStoreCommit.row_id_check_conflict().
-
-        Args:
-            row_id_check_from_snapshot: The snapshot ID from which to start
-                checking row ID conflicts, or None to disable.
-
-        Returns:
-            self for method chaining.
-        """
-        self.file_store_commit.row_id_check_conflict(row_id_check_from_snapshot)
-        return self
-
     def _check_committed(self):
         if self.batch_committed:
             raise RuntimeError("BatchTableCommit only supports one-time committing.")

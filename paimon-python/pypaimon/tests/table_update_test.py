@@ -15,7 +15,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-import logging
 import os
 import shutil
 import tempfile
@@ -899,9 +898,9 @@ class TableUpdateTest(unittest.TestCase):
                         'age': update_spec['ages'],
                     })
 
-                    commit_messages, snapshot_id = table_update.update_by_arrow_with_row_id(update_data)
+                    commit_messages = table_update.update_by_arrow_with_row_id(update_data)
 
-                    table_commit = write_builder.new_commit().row_id_check_conflict(snapshot_id)
+                    table_commit = write_builder.new_commit()
                     table_commit.commit(commit_messages)
                     table_commit.close()
 
@@ -959,7 +958,6 @@ class TableUpdateTest(unittest.TestCase):
         successful updates for each row (last-writer-wins).
         """
         import threading
-        import traceback
 
         table = self._create_table()
 
