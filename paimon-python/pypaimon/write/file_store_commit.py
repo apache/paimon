@@ -27,7 +27,6 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-from pypaimon.tag.tag_manager import TagManager
 from pypaimon.write.commit_rollback import CommitRollback
 from pypaimon.write.conflict_detection import ConflictDetection
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
@@ -102,15 +101,11 @@ class FileStoreCommit:
             manifest_list_manager=self.manifest_list_manager,
             table=table,
         )
-        self.tag_manager = TagManager(
-            file_io=table.file_io,
-            table_path=table.table_path,
-        )
-        self.rollback = CommitRollback(
-            snapshot_manager=self.snapshot_manager,
-            tag_manager=self.tag_manager,
-            file_io=table.file_io,
-        )
+
+        self.rollback = None
+        table_rollback = table.catalog_environment.catalog_table_rollback()
+        if table_rollback is not None:
+            self.rollback = CommitRollback(table_rollback)
 
     def row_id_check_conflict(self, row_id_check_from_snapshot):
         """Set the snapshot ID from which to check row ID conflicts."""
@@ -349,7 +344,7 @@ class FileStoreCommit:
                 latest_snapshot, base_entries, commit_entries, commit_kind)
 
             if conflict_exception is not None:
-                if allow_rollback:
+                if allow_rollback and self.rollback is not None:
                     if self.rollback.try_to_rollback(latest_snapshot):
                         return RetryResult(latest_snapshot, conflict_exception)
                 raise conflict_exception

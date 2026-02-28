@@ -20,7 +20,8 @@ from typing import Callable, Dict, List, Optional, Union
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest, CommitTableRequest,
                                       CreateDatabaseRequest,
-                                      CreateTableRequest, RenameTableRequest)
+                                      CreateTableRequest, RenameTableRequest,
+                                      RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetTableResponse,
                                        GetTableTokenResponse,
@@ -357,6 +358,27 @@ class RESTApi:
             self.rest_auth_function
         )
         return response.is_success()
+
+    def rollback_to(self, identifier, instant, from_snapshot=None):
+        """Rollback table to the given instant.
+
+        Args:
+            identifier: The table identifier.
+            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
+            from_snapshot: Optional snapshot ID. Success only occurs when the
+                latest snapshot is this snapshot.
+
+        Raises:
+            NoSuchResourceException: If the table, snapshot or tag does not exist.
+            ForbiddenException: If no permission to access this table.
+        """
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = RollbackTableRequest(instant=instant, from_snapshot=from_snapshot)
+        self.client.post(
+            self.resource_paths.rollback_table(database_name, table_name),
+            request,
+            self.rest_auth_function
+        )
 
     @staticmethod
     def __validate_identifier(identifier: Identifier):

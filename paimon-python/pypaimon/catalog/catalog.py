@@ -95,6 +95,23 @@ class Catalog(ABC):
 
         """
 
+    def rollback_to(self, identifier, instant, from_snapshot=None):
+        """Rollback table by the given identifier and instant.
+
+        Args:
+            identifier: Path of the table (Identifier instance).
+            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
+            from_snapshot: Optional snapshot ID. Success only occurs when the
+                latest snapshot is this snapshot.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            UnsupportedOperationError: If the catalog does not support version management.
+        """
+        raise NotImplementedError(
+            "rollback_to is not supported by this catalog."
+        )
+
     def drop_partitions(
         self,
         identifier: Union[str, Identifier],
