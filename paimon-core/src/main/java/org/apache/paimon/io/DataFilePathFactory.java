@@ -86,6 +86,12 @@ public class DataFilePathFactory {
         return newPathFromName(newFileName(dataFilePrefix, ".blob"));
     }
 
+    /** Create a new blob file path under the given external storage path for descriptor fields. */
+    public Path newExternalStorageBlobPath(String externalStoragePath) {
+        String fileName = newFileName(dataFilePrefix, ".blob");
+        return new Path(externalStoragePath, fileName);
+    }
+
     public Path newChangelogPath() {
         return newPath(changelogFilePrefix);
     }

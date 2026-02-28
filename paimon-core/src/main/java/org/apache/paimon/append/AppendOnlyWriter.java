@@ -96,6 +96,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final MemorySize maxDiskSize;
     @Nullable private final BlobConsumer blobConsumer;
     private final Set<String> blobDescriptorFields;
+    private final Set<String> blobExternalStorageFields;
+    @Nullable private final String blobExternalStoragePath;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -127,6 +129,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             boolean statsDenseStore,
             @Nullable BlobConsumer blobConsumer,
             Set<String> blobDescriptorFields,
+            Set<String> blobExternalStorageFields,
+            @Nullable String blobExternalStoragePath,
             boolean dataEvolutionEnabled) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
@@ -156,6 +160,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
         this.blobDescriptorFields = blobDescriptorFields;
+        this.blobExternalStorageFields = blobExternalStorageFields;
+        this.blobExternalStoragePath = blobExternalStoragePath;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -307,7 +313,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (BlobType.splitBlob(writeSchema, blobDescriptorFields).getRight().getFieldCount() > 0) {
+        if (BlobType.splitBlob(writeSchema, blobDescriptorFields).getRight().getFieldCount() > 0
+                || !blobExternalStorageFields.isEmpty()) {
             return new RollingBlobFileWriter(
                     fileIO,
                     schemaId,
@@ -328,7 +335,9 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     false,
                     statsDenseStore,
                     blobConsumer,
-                    blobDescriptorFields);
+                    blobDescriptorFields,
+                    blobExternalStorageFields,
+                    blobExternalStoragePath);
         }
         return new RowDataRollingFileWriter(
                 fileIO,
