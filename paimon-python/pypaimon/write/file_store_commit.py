@@ -140,8 +140,8 @@ class FileStoreCommit:
         commit_kind = "APPEND"
         detect_conflicts = False
         allow_rollback = False
-        if self.conflict_detection.should_be_overwrite_commit(commit_entries):
-            # commit_kind = "OVERWRITE"
+        if self.conflict_detection.should_be_overwrite_commit():
+            commit_kind = "OVERWRITE"
             detect_conflicts = True
             allow_rollback = True
 
@@ -507,9 +507,9 @@ class FileStoreCommit:
     def _read_all_entries_from_changed_partitions(self, latest_snapshot, delta_entries):
         """Read all entries from the latest snapshot for partitions that are changed.
 
-        Follows Java CommitScanner.readAllEntriesFromChangedPartitions logic:
-        extracts changed partitions from delta entries, then reads all entries
-        from the latest snapshot filtered by those partitions.
+        Builds a partition predicate from delta entries and passes it to FileScanner,
+        so that manifest files and entries are filtered during reading rather than
+        after a full scan.
 
         Args:
             latest_snapshot: The latest snapshot to read entries from.
@@ -522,19 +522,43 @@ class FileStoreCommit:
         if latest_snapshot is None:
             return []
 
-        changed_partition_set = set()
-        for entry in delta_entries:
-            changed_partition_set.add(tuple(entry.partition.values))
+        partition_filter = self._build_partition_filter_from_entries(delta_entries)
 
         all_manifests = self.manifest_list_manager.read_all(latest_snapshot)
-        all_entries = FileScanner(
-            self.table, lambda: [], None
+        return FileScanner(
+            self.table, lambda: [], partition_filter
         ).read_manifest_entries(all_manifests)
 
-        return [
-            entry for entry in all_entries
-            if tuple(entry.partition.values) in changed_partition_set
-        ]
+    def _build_partition_filter_from_entries(self, entries):
+        """Build a partition predicate that matches all partitions present in the given entries.
+
+        Args:
+            entries: List of ManifestEntry whose partitions should be matched.
+
+        Returns:
+            A Predicate matching any of the changed partitions, or None if
+            partition keys are empty.
+        """
+        partition_keys = self.table.partition_keys
+        if not partition_keys:
+            return None
+
+        changed_partitions = set()
+        for entry in entries:
+            changed_partitions.add(tuple(entry.partition.values))
+
+        if not changed_partitions:
+            return None
+
+        predicate_builder = PredicateBuilder(self.table.fields)
+        partition_predicates = []
+        for partition_values in changed_partitions:
+            sub_predicates = []
+            for i, key in enumerate(partition_keys):
+                sub_predicates.append(predicate_builder.equal(key, partition_values[i]))
+            partition_predicates.append(predicate_builder.and_predicates(sub_predicates))
+
+        return predicate_builder.or_predicates(partition_predicates)
 
     def _generate_overwrite_entries(self, latestSnapshot, partition_filter, commit_messages):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
