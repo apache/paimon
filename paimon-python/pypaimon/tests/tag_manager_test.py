@@ -16,7 +16,6 @@
 #  limitations under the License.
 ################################################################################
 
-import os
 import shutil
 import tempfile
 import unittest
@@ -24,7 +23,6 @@ import unittest
 from pypaimon.common.options import Options
 from pypaimon.filesystem.local_file_io import LocalFileIO
 from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.tag.tag import Tag
 from pypaimon.tag.tag_manager import TagManager
 
 
