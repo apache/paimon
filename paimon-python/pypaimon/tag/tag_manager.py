@@ -180,10 +180,10 @@ class TagManager:
     def delete_tag(self, tag_name: str) -> bool:
         """
         Delete a tag.
-        
+
         Args:
             tag_name: Name of the tag to delete
-            
+
         Returns:
             True if tag was deleted, False if tag didn't exist
         """
@@ -198,3 +198,36 @@ class TagManager:
         path = self.tag_path(tag_name)
         self.file_io.delete_quietly(path)
         return True
+
+    def rename_tag(self, old_name: str, new_name: str) -> None:
+        """
+        Rename a tag.
+
+        Args:
+            old_name: Current name of the tag
+            new_name: New name for the tag
+
+        Raises:
+            ValueError: If old_name or new_name is blank, old_name doesn't exist,
+                       or new_name already exists
+        """
+        if not old_name or old_name.isspace():
+            raise ValueError("Old tag name shouldn't be blank.")
+
+        if not new_name or new_name.isspace():
+            raise ValueError("New tag name shouldn't be blank.")
+
+        # Check if old tag exists
+        if not self.tag_exists(old_name):
+            raise ValueError(f"Tag '{old_name}' doesn't exist.")
+
+        # Check if new tag already exists
+        if self.tag_exists(new_name):
+            raise ValueError(f"Tag '{new_name}' already exists.")
+
+        # Rename the tag file from old name to new name
+        old_path = self.tag_path(old_name)
+        new_path = self.tag_path(new_name)
+        self.file_io.rename(old_path, new_path)
+
+        logger.info(f"Tag renamed from '{old_name}' to '{new_name}'.")
