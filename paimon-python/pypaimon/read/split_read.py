@@ -137,8 +137,11 @@ class SplitRead(ABC):
             format_reader = FormatLanceReader(self.table.file_io, file_path, read_file_fields,
                                               read_arrow_predicate, batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
-            format_reader = FormatPyArrowReader(self.table.file_io, file_format, file_path,
-                                                read_file_fields, read_arrow_predicate, batch_size=batch_size)
+            name_to_field = {f.name: f for f in self.read_fields}
+            ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            format_reader = FormatPyArrowReader(
+                self.table.file_io, file_format, file_path,
+                ordered_read_fields, read_arrow_predicate, batch_size=batch_size)
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 
