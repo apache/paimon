@@ -542,9 +542,9 @@ public class RESTCatalog implements Catalog {
             api.alterTable(identifier, changes);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
-                if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
+                if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
                     throw new TableNotExistException(identifier);
-                } else if (Objects.equals(
+                } else if (StringUtils.equals(
                         e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
                     throw new ColumnNotExistException(identifier, e.resourceName());
                 }
@@ -667,9 +667,9 @@ public class RESTCatalog implements Catalog {
         try {
             api.createBranch(identifier, branch, fromTag);
         } catch (NoSuchResourceException e) {
-            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
                 throw new TableNotExistException(identifier, e);
-            } else if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+            } else if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new TagNotExistException(identifier, fromTag, e);
             } else {
                 throw e;
@@ -1044,7 +1044,7 @@ public class RESTCatalog implements Catalog {
                 throw new TagAlreadyExistException(identifier, tagName);
             }
         } catch (NoSuchResourceException e) {
-            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new SnapshotNotExistException(
                         String.format(
                                 "Snapshot %s in table %s doesn't exist.",
@@ -1101,7 +1101,7 @@ public class RESTCatalog implements Catalog {
         try {
             api.deleteTag(identifier, tagName);
         } catch (NoSuchResourceException e) {
-            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new TagNotExistException(identifier, tagName);
             }
             throw new TableNotExistException(identifier);
