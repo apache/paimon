@@ -28,9 +28,13 @@ import org.apache.paimon.flink.dataevolution.FirstRowIdAssigner;
 import org.apache.paimon.flink.dataevolution.MergeIntoCommitterOperatorFactory;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
+import org.apache.paimon.flink.sink.CommitterOperatorFactory;
+import org.apache.paimon.flink.sink.NoopCommittableStateManager;
+import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.sorter.SortOperator;
 import org.apache.paimon.flink.utils.FlinkCalciteClasses;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.types.DataField;
@@ -132,6 +136,17 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                             "Only FileStoreTable supports merge-into action. The table type is '%s'.",
                             table.getClass().getName()));
         }
+
+        Long latestSnapshotId = ((FileStoreTable) table).snapshotManager().latestSnapshotId();
+        if (latestSnapshotId == null) {
+            throw new UnsupportedOperationException(
+                    "merge-into action doesn't support updating an empty table.");
+        }
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT.key(),
+                                latestSnapshotId.toString()));
 
         this.coreOptions = ((FileStoreTable) table).coreOptions();
 
@@ -370,10 +385,22 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             DataStream<Committable> written, Set<String> updatedColumns) {
         FileStoreTable storeTable = (FileStoreTable) table;
 
-        MergeIntoCommitterOperatorFactory factory =
-                new MergeIntoCommitterOperatorFactory(storeTable, updatedColumns);
+        CommitterOperatorFactory<Committable, ManifestCommittable> factory =
+                new CommitterOperatorFactory<>(
+                        false,
+                        true,
+                        "DataEvolutionMergeInto",
+                        context ->
+                                new StoreCommitter(
+                                        storeTable,
+                                        storeTable.newCommit(context.commitUser()),
+                                        context),
+                        new NoopCommittableStateManager());
 
-        return written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), factory)
+        MergeIntoCommitterOperatorFactory committerOperator =
+                new MergeIntoCommitterOperatorFactory(factory, storeTable, updatedColumns);
+
+        return written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
                 .setParallelism(1)
                 .setMaxParallelism(1);
     }

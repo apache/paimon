@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.dataevolution;
 
 import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.CommitterOperatorFactory;
+import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperatorFactory;
@@ -32,20 +34,30 @@ import java.util.Set;
 public class MergeIntoCommitterOperatorFactory extends AbstractStreamOperatorFactory<Committable>
         implements OneInputStreamOperatorFactory<Committable, Committable> {
 
+    private final CommitterOperatorFactory<Committable, ManifestCommittable> commitOperatorFactory;
+
     private final FileStoreTable table;
 
     private final Set<String> updatedColumns;
 
-    public MergeIntoCommitterOperatorFactory(FileStoreTable table, Set<String> updatedColumns) {
+    public MergeIntoCommitterOperatorFactory(
+            CommitterOperatorFactory<Committable, ManifestCommittable> commitOperatorFactory,
+            FileStoreTable table,
+            Set<String> updatedColumns) {
         this.table = table;
         this.updatedColumns = updatedColumns;
+        this.commitOperatorFactory = commitOperatorFactory;
     }
 
     @Override
     @SuppressWarnings("unchecked")
     public <T extends StreamOperator<Committable>> T createStreamOperator(
             StreamOperatorParameters<Committable> parameters) {
-        return (T) new MergeIntoCommitterOperator(parameters, table, updatedColumns);
+        return (T)
+                new MergeIntoCommitterOperator(
+                        commitOperatorFactory.createStreamOperator(parameters),
+                        table,
+                        updatedColumns);
     }
 
     @Override
