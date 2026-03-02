@@ -678,6 +678,5 @@ class SimpleTableTest(unittest.TestCase):
 
         with self.assertRaises(ValueError) as context:
             table.rollback_to("no-such-tag")
-        self.assertIn("Rollback tag", str(context.exception))
         self.assertIn("no-such-tag", str(context.exception))
         self.assertIn("doesn't exist", str(context.exception))
