@@ -713,6 +713,7 @@ public class AppendOnlyWriterTest {
                         true,
                         false,
                         null,
+                        options.blobDescriptorField(),
                         options.dataEvolutionEnabled());
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));

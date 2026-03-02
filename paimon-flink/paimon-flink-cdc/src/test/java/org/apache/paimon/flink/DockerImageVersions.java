@@ -16,21 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.iceberg.migrate;
+package org.apache.paimon.flink;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.iceberg.IcebergOptions;
-import org.apache.paimon.options.Options;
+/** Docker image versions. */
+public class DockerImageVersions {
 
-/** Factory to create {@link IcebergMigrateHiveMetadata}. */
-public class IcebergMigrateHiveMetadataFactory implements IcebergMigrateMetadataFactory {
-    @Override
-    public String identifier() {
-        return IcebergOptions.StorageType.HIVE_CATALOG.toString() + "_migrate";
-    }
-
-    @Override
-    public IcebergMigrateHiveMetadata create(Identifier icebergIdentifier, Options icebergOptions) {
-        return new IcebergMigrateHiveMetadata(icebergIdentifier, icebergOptions);
-    }
+    public static final String KAFKA = "confluentinc/cp-kafka:7.9.2";
+    public static final String SCHEMA_REGISTRY = "confluentinc/cp-schema-registry:7.9.2";
 }

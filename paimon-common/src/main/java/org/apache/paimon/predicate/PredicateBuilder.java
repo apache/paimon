@@ -50,6 +50,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 
@@ -243,6 +244,14 @@ public class PredicateBuilder {
                 transform, Between.INSTANCE, Arrays.asList(includedLowerBound, includedUpperBound));
     }
 
+    public Predicate alwaysFalse() {
+        return new LeafPredicate(NullTransform.INSTANCE, AlwaysFalse.INSTANCE, emptyList());
+    }
+
+    public Predicate alwaysTrue() {
+        return new LeafPredicate(NullTransform.INSTANCE, AlwaysTrue.INSTANCE, emptyList());
+    }
+
     public static Predicate and(Predicate... predicates) {
         return and(Arrays.asList(predicates));
     }
@@ -310,7 +319,7 @@ public class PredicateBuilder {
     }
 
     private static void splitCompound(
-            CompoundPredicate.Function function, Predicate predicate, List<Predicate> result) {
+            CompoundFunction function, Predicate predicate, List<Predicate> result) {
         if (predicate instanceof CompoundPredicate
                 && ((CompoundPredicate) predicate).function().equals(function)) {
             for (Predicate child : ((CompoundPredicate) predicate).children()) {

@@ -71,7 +71,7 @@ public class RowIdPredicateVisitor implements PredicateVisitor<Optional<List<Ran
 
     @Override
     public Optional<List<Range>> visit(CompoundPredicate predicate) {
-        CompoundPredicate.Function function = predicate.function();
+        CompoundFunction function = predicate.function();
         Optional<List<Range>> rowIds = Optional.empty();
         // `And` means we should get the intersection of all children.
         if (function instanceof And) {

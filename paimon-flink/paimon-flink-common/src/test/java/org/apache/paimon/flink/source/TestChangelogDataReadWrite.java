@@ -141,6 +141,7 @@ public class TestChangelogDataReadWrite {
                                 pathFactory,
                                 EXTRACTOR,
                                 options));
+
         RawFileSplitRead rawFileRead =
                 new RawFileSplitRead(
                         LocalFileIO.create(),
@@ -149,8 +150,7 @@ public class TestChangelogDataReadWrite {
                         VALUE_TYPE,
                         FileFormatDiscover.of(options),
                         pathFactory,
-                        options.fileIndexReadEnabled(),
-                        false);
+                        options);
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
     }
 

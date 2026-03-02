@@ -30,7 +30,6 @@ object SparkRowUtils {
   def toPaimonRow(
       writeType: RowType,
       rowkindColIdx: Int,
-      blobAsDescriptor: Boolean,
       catalogContext: CatalogContext): Row => SparkRow = {
     if (rowkindColIdx != -1) {
       row =>
@@ -38,9 +37,8 @@ object SparkRowUtils {
           writeType,
           row,
           RowKind.fromByteValue(row.getByte(rowkindColIdx)),
-          blobAsDescriptor,
           catalogContext)
-    } else { row => new SparkRow(writeType, row, RowKind.INSERT, blobAsDescriptor, catalogContext) }
+    } else { row => new SparkRow(writeType, row, RowKind.INSERT, catalogContext) }
   }
 
   def getFieldIndex(schema: StructType, colName: String): Int = {

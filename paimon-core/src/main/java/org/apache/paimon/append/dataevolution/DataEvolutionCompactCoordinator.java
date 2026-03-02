@@ -46,6 +46,7 @@ import java.util.Queue;
 import java.util.TreeMap;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact coordinator to compact data evolution table. */
@@ -101,10 +102,7 @@ public class DataEvolutionCompactCoordinator {
             List<ManifestFileMeta> manifestFileMetas =
                     snapshotReader.manifestsReader().read(snapshot, ScanMode.ALL).filteredManifests;
 
-            boolean allManifestMetaContainsRowId =
-                    manifestFileMetas.stream()
-                            .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null);
-            if (allManifestMetaContainsRowId) {
+            if (allContainsRowId(manifestFileMetas)) {
                 RangeHelper<ManifestFileMeta> rangeHelper =
                         new RangeHelper<>(
                                 manifest -> new Range(manifest.minRowId(), manifest.maxRowId()));

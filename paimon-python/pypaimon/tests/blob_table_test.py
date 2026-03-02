@@ -197,7 +197,7 @@ class DataBlobWriterTest(unittest.TestCase):
         writer.close()
 
     def test_data_blob_writer_multiple_blob_columns(self):
-        """Test that DataBlobWriter raises error when multiple blob columns are found."""
+        """Test that DataBlobWriter supports multiple blob columns."""
         from pypaimon import Schema
 
         # Test schema with multiple blob columns
@@ -228,10 +228,18 @@ class DataBlobWriterTest(unittest.TestCase):
             'blob2': [b'blob2_1', b'blob2_2', b'blob2_3']
         }, schema=pa_schema)
 
-        # This should raise an error when DataBlobWriter is created internally
-        with self.assertRaises(ValueError) as context:
-            writer.write_arrow(test_data)
-        self.assertIn("Limit exactly one blob field in one paimon table yet", str(context.exception))
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        self.assertGreaterEqual(len(blob_files), 2, "Each blob column should produce blob files")
+
+        # Verify row counts can be read back correctly.
+        result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, 3)
 
     def test_data_blob_writer_write_operations(self):
         """Test DataBlobWriter write operations with real data."""
@@ -1074,7 +1082,94 @@ class DataBlobWriterTest(unittest.TestCase):
         print("   - Created external blob file and descriptor")
         print("   - Wrote and read blob descriptor successfully")
         print("   - Verified blob data can be read from descriptor")
-        print("   - Tested blob-as-descriptor=true mode")
+        print("   - Tested blob-as-descriptor=true read output mode")
+
+    def test_blob_descriptor_fields_mixed_mode(self):
+        import random
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('pic1', pa.large_binary()),
+            ('pic2', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-descriptor-field': 'pic2'
+            }
+        )
+        self.catalog.create_table('test_db.blob_mixed_mode_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_mixed_mode_test')
+
+        random.seed(7)
+        pic1_data = bytes(bytearray([random.randint(0, 255) for _ in range(1024)]))
+
+        external_blob_path = os.path.join(self.temp_dir, 'mixed_external_blob')
+        pic2_data = b'pic2_descriptor_payload'
+        with open(external_blob_path, 'wb') as f:
+            f.write(pic2_data)
+        descriptor = BlobDescriptor(external_blob_path, 0, len(pic2_data))
+
+        test_data = pa.Table.from_pydict({
+            'id': [1],
+            'pic1': [pic1_data],
+            'pic2': [descriptor.serialize()]
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        all_files = [f for msg in commit_messages for f in msg.new_files]
+        blob_files = [f for f in all_files if f.file_name.endswith('.blob')]
+        self.assertGreaterEqual(len(blob_files), 1)
+        self.assertTrue(all(f.write_cols == ['pic1'] for f in blob_files))
+
+        result = table.new_read_builder().new_read().to_arrow(table.new_read_builder().new_scan().plan().splits())
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
+        self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
+
+    def test_blob_descriptor_fields_rejects_non_descriptor_input(self):
+        from pypaimon import Schema
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('pic1', pa.large_binary()),
+            ('pic2', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-descriptor-field': 'pic2'
+            }
+        )
+        self.catalog.create_table('test_db.blob_mixed_mode_reject_test', schema, False)
+        table = self.catalog.get_table('test_db.blob_mixed_mode_reject_test')
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+
+        bad_data = pa.Table.from_pydict({
+            'id': [1],
+            'pic1': [b'good'],
+            'pic2': [b'not-a-descriptor']
+        }, schema=pa_schema)
+
+        with self.assertRaises(ValueError) as context:
+            writer.write_arrow(bad_data)
+        self.assertIn("blob-descriptor-field", str(context.exception))
 
     def test_blob_write_read_large_data_end_to_end(self):
         """Test end-to-end blob functionality with large blob data (1MB per blob)."""
@@ -1745,7 +1840,7 @@ class DataBlobWriterTest(unittest.TestCase):
         from pypaimon import Schema
         from pypaimon.table.row.blob import BlobDescriptor
 
-        # Create schema with blob column (blob-as-descriptor=true)
+        # Create schema with blob column (descriptor input is auto-detected in write path)
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -1770,7 +1865,7 @@ class DataBlobWriterTest(unittest.TestCase):
                 f.write(data)
             descriptors.append(BlobDescriptor(path, 0, len(data)))
 
-        # Write data row by row (this triggers the one-by-one writing in blob-as-descriptor mode)
+        # Write data row by row and verify blob sequence-number continuity
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
 
@@ -1832,7 +1927,7 @@ class DataBlobWriterTest(unittest.TestCase):
     def test_blob_non_descriptor_sequence_number_increment(self):
         from pypaimon import Schema
 
-        # Create schema with blob column (blob-as-descriptor=false, normal mode)
+        # Create schema with blob column (default read output is blob bytes)
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -1841,7 +1936,7 @@ class DataBlobWriterTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(pa_schema, options={
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
-            'blob-as-descriptor': 'false'  # Normal mode, not descriptor mode
+            'blob-as-descriptor': 'false'  # Read output as blob bytes
         })
 
         self.catalog.create_table('test_db.blob_sequence_non_desc_test', schema, False)
@@ -1855,7 +1950,7 @@ class DataBlobWriterTest(unittest.TestCase):
             'blob_data': [f'blob data {i}'.encode('utf-8') for i in range(num_rows)]
         }, schema=pa_schema)
 
-        # Write data as a batch (this triggers batch writing in non-descriptor mode)
+        # Write data as a batch and verify blob sequence-number continuity
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
         writer.write_arrow(test_data)
@@ -1901,7 +1996,7 @@ class DataBlobWriterTest(unittest.TestCase):
                     f"File: {blob_file.file_name}, min_seq: {min_seq}, max_seq: {max_seq}"
                 )
 
-        print("✅ Non-descriptor mode sequence number increment test passed")
+        print("✅ Blob sequence number increment test passed (batch write)")
 
     def test_blob_stats_schema_with_custom_column_name(self):
         from pypaimon import Schema
@@ -1969,7 +2064,7 @@ class DataBlobWriterTest(unittest.TestCase):
         import re
         from pypaimon import Schema
 
-        # Create schema with blob column (blob-as-descriptor=false)
+        # Create schema with blob column (blob bytes read output)
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
@@ -1978,7 +2073,7 @@ class DataBlobWriterTest(unittest.TestCase):
         schema = Schema.from_pyarrow_schema(pa_schema, options={
             'row-tracking.enabled': 'true',
             'data-evolution.enabled': 'true',
-            'blob-as-descriptor': 'false',  # Non-descriptor mode
+            'blob-as-descriptor': 'false',  # Read output as blob bytes
             'target-file-size': '1MB'  # Small target size to trigger multiple rollings
         })
 
@@ -2069,10 +2164,10 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(result.column('id').to_pylist(), list(range(1, num_blobs + 1)))
 
     def test_blob_non_descriptor_target_file_size_rolling(self):
-        """Test that blob.target-file-size is respected in non-descriptor mode."""
+        """Test that blob.target-file-size is respected in blob write path."""
         from pypaimon import Schema
 
-        # Create schema with blob column (non-descriptor mode)
+        # Create schema with blob column (blob write path)
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('blob_data', pa.large_binary()),
@@ -2609,7 +2704,11 @@ class DataBlobWriterTest(unittest.TestCase):
                 pa_schema,
                 options={
                     'row-tracking.enabled': 'true',
-                    'data-evolution.enabled': 'true'
+                    'data-evolution.enabled': 'true',
+                    # Concurrent commits are expected in this test; enlarge retry budget
+                    # to reduce flaky failures from transient commit conflicts.
+                    'commit.max-retries': '50',
+                    'commit.max-retry-wait': '30s'
                 }
             )
             self.catalog.create_table(table_name, schema, False)

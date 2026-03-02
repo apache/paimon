@@ -44,6 +44,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ListUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -95,7 +96,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private ScanMetrics scanMetrics = null;
     private boolean dropStats;
-    @Nullable protected List<Range> rowRanges;
+    @Nullable protected RowRangeIndex rowRangeIndex = null;
     @Nullable protected Long limit;
 
     public AbstractFileStoreScan(
@@ -247,8 +248,25 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withRowRanges(List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
-        manifestsReader.withRowRanges(rowRanges);
+        if (rowRanges == null) {
+            this.rowRangeIndex = null;
+            manifestsReader.withRowRangeIndex(null);
+            return this;
+        }
+        this.rowRangeIndex = RowRangeIndex.create(rowRanges);
+        manifestsReader.withRowRangeIndex(this.rowRangeIndex);
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        if (rowRangeIndex == null) {
+            this.rowRangeIndex = null;
+            manifestsReader.withRowRangeIndex(null);
+            return this;
+        }
+        this.rowRangeIndex = rowRangeIndex;
+        manifestsReader.withRowRangeIndex(rowRangeIndex);
         return this;
     }
 

@@ -149,6 +149,21 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         return tag_mgr.list_tags()
 
+    def rename_tag(self, old_name: str, new_name: str) -> None:
+        """
+        Rename a tag.
+
+        Args:
+            old_name: Current name of the tag
+            new_name: New name for the tag
+
+        Raises:
+            ValueError: If old_name or new_name is blank, old_name doesn't exist,
+                       or new_name already exists
+        """
+        tag_mgr = self.tag_manager()
+        tag_mgr.rename_tag(old_name, new_name)
+
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 

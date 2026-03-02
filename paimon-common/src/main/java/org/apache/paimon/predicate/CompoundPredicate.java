@@ -23,10 +23,7 @@ import org.apache.paimon.data.InternalRow;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonValue;
 
-import java.io.IOException;
-import java.io.Serializable;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -43,20 +40,20 @@ public class CompoundPredicate implements Predicate {
     private static final String FIELD_CHILDREN = "children";
 
     @JsonProperty(FIELD_FUNCTION)
-    private final Function function;
+    private final CompoundFunction function;
 
     @JsonProperty(FIELD_CHILDREN)
     private final List<Predicate> children;
 
     @JsonCreator
     public CompoundPredicate(
-            @JsonProperty(FIELD_FUNCTION) Function function,
+            @JsonProperty(FIELD_FUNCTION) CompoundFunction function,
             @JsonProperty(FIELD_CHILDREN) List<Predicate> children) {
         this.function = function;
         this.children = children;
     }
 
-    public Function function() {
+    public CompoundFunction function() {
         return function;
     }
 
@@ -102,65 +99,5 @@ public class CompoundPredicate implements Predicate {
     @Override
     public String toString() {
         return function + "(" + children + ")";
-    }
-
-    /** Evaluate the predicate result based on multiple {@link Predicate}s. */
-    public abstract static class Function implements Serializable {
-        @JsonCreator
-        public static Function fromJson(String name) throws IOException {
-            switch (name) {
-                case And.NAME:
-                    return And.INSTANCE;
-                case Or.NAME:
-                    return Or.INSTANCE;
-                default:
-                    throw new IllegalArgumentException(
-                            "Could not resolve compound predicate function '" + name + "'");
-            }
-        }
-
-        @JsonValue
-        public String toJson() {
-            if (this instanceof And) {
-                return And.NAME;
-            } else if (this instanceof Or) {
-                return Or.NAME;
-            } else {
-                throw new IllegalArgumentException(
-                        "Unknown compound predicate function class for JSON serialization: "
-                                + getClass());
-            }
-        }
-
-        public abstract boolean test(InternalRow row, List<Predicate> children);
-
-        public abstract boolean test(
-                long rowCount,
-                InternalRow minValues,
-                InternalRow maxValues,
-                InternalArray nullCounts,
-                List<Predicate> children);
-
-        public abstract Optional<Predicate> negate(List<Predicate> children);
-
-        public abstract <T> T visit(FunctionVisitor<T> visitor, List<T> children);
-
-        @Override
-        public int hashCode() {
-            return this.getClass().getName().hashCode();
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            return o != null && getClass() == o.getClass();
-        }
-
-        @Override
-        public String toString() {
-            return getClass().getSimpleName();
-        }
     }
 }

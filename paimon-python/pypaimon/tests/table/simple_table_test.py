@@ -254,6 +254,186 @@ class SimpleTableTest(unittest.TestCase):
         # Create the same tag with ignore_if_exists=True - should not raise error
         table.create_tag("duplicate_tag", ignore_if_exists=True)
 
+    def test_tag_rename(self):
+        """Test renaming a tag."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_tag_rename', schema, False)
+        table = self.catalog.get_table('default.test_tag_rename')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write some data - snapshot 1
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'pt': [1],
+            'k': [10],
+            'v': [100]
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Create a tag
+        table.create_tag("old_tag")
+
+        # Rename the tag
+        table.rename_tag("old_tag", "new_tag")
+
+        # Verify old tag no longer exists
+        tags = table.list_tags()
+        self.assertNotIn("old_tag", tags)
+        self.assertIn("new_tag", tags)
+
+        # Verify tag content is preserved
+        tag_manager = table.tag_manager()
+        tag = tag_manager.get("new_tag")
+        self.assertIsNotNone(tag)
+        self.assertEqual(tag.id, 1)
+
+    def test_tag_rename_nonexistent(self):
+        """Test renaming a nonexistent tag."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_tag_rename_nonexistent', schema, False)
+        table = self.catalog.get_table('default.test_tag_rename_nonexistent')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write some data
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'pt': [1],
+            'k': [10],
+            'v': [100]
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Try to rename nonexistent tag
+        with self.assertRaises(ValueError) as context:
+            table.rename_tag("nonexistent", "new_tag")
+        self.assertIn("doesn't exist", str(context.exception))
+
+    def test_tag_rename_to_existing(self):
+        """Test renaming a tag to a name that already exists."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_tag_rename_to_existing', schema, False)
+        table = self.catalog.get_table('default.test_tag_rename_to_existing')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write some data - snapshot 1
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'pt': [1],
+            'k': [10],
+            'v': [100]
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Create two tags
+        table.create_tag("tag1")
+        table.create_tag("tag2")
+
+        # Try to rename tag1 to tag2 (which already exists)
+        with self.assertRaises(ValueError) as context:
+            table.rename_tag("tag1", "tag2")
+        self.assertIn("already exists", str(context.exception))
+
+        # Verify both original tags still exist
+        tags = table.list_tags()
+        self.assertIn("tag1", tags)
+        self.assertIn("tag2", tags)
+
+    def test_tag_rename_and_scan(self):
+        """Test that renaming a tag and then scanning by new name works correctly."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_tag_rename_scan', schema, False)
+        table = self.catalog.get_table('default.test_tag_rename_scan')
+
+        write_builder = table.new_batch_write_builder()
+
+        # First commit
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = pa.Table.from_pydict({
+            'pt': [1, 1],
+            'k': [10, 20],
+            'v': [100, 200]
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data1)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Second commit
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data2 = pa.Table.from_pydict({
+            'pt': [2, 2],
+            'k': [30, 40],
+            'v': [101, 201]
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data2)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Create tag at snapshot 1
+        table.create_tag("old_tag", snapshot_id=1)
+
+        # Rename the tag
+        table.rename_tag("old_tag", "new_tag")
+
+        # Read from the renamed tag
+        table_with_tag = table.copy({CoreOptions.SCAN_TAG_NAME.key(): "new_tag"})
+        read_builder = table_with_tag.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+
+        # Verify: should only contain data from snapshot 1
+        result_sorted = result.sort_by([('pt', 'ascending'), ('k', 'ascending')])
+
+        expected = pa.Table.from_pydict({
+            'pt': [1, 1],
+            'k': [10, 20],
+            'v': [100, 200]
+        }, schema=self.pa_schema)
+
+        self.assertEqual(result_sorted.num_rows, 2)
+        self.assertEqual(result_sorted.column('pt').to_pylist(), expected.column('pt').to_pylist())
+        self.assertEqual(result_sorted.column('k').to_pylist(), expected.column('k').to_pylist())
+        self.assertEqual(result_sorted.column('v').to_pylist(), expected.column('v').to_pylist())
+
     def test_schema_evolution_tag_read(self):
         # schema 0
         pa_schema = pa.schema([

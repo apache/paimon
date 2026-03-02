@@ -202,7 +202,10 @@ public class HiveLocationTest {
         }
 
         Set<String> tableInHive = Sets.newHashSet(hiveShell.executeQuery("show tables"));
-        assertThat(tableInHive).isEqualTo(tableForTest);
+        assertThat(tableInHive)
+                .isEqualTo(
+                        Sets.newHashSet(
+                                "test_extern_table", "test_extern_table1", "hive_inner_table1"));
     }
 
     @Test

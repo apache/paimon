@@ -30,6 +30,17 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.GreaterOrEqual;
+import org.apache.paimon.predicate.GreaterThan;
+import org.apache.paimon.predicate.InPredicateVisitor;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
+import org.apache.paimon.predicate.LessOrEqual;
+import org.apache.paimon.predicate.LessThan;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -55,11 +66,15 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.catalog.Identifier.SYSTEM_TABLE_SPLITTER;
@@ -137,7 +152,7 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
+            // filter is handled in ManifestsRead
             return this;
         }
 
@@ -169,9 +184,15 @@ public class ManifestsTable implements ReadonlyTable {
 
     private static class ManifestsRead implements InnerTableRead {
 
+        private static final String LEAF_NAME = "schema_id";
+
         private RowType readType;
 
         private final FileStoreTable dataTable;
+
+        private @Nullable Long schemaIdMin = null;
+        private @Nullable Long schemaIdMax = null;
+        private final List<Long> schemaIds = new ArrayList<>();
 
         public ManifestsRead(FileStoreTable dataTable) {
             this.dataTable = dataTable;
@@ -179,8 +200,62 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            if (predicate == null) {
+                return this;
+            }
+
+            if (predicate instanceof CompoundPredicate) {
+                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                if ((compoundPredicate.function()) instanceof And) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        handleLeafPredicate(leaf, LEAF_NAME);
+                    }
+                }
+
+                // optimize for IN filter
+                if ((compoundPredicate.function()) instanceof Or) {
+                    InPredicateVisitor.extractInElements(predicate, LEAF_NAME)
+                            .ifPresent(
+                                    leafs ->
+                                            leafs.forEach(
+                                                    leaf ->
+                                                            schemaIds.add(
+                                                                    Long.parseLong(
+                                                                            leaf.toString()))));
+                }
+            } else {
+                handleLeafPredicate(predicate, LEAF_NAME);
+            }
+
             return this;
+        }
+
+        private void handleLeafPredicate(Predicate predicate, String leafName) {
+            LeafPredicate schemaPred =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
+            if (schemaPred != null) {
+                if (schemaPred.function() instanceof Equal) {
+                    schemaIdMin = (Long) schemaPred.literals().get(0);
+                    schemaIdMax = (Long) schemaPred.literals().get(0);
+                }
+
+                if (schemaPred.function() instanceof GreaterThan) {
+                    schemaIdMin = (Long) schemaPred.literals().get(0) + 1;
+                }
+
+                if (schemaPred.function() instanceof GreaterOrEqual) {
+                    schemaIdMin = (Long) schemaPred.literals().get(0);
+                }
+
+                if (schemaPred.function() instanceof LessThan) {
+                    schemaIdMax = (Long) schemaPred.literals().get(0) - 1;
+                }
+
+                if (schemaPred.function() instanceof LessOrEqual) {
+                    schemaIdMax = (Long) schemaPred.literals().get(0);
+                }
+            }
         }
 
         @Override
@@ -201,6 +276,17 @@ public class ManifestsTable implements ReadonlyTable {
             }
             List<ManifestFileMeta> manifestFileMetas = allManifests(dataTable);
 
+            // Apply schema_id filter
+            if (!schemaIds.isEmpty()) {
+                manifestFileMetas = filterBySchemaIds(manifestFileMetas, schemaIds);
+            } else if (schemaIdMin != null || schemaIdMax != null) {
+                manifestFileMetas =
+                        filterBySchemaIdRange(
+                                manifestFileMetas,
+                                Optional.ofNullable(schemaIdMin),
+                                Optional.ofNullable(schemaIdMax));
+            }
+
             @SuppressWarnings("unchecked")
             CastExecutor<InternalRow, BinaryString> partitionCastExecutor =
                     (CastExecutor<InternalRow, BinaryString>)
@@ -220,6 +306,33 @@ public class ManifestsTable implements ReadonlyTable {
                                                 .replaceRow(row));
             }
             return new IteratorRecordReader<>(rows);
+        }
+
+        private static List<ManifestFileMeta> filterBySchemaIds(
+                List<ManifestFileMeta> metas, List<Long> schemaIds) {
+            List<ManifestFileMeta> result = new ArrayList<>();
+            for (ManifestFileMeta meta : metas) {
+                if (schemaIds.contains(meta.schemaId())) {
+                    result.add(meta);
+                }
+            }
+            return result;
+        }
+
+        private static List<ManifestFileMeta> filterBySchemaIdRange(
+                List<ManifestFileMeta> metas, Optional<Long> min, Optional<Long> max) {
+            List<ManifestFileMeta> result = new ArrayList<>();
+            for (ManifestFileMeta meta : metas) {
+                long schemaId = meta.schemaId();
+                if (min.isPresent() && schemaId < min.get()) {
+                    continue;
+                }
+                if (max.isPresent() && schemaId > max.get()) {
+                    continue;
+                }
+                result.add(meta);
+            }
+            return result;
         }
 
         private InternalRow toRow(

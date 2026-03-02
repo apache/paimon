@@ -27,6 +27,7 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -71,6 +72,10 @@ public interface InnerTableScan extends TableScan {
     }
 
     default InnerTableScan withRowRanges(List<Range> rowRanges) {
+        return this;
+    }
+
+    default InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
         return this;
     }
 

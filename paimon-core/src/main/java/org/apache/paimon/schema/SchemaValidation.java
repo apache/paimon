@@ -34,6 +34,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
@@ -47,9 +48,11 @@ import org.apache.paimon.utils.StringUtils;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -156,7 +159,10 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(BlobType.splitBlob(new RowType(schema.fields())).getLeft());
+        RowType tableRowType = new RowType(schema.fields());
+        Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
+        fileFormat.validateDataFields(
+                BlobType.splitBlob(tableRowType, blobDescriptorFields).getLeft());
 
         // Check column names in schema
         schema.fieldNames()
@@ -614,9 +620,26 @@ public class SchemaValidation {
                     normalAndBlobType.getLeft().getFieldCount() > 0,
                     "Table with BLOB type column must have other normal columns.");
             checkArgument(
-                    !schema.partitionKeys().contains(blobNames.get(0)),
+                    blobNames.stream().noneMatch(schema.partitionKeys()::contains),
                     "The BLOB type column can not be part of partition keys.");
         }
+    }
+
+    private static Set<String> validateBlobDescriptorFields(RowType rowType, CoreOptions options) {
+        Set<String> blobFieldNames =
+                rowType.getFields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> configured = options.blobDescriptorField();
+        for (String field : configured) {
+            checkArgument(
+                    blobFieldNames.contains(field),
+                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    field,
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        }
+        return configured;
     }
 
     private static void validateIncrementalClustering(TableSchema schema, CoreOptions options) {

@@ -38,6 +38,7 @@ import org.apache.paimon.rest.auth.AuthProviderEnum;
 import org.apache.paimon.rest.auth.BearTokenAuthProvider;
 import org.apache.paimon.rest.auth.DLFAuthProvider;
 import org.apache.paimon.rest.auth.DLFDefaultSigner;
+import org.apache.paimon.rest.auth.DLFToken;
 import org.apache.paimon.rest.auth.DLFTokenLoader;
 import org.apache.paimon.rest.auth.DLFTokenLoaderFactory;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
@@ -124,9 +125,8 @@ class MockRESTCatalogTest extends RESTCatalogTest {
         String securityToken = "securityToken" + UUID.randomUUID();
         String uri = "https://cn-hangzhou-vpc.dlf.aliyuncs.com";
         String region = "cn-hangzhou";
-        this.authProvider =
-                DLFAuthProvider.fromAccessKey(
-                        akId, akSecret, securityToken, uri, region, DLFDefaultSigner.IDENTIFIER);
+        DLFToken dlfToken = new DLFToken(akId, akSecret, securityToken, null);
+        this.authProvider = new TestDLFAuthProvider(dlfToken, uri, region);
         this.authMap =
                 ImmutableMap.of(
                         RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
@@ -150,9 +150,8 @@ class MockRESTCatalogTest extends RESTCatalogTest {
                         new Options(
                                 ImmutableMap.of(
                                         RESTCatalogOptions.DLF_TOKEN_PATH.key(), tokenPath)));
-        this.authProvider =
-                DLFAuthProvider.fromTokenLoader(
-                        tokenLoader, uri, region, DLFDefaultSigner.IDENTIFIER);
+        DLFToken dlfToken = tokenLoader.loadToken();
+        this.authProvider = new TestDLFAuthProvider(dlfToken, uri, region);
         this.authMap =
                 ImmutableMap.of(
                         RESTCatalogOptions.TOKEN_PROVIDER.key(), AuthProviderEnum.DLF.identifier(),
@@ -455,5 +454,45 @@ class MockRESTCatalogTest extends RESTCatalogTest {
             options.set(entry.getKey(), entry.getValue());
         }
         return new RESTCatalog(CatalogContext.create(options));
+    }
+
+    private static String extractHost(String uri) {
+        String withoutProtocol = uri.replaceFirst("^https?://", "");
+        int pathIndex = withoutProtocol.indexOf('/');
+        return pathIndex >= 0 ? withoutProtocol.substring(0, pathIndex) : withoutProtocol;
+    }
+
+    /**
+     * A test-only {@link DLFAuthProvider} variant used on the mock server side. Unlike the
+     * production {@link DLFAuthProvider#mergeAuthHeader} which generates a fresh timestamp via
+     * {@link java.time.Instant#now()}, this subclass reuses the sign headers already present in the
+     * incoming request to recompute the expected authorization. This avoids flaky signature
+     * mismatches when the client's signing time and the server's verification time cross a second
+     * boundary.
+     */
+    private static class TestDLFAuthProvider extends DLFAuthProvider {
+
+        private final DLFDefaultSigner signer;
+        private final String host;
+
+        TestDLFAuthProvider(DLFToken token, String uri, String region) {
+            super(null, token, uri, region, DLFDefaultSigner.IDENTIFIER);
+            this.signer = new DLFDefaultSigner(region);
+            this.host = extractHost(uri);
+        }
+
+        @Override
+        public Map<String, String> mergeAuthHeader(
+                Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
+            try {
+                String authorization =
+                        signer.authorization(restAuthParameter, token, host, baseHeader);
+                Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
+                headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
+                return headersWithAuth;
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to verify authorization header", e);
+            }
+        }
     }
 }

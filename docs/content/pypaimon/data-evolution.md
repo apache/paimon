@@ -45,8 +45,6 @@ its corresponding `first_row_id`, then groups rows with the same `first_row_id` 
 
 **Requirements for `_ROW_ID` updates**
 
-- **All rows required**: the input table must contain **exactly the full table row count** (one row per existing row).
-- **Row id coverage**: after sorting by `_ROW_ID`, it must be **0..N-1** (no duplicates, no gaps).
 - **Update columns only**: include `_ROW_ID` plus the columns you want to update (partial schema is OK).
 
 ```python

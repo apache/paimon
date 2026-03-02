@@ -246,7 +246,14 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             List<FileStatus> files = tryBestListingDirs(path);
 
             if (files.isEmpty()) {
-                emptyDirs.add(path);
+                try {
+                    FileStatus dirStatus = fileIO.getFileStatus(path);
+                    if (oldEnough(dirStatus)) {
+                        emptyDirs.add(path);
+                    }
+                } catch (IOException e) {
+                    LOG.warn("IOException during check dirStatus for {}, ignore it", path, e);
+                }
                 return Collections.emptyList();
             }
 
