@@ -25,10 +25,10 @@ import org.apache.paimon.TableType;
 import org.apache.paimon.append.AppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -2577,17 +2577,11 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         org.apache.paimon.consumer.ConsumerManager consumerManager =
                 new org.apache.paimon.consumer.ConsumerManager(
                         fileStoreTable.fileIO(), fileStoreTable.location());
-        consumerManager.resetConsumer(
-                "consumer1", new org.apache.paimon.consumer.Consumer(1));
-        consumerManager.resetConsumer(
-                "consumer2", new org.apache.paimon.consumer.Consumer(2));
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
 
         // Test listConsumersPaged
-        assertThat(
-                        catalog
-                                .listConsumersPaged(identifier, null, null)
-                                .getElements()
-                                .size())
+        assertThat(catalog.listConsumersPaged(identifier, null, null).getElements().size())
                 .isEqualTo(2);
 
         // Test with RESTApi directly

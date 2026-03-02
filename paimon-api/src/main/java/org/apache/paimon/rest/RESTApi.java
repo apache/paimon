@@ -608,9 +608,8 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public PagedList<ListConsumersResponse.ConsumerInfo>
-            listConsumersPaged(
-                    Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+    public PagedList<ListConsumersResponse.ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
         ListConsumersResponse response =
                 client.get(
                         resourcePaths.consumers(
@@ -618,8 +617,7 @@ public class RESTApi {
                         buildPagedQueryParams(maxResults, pageToken),
                         ListConsumersResponse.class,
                         restAuthFunction);
-        List<ListConsumersResponse.ConsumerInfo> consumers =
-                response.getConsumers();
+        List<ListConsumersResponse.ConsumerInfo> consumers = response.getConsumers();
         if (consumers == null) {
             return new PagedList<>(emptyList(), null);
         }

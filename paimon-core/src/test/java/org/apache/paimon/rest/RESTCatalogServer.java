@@ -23,12 +23,12 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.catalog.Database;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.TableMetadata;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -75,12 +75,12 @@ import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
+import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
-import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
@@ -783,15 +783,13 @@ public class RESTCatalogServer {
         ConsumerManager consumerManager =
                 new ConsumerManager(table.fileIO(), table.location(), table.branch());
         Map<String, Long> consumers = consumerManager.consumers();
-        List<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerInfo>
-                consumerEntries =
-                        consumers.entrySet().stream()
-                                .map(
-                                        e ->
-                                                new org.apache.paimon.rest.responses
-                                                        .ListConsumersResponse.ConsumerInfo(
-                                                        e.getKey(), e.getValue()))
-                                .collect(Collectors.toList());
+        List<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerInfo> consumerEntries =
+                consumers.entrySet().stream()
+                        .map(
+                                e ->
+                                        new org.apache.paimon.rest.responses.ListConsumersResponse
+                                                .ConsumerInfo(e.getKey(), e.getValue()))
+                        .collect(Collectors.toList());
         ListConsumersResponse response = new ListConsumersResponse(consumerEntries, null);
         return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
     }

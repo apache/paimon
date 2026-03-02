@@ -360,9 +360,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<ListConsumersResponse.ConsumerInfo>
-            listConsumersPaged(
-                    Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+    public PagedList<ListConsumersResponse.ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
             throws TableNotExistException {
         try {
             return api.listConsumersPaged(identifier, maxResults, pageToken);
