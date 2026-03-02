@@ -57,10 +57,10 @@ class Catalog(ABC):
 
     @abstractmethod
     def alter_table(
-            self,
-            identifier: Union[str, Identifier],
-            changes: List[SchemaChange],
-            ignore_if_not_exists: bool = False
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
     ):
         """Alter table with schema changes."""
 
@@ -113,9 +113,9 @@ class Catalog(ABC):
         )
 
     def drop_partitions(
-            self,
-            identifier: Union[str, Identifier],
-            partitions: List[Dict[str, str]],
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
     ) -> None:
         raise NotImplementedError(
             "drop_partitions is not supported by this catalog. Use REST catalog for partition drop."

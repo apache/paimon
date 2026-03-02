@@ -537,3 +537,147 @@ class SimpleTableTest(unittest.TestCase):
         }, schema=expected_schema)
 
         self.assertEqual(expected, result.sort_by('user_id'))
+
+    def test_table_rollback_to_snapshot(self):
+        """Test table-level rollback to a specific snapshot."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_rollback_snapshot', schema, False)
+        table = self.catalog.get_table('default.test_rollback_snapshot')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write 5 commits
+        for i in range(5):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'pt': [1],
+                'k': [i],
+                'v': [i * 100]
+            }, schema=self.pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        snapshot_mgr = table.snapshot_manager()
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 5)
+
+        # Rollback to snapshot 3
+        table.rollback_to(3)
+
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
+        self.assertIsNone(snapshot_mgr.get_snapshot_by_id(4))
+        self.assertIsNone(snapshot_mgr.get_snapshot_by_id(5))
+
+    def test_table_rollback_to_tag(self):
+        """Test table-level rollback to a specific tag."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_rollback_tag', schema, False)
+        table = self.catalog.get_table('default.test_rollback_tag')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write 5 commits and create tags
+        for i in range(5):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'pt': [1],
+                'k': [i],
+                'v': [i * 100]
+            }, schema=self.pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+            table.create_tag("v{}".format(i + 1))
+
+        snapshot_mgr = table.snapshot_manager()
+        tag_mgr = table.tag_manager()
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 5)
+
+        # Rollback to tag v3
+        table.rollback_to("v3")
+
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
+        # Tags with snapshot > 3 should be cleaned
+        self.assertFalse(tag_mgr.tag_exists("v4"))
+        self.assertFalse(tag_mgr.tag_exists("v5"))
+        # Tag v3 should still exist
+        self.assertTrue(tag_mgr.tag_exists("v3"))
+
+    def test_table_rollback_to_nonexistent_snapshot(self):
+        """Test that rollback to a non-existent snapshot raises ValueError."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_rollback_no_snap', schema, False)
+        table = self.catalog.get_table('default.test_rollback_no_snap')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write 2 commits
+        for i in range(2):
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'pt': [1],
+                'k': [i],
+                'v': [i * 100]
+            }, schema=self.pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        with self.assertRaises(ValueError) as context:
+            table.rollback_to(99)
+        self.assertIn("Rollback snapshot", str(context.exception))
+        self.assertIn("99", str(context.exception))
+        self.assertIn("doesn't exist", str(context.exception))
+
+    def test_table_rollback_to_nonexistent_tag(self):
+        """Test that rollback to a non-existent tag raises ValueError."""
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            primary_keys=['pt', 'k'],
+            partition_keys=['pt'],
+            options={'bucket': '3'}
+        )
+        self.catalog.create_table('default.test_rollback_no_tag', schema, False)
+        table = self.catalog.get_table('default.test_rollback_no_tag')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Write 1 commit
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'pt': [1],
+            'k': [10],
+            'v': [100]
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        with self.assertRaises(ValueError) as context:
+            table.rollback_to("no-such-tag")
+        self.assertIn("Rollback tag", str(context.exception))
+        self.assertIn("no-such-tag", str(context.exception))
+        self.assertIn("doesn't exist", str(context.exception))

@@ -218,9 +218,9 @@ class RESTCatalog(Catalog):
             raise TableNoPermissionException(identifier) from e
 
     def drop_partitions(
-            self,
-            identifier: Union[str, Identifier],
-            partitions: List[Dict[str, str]],
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
     ) -> None:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
@@ -240,10 +240,10 @@ class RESTCatalog(Catalog):
             commit.close()
 
     def alter_table(
-            self,
-            identifier: Union[str, Identifier],
-            changes: List[SchemaChange],
-            ignore_if_not_exists: bool = False
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
     ):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)

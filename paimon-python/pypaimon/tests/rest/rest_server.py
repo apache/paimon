@@ -72,11 +72,11 @@ class ErrorResponse(RESTResponse):
     code: Optional[int] = json_field("code", default=None)
 
     def __init__(
-        self,
-        resource_type: Optional[str] = None,
-        resource_name: Optional[str] = None,
-        message: Optional[str] = None,
-        code: Optional[int] = None,
+            self,
+            resource_type: Optional[str] = None,
+            resource_name: Optional[str] = None,
+            message: Optional[str] = None,
+            code: Optional[int] = None,
     ):
         self.resource_type = resource_type
         self.resource_name = resource_name
@@ -141,8 +141,8 @@ def _dict_to_schema_change(change_dict: dict) -> SchemaChange:
                 if field_name is None:
                     raise ValueError(f"Missing fieldName field in Move: {move_dict}")
                 reference_field = (
-                    move_dict.get("referenceFieldName") or
-                    move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME)
+                        move_dict.get("referenceFieldName") or
+                        move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME)
                 )
                 move = Move(
                     field_name=field_name,
@@ -554,8 +554,8 @@ class RESTCatalogServer:
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
                 table_dir = (
-                    Path(self.data_path) / self.warehouse / database_name /
-                    create_table.identifier.get_object_name() / 'schema'
+                        Path(self.data_path) / self.warehouse / database_name /
+                        create_table.identifier.get_object_name() / 'schema'
                 )
                 if not table_dir.exists():
                     table_dir.mkdir(parents=True)
@@ -711,38 +711,6 @@ class RESTCatalogServer:
             return self._mock_response(
                 ErrorResponse(None, None, f"Rollback failed: {str(e)}", 500), 500)
 
-    def _get_file_table(self, identifier: Identifier):
-        """Construct a FileStoreTable from the metadata store.
-
-        Mirrors Java RESTCatalogServer.getFileTable(): loads the schema from
-        the metadata store, builds a CatalogEnvironment (without catalog
-        loader so rollback goes through local file cleanup), and returns a
-        FileStoreTable.
-        """
-        from pypaimon.catalog.catalog_environment import CatalogEnvironment
-        from pypaimon.common.file_io import FileIO
-        from pypaimon.common.options.options import Options
-        from pypaimon.table.file_store_table import FileStoreTable
-
-        table_metadata = self.table_metadata_store.get(identifier.get_full_name())
-        if table_metadata is None:
-            raise TableNotExistException(identifier)
-
-        table_schema = table_metadata.schema
-        table_path = (
-            f'file://{self.data_path}/{self.warehouse}/'
-            f'{identifier.get_database_name()}/{identifier.get_object_name()}')
-
-        catalog_env = CatalogEnvironment(
-            identifier=identifier,
-            uuid=table_metadata.uuid,
-            catalog_loader=None,
-            supports_version_management=False
-        )
-
-        file_io = FileIO.get(table_path, Options({}))
-        return FileStoreTable(file_io, identifier, table_path, table_schema, catalog_env)
-
     def _rollback_table_by_snapshot(self, identifier: Identifier, snapshot_id: int,
                                     from_snapshot: Optional[int]) -> Tuple[str, int]:
         """Rollback table to a specific snapshot ID by delegating to table.rollback_to()."""
@@ -782,6 +750,38 @@ class RESTCatalogServer:
 
         table.rollback_to(tag_name)
         return "", 200
+
+    def _get_file_table(self, identifier: Identifier):
+        """Construct a FileStoreTable from the metadata store.
+
+        Mirrors Java RESTCatalogServer.getFileTable(): loads the schema from
+        the metadata store, builds a CatalogEnvironment (without catalog
+        loader so rollback goes through local file cleanup), and returns a
+        FileStoreTable.
+        """
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.options.options import Options
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        table_metadata = self.table_metadata_store.get(identifier.get_full_name())
+        if table_metadata is None:
+            raise TableNotExistException(identifier)
+
+        table_schema = table_metadata.schema
+        table_path = (
+            f'file://{self.data_path}/{self.warehouse}/'
+            f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+
+        catalog_env = CatalogEnvironment(
+            identifier=identifier,
+            uuid=table_metadata.uuid,
+            catalog_loader=None,
+            supports_version_management=False
+        )
+
+        file_io = FileIO.get(table_path, Options({}))
+        return FileStoreTable(file_io, identifier, table_path, table_schema, catalog_env)
 
     def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
         """Write snapshot and related files to the file system"""
@@ -947,8 +947,8 @@ class RESTCatalogServer:
         table_metadata = self.table_metadata_store[identifier.get_full_name()]
 
         table_path = (
-            Path(self.data_path) / self.warehouse /
-            identifier.get_database_name() / identifier.get_object_name()
+                Path(self.data_path) / self.warehouse /
+                identifier.get_database_name() / identifier.get_object_name()
         )
         schema_manager = SchemaManager(self._get_file_io(), str(table_path))
         new_schema = schema_manager.commit_changes(schema_changes)
@@ -1004,13 +1004,13 @@ class RESTCatalogServer:
                 else "table"
             )
             table_type_matches = (
-                not table_type
-                or metadata_table_type == table_type
+                    not table_type
+                    or metadata_table_type == table_type
             )
             if (identifier.get_database_name() == database_name and
-                table_type_matches and
-                (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
-                                                                    table_name_pattern))):
+                    table_type_matches and
+                    (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
+                                                                        table_name_pattern))):
                 tables.append(identifier.get_table_name())
 
         return tables

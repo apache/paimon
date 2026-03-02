@@ -15,8 +15,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
 
 from pypaimon.common.json_util import JSON
+
+logger = logging.getLogger(__name__)
 
 
 class RollbackHelper:
@@ -52,8 +55,14 @@ class RollbackHelper:
         retained_id = retained_snapshot.id
 
         # Update LATEST hint
-        self._file_io.write_file(
-            self._snapshot_manager.latest_file, str(retained_id), overwrite=True)
+        try:
+            # Try atomic write first
+            success = self._file_io.try_to_write_atomic(self._snapshot_manager.latest_file, str(retained_id))
+            if not success:
+                # Fallback to regular write
+                self._file_io.write_file(self._snapshot_manager.latest_file, str(retained_id), overwrite=True)
+        except Exception as e:
+            logger.warning("Failed to update LATEST hint: %s", e)
 
         # Delete snapshot files larger than retained
         for snapshot_id in range(retained_id + 1, latest_id + 1):
