@@ -322,7 +322,7 @@ public class RESTCatalog implements Catalog {
         try {
             return Optional.ofNullable(api.loadSnapshot(identifier));
         } catch (NoSuchResourceException e) {
-            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 return Optional.empty();
             }
             throw new TableNotExistException(identifier);
@@ -337,7 +337,7 @@ public class RESTCatalog implements Catalog {
         try {
             return Optional.ofNullable(api.loadSnapshot(identifier, version));
         } catch (NoSuchResourceException e) {
-            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 return Optional.empty();
             }
             throw new TableNotExistException(identifier);
@@ -417,10 +417,10 @@ public class RESTCatalog implements Catalog {
         try {
             api.rollbackTo(identifier, instant, fromSnapshot);
         } catch (NoSuchResourceException e) {
-            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
                         String.format("Rollback snapshot '%s' doesn't exist.", e.resourceName()));
-            } else if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+            } else if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new IllegalArgumentException(
                         String.format("Rollback tag '%s' doesn't exist.", e.resourceName()));
             }
