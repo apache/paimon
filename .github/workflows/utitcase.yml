@@ -29,6 +29,8 @@ on:
       - 'paimon-lucene/**'
       - 'paimon-faiss/**'
       - '.github/workflows/faiss-vector-index-tests.yml'
+      - 'paimon-diskann/**'
+      - '.github/workflows/publish-diskann_snapshot.yml'
       - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
 
 env:
@@ -40,15 +42,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build_native:
+  build_faiss_native:
     uses: ./.github/workflows/build-faiss-native.yml
+    with:
+      platform: linux-amd64
+      jdk-version: '8'
+
+  build_diskann_native:
+    uses: ./.github/workflows/build-diskann-native.yml
     with:
       platform: linux-amd64
       jdk-version: '8'
 
   build_test:
     runs-on: ubuntu-latest
-    needs: build_native
+    needs: [build_faiss_native, build_diskann_native]
 
     steps:
       - name: Checkout code
@@ -60,21 +68,30 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
-      - name: Download native library artifact
+      - name: Download FAISS native library artifact
         uses: actions/download-artifact@v7
         with:
           name: faiss-native-linux-amd64
           path: paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
 
-      - name: List downloaded native library
+      - name: Download DiskANN native library artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: diskann-native-linux-amd64
+          path: paimon-diskann/paimon-diskann-jni/src/main/resources/
+
+      - name: List downloaded native libraries
         run: |
-          echo "=== Downloaded native libraries ==="
+          echo "=== FAISS native libraries ==="
           ls -la paimon-faiss/paimon-faiss-jni/src/main/resources/linux/amd64/
+          echo ""
+          echo "=== DiskANN native libraries ==="
+          find paimon-diskann/paimon-diskann-jni/src/main/resources -type f -exec ls -la {} \;
 
       - name: Build Others
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3,paimon-faiss
+          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3,paimon-faiss,paimon-diskann
 
       - name: Test Others
         timeout-minutes: 60

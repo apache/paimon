@@ -1,0 +1,39 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+[package]
+name = "paimon_diskann_jni"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21"
+# DiskANN with testing feature: Provides test_provider for in-memory vector storage
+# Note: Despite the name "testing", this is used in production for the in-memory index implementation
+diskann = { version = "0.45.0", features = ["testing"] }
+diskann-vector = "0.45.0"
+# Tokio with rt feature: Required for async DiskANN operations
+# Uses single-threaded runtime (new_current_thread) for efficient resource usage
+tokio = { version = "1", features = ["rt"] }
+# Futures utilities (for futures_util::future::ok in JniProvider)
+futures-util = "0.3"
+# Concurrent HashMap used by the JniProvider graph storage
+dashmap = "6"
+diskann-quantization = "0.45.0"
+diskann-utils = "0.45.0"
