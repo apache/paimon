@@ -25,7 +25,7 @@ from pypaimon.table.instant import Instant
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 
-class RESTCatalogRollbackTest(RESTBaseTest):
+class RESTCatalogTest(RESTBaseTest):
 
     def test_table_rollback(self):
         """Test table rollback to snapshot and tag, mirroring Java testTableRollback."""

@@ -61,22 +61,6 @@ class CatalogEnvironment:
             # to create locks based on the catalog lock context
             return RenamingSnapshotCommit(snapshot_manager)
 
-    def catalog_table_rollback(self):
-        """Create a TableRollback instance based on the catalog environment configuration.
-
-        If catalog_loader is available and version management is supported,
-        returns a CatalogTableRollback that delegates to catalog.rollback_to.
-        Otherwise, returns None.
-
-        Returns:
-            A TableRollback instance or None.
-        """
-        if self.catalog_loader is not None and self.supports_version_management:
-            catalog = self.catalog_loader.load()
-            identifier = self.identifier
-            return CatalogTableRollback(catalog, identifier)
-        return None
-
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """
         Create a copy of this CatalogEnvironment with a different identifier.

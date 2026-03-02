@@ -273,6 +273,7 @@ class RESTCatalog(Catalog):
         try:
             self.rest_api.rollback_to(identifier, instant, from_snapshot)
         except NoSuchResourceException as e:
+            # TODO more exception
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
