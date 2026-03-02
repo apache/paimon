@@ -69,8 +69,8 @@ public class KafkaMetadataE2ETest {
 
         CdcMetadataConverter[] metadataConverters = createKafkaMetadataConverters();
         DebeziumAvroRecordParser parser =
-                new DebeziumAvroRecordParser(
-                        TypeMapping.defaultMapping(), Collections.emptyList(), metadataConverters);
+                new DebeziumAvroRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
+        parser.withMetadataConverters(metadataConverters);
 
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         parser.flatMap(
@@ -161,8 +161,8 @@ public class KafkaMetadataE2ETest {
 
         CdcMetadataConverter[] metadataConverters = createKafkaMetadataConverters();
         DebeziumAvroRecordParser parser =
-                new DebeziumAvroRecordParser(
-                        TypeMapping.defaultMapping(), Collections.emptyList(), metadataConverters);
+                new DebeziumAvroRecordParser(TypeMapping.defaultMapping(), Collections.emptyList());
+        parser.withMetadataConverters(metadataConverters);
 
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         parser.flatMap(

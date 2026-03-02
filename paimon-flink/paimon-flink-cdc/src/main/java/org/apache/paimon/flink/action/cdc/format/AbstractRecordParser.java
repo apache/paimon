@@ -56,7 +56,7 @@ public abstract class AbstractRecordParser
     protected static final String FIELD_DATABASE = "database";
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
-    protected final CdcMetadataConverter[] metadataConverters;
+    protected CdcMetadataConverter[] metadataConverters;
     protected CdcSourceRecord currentRecord; // Store current record for metadata access
 
     public AbstractRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
@@ -71,6 +71,13 @@ public abstract class AbstractRecordParser
         this.computedColumns = computedColumns;
         this.metadataConverters =
                 metadataConverters != null ? metadataConverters : new CdcMetadataConverter[0];
+    }
+
+    /** Sets metadata converters and returns this parser for chaining. */
+    public AbstractRecordParser withMetadataConverters(CdcMetadataConverter[] metadataConverters) {
+        this.metadataConverters =
+                metadataConverters != null ? metadataConverters : new CdcMetadataConverter[0];
+        return this;
     }
 
     @Nullable

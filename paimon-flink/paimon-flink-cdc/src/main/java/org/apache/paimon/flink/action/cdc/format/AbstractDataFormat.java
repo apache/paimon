@@ -55,9 +55,8 @@ public abstract class AbstractDataFormat implements DataFormat {
             TypeMapping typeMapping,
             List<ComputedColumn> computedColumns,
             CdcMetadataConverter[] metadataConverters) {
-        // Most parsers don't support metadata converters, so we default to the 2-parameter version
-        // Only specific parsers like DebeziumAvroRecordParser will override this
-        return createParser(typeMapping, computedColumns);
+        return createParser(typeMapping, computedColumns)
+                .withMetadataConverters(metadataConverters);
     }
 
     @Override

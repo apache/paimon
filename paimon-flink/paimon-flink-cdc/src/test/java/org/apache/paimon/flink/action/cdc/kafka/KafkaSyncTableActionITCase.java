@@ -516,9 +516,6 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .withPartitionKeys("_year")
                         .withPrimaryKeys("_id", "_year")
                         .withComputedColumnArgs("_year=year(_date)")
-                        .withMetadataColumnPrefix("__kafka_")
-                        .withMetadataColumns(
-                                "topic", "offset", "partition", "timestamp", "timestamp_type")
                         .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
@@ -528,23 +525,9 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         new DataType[] {
                             DataTypes.STRING().notNull(),
                             DataTypes.STRING(),
-                            DataTypes.INT().notNull(),
-                            DataTypes.STRING().notNull(),
-                            DataTypes.INT(),
-                            DataTypes.BIGINT(),
-                            DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
-                            DataTypes.STRING()
+                            DataTypes.INT().notNull()
                         },
-                        new String[] {
-                            "_id",
-                            "_date",
-                            "_year",
-                            "__kafka_topic",
-                            "__kafka_partition",
-                            "__kafka_offset",
-                            "__kafka_timestamp",
-                            "__kafka_timestamp_type"
-                        });
+                        new String[] {"_id", "_date", "_year"});
         waitForResult(
                 Collections.singletonList("+I[101, 2023-03-23, 2023]"),
                 getFileStoreTable(tableName),
@@ -572,32 +555,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        FileStoreTable table = getFileStoreTable(tableName);
-
-        // Verify the schema includes metadata columns
-        RowType tableRowType = table.rowType();
-        assertThat(tableRowType.getFieldNames())
-                .containsExactlyInAnyOrder(
-                        "_id",
-                        "_date",
-                        "_year",
-                        "__kafka_topic",
-                        "__kafka_partition",
-                        "__kafka_offset",
-                        "__kafka_timestamp",
-                        "__kafka_timestamp_type");
-
-        // Verify the data types of metadata columns
-        assertThat(tableRowType.getField("__kafka_topic").type()).isEqualTo(DataTypes.STRING());
-        assertThat(tableRowType.getField("__kafka_partition").type()).isEqualTo(DataTypes.INT());
-        assertThat(tableRowType.getField("__kafka_offset").type()).isEqualTo(DataTypes.BIGINT());
-        assertThat(tableRowType.getField("__kafka_timestamp").type())
-                .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
-        assertThat(tableRowType.getField("__kafka_timestamp_type").type())
-                .isEqualTo(DataTypes.STRING());
-
-        // Verify the metadata values are present in the data
-        // We use a RowType that includes all columns including metadata
+        // Column order matches the order specified in withMetadataColumns above
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -605,8 +563,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                             DataTypes.STRING(),
                             DataTypes.INT().notNull(),
                             DataTypes.STRING(),
-                            DataTypes.INT(),
                             DataTypes.BIGINT(),
+                            DataTypes.INT(),
                             DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
                             DataTypes.STRING()
                         },
@@ -615,17 +573,18 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                             "_date",
                             "_year",
                             "__kafka_topic",
-                            "__kafka_partition",
                             "__kafka_offset",
+                            "__kafka_partition",
                             "__kafka_timestamp",
                             "__kafka_timestamp_type"
                         });
 
-        // Wait for result - we only check basic fields in expected result because
-        // offset and timestamp values are unpredictable
+        // Use regex matching because offset and timestamp values are unpredictable
         waitForResult(
-                Collections.singletonList("+I[101, 2023-03-23, 2023]"),
-                table,
+                true,
+                Collections.singletonList(
+                        "\\+I\\[101, 2023-03-23, 2023, metadata_column, 0, 0, .+, .+\\]"),
+                getFileStoreTable(tableName),
                 rowType,
                 Arrays.asList("_id", "_year"));
     }
