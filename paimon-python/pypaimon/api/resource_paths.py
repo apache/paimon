@@ -70,3 +70,7 @@ class ResourcePaths:
     def commit_table(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/commit".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def rollback_table(self, database_name: str, table_name: str) -> str:
+        return ("{}/{}/{}/{}/{}/rollback".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                                 self.TABLES, RESTUtil.encode_string(table_name)))
