@@ -16,7 +16,6 @@
 # limitations under the License.
 ################################################################################
 
-from functools import singledispatchmethod
 from typing import List, Optional
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
@@ -150,11 +149,10 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         return tag_mgr.list_tags()
 
-    @singledispatchmethod
     def rollback_to(self, target):
         """Rollback table to the given snapshot ID (int) or tag name (str).
 
-        Uses singledispatchmethod to dispatch based on argument type:
+        Dispatches based on argument type:
         - int: rollback to the snapshot with that ID
         - str: rollback to the tag with that name
 
@@ -167,10 +165,14 @@ class FileStoreTable(Table):
         Raises:
             ValueError: If the target doesn't exist or type is unsupported.
         """
-        raise ValueError("Unsupported rollback target type: {}".format(type(target)))
+        if isinstance(target, int):
+            self._rollback_to_snapshot(target)
+        elif isinstance(target, str):
+            self._rollback_to_tag(target)
+        else:
+            raise ValueError("Unsupported rollback target type: {}".format(type(target)))
 
-    @rollback_to.register(int)
-    def _rollback_to_snapshot(self, snapshot_id: int):
+    def _rollback_to_snapshot(self, snapshot_id):
         """Rollback to a snapshot by ID.
 
         First tries catalog-based rollback. If not available, falls back to
@@ -208,8 +210,7 @@ class FileStoreTable(Table):
         raise ValueError(
             "Rollback snapshot '{}' doesn't exist.".format(snapshot_id))
 
-    @rollback_to.register(str)
-    def _rollback_to_tag(self, tag_name: str):
+    def _rollback_to_tag(self, tag_name):
         """Rollback to a tag by name.
 
         First tries catalog-based rollback. If not available, falls back to
