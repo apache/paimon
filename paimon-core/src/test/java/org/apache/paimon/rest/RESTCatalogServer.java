@@ -781,14 +781,11 @@ public class RESTCatalogServer {
     private MockResponse listConsumers(Identifier identifier) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         ConsumerManager consumerManager =
-                new ConsumerManager(table.fileIO(), table.location(), table.branch());
+                new ConsumerManager(table.fileIO(), table.location(), "main");
         Map<String, Long> consumers = consumerManager.consumers();
-        List<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerInfo> consumerEntries =
+        List<ListConsumersResponse.ConsumerInfo> consumerEntries =
                 consumers.entrySet().stream()
-                        .map(
-                                e ->
-                                        new org.apache.paimon.rest.responses.ListConsumersResponse
-                                                .ConsumerInfo(e.getKey(), e.getValue()))
+                        .map(e -> new ListConsumersResponse.ConsumerInfo(e.getKey(), e.getValue()))
                         .collect(Collectors.toList());
         ListConsumersResponse response = new ListConsumersResponse(consumerEntries, null);
         return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
