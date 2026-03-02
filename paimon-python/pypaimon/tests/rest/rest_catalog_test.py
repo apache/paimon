@@ -28,7 +28,7 @@ from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 class RESTCatalogTest(RESTBaseTest):
 
     def test_table_rollback(self):
-        """Test table rollback to snapshot and tag, mirroring Java testTableRollback."""
+        """Test table rollback to snapshot and tag."""
         table_name = "default.table_for_rollback"
         pa_schema = pa.schema([('col1', pa.int32())])
         schema = Schema.from_pyarrow_schema(pa_schema)
@@ -72,9 +72,11 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIsNone(snapshot_5)
 
         # Rollback to a non-existent snapshot (5) should fail
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValueError) as context:
             self.rest_catalog.rollback_to(
                 identifier, Instant.snapshot(rollback_to_snapshot_id + 1))
+        self.assertIn("Rollback snapshot", str(context.exception))
+        self.assertIn("doesn't exist", str(context.exception))
 
         # --- Rollback to tag-3 (snapshot 3) ---
         rollback_to_tag_name = "tag-{}".format(rollback_to_snapshot_id - 1)
@@ -96,6 +98,66 @@ class RESTCatalogTest(RESTBaseTest):
             identifier, Instant.snapshot(2), from_snapshot=3)
         latest_final = snapshot_mgr.get_latest_snapshot()
         self.assertEqual(latest_final.id, 2)
+
+    def test_rollback_to_nonexistent_tag(self):
+        """Test that rollback to a non-existent tag raises an error."""
+        table_name = "default.table_rollback_no_tag"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        identifier = Identifier.from_string(table_name)
+
+        # Write one commit so the table has a snapshot
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({'col1': [1]}, schema=pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        with self.assertRaises(ValueError) as context:
+            self.rest_catalog.rollback_to(
+                identifier, Instant.tag("nonexistent-tag"))
+        self.assertIn("Rollback tag", str(context.exception))
+        self.assertIn("nonexistent-tag", str(context.exception))
+        self.assertIn("doesn't exist", str(context.exception))
+
+    def test_rollback_with_string_identifier(self):
+        """Test rollback using a string identifier instead of Identifier object."""
+        table_name = "default.table_rollback_str_id"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        for i in range(3):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({'col1': [i]}, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        snapshot_mgr = table.snapshot_manager()
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 3)
+
+        # Use string identifier directly (not Identifier object)
+        self.rest_catalog.rollback_to(table_name, Instant.snapshot(2))
+        self.assertEqual(snapshot_mgr.get_latest_snapshot().id, 2)
+
+    def test_rollback_on_nonexistent_table(self):
+        """Test that rollback on a non-existent table raises an error."""
+        from pypaimon.catalog.catalog_exception import TableNotExistException
+        identifier = Identifier.from_string("default.no_such_table")
+        with self.assertRaises(TableNotExistException) as context:
+            self.rest_catalog.rollback_to(identifier, Instant.snapshot(1))
+        self.assertIn("default.no_such_table", str(context.exception))
+        self.assertIn("does not exist", str(context.exception))
 
 
 if __name__ == '__main__':
