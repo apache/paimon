@@ -273,7 +273,12 @@ class RESTCatalog(Catalog):
         try:
             self.rest_api.rollback_to(identifier, instant, from_snapshot)
         except NoSuchResourceException as e:
-            # TODO more exception
+            if e.resource_type == "snapshot":
+                raise ValueError(
+                    "Rollback snapshot '{}' doesn't exist.".format(e.resource_name)) from e
+            elif e.resource_type == "tag":
+                raise ValueError(
+                    "Rollback tag '{}' doesn't exist.".format(e.resource_name)) from e
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
