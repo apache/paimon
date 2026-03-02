@@ -196,63 +196,6 @@ run_pk_dv_test() {
     fi
 }
 
-# Function to run FAISS vector index test (Java write, Python read)
-run_faiss_vector_test() {
-    echo -e "${YELLOW}=== Step 6: Running FAISS Vector Index Test (Java Write, Python Read) ===${NC}"
-
-    # Check Python version - skip FAISS tests for Python 3.6 as it has limited faiss-cpu support
-    local python_version
-    python_version=$(python -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))" 2>/dev/null || echo "unknown")
-    if [[ "$python_version" == "3.6" ]]; then
-        echo -e "${YELLOW}⊘ Skipping FAISS test for Python 3.6 (limited faiss-cpu support)${NC}"
-        return 0
-    fi
-
-    cd "$PROJECT_ROOT"
-
-    # Run the Java test method for FAISS vector index
-    echo "Running Maven test for JavaPyFaissE2ETest.testJavaWriteFaissVectorIndex..."
-    echo "Note: Maven may download dependencies on first run, this may take a while..."
-    local mvn_output
-    mvn_output=$(mvn test '-Dtest=org.apache.paimon.faiss.index.JavaPyFaissE2ETest#testJavaWriteFaissVectorIndex' -pl paimon-faiss/paimon-faiss-index -Drun.e2e.tests=true 2>&1)
-    local mvn_exit_code=$?
-    echo "$mvn_output"
-
-    if [[ $mvn_exit_code -ne 0 ]]; then
-        echo -e "${RED}✗ Java FAISS write test failed${NC}"
-        return 1
-    elif echo "$mvn_output" | grep -q "Tests run: 1.*Skipped: 1"; then
-        # Test was skipped (FAISS native library not available)
-        echo -e "${YELLOW}⊘ Java FAISS write test skipped (FAISS native library not available)${NC}"
-        # Continue to Python test which will also skip
-    else
-        echo -e "${GREEN}✓ Java FAISS write test completed successfully${NC}"
-    fi
-
-    echo ""
-
-    # Run the Python test method for reading FAISS vector table
-    # Run from the tests directory where the test file is located
-    cd "$PROJECT_ROOT/paimon-python/pypaimon/tests"
-    echo "Running Python test for JavaPyFaissE2ETest.test_read_faiss_vector_table..."
-    # Capture pytest output and check for "passed" since FAISS cleanup can cause segfault on exit
-    local pytest_output
-    pytest_output=$(python -m pytest test_global_index.py::JavaPyFaissE2ETest::test_read_faiss_vector_table -v --tb=short 2>&1) || true
-    echo "$pytest_output"
-
-    if echo "$pytest_output" | grep -qE "1 passed|passed.*1"; then
-        echo -e "${GREEN}✓ Python FAISS read test completed successfully${NC}"
-        return 0
-    elif echo "$pytest_output" | grep -qE "1 skipped|skipped.*1"; then
-        # Test was skipped (table not found, likely because Java test was also skipped)
-        echo -e "${YELLOW}⊘ Python FAISS read test skipped (table not created - FAISS native library may not be available)${NC}"
-        return 0
-    else
-        echo -e "${RED}✗ Python FAISS read test failed${NC}"
-        return 1
-    fi
-}
-
 # Function to run BTree index test (Java write, Python read)
 run_btree_index_test() {
     echo -e "${YELLOW}=== Step 6: Running BTree Index Test (Java Write, Python Read) ===${NC}"
@@ -285,7 +228,6 @@ main() {
     local python_write_result=0
     local java_read_result=0
     local pk_dv_result=0
-    local faiss_vector_result=0
     local btree_index_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
@@ -332,13 +274,6 @@ main() {
 
     echo ""
 
-    # Run FAISS vector index test (Java write, Python read)
-    if ! run_faiss_vector_test; then
-        faiss_vector_result=1
-    fi
-
-    echo ""
-
     # Run BTree index test (Java write, Python read)
     if ! run_btree_index_test; then
         btree_index_result=1
@@ -378,12 +313,6 @@ main() {
         echo -e "${RED}✗ PK DV Test (JavaPyReadWriteTest.testPKDeletionVectorWriteRead): FAILED${NC}"
     fi
 
-    if [[ $faiss_vector_result -eq 0 ]]; then
-        echo -e "${GREEN}✓ FAISS Vector Index Test (Java Write, Python Read): PASSED${NC}"
-    else
-        echo -e "${RED}✗ FAISS Vector Index Test (Java Write, Python Read): FAILED${NC}"
-    fi
-
     if [[ $btree_index_result -eq 0 ]]; then
         echo -e "${GREEN}✓ BTree Index Test (Java Write, Python Read): PASSED${NC}"
     else
@@ -395,7 +324,7 @@ main() {
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $faiss_vector_result -eq 0 && $btree_index_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

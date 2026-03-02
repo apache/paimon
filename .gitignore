@@ -24,16 +24,9 @@ paimon-python/.idea/
 paimon-python/dist/
 paimon-python/*.egg-info/
 paimon-python/dev/log
-paimon-lucene/.idea/
 
 ### VS Code ###
 .vscode/
 
 ### Mac OS ###
 .DS_Store
-
-### Native build artifacts ###
-paimon-faiss/paimon-faiss-jni/build/
-paimon-faiss/paimon-faiss-jni/src/main/resources/darwin*
-paimon-faiss/paimon-faiss-jni/src/main/resources/linux*
-paimon-faiss/paimon-faiss-jni/src/main/native/cmake-build-debug/

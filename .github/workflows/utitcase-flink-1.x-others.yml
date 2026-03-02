@@ -25,7 +25,6 @@ on:
       - '**/*.md'
       - 'paimon-python/**'
       - '.github/workflows/paimon-python-checks.yml'
-      - 'paimon-lucene/**'
       - 'paimon-core/src/test/java/org/apache/paimon/JavaPyE2ETest.java'
 
 env:
