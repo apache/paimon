@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BinaryRow;
@@ -88,6 +89,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
+    private final CoreOptions coreOptions;
 
     protected RowType readRowType;
 
@@ -96,14 +98,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             SchemaManager schemaManager,
             TableSchema schema,
             RowType rowType,
-            FileFormatDiscover formatDiscover,
+            CoreOptions coreOptions,
             FileStorePathFactory pathFactory) {
         this.fileIO = fileIO;
         final Map<Long, TableSchema> cache = new HashMap<>();
         this.schemaFetcher =
                 schemaId -> cache.computeIfAbsent(schemaId, key -> schemaManager.schema(schemaId));
         this.schema = schema;
-        this.formatDiscover = formatDiscover;
+        this.formatDiscover = FileFormatDiscover.of(coreOptions);
+        this.coreOptions = coreOptions;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.readRowType = rowType;
@@ -371,6 +374,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     readRowType,
                                     formatReaderMapping.getReaderFactory(),
                                     formatReaderContext,
+                                    coreOptions.scanIgnoreCorruptFile(),
+                                    coreOptions.scanIgnoreLostFile(),
                                     formatReaderMapping.getIndexMapping(),
                                     formatReaderMapping.getCastMapping(),
                                     PartitionUtils.create(
@@ -398,6 +403,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readRowType,
                 formatReaderMapping.getReaderFactory(),
                 formatReaderContext,
+                coreOptions.scanIgnoreCorruptFile(),
+                coreOptions.scanIgnoreLostFile(),
                 formatReaderMapping.getIndexMapping(),
                 formatReaderMapping.getCastMapping(),
                 PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
@@ -554,10 +561,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     public static List<List<DataFileMeta>> mergeRangesAndSort(List<DataFileMeta> files) {
         // group by row id range
-        ToLongFunction<DataFileMeta> firstRowIdFunc = DataFileMeta::nonNullFirstRowId;
-        ToLongFunction<DataFileMeta> endRowIdF = f -> f.nonNullFirstRowId() + f.rowCount() - 1;
         ToLongFunction<DataFileMeta> maxSeqF = DataFileMeta::maxSequenceNumber;
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(firstRowIdFunc, endRowIdF);
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> result = rangeHelper.mergeOverlappingRanges(files);
 
         // in group, sort by blob file and max_seq
@@ -582,7 +587,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
             // blob files sort by first row id then by reversed max sequence number
             blobFiles.sort(
-                    comparingLong(firstRowIdFunc)
+                    comparingLong(DataFileMeta::nonNullFirstRowId)
                             .thenComparing(reverseOrder(comparingLong(maxSeqF))));
 
             // concat data files and blob files

@@ -25,6 +25,7 @@ from typing import Dict, List, Optional
 from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
+from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -404,12 +405,11 @@ class FileStoreCommit:
                 min_row_id = None
                 max_row_id = None
                 break
-            entry_min = entry.file.first_row_id
-            entry_max = entry.file.first_row_id + entry.file.row_count - 1
-            if min_row_id is None or entry_min < min_row_id:
-                min_row_id = entry_min
-            if max_row_id is None or entry_max > max_row_id:
-                max_row_id = entry_max
+            file_range = entry.file.row_id_range()
+            if min_row_id is None or file_range.from_ < min_row_id:
+                min_row_id = file_range.from_
+            if max_row_id is None or file_range.to > max_row_id:
+                max_row_id = file_range.to
 
         # return new ManifestFileMeta
         manifest_file_path = f"{self.manifest_file_manager.manifest_path}/{new_manifest_file}"
@@ -633,14 +633,14 @@ class FileStoreCommit:
     def _assign_row_tracking_meta(self, first_row_id_start: int, commit_entries: List[ManifestEntry]):
         """
         Assign row tracking metadata (first_row_id) to new files.
-        This follows the Java implementation logic from FileStoreCommitImpl.assignRowTrackingMeta.
         """
         if not commit_entries:
             return commit_entries, first_row_id_start
 
         row_id_assigned = []
         start = first_row_id_start
-        blob_start = first_row_id_start
+        current_data_start = first_row_id_start
+        blob_start_by_field = {}
 
         for entry in commit_entries:
             # Check if this is an append file that needs row ID assignment
@@ -648,29 +648,27 @@ class FileStoreCommit:
                     entry.file.file_source == 0 and  # APPEND file source
                     entry.file.first_row_id is None):  # No existing first_row_id
 
-                if self._is_blob_file(entry.file.file_name):
-                    # Handle blob files specially
-                    if blob_start >= start:
+                if DataFileMeta.is_blob_file(entry.file.file_name):
+                    # Handle blob files specially. Each blob field tracks row ids independently.
+                    if current_data_start >= start:
                         raise RuntimeError(
-                            f"This is a bug, blobStart {blob_start} should be less than start {start} "
+                            f"This is a bug, blobStart {current_data_start} should be less than start {start} "
                             f"when assigning a blob entry file."
                         )
                     row_count = entry.file.row_count
-                    row_id_assigned.append(entry.assign_first_row_id(blob_start))
-                    blob_start += row_count
+                    blob_field_key = tuple(entry.file.write_cols or [])
+                    field_blob_start = blob_start_by_field.get(blob_field_key, current_data_start)
+                    row_id_assigned.append(entry.assign_first_row_id(field_blob_start))
+                    blob_start_by_field[blob_field_key] = field_blob_start + row_count
                 else:
                     # Handle regular files
                     row_count = entry.file.row_count
                     row_id_assigned.append(entry.assign_first_row_id(start))
-                    blob_start = start
+                    current_data_start = start
+                    blob_start_by_field.clear()
                     start += row_count
             else:
                 # For compact files or files that already have first_row_id, don't assign
                 row_id_assigned.append(entry)
 
         return row_id_assigned, start
-
-    @staticmethod
-    def _is_blob_file(file_name: str) -> bool:
-        """Check if a file is a blob file based on its extension."""
-        return file_name.endswith('.blob')

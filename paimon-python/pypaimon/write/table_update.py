@@ -31,6 +31,60 @@ from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
 
+def _filter_by_whole_file_shard(splits: List[DataSplit], sub_task_id: int, total_tasks: int) -> List[DataSplit]:
+    list_ranges = []
+    for split in splits:
+        for file in split.files:
+            list_ranges.append(file.row_id_range())
+
+    sorted_ranges = Range.sort_and_merge_overlap(list_ranges, True, False)
+
+    start_range, end_range = _divide_ranges(sorted_ranges, sub_task_id, total_tasks)
+    if start_range is None or end_range is None:
+        return []
+    start_first_row_id = start_range.from_
+    end_first_row_id = end_range.to
+
+    def filter_data_file(f: DataFileMeta) -> bool:
+        return start_first_row_id <= f.first_row_id <= end_first_row_id
+
+    filtered_splits = []
+
+    for split in splits:
+        split = split.filter_file(filter_data_file)
+        if split is not None:
+            filtered_splits.append(split)
+
+    return filtered_splits
+
+
+def _divide_ranges(
+        sorted_ranges: List[Range], sub_task_id: int, total_tasks: int
+) -> Tuple[Optional[Range], Optional[Range]]:
+    if not sorted_ranges:
+        return None, None
+
+    num_ranges = len(sorted_ranges)
+
+    # If more tasks than ranges, some tasks get nothing
+    if sub_task_id >= num_ranges:
+        return None, None
+
+    # Calculate balanced distribution of ranges across tasks
+    base_ranges_per_task = num_ranges // total_tasks
+    remainder = num_ranges % total_tasks
+
+    # Each of the first 'remainder' tasks gets one extra range
+    if sub_task_id < remainder:
+        num_ranges_for_task = base_ranges_per_task + 1
+        start_idx = sub_task_id * (base_ranges_per_task + 1)
+    else:
+        num_ranges_for_task = base_ranges_per_task
+        start_idx = (remainder * (base_ranges_per_task + 1) + (sub_task_id - remainder) * base_ranges_per_task)
+    end_idx = start_idx + num_ranges_for_task - 1
+    return sorted_ranges[start_idx], sorted_ranges[end_idx]
+
+
 class TableUpdate:
     def __init__(self, table, commit_user):
         from pypaimon.table.file_store_table import FileStoreTable
@@ -97,8 +151,10 @@ class ShardTableUpdator:
         self.writer: Optional[SingleWriter] = None
         self.dict = defaultdict(list)
 
-        scanner = self.table.new_read_builder().new_scan().with_shard(shard_num, total_shard_count)
-        self.splits = scanner.plan().splits()
+        scanner = self.table.new_read_builder().new_scan()
+        splits = scanner.plan().splits()
+        splits = _filter_by_whole_file_shard(splits, shard_num, total_shard_count)
+        self.splits = splits
 
         self.row_ranges: List[(Tuple, Range)] = []
         for split in self.splits:
@@ -111,10 +167,7 @@ class ShardTableUpdator:
 
     @staticmethod
     def compute_from_files(files: List[DataFileMeta]) -> List[Range]:
-        ranges = []
-        for file in files:
-            ranges.append(Range(file.first_row_id, file.first_row_id + file.row_count - 1))
-
+        ranges = [file.row_id_range() for file in files]
         return Range.sort_and_merge_overlap(ranges, True, False)
 
     def arrow_reader(self) -> pyarrow.ipc.RecordBatchReader:

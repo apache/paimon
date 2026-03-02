@@ -20,7 +20,9 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.flink.table.types.logical.BinaryType;
 import org.apache.flink.table.types.logical.LogicalType;
@@ -47,6 +49,19 @@ public class LogicalTypeConversion {
                 logicalType instanceof BinaryType || logicalType instanceof VarBinaryType,
                 "Expected BinaryType or VarBinaryType, but got: " + logicalType);
         return new BlobType();
+    }
+
+    public static VectorType toVectorType(LogicalType elementType, String vectorDim) {
+        checkArgument(
+                !vectorDim.trim().isEmpty(),
+                "Expected an integer for vector-dim, but got empty value.");
+        try {
+            int dim = Integer.parseInt(vectorDim);
+            return DataTypes.VECTOR(dim, toDataType(elementType));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(
+                    "Expected an integer for vector-dim, but got: " + vectorDim);
+        }
     }
 
     public static RowType toDataType(org.apache.flink.table.types.logical.RowType logicalType) {

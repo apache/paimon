@@ -290,7 +290,18 @@ public class FlinkOrphanFilesClean extends OrphanFilesClean {
                                             }
                                         }
                                         if (files.isEmpty()) {
-                                            ctx.output(emptyDirOutputTag, dirPath);
+                                            try {
+                                                FileStatus dirStatus =
+                                                        fileIO.getFileStatus(dirPath);
+                                                if (oldEnough(dirStatus)) {
+                                                    ctx.output(emptyDirOutputTag, dirPath);
+                                                }
+                                            } catch (IOException e) {
+                                                LOG.warn(
+                                                        "IOException during check dirStatus for {}, ignore it",
+                                                        dirPath,
+                                                        e);
+                                            }
                                         }
                                     }
                                 })

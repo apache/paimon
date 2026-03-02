@@ -43,6 +43,7 @@ import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -189,6 +190,8 @@ public class FormatReadBuilder implements ReadBuilder {
             return new DataFileRecordReader(
                     readType(),
                     reader,
+                    options.scanIgnoreCorruptFile(),
+                    options.scanIgnoreLostFile(),
                     null,
                     null,
                     PartitionUtils.create(partitionMapping, dataSplit.partition()),
@@ -196,7 +199,8 @@ public class FormatReadBuilder implements ReadBuilder {
                     null,
                     0,
                     Collections.emptyMap(),
-                    null);
+                    null,
+                    formatReaderContext.filePath());
         } catch (Exception e) {
             FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
             throw e;
@@ -240,6 +244,11 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withRowRanges(List<Range> rowRanges) {
         throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
+    }
+
+    @Override
+    public ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRangeIndex.");
     }
 
     @Override

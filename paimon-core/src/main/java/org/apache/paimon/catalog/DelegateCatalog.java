@@ -127,6 +127,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listTableDetails(databaseName);
+    }
+
+    @Override
     public PagedList<Identifier> listTablesPagedGlobally(
             String databaseNamePattern,
             String tableNamePattern,

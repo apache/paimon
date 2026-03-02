@@ -30,7 +30,7 @@ from pypaimon.globalindex.global_index_scan_builder import (
     GlobalIndexScanBuilder,
     RowRangeGlobalIndexScanner,
 )
-from pypaimon.globalindex.range import Range
+from pypaimon.utils.range import Range
 
 __all__ = [
     'GlobalIndexResult',

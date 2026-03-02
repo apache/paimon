@@ -391,9 +391,7 @@ public class ConflictDetection {
                         .collect(Collectors.toList());
 
         RangeHelper<SimpleFileEntry> rangeHelper =
-                new RangeHelper<>(
-                        SimpleFileEntry::nonNullFirstRowId,
-                        f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+                new RangeHelper<>(SimpleFileEntry::nonNullRowIdRange);
         List<List<SimpleFileEntry>> merged = rangeHelper.mergeOverlappingRanges(entries);
         for (List<SimpleFileEntry> group : merged) {
             List<SimpleFileEntry> dataFiles = new ArrayList<>();
@@ -450,9 +448,8 @@ public class ConflictDetection {
                     commitScanner.readIncrementalEntries(snapshot, changedPartitions);
             for (ManifestEntry entry : changes) {
                 DataFileMeta file = entry.file();
-                long firstRowId = file.nonNullFirstRowId();
-                if (firstRowId < checkNextRowId) {
-                    Range fileRange = new Range(firstRowId, firstRowId + file.rowCount() - 1);
+                Range fileRange = file.nonNullRowIdRange();
+                if (fileRange.from < checkNextRowId) {
                     for (Range range : historyIdRanges) {
                         if (range.hasIntersection(fileRange)) {
                             return Optional.of(

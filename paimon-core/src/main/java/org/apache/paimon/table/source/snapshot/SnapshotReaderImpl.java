@@ -60,6 +60,7 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -307,8 +308,14 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withRowRanges(List<Range> rowRanges) {
-        scan.withRowRanges(rowRanges);
+    public SnapshotReader withRowRanges(List<Range> sortedPushdownRowRanges) {
+        scan.withRowRanges(sortedPushdownRowRanges);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        scan.withRowRangeIndex(rowRangeIndex);
         return this;
     }
 

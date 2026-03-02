@@ -28,6 +28,7 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import java.io.Serializable;
 import java.util.List;
@@ -158,6 +159,14 @@ public interface ReadBuilder extends Serializable {
      * @param rowRanges the row id ranges to be read
      */
     ReadBuilder withRowRanges(List<Range> rowRanges);
+
+    /**
+     * Specify the row range index to be read. This is usually used to read specific rows in
+     * data-evolution table.
+     *
+     * @param rowRangeIndex the indexed row id ranges to be read
+     */
+    ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex);
 
     /**
      * Push vector search to the reader.

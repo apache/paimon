@@ -42,7 +42,7 @@ def read_requirements():
 install_requires = read_requirements()
 
 long_description = "See Apache Paimon Python API \
-[Doc](https://paimon.apache.org/docs/master/program-api/python-api/) for usage."
+[Doc](https://paimon.apache.org/docs/master/pypaimon/python-api/) for usage."
 
 setup(
     name="pypaimon",

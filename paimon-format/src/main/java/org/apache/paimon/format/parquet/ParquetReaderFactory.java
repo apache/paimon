@@ -119,7 +119,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         List<ParquetField> fields = buildFieldsList(readFields, columnIO, requestedSchema);
 
         return new VectorizedParquetRecordReader(
-                context.filePath(), reader, fileSchema, fields, writableVectors, batchSize);
+                context.filePath(),
+                reader,
+                fileSchema,
+                fields,
+                writableVectors,
+                batchSize,
+                context.fileIO());
     }
 
     /** Clips `parquetSchema` according to `fieldNames`. */

@@ -372,6 +372,10 @@ under the License.
                                     <pattern>org.apache.kafka</pattern>
                                     <shadedPattern>org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>
                                 </relocation>
+                                <relocation>
+                                    <pattern>com.zaxxer</pattern>
+                                    <shadedPattern>org.apache.flink.cdc.connectors.shaded.com.zaxxer</shadedPattern>
+                                </relocation>
                             </relocations>
                         </configuration>
                     </execution>

@@ -178,6 +178,14 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return result;
     }
 
+    public long recordsPerRange() {
+        return recordsPerRange;
+    }
+
+    public RowIdIndexFieldsExtractor extractor() {
+        return extractor;
+    }
+
     public List<CommitMessage> build(Range rowRange, Iterator<InternalRow> data)
             throws IOException {
         long counter = 0;
@@ -218,7 +226,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return commitMessages;
     }
 
-    private GlobalIndexParallelWriter createWriter() throws IOException {
+    public GlobalIndexParallelWriter createWriter() throws IOException {
         GlobalIndexParallelWriter currentWriter;
         GlobalIndexWriter indexWriter = createIndexWriter(table, indexType, indexField, options);
         if (!(indexWriter instanceof GlobalIndexParallelWriter)) {
@@ -230,7 +238,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return currentWriter;
     }
 
-    private CommitMessage flushIndex(
+    public CommitMessage flushIndex(
             Range rowRange, List<ResultEntry> resultEntries, BinaryRow partition)
             throws IOException {
         List<IndexFileMeta> indexFileMetas =
@@ -245,9 +253,9 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         long end = Long.MIN_VALUE;
         for (DataSplit dataSplit : dataSplits) {
             for (DataFileMeta file : dataSplit.dataFiles()) {
-                long firstRowId = file.nonNullFirstRowId();
-                start = Math.min(start, firstRowId);
-                end = Math.max(end, firstRowId + file.rowCount());
+                Range range = file.nonNullRowIdRange();
+                start = Math.min(start, range.from);
+                end = Math.max(end, range.to);
             }
         }
         return start == Long.MAX_VALUE ? null : new Range(start, end);

@@ -26,13 +26,12 @@ import javax.crypto.spec.SecretKeySpec;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
-import java.util.TimeZone;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -65,20 +64,25 @@ public class DLFOpenApiSigner implements DLFRequestSigner {
     private static final String SIGNATURE_VERSION_VALUE = "1.0";
     private static final String API_VERSION = "2026-01-18";
 
-    private static final SimpleDateFormat GMT_DATE_FORMATTER =
-            new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.ENGLISH);
-
-    static {
-        GMT_DATE_FORMATTER.setTimeZone(TimeZone.getTimeZone("GMT"));
-    }
+    private static final DateTimeFormatter GMT_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'")
+                    .withZone(ZoneId.of("GMT"));
 
     @Override
     public Map<String, String> signHeaders(
             @Nullable String body, Instant now, @Nullable String securityToken, String host) {
+        // Parameter validation
+        if (now == null) {
+            throw new IllegalArgumentException("Parameter 'now' cannot be null");
+        }
+        if (host == null) {
+            throw new IllegalArgumentException("Parameter 'host' cannot be null");
+        }
+
         Map<String, String> headers = new HashMap<>();
 
         // Date header (GMT format)
-        String dateStr = GMT_DATE_FORMATTER.format(java.util.Date.from(now));
+        String dateStr = GMT_DATE_FORMATTER.format(now.atZone(ZoneId.of("GMT")));
         headers.put(DATE_HEADER, dateStr);
 
         // Accept header
@@ -99,7 +103,11 @@ public class DLFOpenApiSigner implements DLFRequestSigner {
 
         // x-acs-* headers
         headers.put(X_ACS_SIGNATURE_METHOD, SIGNATURE_METHOD_VALUE);
-        headers.put(X_ACS_SIGNATURE_NONCE, UUID.randomUUID().toString());
+
+        // Enhanced nonce: UUID + timestamp + thread ID
+        String nonce = generateUniqueNonce();
+        headers.put(X_ACS_SIGNATURE_NONCE, nonce);
+
         headers.put(X_ACS_SIGNATURE_VERSION, SIGNATURE_VERSION_VALUE);
         headers.put(X_ACS_VERSION, API_VERSION);
 
@@ -111,6 +119,20 @@ public class DLFOpenApiSigner implements DLFRequestSigner {
         return headers;
     }
 
+    /**
+     * Generates a unique nonce: UUID + timestamp + thread ID.
+     *
+     * @return unique nonce string
+     */
+    private String generateUniqueNonce() {
+        StringBuilder uniqueNonce = new StringBuilder();
+        UUID uuid = UUID.randomUUID();
+        uniqueNonce.append(uuid.toString());
+        uniqueNonce.append(System.currentTimeMillis());
+        uniqueNonce.append(Thread.currentThread().getId());
+        return uniqueNonce.toString();
+    }
+
     @Override
     public String authorization(
             RESTAuthParameter restAuthParameter,
@@ -118,6 +140,20 @@ public class DLFOpenApiSigner implements DLFRequestSigner {
             String host,
             Map<String, String> signHeaders)
             throws Exception {
+        // Parameter validation
+        if (restAuthParameter == null) {
+            throw new IllegalArgumentException("Parameter 'restAuthParameter' cannot be null");
+        }
+        if (token == null) {
+            throw new IllegalArgumentException("Parameter 'token' cannot be null");
+        }
+        if (host == null) {
+            throw new IllegalArgumentException("Parameter 'host' cannot be null");
+        }
+        if (signHeaders == null) {
+            throw new IllegalArgumentException("Parameter 'signHeaders' cannot be null");
+        }
+
         // Step 1: Build CanonicalizedHeaders (x-acs-* headers, sorted, lowercase)
         String canonicalizedHeaders = buildCanonicalizedHeaders(signHeaders);
 

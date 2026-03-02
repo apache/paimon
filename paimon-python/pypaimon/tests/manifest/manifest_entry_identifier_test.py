@@ -15,6 +15,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import shutil
 import tempfile
 import unittest
 
@@ -39,6 +40,10 @@ class ManifestEntryIdentifierTest(unittest.TestCase):
         cls.tempdir = tempfile.mkdtemp()
         cls.catalog = FileSystemCatalog(Options({CatalogOptions.WAREHOUSE.key(): cls.tempdir}))
         cls.catalog.create_database('default', False)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def setUp(self):
         try:

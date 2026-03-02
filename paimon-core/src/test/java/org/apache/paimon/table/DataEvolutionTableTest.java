@@ -458,6 +458,94 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
     }
 
     @Test
+    public void testLimitPushDownWithoutFilter() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeType = schema.rowType().project(Arrays.asList("f0", "f1"));
+
+        // Write three commits through normal path and verify limit pushdown can reduce scanned
+        // files.
+        for (int i = 0; i < 30; i++) {
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+                write.write(GenericRow.of(i * 2 + 1, BinaryString.fromString("v" + (i * 2 + 1))));
+                write.write(GenericRow.of(i * 2 + 2, BinaryString.fromString("v" + (i * 2 + 2))));
+
+                BatchTableCommit commit = builder.newCommit();
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        for (int i = 0; i < 2; i++) {
+            try (BatchTableWrite write =
+                    builder.newWrite().withWriteType(writeType.project("f1"))) {
+                write.write(GenericRow.of(BinaryString.fromString("v" + (i * 2 + 1))));
+                write.write(GenericRow.of(BinaryString.fromString("v" + (i * 2 + 2))));
+
+                BatchTableCommit commit = builder.newCommit();
+                List<CommitMessage> commitMessages = write.prepareCommit();
+                setFirstRowId(commitMessages, 0L);
+                commit.commit(commitMessages);
+            }
+        }
+
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        TableScan.Plan fullPlan = readBuilder.newScan().plan();
+        TableScan.Plan limitPlan = readBuilder.withLimit(3).newScan().plan();
+
+        int fullFiles =
+                fullPlan.splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .mapToInt(split -> split.dataFiles().size())
+                        .sum();
+        int limitedFiles =
+                limitPlan.splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .mapToInt(split -> split.dataFiles().size())
+                        .sum();
+
+        assertThat(fullFiles).isEqualTo(32);
+        assertThat(limitedFiles).isEqualTo(4);
+        assertThat(limitedFiles).isLessThan(fullFiles);
+    }
+
+    @Test
+    public void testLimitPushDownWithFilterShouldNotEarlyStop() throws Exception {
+        createTableDefault();
+        Schema schema = schemaDefault();
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeType = schema.rowType().project(Arrays.asList("f0", "f1"));
+
+        // Three manifests with different values on f1, only the last one matches filter.
+        for (int i = 0; i < 3; i++) {
+            String value = i == 0 ? "a" : (i == 1 ? "b" : "c");
+            try (BatchTableWrite write = builder.newWrite().withWriteType(writeType)) {
+                write.write(GenericRow.of(i * 2 + 1, BinaryString.fromString(value)));
+                write.write(GenericRow.of(i * 2 + 2, BinaryString.fromString(value)));
+
+                BatchTableCommit commit = builder.newCommit();
+                commit.commit(write.prepareCommit());
+            }
+        }
+
+        ReadBuilder readBuilder = getTableDefault().newReadBuilder();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(schema.rowType());
+        Predicate predicate = predicateBuilder.equal(1, BinaryString.fromString("c"));
+
+        TableScan.Plan plan = readBuilder.withFilter(predicate).withLimit(1).newScan().plan();
+        assertThat(plan.splits().isEmpty()).isFalse();
+
+        RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan);
+        AtomicInteger rowCount = new AtomicInteger(0);
+        reader.forEachRemaining(
+                row -> {
+                    assertThat(row.getString(1).toString()).isEqualTo("c");
+                    rowCount.incrementAndGet();
+                });
+        assertThat(rowCount.get()).isGreaterThan(0);
+    }
+
+    @Test
     public void testWithRowIdsFilterManifestEntries() throws Exception {
         innerTestWithRowIds(true);
     }

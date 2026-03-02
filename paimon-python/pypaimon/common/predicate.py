@@ -76,7 +76,7 @@ class Predicate:
         null_count = stat.null_counts[self.index]
 
         if self.method == 'isNull':
-            return null_count is not None and null_count > 0
+            return null_count is None or null_count > 0
         if self.method == 'isNotNull':
             return null_count is None or row_count is None or null_count < row_count
 

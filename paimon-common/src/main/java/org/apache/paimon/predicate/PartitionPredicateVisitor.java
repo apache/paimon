@@ -32,14 +32,16 @@ public class PartitionPredicateVisitor implements PredicateVisitor<Boolean> {
     @Override
     public Boolean visit(LeafPredicate predicate) {
         Transform transform = predicate.transform();
+        boolean hasFieldRef = false;
         for (Object input : transform.inputs()) {
             if (input instanceof FieldRef) {
+                hasFieldRef = true;
                 if (!partitionKeys.contains(((FieldRef) input).name())) {
                     return false;
                 }
             }
         }
-        return true;
+        return hasFieldRef;
     }
 
     @Override

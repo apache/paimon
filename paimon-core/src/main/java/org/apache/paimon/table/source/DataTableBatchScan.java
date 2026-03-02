@@ -137,17 +137,17 @@ public class DataTableBatchScan extends AbstractDataTableScan {
 
         long scannedRowCount = 0;
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
-        LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }
 
+        LOG.info("Applying limit pushdown. Original splits count: {}", splits.size());
         List<Split> limitedSplits = new ArrayList<>();
-        for (DataSplit dataSplit : splits) {
-            OptionalLong mergedRowCount = dataSplit.mergedRowCount();
+        for (Split split : splits) {
+            OptionalLong mergedRowCount = split.mergedRowCount();
             if (mergedRowCount.isPresent()) {
-                limitedSplits.add(dataSplit);
+                limitedSplits.add(split);
                 scannedRowCount += mergedRowCount.getAsLong();
                 if (scannedRowCount >= pushDownLimit) {
                     SnapshotReader.Plan newPlan =
@@ -193,7 +193,7 @@ public class DataTableBatchScan extends AbstractDataTableScan {
         }
 
         SnapshotReader.Plan plan = ((ScannedResult) result).plan();
-        List<DataSplit> splits = plan.dataSplits();
+        List<Split> splits = plan.splits();
         if (splits.isEmpty()) {
             return Optional.of(result);
         }

@@ -146,18 +146,22 @@ public class IncrementalClusterCompact {
                         .setRangeNumber(sinkParallelism * 10)
                         .build();
         DataStream<RowData> sorted =
-                TableSorter.getSorter(env, sourcePair.getLeft(), table, sortInfo).sort();
+                TableSorter.getSorter(
+                                env,
+                                sourcePair.getLeft(),
+                                table.coreOptions(),
+                                table.rowType(),
+                                sortInfo)
+                        .sort();
 
         // 2.3 write and then reorganize the committable
         // set parallelism to null, and it'll forward parallelism when doWrite()
         RowAppendTableSink sink = new RowAppendTableSink(table, null, null);
-        boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
         DataStream<Committable> written =
                 sink.doWrite(
                         FlinkSinkBuilder.mapToInternalRow(
                                 sorted,
                                 table.rowType(),
-                                blobAsDescriptor,
                                 table.catalogEnvironment().catalogContext()),
                         commitUser,
                         null);

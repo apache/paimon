@@ -200,13 +200,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        initial_result = table_read.to_pandas(table_scan.plan().splits())
-        print(f"Format: {file_format}, Result:\n{initial_result}")
-        self.assertEqual(len(initial_result), 6)
-        # Data order may vary due to partitioning/bucketing, so compare as sets
-        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
-        actual_names = set(initial_result['name'].tolist())
-        self.assertEqual(actual_names, expected_names)
+        result = table_read.to_pandas(table_scan.plan().splits())
+        print(f"Format: {file_format}, Result:\n{result}")
+        self.assertEqual(initial_data.to_dict(), result.to_dict())
 
         from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2
