@@ -60,6 +60,22 @@ class CatalogEnvironment:
             # to create locks based on the catalog lock context
             return RenamingSnapshotCommit(snapshot_manager)
 
+    def catalog_table_rollback(self):
+        """Create a TableRollback instance based on the catalog environment.
+
+        Returns a CatalogTableRollback that delegates to catalog.rollback_to
+        when catalog_loader is available and version management is supported.
+        Returns None otherwise (fallback to local file cleanup).
+
+        Returns:
+            A CatalogTableRollback instance, or None.
+        """
+        if self.catalog_loader is not None and self.supports_version_management:
+            from pypaimon.catalog.table_rollback import CatalogTableRollback
+            catalog = self.catalog_loader.load()
+            return CatalogTableRollback(catalog, self.identifier)
+        return None
+
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':
         """
         Create a copy of this CatalogEnvironment with a different identifier.
