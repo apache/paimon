@@ -2592,14 +2592,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // Test with RESTApi directly
         RESTApi api = ((RESTCatalog) catalog).api();
-        List<ListConsumersResponse.ConsumerEntry> consumers =
+        List<ListConsumersResponse.ConsumerInfo> consumers =
                 PagedList.listAllFromPagedApi(
                         token -> api.listConsumersPaged(identifier, null, token));
         assertThat(consumers)
-                .extracting(ListConsumersResponse.ConsumerEntry::getConsumerId)
+                .extracting(ListConsumersResponse.ConsumerInfo::getConsumerId)
                 .containsExactlyInAnyOrder("consumer1", "consumer2");
         assertThat(consumers)
-                .extracting(ListConsumersResponse.ConsumerEntry::getNextSnapshot)
+                .extracting(ListConsumersResponse.ConsumerInfo::getNextSnapshot)
                 .containsExactlyInAnyOrder(1L, 2L);
     }
 

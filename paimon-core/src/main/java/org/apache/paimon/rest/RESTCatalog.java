@@ -52,6 +52,7 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
+import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -62,16 +63,16 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
-import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
+import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -359,17 +360,12 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<Map.Entry<String, Long>> listConsumersPaged(
-            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+    public PagedList<ListConsumersResponse.ConsumerInfo>
+            listConsumersPaged(
+                    Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
             throws TableNotExistException {
         try {
-            PagedList<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerEntry>
-                    entries = api.listConsumersPaged(identifier, maxResults, pageToken);
-            return new PagedList<>(
-                    entries.getElements().stream()
-                            .map(e -> new AbstractMap.SimpleEntry<>(e.getConsumerId(), e.getNextSnapshot()))
-                            .collect(Collectors.toList()),
-                    entries.getNextPageToken());
+            return api.listConsumersPaged(identifier, maxResults, pageToken);
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -1048,7 +1044,7 @@ public class RESTCatalog implements Catalog {
                 throw new TagAlreadyExistException(identifier, tagName);
             }
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new SnapshotNotExistException(
                         String.format(
                                 "Snapshot %s in table %s doesn't exist.",
@@ -1105,7 +1101,7 @@ public class RESTCatalog implements Catalog {
         try {
             api.deleteTag(identifier, tagName);
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new TagNotExistException(identifier, tagName);
             }
             throw new TableNotExistException(identifier);

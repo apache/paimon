@@ -745,7 +745,7 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    default PagedList<Map.Entry<String, Long>> listConsumersPaged(
+    default PagedList<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerInfo> listConsumersPaged(
             Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
             throws TableNotExistException {
         throw new UnsupportedOperationException(

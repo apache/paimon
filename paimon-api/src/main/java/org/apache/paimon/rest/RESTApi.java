@@ -608,7 +608,7 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public PagedList<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerEntry>
+    public PagedList<ListConsumersResponse.ConsumerInfo>
             listConsumersPaged(
                     Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
         ListConsumersResponse response =
@@ -618,7 +618,7 @@ public class RESTApi {
                         buildPagedQueryParams(maxResults, pageToken),
                         ListConsumersResponse.class,
                         restAuthFunction);
-        List<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerEntry> consumers =
+        List<ListConsumersResponse.ConsumerInfo> consumers =
                 response.getConsumers();
         if (consumers == null) {
             return new PagedList<>(emptyList(), null);

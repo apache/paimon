@@ -27,36 +27,36 @@ import java.util.List;
 
 /** Response for list consumers. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListConsumersResponse implements PagedResponse<ListConsumersResponse.ConsumerEntry> {
+public class ListConsumersResponse implements PagedResponse<ListConsumersResponse.ConsumerInfo> {
 
     private static final String FIELD_CONSUMERS = "consumers";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
 
     @JsonProperty(FIELD_CONSUMERS)
-    private final List<ConsumerEntry> consumers;
+    private final List<ConsumerInfo> consumers;
 
     @JsonProperty(FIELD_NEXT_PAGE_TOKEN)
     private final String nextPageToken;
 
-    public ListConsumersResponse(@JsonProperty(FIELD_CONSUMERS) List<ConsumerEntry> consumers) {
+    public ListConsumersResponse(@JsonProperty(FIELD_CONSUMERS) List<ConsumerInfo> consumers) {
         this(consumers, null);
     }
 
     @JsonCreator
     public ListConsumersResponse(
-            @JsonProperty(FIELD_CONSUMERS) List<ConsumerEntry> consumers,
+            @JsonProperty(FIELD_CONSUMERS) List<ConsumerInfo> consumers,
             @JsonProperty(FIELD_NEXT_PAGE_TOKEN) String nextPageToken) {
         this.consumers = consumers;
         this.nextPageToken = nextPageToken;
     }
 
     @JsonGetter(FIELD_CONSUMERS)
-    public List<ConsumerEntry> getConsumers() {
+    public List<ConsumerInfo> getConsumers() {
         return this.consumers;
     }
 
     @Override
-    public List<ConsumerEntry> data() {
+    public List<ConsumerInfo> data() {
         return this.consumers;
     }
 
@@ -67,7 +67,7 @@ public class ListConsumersResponse implements PagedResponse<ListConsumersRespons
 
     /** Entry representing a consumer with id and nextSnapshot. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class ConsumerEntry {
+    public static class ConsumerInfo {
         private static final String FIELD_CONSUMER_ID = "consumerId";
         private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";
 
@@ -78,7 +78,7 @@ public class ListConsumersResponse implements PagedResponse<ListConsumersRespons
         private final Long nextSnapshot;
 
         @JsonCreator
-        public ConsumerEntry(
+        public ConsumerInfo(
                 @JsonProperty(FIELD_CONSUMER_ID) String consumerId,
                 @JsonProperty(FIELD_NEXT_SNAPSHOT) Long nextSnapshot) {
             this.consumerId = consumerId;

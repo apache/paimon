@@ -783,13 +783,13 @@ public class RESTCatalogServer {
         ConsumerManager consumerManager =
                 new ConsumerManager(table.fileIO(), table.location(), table.branch());
         Map<String, Long> consumers = consumerManager.consumers();
-        List<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerEntry>
+        List<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerInfo>
                 consumerEntries =
                         consumers.entrySet().stream()
                                 .map(
                                         e ->
                                                 new org.apache.paimon.rest.responses
-                                                        .ListConsumersResponse.ConsumerEntry(
+                                                        .ListConsumersResponse.ConsumerInfo(
                                                         e.getKey(), e.getValue()))
                                 .collect(Collectors.toList());
         ListConsumersResponse response = new ListConsumersResponse(consumerEntries, null);
