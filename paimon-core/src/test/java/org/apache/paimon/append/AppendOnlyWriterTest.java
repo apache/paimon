@@ -73,6 +73,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -575,6 +576,34 @@ public class AppendOnlyWriterTest {
         writer.close();
     }
 
+    @Test
+    public void testVectorStoreSameFormatUsesRowDataWriter() throws Exception {
+        FileFormat format = FileFormat.fromIdentifier(AVRO, new Options());
+        AppendOnlyWriter writer =
+                createVectorStoreWriter(1024 * 1024L, format, Collections.singletonList("name"));
+        writer.write(row(1, "AAA", PART));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(meta.fileName()).doesNotContain(".vector-store");
+    }
+
+    @Test
+    public void testAllVectorStoreColumnsUseVectorStorePath() throws Exception {
+        FileFormat format = FileFormat.fromIdentifier(AVRO, new Options());
+        AppendOnlyWriter writer =
+                createVectorStoreWriter(1024 * 1024L, format, Arrays.asList("id", "name", "dt"));
+        writer.write(row(1, "AAA", PART));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(meta.fileName()).contains(".vector-store");
+    }
+
     private SimpleColStats initStats(Integer min, Integer max, long nullCount) {
         return new SimpleColStats(min, max, nullCount);
     }
@@ -665,6 +694,58 @@ public class AppendOnlyWriterTest {
             boolean hasIoManager,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.stats-mode", "truncate(16)");
+        return createWriterBase(
+                targetFileSize,
+                null,
+                Collections.emptyList(),
+                forceCompact,
+                useWriteBuffer,
+                spillable,
+                hasIoManager,
+                scannedFiles,
+                compactBefore -> {
+                    latch.await();
+                    return compactBefore.isEmpty()
+                            ? Collections.emptyList()
+                            : Collections.singletonList(generateCompactAfter(compactBefore));
+                },
+                options);
+    }
+
+    private AppendOnlyWriter createVectorStoreWriter(
+            long targetFileSize,
+            FileFormat vectorStoreFileFormat,
+            List<String> vectorStoreFieldNames) {
+        Map<String, String> options = new HashMap<>();
+        options.put("metadata.stats-mode", "truncate(16)");
+        options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
+        return createWriterBase(
+                        targetFileSize,
+                        vectorStoreFileFormat,
+                        vectorStoreFieldNames,
+                        false,
+                        true,
+                        false,
+                        true,
+                        Collections.emptyList(),
+                        compactBefore -> Collections.emptyList(),
+                        options)
+                .getKey();
+    }
+
+    private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriterBase(
+            long targetFileSize,
+            FileFormat vectorStoreFileFormat,
+            List<String> vectorStoreFieldNames,
+            boolean forceCompact,
+            boolean useWriteBuffer,
+            boolean spillable,
+            boolean hasIoManager,
+            List<DataFileMeta> scannedFiles,
+            BucketedAppendCompactManager.CompactRewriter rewriter,
+            Map<String, String> optionsMap) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         BucketedAppendCompactManager compactManager =
@@ -677,22 +758,18 @@ public class AppendOnlyWriterTest {
                         targetFileSize,
                         targetFileSize / 10 * 7,
                         false,
-                        compactBefore -> {
-                            latch.await();
-                            return compactBefore.isEmpty()
-                                    ? Collections.emptyList()
-                                    : Collections.singletonList(
-                                            generateCompactAfter(compactBefore));
-                        },
+                        rewriter,
                         null);
-        CoreOptions options =
-                new CoreOptions(Collections.singletonMap("metadata.stats-mode", "truncate(16)"));
+        CoreOptions options = new CoreOptions(optionsMap);
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
                         hasIoManager ? IOManager.create(tempDir.toString()) : null,
                         SCHEMA_ID,
                         fileFormat,
+                        vectorStoreFileFormat,
+                        vectorStoreFieldNames,
+                        targetFileSize,
                         targetFileSize,
                         targetFileSize,
                         AppendOnlyWriterTest.SCHEMA,

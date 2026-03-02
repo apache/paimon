@@ -895,7 +895,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         // Create coordinator and call plan multiple times
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false);
+                new DataEvolutionCompactCoordinator(table, false, false);
 
         // Each plan() call processes one manifest group
         List<DataEvolutionCompactTask> allTasks = new ArrayList<>();
@@ -926,7 +926,7 @@ public class DataEvolutionTableTest extends DataEvolutionTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         // Create coordinator and call plan multiple times
         DataEvolutionCompactCoordinator coordinator =
-                new DataEvolutionCompactCoordinator(table, false);
+                new DataEvolutionCompactCoordinator(table, false, false);
 
         // Each plan() call processes one manifest group
         List<CommitMessage> commitMessages = new ArrayList<>();

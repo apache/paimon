@@ -28,14 +28,18 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.FileWriterAbortExecutor;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.io.RollingFileWriterImpl;
 import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StatsCollectorFactories;
+import org.apache.paimon.utils.VectorStoreUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,9 +75,10 @@ import java.util.function.Supplier;
  *
  * </pre>
  */
-public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, DataFileMeta> {
+public class DataEvolutionRollingFileWriter
+        implements RollingFileWriter<InternalRow, DataFileMeta> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(RollingBlobFileWriter.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DataEvolutionRollingFileWriter.class);
 
     /** Constant for checking rolling condition periodically. */
     private static final long CHECK_ROLLING_RECORD_CNT = 1000L;
@@ -83,6 +88,10 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                     ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>>
             writerFactory;
     private final Supplier<MultipleBlobFileWriter> blobWriterFactory;
+    private final Supplier<
+                    ProjectedFileWriter<
+                            RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>>
+            vectorStoreWriterFactory;
     private final long targetFileSize;
     private final Set<String> blobDescriptorFields;
 
@@ -93,15 +102,21 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     private ProjectedFileWriter<SingleFileWriter<InternalRow, DataFileMeta>, DataFileMeta>
             currentWriter;
     private MultipleBlobFileWriter blobWriter;
+    private ProjectedFileWriter<
+                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
+            vectorStoreWriter;
     private long recordCount = 0;
     private boolean closed = false;
 
-    public RollingBlobFileWriter(
+    public DataEvolutionRollingFileWriter(
             FileIO fileIO,
             long schemaId,
             FileFormat fileFormat,
+            FileFormat vectorStoreFileFormat,
+            List<String> vectorStoreFieldNames,
             long targetFileSize,
             long blobTargetFileSize,
+            long vectorStoreTargetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             Supplier<LongCounter> seqNumCounterSupplier,
@@ -119,13 +134,30 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
         this.closedWriters = new ArrayList<>();
         this.blobDescriptorFields = blobDescriptorFields;
 
+        // Split into normal, blob, and vector-store parts
+        RowType normalRowType, blobRowType, vectorStoreRowType;
+        {
+            Pair<RowType, RowType> typeWithNormalAndBlob =
+                    BlobType.splitBlob(writeSchema, blobDescriptorFields);
+            normalRowType = typeWithNormalAndBlob.getLeft();
+            blobRowType = typeWithNormalAndBlob.getRight();
+            if (VectorStoreUtils.isDifferentFormat(vectorStoreFileFormat, fileFormat)) {
+                Pair<RowType, RowType> typeWithVectorStore =
+                        VectorStoreUtils.splitVectorStore(normalRowType, vectorStoreFieldNames);
+                normalRowType = typeWithVectorStore.getLeft();
+                vectorStoreRowType = typeWithVectorStore.getRight();
+            } else {
+                vectorStoreRowType = new RowType(Collections.emptyList());
+            }
+        }
+
         // Initialize writer factory for normal data
         this.writerFactory =
                 createNormalWriterFactory(
                         fileIO,
                         schemaId,
                         fileFormat,
-                        BlobType.splitBlob(writeSchema, blobDescriptorFields).getLeft(),
+                        normalRowType,
                         writeSchema,
                         pathFactory,
                         seqNumCounterSupplier,
@@ -137,20 +169,46 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                         statsDenseStore);
 
         // Initialize blob writer
-        this.blobWriterFactory =
-                () ->
-                        new MultipleBlobFileWriter(
-                                fileIO,
-                                schemaId,
-                                writeSchema,
-                                pathFactory,
-                                seqNumCounterSupplier,
-                                fileSource,
-                                asyncFileWrite,
-                                statsDenseStore,
-                                blobTargetFileSize,
-                                blobConsumer,
-                                this.blobDescriptorFields);
+        if (!blobRowType.getFields().isEmpty()) {
+            this.blobWriterFactory =
+                    () ->
+                            new MultipleBlobFileWriter(
+                                    fileIO,
+                                    schemaId,
+                                    writeSchema,
+                                    pathFactory,
+                                    seqNumCounterSupplier,
+                                    fileSource,
+                                    asyncFileWrite,
+                                    statsDenseStore,
+                                    blobTargetFileSize,
+                                    blobConsumer,
+                                    this.blobDescriptorFields);
+        } else {
+            this.blobWriterFactory = null;
+        }
+
+        // Initialize vector-store writer
+        if (!vectorStoreRowType.getFields().isEmpty()) {
+            this.vectorStoreWriterFactory =
+                    () ->
+                            createVectorStoreWriter(
+                                    fileIO,
+                                    vectorStoreFileFormat,
+                                    schemaId,
+                                    vectorStoreRowType,
+                                    writeSchema,
+                                    pathFactory,
+                                    seqNumCounterSupplier,
+                                    fileCompression,
+                                    statsCollectorFactories.statsCollectors(vectorStoreFieldNames),
+                                    fileSource,
+                                    asyncFileWrite,
+                                    statsDenseStore,
+                                    vectorStoreTargetFileSize);
+        } else {
+            this.vectorStoreWriterFactory = null;
+        }
     }
 
     /** Creates a factory for normal data writers. */
@@ -197,6 +255,53 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
         };
     }
 
+    /** Creates a vector-store writer for handling vector-store data. */
+    private static ProjectedFileWriter<
+                    RollingFileWriterImpl<InternalRow, DataFileMeta>, List<DataFileMeta>>
+            createVectorStoreWriter(
+                    FileIO fileIO,
+                    FileFormat vectorStoreFileFormat,
+                    long schemaId,
+                    RowType vectorStoreRowType,
+                    RowType writeSchema,
+                    DataFilePathFactory pathFactory,
+                    Supplier<LongCounter> seqNumCounterSupplier,
+                    String fileCompression,
+                    SimpleColStatsCollector.Factory[] statsCollectors,
+                    FileSource fileSource,
+                    boolean asyncFileWrite,
+                    boolean statsDenseStore,
+                    long targetFileSize) {
+
+        List<String> vectorStoreFieldNames = vectorStoreRowType.getFieldNames();
+
+        int[] vectorStoreProjection = writeSchema.projectIndexes(vectorStoreFieldNames);
+        DataFilePathFactory vectorStorePathFactory =
+                pathFactory.vectorStorePathFactory(vectorStoreFileFormat.getFormatIdentifier());
+        return new ProjectedFileWriter<>(
+                new RollingFileWriterImpl<>(
+                        () ->
+                                new RowDataFileWriter(
+                                        fileIO,
+                                        RollingFileWriter.createFileWriterContext(
+                                                vectorStoreFileFormat,
+                                                vectorStoreRowType,
+                                                statsCollectors,
+                                                fileCompression),
+                                        vectorStorePathFactory.newPath(),
+                                        vectorStoreRowType,
+                                        schemaId,
+                                        seqNumCounterSupplier,
+                                        new FileIndexOptions(),
+                                        fileSource,
+                                        asyncFileWrite,
+                                        statsDenseStore,
+                                        pathFactory.isExternalPath(),
+                                        vectorStoreFieldNames),
+                        targetFileSize),
+                vectorStoreProjection);
+    }
+
     /**
      * Writes a single row to both normal and blob writers. Automatically handles file rolling when
      * target size is reached.
@@ -210,11 +315,19 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             if (currentWriter == null) {
                 currentWriter = writerFactory.get();
             }
-            if (blobWriter == null) {
+            if ((blobWriter == null) && (blobWriterFactory != null)) {
                 blobWriter = blobWriterFactory.get();
             }
+            if ((vectorStoreWriter == null) && (vectorStoreWriterFactory != null)) {
+                vectorStoreWriter = vectorStoreWriterFactory.get();
+            }
             currentWriter.write(row);
-            blobWriter.write(row);
+            if (blobWriter != null) {
+                blobWriter.write(row);
+            }
+            if (vectorStoreWriter != null) {
+                vectorStoreWriter.write(row);
+            }
             recordCount++;
 
             if (rollingFile()) {
@@ -274,6 +387,10 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             blobWriter.abort();
             blobWriter = null;
         }
+        if (vectorStoreWriter != null) {
+            vectorStoreWriter.abort();
+            vectorStoreWriter = null;
+        }
     }
 
     /** Checks if the current file should be rolled based on size and record count. */
@@ -300,12 +417,16 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
         // Close blob writer and process blob metadata
         List<DataFileMeta> blobMetas = closeBlobWriter();
 
+        // Close vector-store writer and process vector-store metadata
+        List<DataFileMeta> vectorStoreMetas = closeVectorStoreWriter();
+
         // Validate consistency between main and blob files
-        validateFileConsistency(mainDataFileMeta, blobMetas);
+        validateFileConsistency(mainDataFileMeta, blobMetas, vectorStoreMetas);
 
         // Add results to the results list
         results.add(mainDataFileMeta);
         results.addAll(blobMetas);
+        results.addAll(vectorStoreMetas);
 
         // Reset current writer
         currentWriter = null;
@@ -329,9 +450,22 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
         return results;
     }
 
+    /** Closes the vector-store writer and processes blob metadata with appropriate tags. */
+    private List<DataFileMeta> closeVectorStoreWriter() throws IOException {
+        if (vectorStoreWriter == null) {
+            return Collections.emptyList();
+        }
+        vectorStoreWriter.close();
+        List<DataFileMeta> results = vectorStoreWriter.result();
+        vectorStoreWriter = null;
+        return results;
+    }
+
     /** Validates that the row counts match between main and blob files. */
     private void validateFileConsistency(
-            DataFileMeta mainDataFileMeta, List<DataFileMeta> blobTaggedMetas) {
+            DataFileMeta mainDataFileMeta,
+            List<DataFileMeta> blobTaggedMetas,
+            List<DataFileMeta> vectorStoreMetas) {
         long mainRowCount = mainDataFileMeta.rowCount();
 
         Map<String, Long> blobRowCounts = new HashMap<>();
@@ -339,6 +473,9 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             long count = file.rowCount();
             blobRowCounts.compute(file.writeCols().get(0), (k, v) -> v == null ? count : v + count);
         }
+        long vectorStoreRowCount =
+                vectorStoreMetas.stream().mapToLong(DataFileMeta::rowCount).sum();
+
         for (String blobFieldName : blobRowCounts.keySet()) {
             long blobRowCount = blobRowCounts.get(blobFieldName);
             if (mainRowCount != blobRowCount) {
@@ -348,6 +485,13 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                                         + "Main file: %s (row count: %d), blob field name: %s (row count: %d)",
                                 mainDataFileMeta, mainRowCount, blobFieldName, blobRowCount));
             }
+        }
+        if (!vectorStoreMetas.isEmpty() && (mainRowCount != vectorStoreRowCount)) {
+            throw new IllegalStateException(
+                    String.format(
+                            "This is a bug: The row count of main file and vector-store files does not match. "
+                                    + "Main file: %s (row count: %d), vector-store files: %s (total row count: %d)",
+                            mainDataFileMeta, mainRowCount, vectorStoreMetas, vectorStoreRowCount));
         }
     }
 
