@@ -129,8 +129,8 @@ def _dict_to_schema_change(change_dict: dict) -> SchemaChange:
                 if field_name is None:
                     raise ValueError(f"Missing fieldName field in Move: {move_dict}")
                 reference_field = (
-                    move_dict.get("referenceFieldName") or
-                    move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME)
+                        move_dict.get("referenceFieldName") or
+                        move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME)
                 )
                 move = Move(
                     field_name=field_name,
@@ -480,6 +480,8 @@ class RESTCatalogServer:
                 return self._table_commit_handle(method, data, lookup_identifier, branch_part)
             elif operation == "token":
                 return self._table_token_handle(method, lookup_identifier)
+            elif operation == "rollback":
+                return self._table_rollback_handle(method, data, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
@@ -540,8 +542,8 @@ class RESTCatalogServer:
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
                 table_dir = (
-                    Path(self.data_path) / self.warehouse / database_name /
-                    create_table.identifier.get_object_name() / 'schema'
+                        Path(self.data_path) / self.warehouse / database_name /
+                        create_table.identifier.get_object_name() / 'schema'
                 )
                 if not table_dir.exists():
                     table_dir.mkdir(parents=True)
@@ -661,6 +663,178 @@ class RESTCatalogServer:
             return self._mock_response(
                 ErrorResponse(None, None, f"Commit failed: {str(e)}", 500), 500
             )
+
+    def _table_rollback_handle(self, method: str, data: str,
+                               identifier: Identifier) -> Tuple[str, int]:
+        """Handle table rollback operations"""
+        if method != "POST":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        try:
+            import json as json_module
+            from pypaimon.api.api_request import RollbackTableRequest
+            from pypaimon.table.instant import Instant, SnapshotInstant, TagInstant
+
+            request_dict = json_module.loads(data)
+            instant_dict = request_dict.get("instant")
+            from_snapshot = request_dict.get("fromSnapshot")
+
+            instant = Instant.from_dict(instant_dict)
+
+            if isinstance(instant, SnapshotInstant):
+                return self._rollback_table_by_snapshot(
+                    identifier, instant.snapshot_id, from_snapshot)
+            elif isinstance(instant, TagInstant):
+                return self._rollback_table_by_tag(identifier, instant.tag_name)
+            else:
+                return self._mock_response(
+                    ErrorResponse(None, None, "Unknown instant type", 400), 400)
+
+        except Exception as e:
+            self.logger.error(f"Error in rollback operation: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            return self._mock_response(
+                ErrorResponse(None, None, f"Rollback failed: {str(e)}", 500), 500)
+
+    def _rollback_table_by_snapshot(self, identifier: Identifier, snapshot_id: int,
+                                    from_snapshot: Optional[int]) -> Tuple[str, int]:
+        """Rollback table to a specific snapshot ID."""
+        import os
+
+        table_path = os.path.join(
+            self.data_path, self.warehouse,
+            identifier.get_database_name(), identifier.get_object_name())
+        snapshot_dir = os.path.join(table_path, "snapshot")
+
+        target_snapshot_file = os.path.join(snapshot_dir, f"snapshot-{snapshot_id}")
+        if not os.path.exists(target_snapshot_file):
+            return self._mock_response(
+                ErrorResponse(ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                              str(snapshot_id), "", 404), 404)
+
+        latest_file = os.path.join(snapshot_dir, "LATEST")
+        if os.path.exists(latest_file):
+            latest_snapshot_id = int(open(latest_file).read().strip())
+        else:
+            return self._mock_response(
+                ErrorResponse(None, None, "No latest snapshot found", 500), 500)
+
+        if from_snapshot is not None and from_snapshot != latest_snapshot_id:
+            return self._mock_response(
+                ErrorResponse(None, None,
+                              f"Latest snapshot {latest_snapshot_id} is not {from_snapshot}",
+                              500), 500)
+
+        # Delete snapshots larger than target
+        for sid in range(snapshot_id + 1, latest_snapshot_id + 1):
+            snapshot_file = os.path.join(snapshot_dir, f"snapshot-{sid}")
+            if os.path.exists(snapshot_file):
+                os.remove(snapshot_file)
+
+        # Update LATEST
+        with open(latest_file, 'w') as f:
+            f.write(str(snapshot_id))
+
+        # Clean tags whose snapshot id is larger than target
+        tag_dir = os.path.join(table_path, "tag")
+        if os.path.isdir(tag_dir):
+            from pypaimon.common.json_util import JSON as json_util
+            from pypaimon.tag.tag import Tag
+            for tag_file_name in os.listdir(tag_dir):
+                tag_file_path = os.path.join(tag_dir, tag_file_name)
+                if os.path.isfile(tag_file_path) and tag_file_name.startswith("tag-"):
+                    try:
+                        tag_content = open(tag_file_path).read()
+                        tag_obj = json_util.from_json(tag_content, Tag)
+                        tag_snapshot = tag_obj.trim_to_snapshot()
+                        if tag_snapshot.id > snapshot_id:
+                            os.remove(tag_file_path)
+                    except Exception:
+                        pass
+
+        return "", 200
+
+    def _rollback_table_by_tag(self, identifier: Identifier,
+                               tag_name: str) -> Tuple[str, int]:
+        """Rollback table to a specific tag."""
+        import os
+        from pypaimon.common.json_util import JSON as json_util
+        from pypaimon.tag.tag import Tag
+
+        table_path = os.path.join(
+            self.data_path, self.warehouse,
+            identifier.get_database_name(), identifier.get_object_name())
+
+        tag_dir = os.path.join(table_path, "tag")
+        tag_file = os.path.join(tag_dir, f"tag-{tag_name}")
+
+        if not os.path.isfile(tag_file):
+            return self._mock_response(
+                ErrorResponse(ErrorResponse.RESOURCE_TYPE_TAG,
+                              tag_name, "", 404), 404)
+
+        tag_content = open(tag_file).read()
+        tag_obj = json_util.from_json(tag_content, Tag)
+        tag_snapshot = tag_obj.trim_to_snapshot()
+        target_snapshot_id = tag_snapshot.id
+
+        snapshot_dir = os.path.join(table_path, "snapshot")
+        latest_file = os.path.join(snapshot_dir, "LATEST")
+        if os.path.exists(latest_file):
+            latest_snapshot_id = int(open(latest_file).read().strip())
+        else:
+            return self._mock_response(
+                ErrorResponse(None, None, "No latest snapshot found", 500), 500)
+
+        # Delete snapshots larger than target
+        for sid in range(target_snapshot_id + 1, latest_snapshot_id + 1):
+            snapshot_file = os.path.join(snapshot_dir, f"snapshot-{sid}")
+            if os.path.exists(snapshot_file):
+                os.remove(snapshot_file)
+
+        # Update LATEST
+        with open(latest_file, 'w') as f:
+            f.write(str(target_snapshot_id))
+
+        # Ensure target snapshot file exists (create from tag if needed)
+        target_snapshot_file = os.path.join(snapshot_dir, f"snapshot-{target_snapshot_id}")
+        if not os.path.exists(target_snapshot_file):
+            import json as json_module
+            snapshot_data = {
+                "version": getattr(tag_snapshot, 'version', 3),
+                "id": tag_snapshot.id,
+                "schemaId": getattr(tag_snapshot, 'schema_id', 0),
+                "baseManifestList": getattr(tag_snapshot, 'base_manifest_list', ""),
+                "deltaManifestList": getattr(tag_snapshot, 'delta_manifest_list', ""),
+                "totalRecordCount": getattr(tag_snapshot, 'total_record_count', 0),
+                "deltaRecordCount": getattr(tag_snapshot, 'delta_record_count', 0),
+                "commitUser": getattr(tag_snapshot, 'commit_user', 'rest-server'),
+                "commitIdentifier": getattr(tag_snapshot, 'commit_identifier', 0),
+                "commitKind": getattr(tag_snapshot, 'commit_kind', 'APPEND'),
+                "timeMillis": getattr(tag_snapshot, 'time_millis', 0)
+            }
+            with open(target_snapshot_file, 'w') as f:
+                json_module.dump(snapshot_data, f, indent=2)
+
+        # Clean tags whose snapshot id is larger than target
+        if os.path.isdir(tag_dir):
+            for tag_file_name in os.listdir(tag_dir):
+                tag_file_path = os.path.join(tag_dir, tag_file_name)
+                if os.path.isfile(tag_file_path) and tag_file_name.startswith("tag-"):
+                    try:
+                        tc = open(tag_file_path).read()
+                        to = json_util.from_json(tc, Tag)
+                        ts = to.trim_to_snapshot()
+                        if ts.id > target_snapshot_id:
+                            os.remove(tag_file_path)
+                    except Exception:
+                        pass
+
+        return "", 200
 
     def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
         """Write snapshot and related files to the file system"""
@@ -826,8 +1000,8 @@ class RESTCatalogServer:
         table_metadata = self.table_metadata_store[identifier.get_full_name()]
 
         table_path = (
-            Path(self.data_path) / self.warehouse /
-            identifier.get_database_name() / identifier.get_object_name()
+                Path(self.data_path) / self.warehouse /
+                identifier.get_database_name() / identifier.get_object_name()
         )
         schema_manager = SchemaManager(self._get_file_io(), str(table_path))
         new_schema = schema_manager.commit_changes(schema_changes)
@@ -883,8 +1057,8 @@ class RESTCatalogServer:
                 else "table"
             )
             table_type_matches = (
-                not table_type
-                or metadata_table_type == table_type
+                    not table_type
+                    or metadata_table_type == table_type
             )
             if (identifier.get_database_name() == database_name and
                     table_type_matches and

@@ -26,6 +26,7 @@ from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.table.instant import Instant
 
 
 class RESTRequest(ABC):
@@ -84,3 +85,12 @@ class AlterTableRequest(RESTRequest):
     FIELD_CHANGES = "changes"
 
     changes: List[SchemaChange] = json_field(FIELD_CHANGES)
+
+
+@dataclass
+class RollbackTableRequest(RESTRequest):
+    FIELD_INSTANT = "instant"
+    FIELD_FROM_SNAPSHOT = "fromSnapshot"
+
+    instant: Instant = json_field(FIELD_INSTANT)
+    from_snapshot: Optional[int] = json_field(FIELD_FROM_SNAPSHOT)
