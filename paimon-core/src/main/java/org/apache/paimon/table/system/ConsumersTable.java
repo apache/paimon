@@ -57,6 +57,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -241,7 +242,7 @@ public class ConsumersTable implements ReadonlyTable {
             Path location = ((ConsumersTable.ConsumersSplit) split).location;
             Map<String, Long> consumers;
             if (!consumerIds.isEmpty()) {
-                consumers = new java.util.HashMap<>();
+                consumers = new HashMap<>();
                 ConsumerManager consumerManager = new ConsumerManager(fileIO, location, branch);
                 for (String consumerId : consumerIds) {
                     consumerManager
