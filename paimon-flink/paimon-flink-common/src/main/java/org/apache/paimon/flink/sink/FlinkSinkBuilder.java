@@ -300,8 +300,9 @@ public class FlinkSinkBuilder {
                             + " then the parallelism of writerOperator will be set to bucketNums.");
             parallelism = bucketNums;
         }
-        DataStream<InternalRow> partitioned =
-                partition(input, new RowDataChannelComputer(table.schema()), parallelism);
+        RowDataChannelComputer channelComputer =
+                new RowDataChannelComputer(table.createRowKeyExtractor());
+        DataStream<InternalRow> partitioned = partition(input, channelComputer, parallelism);
         FixedBucketSink sink = new FixedBucketSink(table, overwritePartition);
         return sink.sinkFrom(partitioned);
     }

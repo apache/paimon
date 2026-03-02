@@ -1,8 +1,10 @@
 ---
 title: "Data Distribution"
-sidebar_position: 2
+weight: 2
+type: docs
+aliases:
+- /primary-key-table/data-distribution.html
 ---
-
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -24,7 +26,7 @@ under the License.
 
 # Data Distribution
 
-A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree](./overview#lsm-trees).
+A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree]({{< ref "primary-key-table/overview#lsm-trees" >}}).
 
 ## Fixed Bucket
 
@@ -33,6 +35,9 @@ the bucket of record.
 
 Rescaling buckets can only be done through offline processes, see [Rescale Bucket](../maintenance/rescale-bucket).
 A too large number of buckets leads to too many small files, and a too small number of buckets leads to poor write performance.
+
+For partitioned tables, each partition can have its own bucket count. After a rescale operation, existing
+partitions retain their original bucket count while newly created partitions use the updated table-level default.
 
 ## Dynamic Bucket
 
@@ -48,12 +53,10 @@ Paimon will automatically expand the number of buckets.
 - Option2: `'dynamic-bucket.initial-buckets'`: controls the number of initialized bucket.
 - Option3: `'dynamic-bucket.max-buckets'`: controls the number of max buckets.
 
-:::info
-
+{{< hint info >}}
 Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition
 (this can lead to duplicate data). Even if you enable `'write-only'` and start a dedicated compaction job, it won't work.
-
-:::
+{{< /hint >}}
 
 When your updates do not cross partitions (no partitions, or primary keys contain all partition fields), Dynamic
 Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode.
@@ -76,13 +79,13 @@ and are not available to readers.
 
 To move the records into the correct bucket and make them readable,
 you need to run a compaction job.
-See `compact` [procedure](../flink/procedures).
+See `compact` [procedure]({{< ref "flink/procedures" >}}).
 The bucket number for the partitions compacted for the first time
 is configured by the option `postpone.default-bucket-num`, whose default value is `1`.
 
 Finally, when you feel that the bucket number of some partition is too small,
 you can also run a rescale job.
-See `rescale` [procedure](../flink/procedures).
+See `rescale` [procedure]({{< ref "flink/procedures" >}}).
 
 ## Cross Partitions Upsert
 
