@@ -242,8 +242,11 @@ class RESTCatalogTest(RESTBaseTest):
             table_commit.close()
 
         # Rollback to snapshot 99 should fail
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception) as context:
             table.rollback_to(99)
+        self.assertIn("Rollback snapshot", str(context.exception))
+        self.assertIn("99", str(context.exception))
+        self.assertIn("doesn't exist", str(context.exception))
 
     def test_table_rollback_to_nonexistent_tag(self):
         """Test that table-level rollback to non-existent tag raises ValueError."""
@@ -263,8 +266,11 @@ class RESTCatalogTest(RESTBaseTest):
         table_write.close()
         table_commit.close()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception) as context:
             table.rollback_to("no-such-tag")
+        self.assertIn("Rollback tag", str(context.exception))
+        self.assertIn("no-such-tag", str(context.exception))
+        self.assertIn("doesn't exist", str(context.exception))
 
 
 if __name__ == '__main__':

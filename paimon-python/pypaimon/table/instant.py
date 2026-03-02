@@ -20,10 +20,9 @@ from abc import ABC, abstractmethod
 
 
 class Instant(ABC):
-    """Table rollback instant, corresponding to Java's Instant interface.
+    """Table rollback instant.
 
-    Supports polymorphic JSON serialization via to_dict/from_dict,
-    matching Java's Jackson @JsonTypeInfo/@JsonSubTypes annotations.
+    Supports polymorphic JSON serialization via to_dict/from_dict
 
     Serialization format:
         SnapshotInstant: {"type": "snapshot", "snapshotId": 123}
