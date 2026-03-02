@@ -9,7 +9,6 @@
 *.iml
 *.ipr
 *.iws
-paimon-lucene/.idea/
 paimon-python/.idea/
 # VS Code
 .vscode/
