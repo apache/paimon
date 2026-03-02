@@ -247,6 +247,34 @@ public class RangePartitionAndSortForAppendTableITCase extends CatalogITCaseBase
         Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
     }
 
+    @Test
+    public void testClusteringPreWriteEnabled() throws Exception {
+        List<Row> inputRows = generateSinkRows();
+        String id = TestValuesTableFactory.registerData(inputRows);
+        batchSql(
+                "CREATE TEMPORARY TABLE test_source (col1 INT, col2 INT, col3 INT, col4 INT) WITH "
+                        + "('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                id);
+        batchSql(
+                "INSERT INTO test_table /*+ OPTIONS('sink.clustering.by-columns' = 'col1', "
+                        + "'sink.parallelism' = '10', 'sink.clustering.strategy' = 'zorder', "
+                        + "'clustering.incremental' = 'true', 'clustering.pre-write.enabled' = 'true') */ "
+                        + "SELECT * FROM test_source");
+        List<Row> sinkRows = batchSql("SELECT * FROM test_table");
+        assertThat(sinkRows.size()).isEqualTo(SINK_ROW_NUMBER);
+        FileStoreTable testStoreTable = paimonTable("test_table");
+        PredicateBuilder predicateBuilder = new PredicateBuilder(testStoreTable.rowType());
+        Predicate predicate = predicateBuilder.between(0, 100, 200);
+        List<ManifestEntry> files = testStoreTable.store().newScan().plan().files();
+        assertThat(files.size()).isEqualTo(10);
+        List<ManifestEntry> filesFilter =
+                ((AppendOnlyFileStoreScan) testStoreTable.store().newScan())
+                        .withFilter(predicate)
+                        .plan()
+                        .files();
+        Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
+    }
+
     private List<Row> generateSinkRows() {
         List<Row> sinkRows = new ArrayList<>();
         Random random = new Random();
