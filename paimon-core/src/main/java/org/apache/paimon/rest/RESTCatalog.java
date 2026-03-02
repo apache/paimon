@@ -62,16 +62,16 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotNotExistException;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
-import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
-
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -321,7 +321,7 @@ public class RESTCatalog implements Catalog {
         try {
             return Optional.ofNullable(api.loadSnapshot(identifier));
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 return Optional.empty();
             }
             throw new TableNotExistException(identifier);
@@ -336,7 +336,7 @@ public class RESTCatalog implements Catalog {
         try {
             return Optional.ofNullable(api.loadSnapshot(identifier, version));
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 return Optional.empty();
             }
             throw new TableNotExistException(identifier);
@@ -351,6 +351,25 @@ public class RESTCatalog implements Catalog {
             throws TableNotExistException {
         try {
             return api.listSnapshotsPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public PagedList<Map.Entry<String, Long>> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            PagedList<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerEntry>
+                    entries = api.listConsumersPaged(identifier, maxResults, pageToken);
+            return new PagedList<>(
+                    entries.getElements().stream()
+                            .map(e -> new AbstractMap.SimpleEntry<>(e.getConsumerId(), e.getNextSnapshot()))
+                            .collect(Collectors.toList()),
+                    entries.getNextPageToken());
         } catch (NoSuchResourceException e) {
             throw new TableNotExistException(identifier);
         } catch (ForbiddenException e) {
@@ -402,10 +421,10 @@ public class RESTCatalog implements Catalog {
         try {
             api.rollbackTo(identifier, instant, fromSnapshot);
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
+            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_SNAPSHOT)) {
                 throw new IllegalArgumentException(
                         String.format("Rollback snapshot '%s' doesn't exist.", e.resourceName()));
-            } else if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+            } else if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new IllegalArgumentException(
                         String.format("Rollback tag '%s' doesn't exist.", e.resourceName()));
             }
@@ -527,9 +546,9 @@ public class RESTCatalog implements Catalog {
             api.alterTable(identifier, changes);
         } catch (NoSuchResourceException e) {
             if (!ignoreIfNotExists) {
-                if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
+                if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
                     throw new TableNotExistException(identifier);
-                } else if (StringUtils.equals(
+                } else if (Objects.equals(
                         e.resourceType(), ErrorResponse.RESOURCE_TYPE_COLUMN)) {
                     throw new ColumnNotExistException(identifier, e.resourceName());
                 }
@@ -652,9 +671,9 @@ public class RESTCatalog implements Catalog {
         try {
             api.createBranch(identifier, branch, fromTag);
         } catch (NoSuchResourceException e) {
-            if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
+            if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TABLE)) {
                 throw new TableNotExistException(identifier, e);
-            } else if (StringUtils.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
+            } else if (Objects.equals(e.resourceType(), ErrorResponse.RESOURCE_TYPE_TAG)) {
                 throw new TagNotExistException(identifier, fromTag, e);
             } else {
                 throw e;

@@ -67,6 +67,7 @@ import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
 import org.apache.paimon.rest.responses.ListFunctionsResponse;
+import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.rest.responses.ListPartitionsResponse;
 import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
@@ -590,6 +591,39 @@ public class RESTApi {
             return new PagedList<>(emptyList(), null);
         }
         return new PagedList<>(snapshots, response.getNextPageToken());
+    }
+
+    /**
+     * Get paged consumers list of the table.
+     *
+     * @param identifier path of the table to list consumers
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the consumers with provided page size(@param maxResults) in this table and
+     *     next page token.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerEntry>
+            listConsumersPaged(
+                    Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        ListConsumersResponse response =
+                client.get(
+                        resourcePaths.consumers(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListConsumersResponse.class,
+                        restAuthFunction);
+        List<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerEntry> consumers =
+                response.getConsumers();
+        if (consumers == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(consumers, response.getNextPageToken());
     }
 
     /**

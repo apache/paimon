@@ -730,6 +730,29 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException;
 
     /**
+     * Get paged consumers list of the table.
+     *
+     * @param identifier path of the table to list consumers
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number
+     *     of max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the consumers with provided page size(@param maxResults) in this table
+     *     and next page token. Each consumer is represented as a Map.Entry where the key is the
+     *     consumer id and the value is the next snapshot id.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default PagedList<Map.Entry<String, Long>> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                "This catalog does not support list consumers");
+    }
+
+    /**
      * rollback table by the given {@link Identifier} and instant.
      *
      * @param identifier path of the table
