@@ -73,6 +73,16 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, AtomicType):
+            return False
+        return self.type == other.type and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.type, self.nullable))
+
     def to_dict(self) -> str:
         if not self.nullable:
             return self.type + " NOT NULL"
@@ -94,6 +104,16 @@ class ArrayType(DataType):
     def __init__(self, nullable: bool, element_type: DataType):
         super().__init__(nullable)
         self.element = element_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, ArrayType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -118,6 +138,16 @@ class MultisetType(DataType):
     def __init__(self, nullable: bool, element_type: DataType):
         super().__init__(nullable)
         self.element = element_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MultisetType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -149,6 +179,18 @@ class MapType(DataType):
         super().__init__(nullable)
         self.key = key_type
         self.value = value_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MapType):
+            return False
+        return (self.key == other.key
+                and self.value == other.value
+                and self.nullable == other.nullable)
+
+    def __hash__(self):
+        return hash((self.key, self.value, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -199,6 +241,21 @@ class DataField:
     def from_dict(cls, data: Dict[str, Any]) -> "DataField":
         return DataTypeParser.parse_data_field(data)
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, DataField):
+            return False
+        return (self.id == other.id
+                and self.name == other.name
+                and self.type == other.type
+                and self.description == other.description
+                and self.default_value == other.default_value)
+
+    def __hash__(self):
+        return hash((self.id, self.name, self.type,
+                     self.description, self.default_value))
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             self.FIELD_ID: self.id,
@@ -222,6 +279,16 @@ class RowType(DataType):
     def __init__(self, nullable: bool, fields: List[DataField]):
         super().__init__(nullable)
         self.fields = fields or []
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, RowType):
+            return False
+        return self.fields == other.fields and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((tuple(self.fields), self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -587,7 +654,7 @@ class PyarrowFieldParser:
                      parent_name: str = "record") -> Union[str, Dict[str, Any]]:
         if pyarrow.types.is_integer(field_type):
             if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
-               (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
+                    (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
                 return "int"
             else:
                 return "long"
