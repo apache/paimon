@@ -45,7 +45,6 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
 from pypaimon.table.iceberg.iceberg_table import IcebergTable
 
-
 FORMAT_TABLE_TYPE = "format-table"
 ICEBERG_TABLE_TYPE = "iceberg-table"
 
@@ -274,6 +273,12 @@ class RESTCatalog(Catalog):
         try:
             self.rest_api.rollback_to(identifier, instant, from_snapshot)
         except NoSuchResourceException as e:
+            if e.resource_type == "snapshot":
+                raise ValueError(
+                    "Rollback snapshot '{}' doesn't exist.".format(e.resource_name)) from e
+            elif e.resource_type == "tag":
+                raise ValueError(
+                    "Rollback tag '{}' doesn't exist.".format(e.resource_name)) from e
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e

@@ -22,9 +22,7 @@ import org.apache.paimon.catalog.CachingCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.hive.migrate.HiveMigrator;
-import org.apache.paimon.iceberg.migrate.IcebergMigrator;
 import org.apache.paimon.migrate.Migrator;
-import org.apache.paimon.options.Options;
 
 import java.util.List;
 import java.util.Map;
@@ -60,28 +58,6 @@ public class TableMigrationUtils {
             default:
                 throw new UnsupportedOperationException("Don't support connector " + connector);
         }
-    }
-
-    public static Migrator getIcebergImporter(
-            Catalog catalog,
-            String sourceDatabase,
-            String sourceTableName,
-            String targetDatabase,
-            String targetTableName,
-            Integer parallelism,
-            Map<String, String> options,
-            Map<String, String> icebergOptions) {
-
-        Options icebergConf = new Options(icebergOptions);
-        return new IcebergMigrator(
-                catalog,
-                targetDatabase,
-                targetTableName,
-                sourceDatabase,
-                sourceTableName,
-                icebergConf,
-                parallelism,
-                options);
     }
 
     public static List<Migrator> getImporters(

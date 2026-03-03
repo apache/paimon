@@ -620,8 +620,8 @@ public class LocalOrphanFilesCleanTest {
 
         Path recentEmptyPath = new Path(tablePath, "part1=2");
         fileIO.mkdirs(recentEmptyPath);
-        LocalOrphanFilesClean cleanRecent =
-                new LocalOrphanFilesClean(table, System.currentTimeMillis() - 1, false);
+        long cutoffMs = System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(2);
+        LocalOrphanFilesClean cleanRecent = new LocalOrphanFilesClean(table, cutoffMs, false);
         cleanRecent.clean();
         assertThat(fileIO.exists(recentEmptyPath))
                 .as("Recent empty partition dir must not be deleted (age safeguard).")

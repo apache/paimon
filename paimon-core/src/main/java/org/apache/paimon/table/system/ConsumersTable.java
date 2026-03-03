@@ -26,6 +26,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.InPredicateVisitor;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.LeafPredicateExtractor;
+import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -47,8 +54,10 @@ import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -171,6 +180,7 @@ public class ConsumersTable implements ReadonlyTable {
 
         private final FileIO fileIO;
         private RowType readType;
+        private final List<String> consumerIds = new ArrayList<>();
 
         public ConsumersRead(FileIO fileIO) {
             this.fileIO = fileIO;
@@ -178,7 +188,39 @@ public class ConsumersTable implements ReadonlyTable {
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
+            if (predicate == null) {
+                return this;
+            }
+
+            String leafName = "consumer_id";
+            if (predicate instanceof CompoundPredicate) {
+                CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+                if ((compoundPredicate.function()) instanceof Or) {
+                    // optimize for IN filter
+                    InPredicateVisitor.extractInElements(predicate, leafName)
+                            .ifPresent(
+                                    leafs ->
+                                            leafs.forEach(
+                                                    leaf -> consumerIds.add(leaf.toString())));
+                } else if ((compoundPredicate.function()) instanceof And) {
+                    List<Predicate> children = compoundPredicate.children();
+                    for (Predicate leaf : children) {
+                        handleLeafPredicate(leaf, leafName);
+                    }
+                }
+            } else {
+                handleLeafPredicate(predicate, leafName);
+            }
+
             return this;
+        }
+
+        public void handleLeafPredicate(Predicate predicate, String leafName) {
+            LeafPredicate consumerPred =
+                    predicate.visit(LeafPredicateExtractor.INSTANCE).get(leafName);
+            if (consumerPred != null && consumerPred.function() instanceof Equal) {
+                consumerIds.add(consumerPred.literals().get(0).toString());
+            }
         }
 
         @Override
@@ -198,7 +240,19 @@ public class ConsumersTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((ConsumersTable.ConsumersSplit) split).location;
-            Map<String, Long> consumers = new ConsumerManager(fileIO, location, branch).consumers();
+            Map<String, Long> consumers;
+            if (!consumerIds.isEmpty()) {
+                consumers = new HashMap<>();
+                ConsumerManager consumerManager = new ConsumerManager(fileIO, location, branch);
+                for (String consumerId : consumerIds) {
+                    consumerManager
+                            .consumer(consumerId)
+                            .ifPresent(
+                                    consumer -> consumers.put(consumerId, consumer.nextSnapshot()));
+                }
+            } else {
+                consumers = new ConsumerManager(fileIO, location, branch).consumers();
+            }
             Iterator<InternalRow> rows =
                     Iterators.transform(consumers.entrySet().iterator(), this::toRow);
             if (readType != null) {

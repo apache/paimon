@@ -45,7 +45,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 TableAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.json_util import JSON
+from pypaimon.common.json_util import JSON, json_field
 from pypaimon import Schema
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
@@ -66,10 +66,22 @@ class ErrorResponse(RESTResponse):
     RESOURCE_TYPE_DEFINITION = "definition"
     RESOURCE_TYPE_DIALECT = "dialect"
 
-    resource_type: Optional[str]
-    resource_name: Optional[str]
-    message: str
-    code: int
+    resource_type: Optional[str] = json_field("resourceType", default=None)
+    resource_name: Optional[str] = json_field("resourceName", default=None)
+    message: Optional[str] = json_field("message", default=None)
+    code: Optional[int] = json_field("code", default=None)
+
+    def __init__(
+        self,
+        resource_type: Optional[str] = None,
+        resource_name: Optional[str] = None,
+        message: Optional[str] = None,
+        code: Optional[int] = None,
+    ):
+        self.resource_type = resource_type
+        self.resource_name = resource_name
+        self.message = message
+        self.code = code
 
 
 # Constants
@@ -675,7 +687,6 @@ class RESTCatalogServer:
 
         try:
             import json as json_module
-            from pypaimon.api.api_request import RollbackTableRequest
             from pypaimon.table.instant import Instant, SnapshotInstant, TagInstant
 
             request_dict = json_module.loads(data)
@@ -702,139 +713,75 @@ class RESTCatalogServer:
 
     def _rollback_table_by_snapshot(self, identifier: Identifier, snapshot_id: int,
                                     from_snapshot: Optional[int]) -> Tuple[str, int]:
-        """Rollback table to a specific snapshot ID."""
-        import os
+        """Rollback table to a specific snapshot ID by delegating to table.rollback_to()."""
+        table = self._get_file_table(identifier)
 
-        table_path = os.path.join(
-            self.data_path, self.warehouse,
-            identifier.get_database_name(), identifier.get_object_name())
-        snapshot_dir = os.path.join(table_path, "snapshot")
-
-        target_snapshot_file = os.path.join(snapshot_dir, f"snapshot-{snapshot_id}")
-        if not os.path.exists(target_snapshot_file):
+        snapshot_mgr = table.snapshot_manager()
+        snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+        if snapshot is None:
             return self._mock_response(
                 ErrorResponse(ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
                               str(snapshot_id), "", 404), 404)
 
-        latest_file = os.path.join(snapshot_dir, "LATEST")
-        if os.path.exists(latest_file):
-            latest_snapshot_id = int(open(latest_file).read().strip())
-        else:
+        latest = snapshot_mgr.get_latest_snapshot()
+        if latest is None:
             return self._mock_response(
                 ErrorResponse(None, None, "No latest snapshot found", 500), 500)
 
-        if from_snapshot is not None and from_snapshot != latest_snapshot_id:
+        if from_snapshot is not None and from_snapshot != latest.id:
             return self._mock_response(
                 ErrorResponse(None, None,
-                              f"Latest snapshot {latest_snapshot_id} is not {from_snapshot}",
+                              f"Latest snapshot {latest.id} is not {from_snapshot}",
                               500), 500)
 
-        # Delete snapshots larger than target
-        for sid in range(snapshot_id + 1, latest_snapshot_id + 1):
-            snapshot_file = os.path.join(snapshot_dir, f"snapshot-{sid}")
-            if os.path.exists(snapshot_file):
-                os.remove(snapshot_file)
-
-        # Update LATEST
-        with open(latest_file, 'w') as f:
-            f.write(str(snapshot_id))
-
-        # Clean tags whose snapshot id is larger than target
-        tag_dir = os.path.join(table_path, "tag")
-        if os.path.isdir(tag_dir):
-            from pypaimon.common.json_util import JSON as json_util
-            from pypaimon.tag.tag import Tag
-            for tag_file_name in os.listdir(tag_dir):
-                tag_file_path = os.path.join(tag_dir, tag_file_name)
-                if os.path.isfile(tag_file_path) and tag_file_name.startswith("tag-"):
-                    try:
-                        tag_content = open(tag_file_path).read()
-                        tag_obj = json_util.from_json(tag_content, Tag)
-                        tag_snapshot = tag_obj.trim_to_snapshot()
-                        if tag_snapshot.id > snapshot_id:
-                            os.remove(tag_file_path)
-                    except Exception:
-                        pass
-
-        return "", 200
+        table.rollback_to(snapshot_id)
+        return self._mock_response("", 200)
 
     def _rollback_table_by_tag(self, identifier: Identifier,
                                tag_name: str) -> Tuple[str, int]:
-        """Rollback table to a specific tag."""
-        import os
-        from pypaimon.common.json_util import JSON as json_util
-        from pypaimon.tag.tag import Tag
+        """Rollback table to a specific tag by delegating to table.rollback_to()."""
+        table = self._get_file_table(identifier)
 
-        table_path = os.path.join(
-            self.data_path, self.warehouse,
-            identifier.get_database_name(), identifier.get_object_name())
-
-        tag_dir = os.path.join(table_path, "tag")
-        tag_file = os.path.join(tag_dir, f"tag-{tag_name}")
-
-        if not os.path.isfile(tag_file):
+        tag_mgr = table.tag_manager()
+        if not tag_mgr.tag_exists(tag_name):
             return self._mock_response(
                 ErrorResponse(ErrorResponse.RESOURCE_TYPE_TAG,
                               tag_name, "", 404), 404)
 
-        tag_content = open(tag_file).read()
-        tag_obj = json_util.from_json(tag_content, Tag)
-        tag_snapshot = tag_obj.trim_to_snapshot()
-        target_snapshot_id = tag_snapshot.id
+        table.rollback_to(tag_name)
+        return self._mock_response("", 200)
 
-        snapshot_dir = os.path.join(table_path, "snapshot")
-        latest_file = os.path.join(snapshot_dir, "LATEST")
-        if os.path.exists(latest_file):
-            latest_snapshot_id = int(open(latest_file).read().strip())
-        else:
-            return self._mock_response(
-                ErrorResponse(None, None, "No latest snapshot found", 500), 500)
+    def _get_file_table(self, identifier: Identifier):
+        """Construct a FileStoreTable from the metadata store.
 
-        # Delete snapshots larger than target
-        for sid in range(target_snapshot_id + 1, latest_snapshot_id + 1):
-            snapshot_file = os.path.join(snapshot_dir, f"snapshot-{sid}")
-            if os.path.exists(snapshot_file):
-                os.remove(snapshot_file)
+        Mirrors Java RESTCatalogServer.getFileTable(): loads the schema from
+        the metadata store, builds a CatalogEnvironment (without catalog
+        loader so rollback goes through local file cleanup), and returns a
+        FileStoreTable.
+        """
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.options.options import Options
+        from pypaimon.table.file_store_table import FileStoreTable
 
-        # Update LATEST
-        with open(latest_file, 'w') as f:
-            f.write(str(target_snapshot_id))
+        table_metadata = self.table_metadata_store.get(identifier.get_full_name())
+        if table_metadata is None:
+            raise TableNotExistException(identifier)
 
-        # Ensure target snapshot file exists (create from tag if needed)
-        target_snapshot_file = os.path.join(snapshot_dir, f"snapshot-{target_snapshot_id}")
-        if not os.path.exists(target_snapshot_file):
-            import json as json_module
-            snapshot_data = {
-                "version": getattr(tag_snapshot, 'version', 3),
-                "id": tag_snapshot.id,
-                "schemaId": getattr(tag_snapshot, 'schema_id', 0),
-                "baseManifestList": getattr(tag_snapshot, 'base_manifest_list', ""),
-                "deltaManifestList": getattr(tag_snapshot, 'delta_manifest_list', ""),
-                "totalRecordCount": getattr(tag_snapshot, 'total_record_count', 0),
-                "deltaRecordCount": getattr(tag_snapshot, 'delta_record_count', 0),
-                "commitUser": getattr(tag_snapshot, 'commit_user', 'rest-server'),
-                "commitIdentifier": getattr(tag_snapshot, 'commit_identifier', 0),
-                "commitKind": getattr(tag_snapshot, 'commit_kind', 'APPEND'),
-                "timeMillis": getattr(tag_snapshot, 'time_millis', 0)
-            }
-            with open(target_snapshot_file, 'w') as f:
-                json_module.dump(snapshot_data, f, indent=2)
+        table_schema = table_metadata.schema
+        table_path = (
+            f'file://{self.data_path}/{self.warehouse}/'
+            f'{identifier.get_database_name()}/{identifier.get_object_name()}')
 
-        # Clean tags whose snapshot id is larger than target
-        if os.path.isdir(tag_dir):
-            for tag_file_name in os.listdir(tag_dir):
-                tag_file_path = os.path.join(tag_dir, tag_file_name)
-                if os.path.isfile(tag_file_path) and tag_file_name.startswith("tag-"):
-                    try:
-                        tc = open(tag_file_path).read()
-                        to = json_util.from_json(tc, Tag)
-                        ts = to.trim_to_snapshot()
-                        if ts.id > target_snapshot_id:
-                            os.remove(tag_file_path)
-                    except Exception:
-                        pass
+        catalog_env = CatalogEnvironment(
+            identifier=identifier,
+            uuid=table_metadata.uuid,
+            catalog_loader=None,
+            supports_version_management=False
+        )
 
-        return "", 200
+        file_io = FileIO.get(table_path, Options({}))
+        return FileStoreTable(file_io, identifier, table_path, table_schema, catalog_env)
 
     def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
         """Write snapshot and related files to the file system"""
@@ -1061,9 +1008,9 @@ class RESTCatalogServer:
                 or metadata_table_type == table_type
             )
             if (identifier.get_database_name() == database_name and
-                    table_type_matches and
-                    (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
-                                                                        table_name_pattern))):
+                table_type_matches and
+                (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
+                                                                    table_name_pattern))):
                 tables.append(identifier.get_table_name())
 
         return tables

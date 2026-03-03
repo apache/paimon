@@ -190,6 +190,8 @@ public class FormatReadBuilder implements ReadBuilder {
             return new DataFileRecordReader(
                     readType(),
                     reader,
+                    options.scanIgnoreCorruptFile(),
+                    options.scanIgnoreLostFile(),
                     null,
                     null,
                     PartitionUtils.create(partitionMapping, dataSplit.partition()),
@@ -197,7 +199,8 @@ public class FormatReadBuilder implements ReadBuilder {
                     null,
                     0,
                     Collections.emptyMap(),
-                    null);
+                    null,
+                    formatReaderContext.filePath());
         } catch (Exception e) {
             FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
             throw e;

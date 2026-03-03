@@ -16,28 +16,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from abc import ABC, abstractmethod
 
-
-class TableRollback(ABC):
-    """Rollback table to instant from snapshot.
-    """
-
-    @abstractmethod
-    def rollback_to(self, instant, from_snapshot=None):
-        """Rollback table to the given instant.
-
-        Args:
-            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
-            from_snapshot: Optional snapshot ID. Success only occurs when the
-                latest snapshot is this snapshot.
-        """
-
-
-class CatalogTableRollback(TableRollback):
-    """
-    Internal TableRollback implementation that delegates to catalog.rollback_to.
-    """
+class TableRollback:
+    """Rollback table to instant by delegating to catalog.rollback_to."""
 
     def __init__(self, catalog, identifier):
         self._catalog = catalog
@@ -52,7 +33,7 @@ class CatalogTableRollback(TableRollback):
                 latest snapshot is this snapshot.
 
         Raises:
-            RuntimeError: If the table does not exist in the catalog.
+            RuntimeError: If the rollback fails.
         """
         try:
             self._catalog.rollback_to(self._identifier, instant, from_snapshot)

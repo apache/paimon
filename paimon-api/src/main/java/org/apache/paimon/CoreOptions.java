@@ -1040,6 +1040,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The delay duration of stream read when scan incremental snapshots.");
 
+    public static final ConfigOption<Boolean> SCAN_IGNORE_CORRUPT_FILE =
+            key("scan.ignore-corrupt-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Ignore corrupt files while scanning.");
+
+    public static final ConfigOption<Boolean> SCAN_IGNORE_LOST_FILE =
+            key("scan.ignore-lost-files")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Ignore lost files while scanning.");
+
     public static final ConfigOption<Boolean> AUTO_CREATE =
             key("auto-create")
                     .booleanType()
@@ -2059,6 +2071,13 @@ public class CoreOptions implements Serializable {
                             "The duration after which a partition without new updates is considered a historical partition. "
                                     + "Historical partitions will be automatically fully clustered during the cluster operation.");
 
+    public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE =
+            key("clustering.incremental.optimize-write")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether enable perform clustering before write phase when incremental clustering is enabled.");
+
     @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -2969,6 +2988,14 @@ public class CoreOptions implements Serializable {
         return options.get(SCAN_VERSION);
     }
 
+    public boolean scanIgnoreCorruptFile() {
+        return options.get(SCAN_IGNORE_CORRUPT_FILE);
+    }
+
+    public boolean scanIgnoreLostFile() {
+        return options.get(SCAN_IGNORE_LOST_FILE);
+    }
+
     public Pair<String, String> incrementalBetween() {
         String str = options.get(INCREMENTAL_BETWEEN);
         String[] split = str.split(",");
@@ -3380,6 +3407,10 @@ public class CoreOptions implements Serializable {
 
     public boolean clusteringIncrementalEnabled() {
         return options.get(CLUSTERING_INCREMENTAL);
+    }
+
+    public boolean clusteringIncrementalOptimizeWrite() {
+        return options.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE);
     }
 
     public boolean bucketClusterEnabled() {

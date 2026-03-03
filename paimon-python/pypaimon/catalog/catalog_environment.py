@@ -19,7 +19,6 @@ limitations under the License.
 from typing import Optional
 
 from pypaimon.catalog.catalog_loader import CatalogLoader
-from pypaimon.catalog.table_rollback import CatalogTableRollback
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.catalog_snapshot_commit import CatalogSnapshotCommit
 from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
@@ -62,19 +61,19 @@ class CatalogEnvironment:
             return RenamingSnapshotCommit(snapshot_manager)
 
     def catalog_table_rollback(self):
-        """Create a TableRollback instance based on the catalog environment configuration.
+        """Create a TableRollback instance based on the catalog environment.
 
-        If catalog_loader is available and version management is supported,
-        returns a CatalogTableRollback that delegates to catalog.rollback_to.
-        Otherwise, returns None.
+        Returns a TableRollback that delegates to catalog.rollback_to
+        when catalog_loader is available and version management is supported.
+        Returns None otherwise (fallback to local file cleanup).
 
         Returns:
-            A TableRollback instance or None.
+            A TableRollback instance, or None.
         """
         if self.catalog_loader is not None and self.supports_version_management:
+            from pypaimon.catalog.table_rollback import TableRollback
             catalog = self.catalog_loader.load()
-            identifier = self.identifier
-            return CatalogTableRollback(catalog, identifier)
+            return TableRollback(catalog, self.identifier)
         return None
 
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':

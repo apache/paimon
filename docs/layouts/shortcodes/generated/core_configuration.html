@@ -57,6 +57,12 @@ under the License.
             <td>Write blob field using blob descriptor rather than blob bytes.</td>
         </tr>
         <tr>
+            <td><h5>blob-descriptor-field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Comma-separated BLOB field names to store as serialized BlobDescriptor bytes inline in data files.</td>
+        </tr>
+        <tr>
             <td><h5>blob-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -67,12 +73,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>Whether to consider blob file size as a factor when performing scan splitting.</td>
-        </tr>
-        <tr>
-            <td><h5>blob-descriptor-field</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Comma-separated BLOB field names to store as serialized BlobDescriptor bytes inline in data files.</td>
         </tr>
         <tr>
             <td><h5>blob.target-file-size</h5></td>
@@ -199,6 +199,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether enable incremental clustering.</td>
+        </tr>
+        <tr>
+            <td><h5>clustering.incremental.optimize-write</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether enable perform clustering before write phase when incremental clustering is enabled.</td>
         </tr>
         <tr>
             <td><h5>clustering.strategy</h5></td>
@@ -1120,6 +1126,18 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>After configuring this time, only the data files created after this time will be read. It is independent of snapshots, but it is imprecise filtering (depending on whether or not compaction occurs).</td>
+        </tr>
+        <tr>
+            <td><h5>scan.ignore-corrupt-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Ignore corrupt files while scanning.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.ignore-lost-files</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Ignore lost files while scanning.</td>
         </tr>
         <tr>
             <td><h5>scan.manifest.parallelism</h5></td>

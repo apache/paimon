@@ -149,6 +149,113 @@ class FileStoreTable(Table):
         tag_mgr = self.tag_manager()
         return tag_mgr.list_tags()
 
+    def rollback_to(self, target):
+        """Rollback table to the given snapshot ID (int) or tag name (str).
+
+        Dispatches based on argument type:
+        - int: rollback to the snapshot with that ID
+        - str: rollback to the tag with that name
+
+        First tries catalog-based rollback (e.g., REST). If catalog rollback
+        is not available, falls back to local file cleanup.
+
+        Args:
+            target: Snapshot ID (int) or tag name (str).
+
+        Raises:
+            ValueError: If the target doesn't exist or type is unsupported.
+        """
+        if isinstance(target, int):
+            self._rollback_to_snapshot(target)
+        elif isinstance(target, str):
+            self._rollback_to_tag(target)
+        else:
+            raise ValueError("Unsupported rollback target type: {}".format(type(target)))
+
+    def _rollback_to_snapshot(self, snapshot_id):
+        """Rollback to a snapshot by ID.
+
+        First tries catalog-based rollback. If not available, falls back to
+        local file cleanup. If the snapshot file has been expired, tries to
+        recover from a tag with the same snapshot ID.
+
+        Args:
+            snapshot_id: The snapshot ID to rollback to.
+
+        Raises:
+            ValueError: If the snapshot doesn't exist.
+        """
+        from pypaimon.table.instant import Instant
+
+        table_rollback = self.catalog_environment.catalog_table_rollback()
+        if table_rollback is not None:
+            table_rollback.rollback_to(Instant.snapshot(snapshot_id))
+            return
+
+        snapshot_mgr = self.snapshot_manager()
+        snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+        if snapshot is not None:
+            self.rollback_helper().clean_larger_than(snapshot)
+            return
+
+        tag_mgr = self.tag_manager()
+        for tag_name in tag_mgr.list_tags():
+            tag = tag_mgr.get(tag_name)
+            if tag is not None:
+                tag_snapshot = tag.trim_to_snapshot()
+                if tag_snapshot.id == snapshot_id:
+                    self.rollback_to(tag_name)
+                    return
+
+        raise ValueError(
+            "Rollback snapshot '{}' doesn't exist.".format(snapshot_id))
+
+    def _rollback_to_tag(self, tag_name):
+        """Rollback to a tag by name.
+
+        First tries catalog-based rollback. If not available, falls back to
+        local file cleanup and recreates the snapshot file if needed.
+
+        Args:
+            tag_name: The tag name to rollback to.
+
+        Raises:
+            ValueError: If the tag doesn't exist.
+        """
+        from pypaimon.table.instant import Instant
+
+        table_rollback = self.catalog_environment.catalog_table_rollback()
+        if table_rollback is not None:
+            table_rollback.rollback_to(Instant.tag(tag_name))
+            return
+
+        tag_mgr = self.tag_manager()
+        tagged_snapshot = tag_mgr.get_or_throw(tag_name).trim_to_snapshot()
+        helper = self.rollback_helper()
+        helper.clean_larger_than(tagged_snapshot)
+        helper.create_snapshot_file_if_needed(tagged_snapshot)
+
+    def rollback_helper(self):
+        """Create a RollbackHelper instance for this table."""
+        from pypaimon.table.rollback_helper import RollbackHelper
+        return RollbackHelper(
+            self.snapshot_manager(), self.tag_manager(), self.file_io)
+
+    def rename_tag(self, old_name: str, new_name: str) -> None:
+        """
+        Rename a tag.
+
+        Args:
+            old_name: Current name of the tag
+            new_name: New name for the tag
+
+        Raises:
+            ValueError: If old_name or new_name is blank, old_name doesn't exist,
+                       or new_name already exists
+        """
+        tag_mgr = self.tag_manager()
+        tag_mgr.rename_tag(old_name, new_name)
+
     def path_factory(self) -> 'FileStorePathFactory':
         from pypaimon.utils.file_store_path_factory import FileStorePathFactory
 
