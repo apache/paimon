@@ -18,7 +18,6 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
@@ -31,7 +30,8 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.FileSource;
-import org.apache.paimon.types.BlobType;
+import org.apache.paimon.operation.BlobFileContext;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
@@ -48,8 +48,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.Supplier;
+
+import static org.apache.paimon.types.BlobType.fieldsNotInBlobFile;
 
 /**
  * A rolling file writer that handles both normal data and blob data. This writer creates separate
@@ -84,7 +85,6 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             writerFactory;
     private final Supplier<MultipleBlobFileWriter> blobWriterFactory;
     private final long targetFileSize;
-    private final Set<String> blobDescriptorFields;
     @Nullable private final ExternalStorageBlobWriter externalStorageBlobWriter;
 
     // State management
@@ -110,17 +110,18 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             StatsCollectorFactories statsCollectorFactories,
             FileIndexOptions fileIndexOptions,
             FileSource fileSource,
-            boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable BlobConsumer blobConsumer,
-            Set<String> blobDescriptorFields,
-            Set<String> blobExternalStorageFields,
-            @Nullable String blobExternalStoragePath) {
+            BlobFileContext context) {
         // Initialize basic fields
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
         this.closedWriters = new ArrayList<>();
-        this.blobDescriptorFields = blobDescriptorFields;
+
+        // blob write does not need async write, cause blob write is I/O-intensive, not
+        // CPU-intensive process.
+        // Async write will cost 64MB more memory per write task, blob writes get low
+        // benefit from async write, but cost a lot.
+        boolean asyncFileWrite = false;
 
         // Initialize writer factory for normal data
         this.writerFactory =
@@ -128,7 +129,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                         fileIO,
                         schemaId,
                         fileFormat,
-                        BlobType.splitBlob(writeSchema, blobDescriptorFields).getLeft(),
+                        fieldsNotInBlobFile(writeSchema, context.blobDescriptorFields()),
                         writeSchema,
                         pathFactory,
                         seqNumCounterSupplier,
@@ -152,18 +153,18 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                                 asyncFileWrite,
                                 statsDenseStore,
                                 blobTargetFileSize,
-                                blobConsumer,
-                                this.blobDescriptorFields);
+                                context.blobConsumer(),
+                                context.blobDescriptorFields());
 
         // Initialize writer for descriptor fields backed by external storage if needed.
-        if (!blobExternalStorageFields.isEmpty()) {
+        if (!context.blobExternalStorageFields().isEmpty()) {
             this.externalStorageBlobWriter =
                     new ExternalStorageBlobWriter(
                             fileIO,
                             schemaId,
                             writeSchema,
-                            blobExternalStorageFields,
-                            blobExternalStoragePath,
+                            context.blobExternalStorageFields(),
+                            context.blobExternalStoragePath(),
                             pathFactory,
                             seqNumCounterSupplier,
                             fileSource,
@@ -182,7 +183,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                     FileIO fileIO,
                     long schemaId,
                     FileFormat fileFormat,
-                    RowType normalRowType,
+                    List<DataField> fieldsNotInBlobFile,
                     RowType writeSchema,
                     DataFilePathFactory pathFactory,
                     Supplier<LongCounter> seqNumCounterSupplier,
@@ -192,7 +193,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                     FileSource fileSource,
                     boolean asyncFileWrite,
                     boolean statsDenseStore) {
-
+        RowType normalRowType = new RowType(fieldsNotInBlobFile);
         List<String> normalColumnNames = normalRowType.getFieldNames();
         int[] projectionNormalFields = writeSchema.projectIndexes(normalColumnNames);
 

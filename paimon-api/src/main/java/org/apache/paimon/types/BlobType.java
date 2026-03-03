@@ -19,11 +19,11 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.utils.Pair;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Data type of binary large object.
@@ -67,32 +67,42 @@ public final class BlobType extends DataType {
         return visitor.visit(this);
     }
 
-    public static Pair<RowType, RowType> splitBlob(RowType rowType) {
-        return splitBlob(rowType, java.util.Collections.emptySet());
-    }
-
     /**
-     * Split row fields into normal fields and blob-file fields.
+     * Retrieve fields not stored in blob files.
      *
      * <p>Blob fields contained in {@code blobDescriptorField} are treated as normal fields (stored
      * inline as serialized descriptor bytes), while other blob fields are treated as blob-file
      * fields.
      */
-    public static Pair<RowType, RowType> splitBlob(
-            RowType rowType, Set<String> blobDescriptorFields) {
-        List<DataField> fields = rowType.getFields();
-        List<DataField> normalFields = new ArrayList<>();
-        List<DataField> blobFields = new ArrayList<>();
+    public static List<DataField> fieldsNotInBlobFile(
+            RowType rowType, Set<String> descriptorFields) {
+        Set<String> fieldsInBlobFile =
+                fieldsInBlobFile(rowType, descriptorFields).stream()
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
+        return rowType.getFields().stream()
+                .filter(field -> !fieldsInBlobFile.contains(field.name()))
+                .collect(Collectors.toList());
+    }
 
-        for (DataField field : fields) {
-            DataTypeRoot type = field.type().getTypeRoot();
-            if (type == DataTypeRoot.BLOB && !blobDescriptorFields.contains(field.name())) {
-                blobFields.add(field);
-            } else {
-                normalFields.add(field);
-            }
-        }
-
-        return Pair.of(new RowType(normalFields), new RowType(blobFields));
+    /**
+     * Retrieve fields stored in blob files.
+     *
+     * <p>Blob fields contained in {@code blobDescriptorField} are treated as normal fields (stored
+     * inline as serialized descriptor bytes), while other blob fields are treated as blob-file
+     * fields.
+     */
+    public static List<DataField> fieldsInBlobFile(RowType rowType, Set<String> descriptorFields) {
+        List<DataField> result = new ArrayList<>();
+        rowType.getFields()
+                .forEach(
+                        field -> {
+                            DataTypeRoot type = field.type().getTypeRoot();
+                            if (type == DataTypeRoot.BLOB
+                                    && !descriptorFields.contains(field.name())) {
+                                result.add(field);
+                            }
+                        });
+        return result;
     }
 }

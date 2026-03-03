@@ -31,7 +31,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
@@ -41,7 +40,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -79,6 +77,7 @@ import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.types.BlobType.fieldsNotInBlobFile;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
@@ -163,7 +162,7 @@ public class SchemaValidation {
         Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
         validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
         fileFormat.validateDataFields(
-                BlobType.splitBlob(tableRowType, blobDescriptorFields).getLeft());
+                new RowType(fieldsNotInBlobFile(tableRowType, blobDescriptorFields)));
 
         // Check column names in schema
         schema.fieldNames()
@@ -611,14 +610,18 @@ public class SchemaValidation {
                     "Data evolution config must disabled with clustering.incremental");
         }
 
-        Pair<RowType, RowType> normalAndBlobType = BlobType.splitBlob(schema.logicalRowType());
-        List<String> blobNames = normalAndBlobType.getRight().getFieldNames();
+        List<DataField> fields = schema.fields();
+        List<String> blobNames =
+                fields.stream()
+                        .filter(field -> field.type().is(DataTypeRoot.BLOB))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");
             checkArgument(
-                    normalAndBlobType.getLeft().getFieldCount() > 0,
+                    fields.size() > blobNames.size(),
                     "Table with BLOB type column must have other normal columns.");
             checkArgument(
                     blobNames.stream().noneMatch(schema.partitionKeys()::contains),

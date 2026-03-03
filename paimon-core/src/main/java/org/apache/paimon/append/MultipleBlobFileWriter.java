@@ -32,7 +32,6 @@ import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.NoneSimpleColStatsCollector;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
-import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
@@ -46,6 +45,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.types.BlobType.fieldsInBlobFile;
 
 /** A blob file writer that writes blob files. */
 public class MultipleBlobFileWriter implements Closeable {
@@ -64,7 +64,7 @@ public class MultipleBlobFileWriter implements Closeable {
             long targetFileSize,
             @Nullable BlobConsumer blobConsumer,
             Set<String> blobDescriptorFields) {
-        RowType blobRowType = BlobType.splitBlob(writeSchema, blobDescriptorFields).getRight();
+        RowType blobRowType = new RowType(fieldsInBlobFile(writeSchema, blobDescriptorFields));
         this.blobWriters = new ArrayList<>();
         for (String blobFieldName : blobRowType.getFieldNames()) {
             BlobFileFormat blobFileFormat = new BlobFileFormat();

@@ -42,6 +42,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -291,11 +292,8 @@ public class KeyValueFileReadWriteTest {
                         new FileIndexOptions(),
                         true,
                         false,
-                        null,
-                        options.blobDescriptorField(),
-                        options.blobExternalStorageField(),
-                        options.blobExternalStoragePath(),
-                        options.dataEvolutionEnabled());
+                        options.dataEvolutionEnabled(),
+                        BlobFileContext.create(schema, options));
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactDeletionFile;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compression.CompressOptions;
-import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
@@ -39,9 +38,9 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BatchRecordWriter;
 import org.apache.paimon.utils.CommitIncrement;
@@ -60,7 +59,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
@@ -83,6 +81,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final boolean forceCompact;
     private final boolean asyncFileWrite;
     private final boolean statsDenseStore;
+    @Nullable private final BlobFileContext blobContext;
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
@@ -94,10 +93,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     @Nullable private final IOManager ioManager;
     private final FileIndexOptions fileIndexOptions;
     private final MemorySize maxDiskSize;
-    @Nullable private final BlobConsumer blobConsumer;
-    private final Set<String> blobDescriptorFields;
-    private final Set<String> blobExternalStorageFields;
-    @Nullable private final String blobExternalStoragePath;
 
     @Nullable private CompactDeletionFile compactDeletionFile;
     private SinkWriter<InternalRow> sinkWriter;
@@ -127,11 +122,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             FileIndexOptions fileIndexOptions,
             boolean asyncFileWrite,
             boolean statsDenseStore,
-            @Nullable BlobConsumer blobConsumer,
-            Set<String> blobDescriptorFields,
-            Set<String> blobExternalStorageFields,
-            @Nullable String blobExternalStoragePath,
-            boolean dataEvolutionEnabled) {
+            boolean dataEvolutionEnabled,
+            @Nullable BlobFileContext blobContext) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -145,7 +137,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.forceCompact = forceCompact;
         this.asyncFileWrite = asyncFileWrite;
         this.statsDenseStore = statsDenseStore;
-        this.blobConsumer = blobConsumer;
+        this.blobContext = blobContext;
         this.newFiles = new ArrayList<>();
         this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
@@ -159,9 +151,6 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.statsCollectorFactories = statsCollectorFactories;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexOptions = fileIndexOptions;
-        this.blobDescriptorFields = blobDescriptorFields;
-        this.blobExternalStorageFields = blobExternalStorageFields;
-        this.blobExternalStoragePath = blobExternalStoragePath;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -313,8 +302,7 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (BlobType.splitBlob(writeSchema, blobDescriptorFields).getRight().getFieldCount() > 0
-                || !blobExternalStorageFields.isEmpty()) {
+        if (blobContext != null) {
             return new RollingBlobFileWriter(
                     fileIO,
                     schemaId,
@@ -328,16 +316,8 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     statsCollectorFactories,
                     fileIndexOptions,
                     FileSource.APPEND,
-                    // blob write does not need async write, cause blob write is I/O-intensive, not
-                    // CPU-intensive process.
-                    // Async write will cost 64MB more memory per write task, blob writes get low
-                    // benefit from async write, but cost a lot.
-                    false,
                     statsDenseStore,
-                    blobConsumer,
-                    blobDescriptorFields,
-                    blobExternalStorageFields,
-                    blobExternalStoragePath);
+                    blobContext);
         }
         return new RowDataRollingFileWriter(
                 fileIO,
