@@ -263,6 +263,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
 
+    public static final ConfigOption<Boolean> COMET_ENABLED =
+            key("comet.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable Comet native vectorized reading for Paimon tables (currently only supports Append-Only tables).");
+
     public static final ConfigOption<Map<String, String>> FILE_COMPRESSION_PER_LEVEL =
             key("file.compression.per.level")
                     .mapType()

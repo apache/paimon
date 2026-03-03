@@ -130,7 +130,7 @@ class PaimonMicroBatchStream(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    PaimonPartitionReaderFactory(readBuilder, blobAsDescriptor = blobAsDescriptor)
+    PaimonPartitionReaderFactory(readBuilder, table, blobAsDescriptor = blobAsDescriptor)
   }
 
   override def initialOffset(): Offset = {

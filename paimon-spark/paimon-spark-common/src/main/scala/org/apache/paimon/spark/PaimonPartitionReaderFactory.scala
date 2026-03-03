@@ -19,15 +19,20 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.spark.schema.PaimonMetadataColumn
-import org.apache.paimon.table.source.ReadBuilder
+import org.apache.paimon.table.Table
+import org.apache.paimon.table.source.{DataSplit, ReadBuilder}
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
+import org.apache.spark.sql.vectorized.ColumnarBatch
 
 import java.util.Objects
 
+import scala.collection.JavaConverters._
+
 case class PaimonPartitionReaderFactory(
     readBuilder: ReadBuilder,
+    table: Table,
     metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty,
     blobAsDescriptor: Boolean)
   extends PartitionReaderFactory {
@@ -39,6 +44,36 @@ case class PaimonPartitionReaderFactory(
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }
+  }
+
+  override def supportColumnarReads(partition: InputPartition): Boolean = {
+    val options = table.options()
+    if (
+      options.containsKey("comet.enabled") && java.lang.Boolean.parseBoolean(
+        options.get("comet.enabled"))
+    ) {
+      partition match {
+        case p: PaimonInputPartition =>
+          // Ensure all splits are DataSplit (no system splits)
+          p.splits.forall(_.isInstanceOf[DataSplit])
+        case _ => false
+      }
+    } else {
+      false
+    }
+  }
+
+  override def createColumnarReader(partition: InputPartition): PartitionReader[ColumnarBatch] = {
+    val dataFields = new java.util.ArrayList(readBuilder.readType().getFields)
+    dataFields.addAll(metadataColumns.map(_.toPaimonDataField).asJava)
+    val rowType = new org.apache.paimon.types.RowType(dataFields)
+    val schema = org.apache.paimon.spark.SparkTypeUtils.fromPaimonRowType(rowType)
+
+    new org.apache.paimon.spark.comet.PaimonCometPartitionReader(
+      table.fileIO(),
+      partition.asInstanceOf[PaimonInputPartition],
+      schema,
+      table)
   }
 
   override def equals(obj: Any): Boolean = {

@@ -128,7 +128,12 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
   override def toBatch: Batch = {
     val metadataColumns = metadataFields.map(
       field => PaimonMetadataColumn.get(field.name, SparkTypeUtils.toSparkPartitionType(table)))
-    PaimonBatch(inputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
+    PaimonBatch(
+      inputPartitions,
+      readBuilder,
+      table,
+      coreOptions.blobAsDescriptor(),
+      metadataColumns)
   }
 
   def estimateStatistics: Statistics = {
