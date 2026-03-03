@@ -29,6 +29,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.write.commit_rollback import CommitRollback
 from pypaimon.write.conflict_detection import ConflictDetection
+from pypaimon.write.commit_scanner import CommitScanner
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.file_scanner import FileScanner
@@ -95,17 +96,18 @@ class FileStoreCommit:
         self.commit_min_retry_wait = table.options.commit_min_retry_wait()
         self.commit_max_retry_wait = table.options.commit_max_retry_wait()
 
+        self.commit_scanner = CommitScanner(table, self.manifest_list_manager)
+
         self.conflict_detection = ConflictDetection(
             data_evolution_enabled=table.options.data_evolution_enabled(),
             snapshot_manager=self.snapshot_manager,
             manifest_list_manager=self.manifest_list_manager,
             table=table,
+            commit_scanner=self.commit_scanner
         )
 
-        self.rollback = None
         table_rollback = table.catalog_environment.catalog_table_rollback()
-        if table_rollback is not None:
-            self.rollback = CommitRollback(table_rollback)
+        self.rollback = CommitRollback(table_rollback) if table_rollback is not None else None
 
     def commit(self, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in normal append mode."""
@@ -113,7 +115,10 @@ class FileStoreCommit:
             return
 
         # Extract snapshot_for_update from commit messages
-        self._apply_row_id_check(commit_messages)
+        for msg in commit_messages:
+            if msg.snapshot_for_update != -1:
+                self.conflict_detection._row_id_check_from_snapshot = msg.snapshot_for_update
+                break
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
@@ -144,20 +149,9 @@ class FileStoreCommit:
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
-                         commit_entries_plan=lambda snapshot: commit_entries,
+                         commit_entries_plan=lambda: commit_entries,
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback)
-
-    def _apply_row_id_check(self, commit_messages: List[CommitMessage]):
-        """Extract snapshot_for_update from commit messages and apply to conflict detection.
-
-        If any commit message has a snapshot_for_update != -1, set it on the
-        conflict detection instance for row ID conflict checking.
-        """
-        for msg in commit_messages:
-            if msg.snapshot_for_update != -1:
-                self.conflict_detection._row_id_check_from_snapshot = msg.snapshot_for_update
-                return
 
     def overwrite(self, overwrite_partition, commit_messages: List[CommitMessage], commit_identifier: int):
         """Commit the given commit messages in overwrite mode."""
@@ -243,7 +237,7 @@ class FileStoreCommit:
         thread_id = threading.current_thread().name
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            commit_entries = commit_entries_plan(latest_snapshot)
+            commit_entries = commit_entries_plan()
 
             # No entries to commit (e.g. drop_partitions with no matching data): skip commit
             # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
@@ -346,7 +340,7 @@ class FileStoreCommit:
 
         # Conflict detection: read base entries from latest snapshot, then check conflicts
         if detect_conflicts and latest_snapshot is not None:
-            base_entries = self._read_all_entries_from_changed_partitions(
+            base_entries = self.commit_scanner.read_all_entries_from_changed_partitions(
                 latest_snapshot, commit_entries)
             conflict_exception = self.conflict_detection.check_conflicts(
                 latest_snapshot, base_entries, commit_entries, commit_kind)
@@ -512,68 +506,12 @@ class FileStoreCommit:
                     return True
         return False
 
-    def _read_all_entries_from_changed_partitions(self, latest_snapshot, delta_entries):
-        """Read all entries from the latest snapshot for partitions that are changed.
-
-        Builds a partition predicate from delta entries and passes it to FileScanner,
-        so that manifest files and entries are filtered during reading rather than
-        after a full scan.
-
-        Args:
-            latest_snapshot: The latest snapshot to read entries from.
-            delta_entries: The delta entries being committed, used to determine
-                which partitions have changed.
-
-        Returns:
-            List of ManifestEntry from the latest snapshot for changed partitions.
-        """
-        if latest_snapshot is None:
-            return []
-
-        partition_filter = self._build_partition_filter_from_entries(delta_entries)
-
-        all_manifests = self.manifest_list_manager.read_all(latest_snapshot)
-        return FileScanner(
-            self.table, lambda: [], partition_filter
-        ).read_manifest_entries(all_manifests)
-
-    def _build_partition_filter_from_entries(self, entries):
-        """Build a partition predicate that matches all partitions present in the given entries.
-
-        Args:
-            entries: List of ManifestEntry whose partitions should be matched.
-
-        Returns:
-            A Predicate matching any of the changed partitions, or None if
-            partition keys are empty.
-        """
-        partition_keys = self.table.partition_keys
-        if not partition_keys:
-            return None
-
-        changed_partitions = set()
-        for entry in entries:
-            changed_partitions.add(tuple(entry.partition.values))
-
-        if not changed_partitions:
-            return None
-
-        predicate_builder = PredicateBuilder(self.table.fields)
-        partition_predicates = []
-        for partition_values in changed_partitions:
-            sub_predicates = []
-            for i, key in enumerate(partition_keys):
-                sub_predicates.append(predicate_builder.equal(key, partition_values[i]))
-            partition_predicates.append(predicate_builder.and_predicates(sub_predicates))
-
-        return predicate_builder.or_predicates(partition_predicates)
-
-    def _generate_overwrite_entries(self, latestSnapshot, partition_filter, commit_messages):
+    def _generate_overwrite_entries(self, latest_snapshot, partition_filter, commit_messages):
         """Generate commit entries for OVERWRITE mode based on latest snapshot."""
         entries = []
-        current_entries = [] if latestSnapshot is None \
+        current_entries = [] if latest_snapshot is None \
             else (FileScanner(self.table, lambda: [], partition_filter).
-                  read_manifest_entries(self.manifest_list_manager.read_all(latestSnapshot)))
+                  read_manifest_entries(self.manifest_list_manager.read_all(latest_snapshot)))
         for entry in current_entries:
             entry.kind = 1  # DELETE
             entries.append(entry)

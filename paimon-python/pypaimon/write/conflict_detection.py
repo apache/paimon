@@ -15,32 +15,28 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-"""Conflict detection for commit operations.
-
-Follows the design of Java's org.apache.paimon.operation.commit.ConflictDetection.
+"""
+Conflict detection for commit operations.
 """
 
-import logging
 
+from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.file_entry import FileEntry
-from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
-
-logger = logging.getLogger(__name__)
+from pypaimon.write.commit_scanner import CommitScanner
 
 
 class ConflictDetection:
     """Detects conflicts between base and delta files during commit.
 
-    Follows the design of Java's ConflictDetection class, providing
-    row ID range conflict checks and row ID from snapshot conflict checks
+    This class provides row ID range conflict checks and row ID from snapshot conflict checks
     for Data Evolution tables.
     """
 
     def __init__(self, data_evolution_enabled, snapshot_manager,
-                 manifest_list_manager, table):
+                 manifest_list_manager: ManifestListManager, table, commit_scanner: CommitScanner):
         """Initialize ConflictDetection.
 
         Args:
@@ -54,6 +50,7 @@ class ConflictDetection:
         self.manifest_list_manager = manifest_list_manager
         self.table = table
         self._row_id_check_from_snapshot = None
+        self.commit_scanner = commit_scanner
 
     def should_be_overwrite_commit(self):
         """Check if the commit should be treated as an overwrite commit.
@@ -92,7 +89,7 @@ class ConflictDetection:
         if conflict is not None:
             return conflict
 
-        return self.check_for_row_id_from_snapshot(latest_snapshot, delta_entries)
+        return self.check_row_id_from_snapshot(latest_snapshot, delta_entries)
 
     def check_row_id_range_conflicts(self, commit_kind, commit_entries):
         """Check for row ID range conflicts among merged entries.
@@ -144,7 +141,7 @@ class ConflictDetection:
 
         return None
 
-    def check_for_row_id_from_snapshot(self, latest_snapshot, commit_entries):
+    def check_row_id_from_snapshot(self, latest_snapshot, commit_entries):
         """Check for row ID conflicts from a specific snapshot onwards.
 
         collects row ID ranges from delta entries, then checks if any
@@ -162,11 +159,6 @@ class ConflictDetection:
             return None
         if self._row_id_check_from_snapshot is None:
             return None
-
-        changed_partitions = set()
-        for entry in commit_entries:
-            partition_key = tuple(entry.partition.values)
-            changed_partitions.add(partition_key)
 
         history_id_ranges = []
         for entry in commit_entries:
@@ -193,8 +185,8 @@ class ConflictDetection:
             if snapshot.commit_kind == "COMPACT":
                 continue
 
-            incremental_entries = self._read_incremental_entries(
-                snapshot, changed_partitions)
+            incremental_entries = self.commit_scanner.read_incremental_entries_from_changed_partitions(
+                snapshot, commit_entries)
             for entry in incremental_entries:
                 file_range = entry.file.row_id_range()
                 if file_range is None:
@@ -202,7 +194,6 @@ class ConflictDetection:
                 if file_range.from_ < check_next_row_id:
                     for history_range in history_id_ranges:
                         if history_range.overlaps(file_range):
-                            print("conflict2")
                             return RuntimeError(
                                 "For Data Evolution table, multiple 'MERGE INTO' "
                                 "operations have encountered conflicts, updating "
@@ -210,31 +201,3 @@ class ConflictDetection:
                                 "ineffective.")
 
         return None
-
-    def _read_incremental_entries(self, snapshot, partition_filter):
-        """Read incremental manifest entries from a snapshot's delta manifest list.
-
-        reads the delta manifest list and filters entries by partition.
-
-        Args:
-            snapshot: The snapshot to read incremental entries from.
-            partition_filter: Set of partition tuples to filter by.
-
-        Returns:
-            List of ManifestEntry matching the partition filter.
-        """
-        delta_manifests = self.manifest_list_manager.read_delta(snapshot)
-        if not delta_manifests:
-            return []
-
-        all_entries = FileScanner(
-            self.table, lambda: [], None
-        ).read_manifest_entries(delta_manifests)
-
-        if not partition_filter:
-            return all_entries
-
-        return [
-            entry for entry in all_entries
-            if tuple(entry.partition.values) in partition_filter
-        ]
