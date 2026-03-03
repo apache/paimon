@@ -303,7 +303,10 @@ case class PaimonSparkWriter(
           }
         }
         val clusteringColumns = coreOptions.clusteringColumns()
-        if ((!coreOptions.clusteringIncrementalEnabled()) && (!clusteringColumns.isEmpty)) {
+        if (
+          (!coreOptions.clusteringIncrementalEnabled() || coreOptions
+            .clusteringIncrementalOptimizeWrite()) && (!clusteringColumns.isEmpty)
+        ) {
           val strategy = coreOptions.clusteringStrategy(tableSchema.fields().size())
           val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
           input = sorter.sort(data)
