@@ -665,6 +665,30 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: on clause has filter expression") {
+    withTable("source", "target") {
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      createTable("source", "a INT, b INT, c STRING", Seq("a"))
+
+      sql("INSERT INTO source values (1, 100, 'c11'), (3, 300, 'c11'), (5, 500, 'c55')")
+      sql("INSERT INTO target values (1, 100, 'cc'), (2, 20, 'cc')")
+
+      sql(
+        """
+          |MERGE INTO target tgt
+          |USING (
+          |  SELECT a, b
+          |  FROM source
+          |  WHERE c = 'c11'
+          |) AS src
+          |ON tgt.a = src.a AND tgt.b = src.b AND tgt.c = 'cc'
+          |WHEN MATCHED THEN DELETE
+          |""".stripMargin)
+
+      checkAnswer(sql("SELECT * FROM target ORDER BY a, b"), Row(2, 20, "cc") :: Nil)
+    }
+  }
+
   test(s"Paimon MergeInto: merge into with varchar") {
     withTable("source", "target") {
       createTable("source", "a INT, b VARCHAR(32)", Seq("a"))
