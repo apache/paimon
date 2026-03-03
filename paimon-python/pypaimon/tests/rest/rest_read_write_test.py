@@ -363,7 +363,6 @@ class RESTTableReadWriteTest(RESTBaseTest):
         ])
         self.assertEqual(actual, expected)
 
-    @unittest.skip("does not support dynamic bucket in dummy rest server")
     def test_pk_lance_reader_no_bucket(self):
         """Test Lance format with PrimaryKey table without specifying bucket."""
         schema = Schema.from_pyarrow_schema(self.pa_schema,
