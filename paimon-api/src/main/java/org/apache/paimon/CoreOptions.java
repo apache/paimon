@@ -2071,8 +2071,8 @@ public class CoreOptions implements Serializable {
                             "The duration after which a partition without new updates is considered a historical partition. "
                                     + "Historical partitions will be automatically fully clustered during the cluster operation.");
 
-    public static final ConfigOption<Boolean> CLUSTERING_PRE_WRITE_ENABLED =
-            key("clustering.pre-write.enabled")
+    public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE =
+            key("clustering.incremental.optimize-write")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
@@ -3410,7 +3410,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean preClusteringEnabled() {
-        return options.get(CLUSTERING_PRE_WRITE_ENABLED);
+        return options.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE);
     }
 
     public boolean bucketClusterEnabled() {

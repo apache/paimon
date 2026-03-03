@@ -258,7 +258,7 @@ public class RangePartitionAndSortForAppendTableITCase extends CatalogITCaseBase
         batchSql(
                 "INSERT INTO test_table /*+ OPTIONS('sink.clustering.by-columns' = 'col1', "
                         + "'sink.parallelism' = '10', 'sink.clustering.strategy' = 'zorder', "
-                        + "'clustering.incremental' = 'true', 'clustering.pre-write.enabled' = 'true') */ "
+                        + "'clustering.incremental' = 'true', 'clustering.incremental.optimize-write' = 'true') */ "
                         + "SELECT * FROM test_source");
         List<Row> sinkRows = batchSql("SELECT * FROM test_table");
         assertThat(sinkRows.size()).isEqualTo(SINK_ROW_NUMBER);
