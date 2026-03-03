@@ -48,15 +48,11 @@ public class NativeLibraryLoader {
     private static final String LIBRARY_PATH_PROPERTY = "paimon.lumina.lib.path";
 
     /**
-     * Dependency libraries that need to be loaded before the main JNI library. Order matters:
-     * libraries must be loaded before the libraries that depend on them.
+     * Dependency libraries that need to be loaded before the main JNI library. The fat .so
+     * statically links libstdc++, libgcc, and liblumina, so normally no dependencies are needed.
+     * This list serves as a fallback for non-fat builds.
      */
-    private static final String[] DEPENDENCY_LIBRARIES = {
-        "libgcc_s.so.1",
-        "libstdc++.so.6",
-        "libgomp.so.1",
-        "liblumina.so",
-    };
+    private static final String[] DEPENDENCY_LIBRARIES = {};
 
     private static volatile boolean libraryLoaded = false;
 
