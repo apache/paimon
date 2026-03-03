@@ -16,9 +16,8 @@
 # limitations under the License.
 ################################################################################
 
-"""Commit rollback to rollback 'COMPACT' commits for resolving conflicts.
-
-Follows the design of Java's org.apache.paimon.operation.commit.CommitRollback.
+"""
+Commit rollback to rollback 'COMPACT' commits for resolving conflicts.
 """
 
 from pypaimon.table.instant import Instant
@@ -28,8 +27,7 @@ class CommitRollback:
     """Rollback COMPACT commits to resolve conflicts.
 
     When a conflict is detected during commit, if the latest snapshot is a
-    COMPACT commit, it can be rolled back via TableRollback, following the
-    logic of Java's CommitRollback.
+    COMPACT commit, it can be rolled back via TableRollback.
     """
 
     def __init__(self, table_rollback):

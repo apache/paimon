@@ -27,9 +27,7 @@ from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
-from pypaimon.write.commit_rollback import CommitRollback
-from pypaimon.write.conflict_detection import ConflictDetection
-from pypaimon.write.commit_scanner import CommitScanner
+
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.read.scanner.file_scanner import FileScanner
@@ -39,6 +37,9 @@ from pypaimon.snapshot.snapshot_commit import (PartitionStatistics,
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.offset_row import OffsetRow
+from pypaimon.write.commit.commit_rollback import CommitRollback
+from pypaimon.write.commit.commit_scanner import CommitScanner
+from pypaimon.write.commit.conflict_detection import ConflictDetection
 from pypaimon.write.commit_message import CommitMessage
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,7 @@ class FileStoreCommit:
             commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
                 snapshot, partition_filter, commit_messages),
             detect_conflicts=True,
-            allow_rollback=True,
+            allow_rollback=False,
         )
 
     def drop_partitions(self, partitions: List[Dict[str, str]], commit_identifier: int) -> None:
@@ -224,7 +225,7 @@ class FileStoreCommit:
             commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
                 snapshot, partition_filter, []),
             detect_conflicts=True,
-            allow_rollback=True,
+            allow_rollback=False,
         )
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,

@@ -867,7 +867,6 @@ class TableUpdateTest(unittest.TestCase):
         the final result is verified to ensure all updates were applied correctly.
         """
         import threading
-        import traceback
         table = self._create_table()
 
         # Table has 5 rows (row_id 0-4) after _create_table:
@@ -889,7 +888,6 @@ class TableUpdateTest(unittest.TestCase):
             max_retries = 20
             for attempt in range(max_retries):
                 try:
-                    print("hello0")
                     write_builder = table.new_batch_write_builder()
                     table_update = write_builder.new_update().with_update_type(['age'])
 
@@ -907,8 +905,11 @@ class TableUpdateTest(unittest.TestCase):
                     success_counts[thread_index] = attempt + 1
                     return
                 except Exception as e:
-                    print(
-                        "Thread-{} attempt {} failed: {}\n{}".format(
+                    import traceback
+                    self.assertIn(
+                        "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts",
+                        str(e),
+                        "Thread-{} attempt {} unexpected error: {}\n{}".format(
                             thread_index, attempt + 1, e, traceback.format_exc()
                         )
                     )
@@ -994,10 +995,12 @@ class TableUpdateTest(unittest.TestCase):
                         completion_order.append(thread_index)
                     return
                 except Exception as e:
-                    print(
-                        "Thread-{} ({}) attempt {} failed: {}".format(
-                            thread_index, update_spec['thread_name'],
-                            attempt + 1, e
+                    import traceback
+                    self.assertIn(
+                        "For Data Evolution table, multiple 'MERGE INTO' operations have encountered conflicts",
+                        str(e),
+                        "Thread-{} attempt {} unexpected error: {}\n{}".format(
+                            thread_index, attempt + 1, e, traceback.format_exc()
                         )
                     )
                     if attempt == max_retries - 1:

@@ -25,7 +25,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.utils.range import Range
 from pypaimon.utils.range_helper import RangeHelper
-from pypaimon.write.commit_scanner import CommitScanner
+from pypaimon.write.commit.commit_scanner import CommitScanner
 
 
 class ConflictDetection:

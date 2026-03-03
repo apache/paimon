@@ -15,9 +15,8 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-"""A helper class to handle ranges.
-
-Follows the design of Java's org.apache.paimon.utils.RangeHelper.
+"""
+A helper class to handle ranges.
 """
 
 
