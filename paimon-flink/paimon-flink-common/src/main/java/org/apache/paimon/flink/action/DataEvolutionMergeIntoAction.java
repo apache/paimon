@@ -25,7 +25,7 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.dataevolution.DataEvolutionPartialWriteOperator;
 import org.apache.paimon.flink.dataevolution.FirstRowIdAssigner;
-import org.apache.paimon.flink.dataevolution.MergeIntoCommitterOperatorFactory;
+import org.apache.paimon.flink.dataevolution.MergeIntoUpdateChecker;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
 import org.apache.paimon.flink.sink.CommitterOperatorFactory;
@@ -385,7 +385,16 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
             DataStream<Committable> written, Set<String> updatedColumns) {
         FileStoreTable storeTable = (FileStoreTable) table;
 
-        CommitterOperatorFactory<Committable, ManifestCommittable> factory =
+        // Check if some global-indexed columns are updated
+        DataStream<Committable> checked =
+                written.transform(
+                                "Updated Column Check",
+                                new CommittableTypeInfo(),
+                                new MergeIntoUpdateChecker(storeTable, updatedColumns))
+                        .setParallelism(1)
+                        .setMaxParallelism(1);
+
+        CommitterOperatorFactory<Committable, ManifestCommittable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
                         true,
@@ -397,10 +406,7 @@ public class DataEvolutionMergeIntoAction extends TableActionBase {
                                         context),
                         new NoopCommittableStateManager());
 
-        MergeIntoCommitterOperatorFactory committerOperator =
-                new MergeIntoCommitterOperatorFactory(factory, storeTable, updatedColumns);
-
-        return written.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
+        return checked.transform("COMMIT OPERATOR", new CommittableTypeInfo(), committerOperator)
                 .setParallelism(1)
                 .setMaxParallelism(1);
     }

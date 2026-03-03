@@ -22,31 +22,19 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.CommitterOperator;
+import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
-import org.apache.flink.runtime.checkpoint.CheckpointOptions;
-import org.apache.flink.runtime.jobgraph.OperatorID;
-import org.apache.flink.runtime.state.CheckpointStreamFactory;
-import org.apache.flink.streaming.api.operators.BoundedOneInput;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.streaming.api.operators.OperatorSnapshotFutures;
-import org.apache.flink.streaming.api.operators.StreamTaskStateInitializer;
-import org.apache.flink.streaming.api.watermark.Watermark;
-import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,139 +46,43 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * A committer for MergeInto which wraps a normal committer and provide the ability to check updated
- * columns.
- *
- * <p>This operator is only for batch mode.
+ * The checker for merge into update result. It will check each committable to see if some
+ * global-indexed columns are updated. It will take some actions according to {@link
+ * CoreOptions#GLOBAL_INDEX_COLUMN_UPDATE_ACTION}.
  */
-public class MergeIntoCommitterOperator
-        implements OneInputStreamOperator<Committable, Committable>, BoundedOneInput {
+public class MergeIntoUpdateChecker extends BoundedOneInputOperator<Committable, Committable> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MergeIntoCommitterOperator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MergeIntoUpdateChecker.class);
 
     private final FileStoreTable table;
     private final Set<String> updatedColumns;
-    private final CommitterOperator<Committable, ManifestCommittable> committerOperator;
 
     private transient Set<BinaryRow> affectedPartitions;
 
-    public MergeIntoCommitterOperator(
-            CommitterOperator<Committable, ManifestCommittable> committerOperator,
-            FileStoreTable table,
-            Set<String> updatedColumns) {
+    public MergeIntoUpdateChecker(FileStoreTable table, Set<String> updatedColumns) {
         this.table = table;
         this.updatedColumns = updatedColumns;
-        this.committerOperator = committerOperator;
-    }
-
-    @Override
-    public void initializeState(StreamTaskStateInitializer streamTaskStateManager)
-            throws Exception {
-        committerOperator.initializeState(streamTaskStateManager);
-    }
-
-    @Override
-    public OperatorSnapshotFutures snapshotState(
-            long checkpointId,
-            long timestamp,
-            CheckpointOptions checkpointOptions,
-            CheckpointStreamFactory storageLocation)
-            throws Exception {
-        return committerOperator.snapshotState(
-                checkpointId, timestamp, checkpointOptions, storageLocation);
-    }
-
-    @Override
-    public void notifyCheckpointComplete(long checkpointId) throws Exception {
-        committerOperator.notifyCheckpointComplete(checkpointId);
-    }
-
-    @Override
-    public void notifyCheckpointAborted(long checkpointId) throws Exception {
-        committerOperator.notifyCheckpointAborted(checkpointId);
     }
 
     @Override
     public void open() throws Exception {
-        committerOperator.open();
+        super.open();
         affectedPartitions = new HashSet<>();
+
+        Preconditions.checkState(
+                getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks() == 1,
+                "Parallelism of MergeIntoUpdateChecker must be 1.");
     }
 
     @Override
     public void processElement(StreamRecord<Committable> element) throws Exception {
         affectedPartitions.add(element.getValue().commitMessage().partition());
-        committerOperator.processElement(element);
-    }
-
-    @Override
-    public void processWatermark(Watermark watermark) throws Exception {
-        committerOperator.processWatermark(watermark);
-    }
-
-    @Override
-    public void processWatermarkStatus(WatermarkStatus watermarkStatus) throws Exception {
-        committerOperator.processWatermarkStatus(watermarkStatus);
-    }
-
-    @Override
-    public void processLatencyMarker(LatencyMarker latencyMarker) throws Exception {
-        committerOperator.processLatencyMarker(latencyMarker);
-    }
-
-    @Override
-    public void finish() throws Exception {
-        committerOperator.finish();
-    }
-
-    @Override
-    public void close() throws Exception {
-        committerOperator.close();
-    }
-
-    @Override
-    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
-        committerOperator.prepareSnapshotPreBarrier(checkpointId);
-    }
-
-    @Override
-    public void setKeyContextElement1(StreamRecord<?> record) throws Exception {
-        committerOperator.setKeyContextElement1(record);
-    }
-
-    @Override
-    public void setKeyContextElement2(StreamRecord<?> record) throws Exception {
-        committerOperator.setKeyContextElement2(record);
-    }
-
-    @Override
-    public OperatorMetricGroup getMetricGroup() {
-        return committerOperator.getMetricGroup();
-    }
-
-    @Override
-    public OperatorID getOperatorID() {
-        return committerOperator.getOperatorID();
-    }
-
-    @Override
-    public void setCurrentKey(Object key) {
-        committerOperator.setCurrentKey(key);
-    }
-
-    @Override
-    public Object getCurrentKey() {
-        return committerOperator.getCurrentKey();
-    }
-
-    @Override
-    public void setKeyContextElement(StreamRecord<Committable> record) throws Exception {
-        committerOperator.setKeyContextElement(record);
+        output.collect(element);
     }
 
     @Override
     public void endInput() throws Exception {
         checkUpdatedColumns();
-        committerOperator.endInput();
     }
 
     private void checkUpdatedColumns() {
@@ -258,7 +150,7 @@ public class MergeIntoCommitterOperator
 
                         Committable committable = new Committable(Long.MAX_VALUE, commitMessage);
 
-                        committerOperator.processElement(new StreamRecord<>(committable));
+                        output.collect(new StreamRecord<>(committable));
                     }
                     break;
                 default:
