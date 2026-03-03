@@ -32,81 +32,39 @@ endif()
 find_package(JNI REQUIRED)
 include_directories(${JNI_INCLUDE_DIRS})
 
-# ==================== Find Lumina ====================
+# ==================== Find Lumina (LUMINA_ROOT required) ====================
 if(NOT LUMINA_ROOT AND DEFINED ENV{LUMINA_ROOT})
     set(LUMINA_ROOT $ENV{LUMINA_ROOT})
 endif()
 
-find_path(LUMINA_INCLUDE_DIR
-    NAMES lumina/api/LuminaBuilder.h
-    PATHS
-        ${LUMINA_ROOT}/include
-        /usr/local/include
-        /usr/include
-)
-
-if(NOT LUMINA_INCLUDE_DIR)
-    message(FATAL_ERROR "Lumina headers not found. Set LUMINA_ROOT.")
-endif()
-message(STATUS "Found Lumina headers: ${LUMINA_INCLUDE_DIR}")
-
-# ==================== Locate Lumina static library ====================
-# A fat .so requires a static archive (.a) to embed via --whole-archive.
-# User can specify the exact path via -DLUMINA_LIBRARY=/path/to/liblumina.a
-
-if(NOT LUMINA_LIBRARY)
-    # Auto-search for liblumina.a
-    set(_ORIG_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
-    find_library(LUMINA_LIBRARY
-        NAMES lumina
-        PATHS
-            ${LUMINA_ROOT}/lib
-            ${LUMINA_ROOT}/lib64
-            /usr/local/lib
-            /usr/local/lib64
-            /usr/lib
-            /usr/lib64
-        NO_DEFAULT_PATH
-    )
-    if(NOT LUMINA_LIBRARY)
-        find_library(LUMINA_LIBRARY NAMES lumina)
-    endif()
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_ORIG_SUFFIXES})
+if(NOT LUMINA_ROOT)
+    message(FATAL_ERROR "LUMINA_ROOT is required. Set -DLUMINA_ROOT=/path/to/lumina")
 endif()
 
-# Diagnostic: list files in lib directories
-foreach(_dir ${LUMINA_ROOT}/lib ${LUMINA_ROOT}/lib64)
-    if(EXISTS "${_dir}")
-        file(GLOB _libs "${_dir}/liblumina*")
-        if(_libs)
-            message(STATUS "Lumina libs in ${_dir}: ${_libs}")
-        endif()
-    endif()
-endforeach()
+set(LUMINA_INCLUDE_DIR "${LUMINA_ROOT}/include")
+set(LUMINA_LIBRARY "${LUMINA_ROOT}/lib/liblumina.so")
 
-if(NOT LUMINA_LIBRARY OR NOT EXISTS "${LUMINA_LIBRARY}")
-    message(FATAL_ERROR
-        "Lumina static library (liblumina.a) not found.\n"
-        "  A fat .so requires liblumina.a (static archive).\n"
-        "  Set -DLUMINA_LIBRARY=/path/to/liblumina.a\n"
-        "  Or ensure liblumina.a is in ${LUMINA_ROOT}/lib/")
+if(NOT EXISTS "${LUMINA_INCLUDE_DIR}/lumina/api/LuminaBuilder.h")
+    message(FATAL_ERROR "Lumina headers not found at ${LUMINA_INCLUDE_DIR}")
 endif()
 
-message(STATUS ">>> Using Lumina library: ${LUMINA_LIBRARY}")
+if(NOT EXISTS "${LUMINA_LIBRARY}")
+    message(FATAL_ERROR "liblumina.so not found at ${LUMINA_LIBRARY}")
+endif()
 
-# ==================== Build fat JNI shared library ====================
+message(STATUS "Lumina headers: ${LUMINA_INCLUDE_DIR}")
+message(STATUS "Lumina library: ${LUMINA_LIBRARY}")
+
+# ==================== Build JNI shared library ====================
 add_library(paimon_lumina_jni SHARED paimon_lumina_jni.cpp)
 
 target_include_directories(paimon_lumina_jni PRIVATE ${LUMINA_INCLUDE_DIR})
 
-# Embed all Lumina symbols into a single fat .so via --whole-archive
 target_link_libraries(paimon_lumina_jni PRIVATE
-    -Wl,--whole-archive ${LUMINA_LIBRARY} -Wl,--no-whole-archive
+    -L${LUMINA_ROOT}/lib -llumina
     pthread dl m
 )
 target_link_options(paimon_lumina_jni PRIVATE
     -static-libstdc++
     -static-libgcc
-    "-Wl,--exclude-libs,ALL"
 )

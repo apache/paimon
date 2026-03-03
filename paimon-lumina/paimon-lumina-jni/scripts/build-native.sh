@@ -17,20 +17,22 @@
 # limitations under the License.
 
 ################################################################################
-# Build libpaimon_lumina_jni.so — single fat .so with Lumina statically linked.
+# Build libpaimon_lumina_jni.so with liblumina.so bundled.
 #
 # Usage:
 #   LUMINA_ROOT=/path/to/lumina ./build-native.sh
-#   LUMINA_ROOT=/path/to/lumina LUMINA_LIBRARY=/path/to/liblumina.a ./build-native.sh
 #
-# The script auto-searches for liblumina.a under LUMINA_ROOT.
-# If your .a is elsewhere, set LUMINA_LIBRARY explicitly.
+# Expected layout under LUMINA_ROOT:
+#   include/lumina/api/LuminaBuilder.h  (headers)
+#   lib/liblumina.so                    (shared library)
+#
+# Output: libpaimon_lumina_jni.so + liblumina.so bundled together,
+#         with libstdc++/libgcc statically linked into the JNI library.
 #
 # Prerequisites:
 #   - CMake >= 3.14, make, patchelf
 #   - C++17 compiler (GCC >= 9.3)
 #   - JDK (JAVA_HOME)
-#   - Lumina static library (liblumina.a)
 ################################################################################
 
 set -e
@@ -43,59 +45,17 @@ BUILD_DIR="$NATIVE_DIR/build"
 # ==================== Validate LUMINA_ROOT ====================
 if [ -z "$LUMINA_ROOT" ]; then
     echo "ERROR: LUMINA_ROOT is not set."
-    echo "  export LUMINA_ROOT=/path/to/paimon-cpp/third_party/lumina"
+    echo "  export LUMINA_ROOT=/path/to/lumina"
     exit 1
 fi
 if [ ! -d "$LUMINA_ROOT/include/lumina" ]; then
     echo "ERROR: Lumina headers not found at $LUMINA_ROOT/include/lumina"
     exit 1
 fi
-
-# ==================== Find liblumina.a ====================
-if [ -z "$LUMINA_LIBRARY" ]; then
-    echo "Searching for liblumina.a ..."
-    # Search common locations under LUMINA_ROOT
-    for candidate in \
-        "$LUMINA_ROOT/lib/liblumina.a" \
-        "$LUMINA_ROOT/lib64/liblumina.a" \
-        "$LUMINA_ROOT/build/lib/liblumina.a" \
-        "$LUMINA_ROOT/build/liblumina.a"; do
-        if [ -f "$candidate" ]; then
-            LUMINA_LIBRARY="$candidate"
-            break
-        fi
-    done
-
-    # Recursive search as last resort
-    if [ -z "$LUMINA_LIBRARY" ]; then
-        LUMINA_LIBRARY="$(find "$LUMINA_ROOT" -name 'liblumina.a' -type f 2>/dev/null | head -1)" || true
-    fi
-
-    if [ -z "$LUMINA_LIBRARY" ] || [ ! -f "$LUMINA_LIBRARY" ]; then
-        echo ""
-        echo "ERROR: liblumina.a not found under LUMINA_ROOT=$LUMINA_ROOT"
-        echo ""
-        echo "  A fat .so requires the static library liblumina.a."
-        echo "  Files found under $LUMINA_ROOT/lib/:"
-        ls -la "$LUMINA_ROOT/lib/" 2>/dev/null || echo "    (directory does not exist)"
-        echo ""
-        echo "  If liblumina.a is elsewhere, set it explicitly:"
-        echo "    LUMINA_LIBRARY=/path/to/liblumina.a ./build-native.sh"
-        echo ""
-        echo "  To build liblumina.a from source, rebuild Lumina with:"
-        echo "    cmake -DBUILD_SHARED_LIBS=OFF ... && make"
-        exit 1
-    fi
-fi
-
-if [ ! -f "$LUMINA_LIBRARY" ]; then
-    echo "ERROR: LUMINA_LIBRARY=$LUMINA_LIBRARY does not exist."
+if [ ! -f "$LUMINA_ROOT/lib/liblumina.so" ]; then
+    echo "ERROR: liblumina.so not found at $LUMINA_ROOT/lib/liblumina.so"
     exit 1
 fi
-
-echo "Found Lumina static library: $LUMINA_LIBRARY"
-ls -lh "$LUMINA_LIBRARY"
-echo ""
 
 # ==================== Auto-detect JAVA_HOME ====================
 find_jdk_home() {
@@ -138,11 +98,10 @@ fi
 export JAVA_HOME
 
 echo "================================================"
-echo "Building Paimon Lumina JNI (fat .so)"
+echo "Building Paimon Lumina JNI"
 echo "================================================"
-echo "LUMINA_ROOT    : $LUMINA_ROOT"
-echo "LUMINA_LIBRARY : $LUMINA_LIBRARY"
-echo "JAVA_HOME      : $JAVA_HOME"
+echo "LUMINA_ROOT : $LUMINA_ROOT"
+echo "JAVA_HOME   : $JAVA_HOME"
 echo ""
 
 # ==================== Detect platform ====================
@@ -165,8 +124,8 @@ esac
 
 OUTPUT_DIR="$PROJECT_DIR/src/main/resources/$PLATFORM_OS/$PLATFORM_ARCH"
 mkdir -p "$OUTPUT_DIR"
-echo "Platform    : $PLATFORM_OS/$PLATFORM_ARCH"
-echo "Output      : $OUTPUT_DIR"
+echo "Platform : $PLATFORM_OS/$PLATFORM_ARCH"
+echo "Output   : $OUTPUT_DIR"
 echo ""
 
 # ==================== Build ====================
@@ -176,27 +135,27 @@ cd "$BUILD_DIR"
 
 cmake -DCMAKE_BUILD_TYPE=Release \
       -DLUMINA_ROOT="$LUMINA_ROOT" \
-      -DLUMINA_LIBRARY="$LUMINA_LIBRARY" \
       -DJAVA_HOME="$JAVA_HOME" \
       ..
 
 make -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 # ==================== Install ====================
-SO_NAME="libpaimon_lumina_jni.so"
+JNI_SO="libpaimon_lumina_jni.so"
+LUMINA_SO="liblumina.so"
 if [ "$OS" = "Darwin" ]; then
-    SO_NAME="libpaimon_lumina_jni.dylib"
+    JNI_SO="libpaimon_lumina_jni.dylib"
 fi
 
-cp "$BUILD_DIR/$SO_NAME" "$OUTPUT_DIR/$SO_NAME"
+cp "$BUILD_DIR/$JNI_SO" "$OUTPUT_DIR/$JNI_SO"
+cp "$LUMINA_ROOT/lib/$LUMINA_SO" "$OUTPUT_DIR/$LUMINA_SO"
 
 # ==================== patchelf ====================
 if [ "$OS" = "Linux" ] && command -v patchelf &>/dev/null; then
     echo ""
-    echo "Setting rpath..."
-    patchelf --force-rpath --set-rpath \
-        '$ORIGIN:/usr/local/lib64:/usr/lib/jvm/java/jre/lib/amd64:/usr/lib/jvm/java/jre/lib/amd64/server' \
-        "$OUTPUT_DIR/$SO_NAME"
+    echo "Setting rpath with \$ORIGIN..."
+    patchelf --force-rpath --set-rpath '$ORIGIN' "$OUTPUT_DIR/$JNI_SO"
+    patchelf --force-rpath --set-rpath '$ORIGIN' "$OUTPUT_DIR/$LUMINA_SO"
     echo "Done"
 fi
 
@@ -206,37 +165,16 @@ echo "============================================"
 echo "Build completed!"
 echo "============================================"
 echo ""
-
-echo "Output:"
-ls -lh "$OUTPUT_DIR/$SO_NAME"
-echo ""
-
-LIB_SIZE_KB=$(du -k "$OUTPUT_DIR/$SO_NAME" | cut -f1)
-if [ "$LIB_SIZE_KB" -lt 1024 ]; then
-    echo "WARNING: Library is only ${LIB_SIZE_KB}K — Lumina may not be embedded!"
-    echo "  Expected a fat .so of several MB."
-    echo "  Check the CMake/linker output above for errors."
-else
-    echo "OK: Fat .so is ${LIB_SIZE_KB}K (Lumina + JNI + libstdc++ statically linked)"
-fi
+echo "Output files:"
+ls -lh "$OUTPUT_DIR/$JNI_SO"
+ls -lh "$OUTPUT_DIR/$LUMINA_SO"
 echo ""
 
 if [ "$OS" = "Linux" ]; then
-    echo "Dynamic dependencies (should NOT include liblumina):"
-    ldd "$OUTPUT_DIR/$SO_NAME" 2>/dev/null || true
-
+    echo "Dynamic dependencies of $JNI_SO:"
+    ldd "$OUTPUT_DIR/$JNI_SO" 2>/dev/null || true
     echo ""
-    if ldd "$OUTPUT_DIR/$SO_NAME" 2>/dev/null | grep -q "liblumina"; then
-        echo "WARNING: liblumina.so still appears as a dynamic dependency!"
-        echo "  The fat .so may not be self-contained."
-    else
-        echo "OK: No dynamic dependency on liblumina — fully self-contained."
-    fi
-elif [ "$OS" = "Darwin" ]; then
-    echo "Dependencies:"
-    otool -L "$OUTPUT_DIR/$SO_NAME" 2>/dev/null || true
 fi
 
-echo ""
 echo "To package into JAR:"
 echo "  mvn -pl paimon-lumina/paimon-lumina-jni package"
