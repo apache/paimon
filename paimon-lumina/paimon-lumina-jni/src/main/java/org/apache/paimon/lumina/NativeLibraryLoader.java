@@ -48,10 +48,10 @@ public class NativeLibraryLoader {
     private static final String LIBRARY_PATH_PROPERTY = "paimon.lumina.lib.path";
 
     /**
-     * Dependency libraries that must be loaded before the main JNI library. The JNI .so statically
-     * links libstdc++ and libgcc, but dynamically links liblumina.so which is bundled alongside.
+     * Dependency libraries bundled in the JAR that must be extracted and loaded before the main JNI
+     * .so. Order matters: each library's own dependencies must appear earlier in the array.
      */
-    private static final String[] DEPENDENCY_LIBRARIES = {"liblumina.so"};
+    private static final String[] BUNDLED_LIBRARIES = {"libstdc++.so.6", "liblumina.so"};
 
     private static volatile boolean libraryLoaded = false;
 
@@ -75,7 +75,7 @@ public class NativeLibraryLoader {
                 loadNativeLibrary();
                 libraryLoaded = true;
                 LOG.info("Lumina native library loaded successfully");
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 throw new LuminaException("Failed to load Lumina native library", e);
             }
         }
@@ -130,7 +130,7 @@ public class NativeLibraryLoader {
                 tempDir.toFile().deleteOnExit();
             }
 
-            loadDependencyLibraries();
+            extractAndLoadDependencies();
 
             String fileName = System.mapLibraryName(JNI_LIBRARY_NAME);
             File tempFile = new File(tempDir.toFile(), fileName);
@@ -148,24 +148,34 @@ public class NativeLibraryLoader {
                 LOG.warn("Could not set executable permission on native library");
             }
 
+            File[] contents = tempDir.toFile().listFiles();
+            if (contents != null) {
+                StringBuilder sb = new StringBuilder();
+                sb.append("[NativeLibraryLoader] Temp dir ").append(tempDir).append(" contents:");
+                for (File f : contents) {
+                    sb.append(" ").append(f.getName()).append("(").append(f.length()).append(")");
+                }
+                System.err.println(sb.toString());
+            }
+
             System.load(tempFile.getAbsolutePath());
             LOG.info("Loaded Lumina native library from JAR: {}", libraryPath);
         }
     }
 
-    private static void loadDependencyLibraries() {
+    private static void extractAndLoadDependencies() {
         String os = getOsName();
         String arch = getArchName();
 
-        for (String depLib : DEPENDENCY_LIBRARIES) {
-            String resourcePath = "/" + os + "/" + arch + "/" + depLib;
+        for (String lib : BUNDLED_LIBRARIES) {
+            String resourcePath = "/" + os + "/" + arch + "/" + lib;
             try (InputStream is = NativeLibraryLoader.class.getResourceAsStream(resourcePath)) {
                 if (is == null) {
-                    LOG.warn("Dependency library not bundled: {}", depLib);
+                    LOG.debug("Bundled library not found in JAR: {}", lib);
                     continue;
                 }
 
-                File tempFile = new File(tempDir.toFile(), depLib);
+                File tempFile = new File(tempDir.toFile(), lib);
                 tempFile.deleteOnExit();
 
                 try (OutputStream fos = new FileOutputStream(tempFile)) {
@@ -177,15 +187,15 @@ public class NativeLibraryLoader {
                 }
 
                 if (!tempFile.setExecutable(true)) {
-                    LOG.warn("Could not set executable permission on: {}", depLib);
+                    LOG.warn("Could not set executable permission on: {}", lib);
                 }
 
                 System.load(tempFile.getAbsolutePath());
-                LOG.info("Loaded bundled dependency library: {}", depLib);
+                LOG.info("Loaded bundled dependency: {}", tempFile.getAbsolutePath());
             } catch (UnsatisfiedLinkError e) {
-                LOG.warn("Could not load dependency {}: {}", depLib, e.getMessage());
+                LOG.warn("Could not load dependency {}: {}", lib, e.getMessage());
             } catch (IOException e) {
-                LOG.warn("Could not extract dependency {}: {}", depLib, e.getMessage());
+                LOG.warn("Could not extract dependency {}: {}", lib, e.getMessage());
             }
         }
     }

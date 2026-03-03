@@ -21,13 +21,7 @@ package org.apache.paimon.lumina;
 /** Global Lumina configuration and utilities. */
 public final class Lumina {
 
-    static {
-        try {
-            NativeLibraryLoader.load();
-        } catch (LuminaException e) {
-            throw new ExceptionInInitializerError(e);
-        }
-    }
+    private Lumina() {}
 
     /**
      * Ensure the native library is loaded.

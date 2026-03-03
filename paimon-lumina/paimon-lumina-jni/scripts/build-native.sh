@@ -17,7 +17,7 @@
 # limitations under the License.
 
 ################################################################################
-# Build libpaimon_lumina_jni.so with liblumina.so bundled.
+# Build libpaimon_lumina_jni.so and bundle liblumina.so alongside it.
 #
 # Usage:
 #   LUMINA_ROOT=/path/to/lumina ./build-native.sh
@@ -26,8 +26,13 @@
 #   include/lumina/api/LuminaBuilder.h  (headers)
 #   lib/liblumina.so                    (shared library)
 #
-# Output: libpaimon_lumina_jni.so + liblumina.so bundled together,
-#         with libstdc++/libgcc statically linked into the JNI library.
+# Output directory will contain:
+#   libpaimon_lumina_jni.so   (JNI library, RPATH=$ORIGIN)
+#   liblumina.so              (copied from LUMINA_ROOT, RPATH=$ORIGIN)
+#
+# At runtime the two .so files must reside in the same directory.
+# The NativeLibraryLoader extracts them from the JAR into a temp dir;
+# the OS dynamic linker resolves liblumina.so via RPATH=$ORIGIN.
 #
 # Prerequisites:
 #   - CMake >= 3.14, make, patchelf
@@ -41,6 +46,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 NATIVE_DIR="$PROJECT_DIR/src/main/native"
 BUILD_DIR="$NATIVE_DIR/build"
+
+# ==================== Auto-detect C++17 compiler (devtoolset) ====================
+if [ -z "$CXX" ]; then
+    for ver in 13 12 11 10 9; do
+        devtoolset="/opt/rh/devtoolset-${ver}/enable"
+        if [ -f "$devtoolset" ]; then
+            echo "Activating devtoolset-${ver} for C++17 support..."
+            source "$devtoolset"
+            break
+        fi
+    done
+fi
+
+# Verify the compiler supports C++17
+CXX_CMD="${CXX:-g++}"
+if ! echo '#include <variant>' | "$CXX_CMD" -std=c++17 -x c++ -E - &>/dev/null; then
+    echo "ERROR: $CXX_CMD does not support C++17 (<variant> header not found)."
+    echo "  Install a newer GCC: yum install devtoolset-9-gcc-c++"
+    echo "  Or set CXX to a C++17-capable compiler."
+    exit 1
+fi
+echo "C++ compiler : $CXX_CMD ($(${CXX_CMD} -dumpversion))"
 
 # ==================== Validate LUMINA_ROOT ====================
 if [ -z "$LUMINA_ROOT" ]; then
@@ -133,29 +160,94 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
+CMAKE_EXTRA_ARGS=""
+if [ -n "$CC" ]; then
+    CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DCMAKE_C_COMPILER=$CC"
+fi
+if [ -n "$CXX" ]; then
+    CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DCMAKE_CXX_COMPILER=$CXX"
+fi
+
 cmake -DCMAKE_BUILD_TYPE=Release \
       -DLUMINA_ROOT="$LUMINA_ROOT" \
       -DJAVA_HOME="$JAVA_HOME" \
+      $CMAKE_EXTRA_ARGS \
       ..
 
 make -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
-# ==================== Install ====================
+# ==================== Install: copy both .so files ====================
 JNI_SO="libpaimon_lumina_jni.so"
 LUMINA_SO="liblumina.so"
 if [ "$OS" = "Darwin" ]; then
     JNI_SO="libpaimon_lumina_jni.dylib"
+    LUMINA_SO="liblumina.dylib"
 fi
 
-cp "$BUILD_DIR/$JNI_SO" "$OUTPUT_DIR/$JNI_SO"
-cp "$LUMINA_ROOT/lib/$LUMINA_SO" "$OUTPUT_DIR/$LUMINA_SO"
+cp -L "$BUILD_DIR/$JNI_SO"           "$OUTPUT_DIR/$JNI_SO"
+cp -L "$LUMINA_ROOT/lib/$LUMINA_SO"  "$OUTPUT_DIR/$LUMINA_SO"
 
-# ==================== patchelf ====================
+# ==================== Bundle libstdc++.so.6 for liblumina.so ====================
+# liblumina.so dynamically links libstdc++, but the system's version (GCC 4.8)
+# may be too old.  Bundle a newer version so RPATH=$ORIGIN picks it up.
+if [ "$OS" = "Linux" ]; then
+    STDCXX_SO=""
+
+    # Method 1: ask the compiler
+    for name in libstdc++.so.6 libstdc++.so; do
+        candidate="$("$CXX_CMD" -print-file-name="$name" 2>/dev/null)"
+        if [ -n "$candidate" ] && [ "$candidate" != "$name" ] && [ -f "$candidate" ]; then
+            STDCXX_SO="$candidate"; break
+        fi
+    done
+
+    # Method 2: search compiler's lib directory
+    if [ -z "$STDCXX_SO" ]; then
+        CXX_LIBDIR="$(dirname "$("$CXX_CMD" -print-file-name=libstdc++.a 2>/dev/null)" 2>/dev/null)"
+        if [ -d "$CXX_LIBDIR" ]; then
+            for f in "$CXX_LIBDIR"/libstdc++.so.6*; do
+                [ -f "$f" ] && STDCXX_SO="$f" && break
+            done
+        fi
+    fi
+
+    # Method 3: search devtoolset paths
+    if [ -z "$STDCXX_SO" ]; then
+        for f in /opt/rh/devtoolset-*/root/usr/lib64/libstdc++.so.6* \
+                 /opt/rh/devtoolset-*/root/usr/lib/gcc/x86_64-*/*/libstdc++.so*; do
+            [ -f "$f" ] && STDCXX_SO="$f" && break
+        done
+    fi
+
+    # Method 4: search LD_LIBRARY_PATH
+    if [ -z "$STDCXX_SO" ] && [ -n "$LD_LIBRARY_PATH" ]; then
+        IFS=':' read -ra _DIRS <<< "$LD_LIBRARY_PATH"
+        for dir in "${_DIRS[@]}"; do
+            for f in "$dir"/libstdc++.so.6*; do
+                [ -f "$f" ] && STDCXX_SO="$f" && break 2
+            done
+        done
+    fi
+
+    if [ -n "$STDCXX_SO" ] && [ -f "$STDCXX_SO" ]; then
+        echo ""
+        echo "Bundling libstdc++.so.6 from: $STDCXX_SO"
+        cp -L "$STDCXX_SO" "$OUTPUT_DIR/libstdc++.so.6"
+    else
+        echo ""
+        echo "WARNING: Could not locate a newer libstdc++.so.6"
+        echo "  liblumina.so may fail on systems with old libstdc++"
+        echo "  You can manually copy it: cp /path/to/libstdc++.so.6 $OUTPUT_DIR/"
+    fi
+fi
+
+# ==================== patchelf: set RPATH=$ORIGIN ====================
 if [ "$OS" = "Linux" ] && command -v patchelf &>/dev/null; then
     echo ""
-    echo "Setting rpath with \$ORIGIN..."
-    patchelf --force-rpath --set-rpath '$ORIGIN' "$OUTPUT_DIR/$JNI_SO"
-    patchelf --force-rpath --set-rpath '$ORIGIN' "$OUTPUT_DIR/$LUMINA_SO"
+    echo "Setting RPATH=\$ORIGIN on all bundled libraries..."
+    for f in "$OUTPUT_DIR"/*.so "$OUTPUT_DIR"/*.so.*; do
+        [ -f "$f" ] && patchelf --force-rpath --set-rpath '$ORIGIN' "$f" 2>/dev/null
+    done
     echo "Done"
 fi
 
@@ -165,14 +257,17 @@ echo "============================================"
 echo "Build completed!"
 echo "============================================"
 echo ""
+
 echo "Output files:"
-ls -lh "$OUTPUT_DIR/$JNI_SO"
-ls -lh "$OUTPUT_DIR/$LUMINA_SO"
+ls -lh "$OUTPUT_DIR/"*.so "$OUTPUT_DIR/"*.so.* 2>/dev/null
 echo ""
 
 if [ "$OS" = "Linux" ]; then
-    echo "Dynamic dependencies of $JNI_SO:"
-    ldd "$OUTPUT_DIR/$JNI_SO" 2>/dev/null || true
+    echo "Dynamic dependencies of $JNI_SO (with bundled libs):"
+    LD_LIBRARY_PATH="$OUTPUT_DIR" ldd "$OUTPUT_DIR/$JNI_SO" 2>/dev/null || true
+    echo ""
+    echo "Dynamic dependencies of $LUMINA_SO (with bundled libs):"
+    LD_LIBRARY_PATH="$OUTPUT_DIR" ldd "$OUTPUT_DIR/$LUMINA_SO" 2>/dev/null || true
     echo ""
 fi
 
