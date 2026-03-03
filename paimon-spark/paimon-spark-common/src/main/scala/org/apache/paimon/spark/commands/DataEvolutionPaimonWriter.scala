@@ -61,9 +61,16 @@ case class DataEvolutionPaimonWriter(paimonTable: FileStoreTable, dataSplits: Se
     assert(data.columns.length == columnNames.size + 2)
     val writeType = table.rowType().project(columnNames.asJava)
 
-    if (writeType.getFieldTypes.stream.anyMatch((t: DataType) => t.is(BLOB))) {
+    val options = new CoreOptions(table.schema().options())
+    val updatableBlobFields = options.updatableBlobFields()
+    val hasRawDataBlob = writeType.getFields.asScala.exists(
+      f => f.`type`().is(BLOB) && !updatableBlobFields.contains(f.name()))
+    if (hasRawDataBlob) {
       throw new UnsupportedOperationException(
-        "DataEvolution does not support writing partial columns mixed with BLOB type.")
+        "DataEvolution does not support writing partial columns with raw-data BLOB type. " +
+          "Only descriptor-based BLOB columns (configured via '" +
+          CoreOptions.BLOB_DESCRIPTOR_FIELD.key() + "' or '" +
+          CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key() + "') can be updated.")
     }
 
     val written =

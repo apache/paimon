@@ -2182,6 +2182,29 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
 
+    @Immutable
+    public static final ConfigOption<String> BLOB_EXTERNAL_STORAGE_PATH =
+            key("blob-external-storage-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The external storage path where raw BLOB data from fields configured "
+                                    + "by 'blob-external-storage-field' is written at write time. "
+                                    + "Orphan file cleanup is not applied to this path.");
+
+    @Immutable
+    public static final ConfigOption<String> BLOB_EXTERNAL_STORAGE_FIELD =
+            key("blob-external-storage-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated BLOB field names (must be a subset of '"
+                                    + BLOB_DESCRIPTOR_FIELD.key()
+                                    + "') whose raw data will be written to external storage at "
+                                    + "write time. The external storage path is configured via '"
+                                    + BLOB_EXTERNAL_STORAGE_PATH.key()
+                                    + "'. Orphan file cleanup is not applied to that path.");
+
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
                     .booleanType()
@@ -2745,7 +2768,40 @@ public class CoreOptions implements Serializable {
      * <p>If this option is not set, all blob fields are stored in '.blob' files by default.
      */
     public Set<String> blobDescriptorField() {
-        return options.getOptional(BLOB_DESCRIPTOR_FIELD)
+        return parseCommaSeparatedSet(BLOB_DESCRIPTOR_FIELD);
+    }
+
+    /**
+     * Resolve blob fields whose data should be written to external storage at write time. These
+     * fields must be a subset of {@link #blobDescriptorField()}.
+     */
+    public Set<String> blobExternalStorageField() {
+        return parseCommaSeparatedSet(BLOB_EXTERNAL_STORAGE_FIELD);
+    }
+
+    /**
+     * Returns the set of BLOB fields that support partial updates (e.g. via MERGE INTO).
+     *
+     * <p>Currently, only descriptor-based BLOB fields (configured via {@link
+     * #BLOB_DESCRIPTOR_FIELD}) are updatable. Raw-data BLOB fields are not updatable because the
+     * update cost is too high. Fields configured by {@link #BLOB_EXTERNAL_STORAGE_FIELD} are a
+     * subset of descriptor fields and therefore are also updatable.
+     */
+    public Set<String> updatableBlobFields() {
+        return blobDescriptorField();
+    }
+
+    /**
+     * Return the external storage path for descriptor BLOB fields that write raw data outside the
+     * table location. Returns null if not configured.
+     */
+    @Nullable
+    public String blobExternalStoragePath() {
+        return options.get(BLOB_EXTERNAL_STORAGE_PATH);
+    }
+
+    private Set<String> parseCommaSeparatedSet(ConfigOption<String> option) {
+        return options.getOptional(option)
                 .map(
                         s ->
                                 Arrays.stream(s.split(","))

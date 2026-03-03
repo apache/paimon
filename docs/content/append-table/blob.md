@@ -69,6 +69,21 @@ This separation provides several benefits:
 
 For details about the blob file format structure, see [File Format - BLOB]({{< ref "concepts/spec/fileformat#blob" >}}).
 
+## Storage Modes
+
+Paimon supports three storage modes for BLOB fields:
+
+1. **Default blob storage**
+   Blob bytes are written to Paimon-managed `.blob` files under the table path.
+
+2. **Descriptor-only storage**
+   Fields configured in `blob-descriptor-field` store only serialized `BlobDescriptor` bytes inline in data files. Paimon does not write `.blob` files for these fields, and writes must provide descriptor-based input.
+
+3. **External-storage descriptor mode**
+   Fields configured in `blob-external-storage-field` are a subset of `blob-descriptor-field`. At write time, Paimon writes the raw blob data to the configured `blob-external-storage-path` and stores only serialized `BlobDescriptor` bytes inline in data files.
+
+This allows one table to mix raw-data BLOB fields, descriptor-only BLOB fields, and descriptor-based BLOB fields backed by external storage.
+
 ## Table Options
 
 <table class="table table-bordered">
@@ -106,6 +121,27 @@ For details about the blob file format structure, see [File Format - BLOB]({{< r
         By default, all blob fields store blob bytes in separate <code>.blob</code> files.
         If configured, one table can mix:
         some BLOB fields in <code>.blob</code> files and some as descriptor references.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>blob-external-storage-field</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>
+        Comma-separated BLOB field names whose raw data should be written to external storage at write time.
+        This option must be a subset of <code>blob-descriptor-field</code>.
+        For these fields, Paimon stores serialized <code>BlobDescriptor</code> bytes inline in data files.
+      </td>
+    </tr>
+    <tr>
+      <td><h5>blob-external-storage-path</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>String</td>
+      <td>
+        External storage path used by fields configured in <code>blob-external-storage-field</code>.
+        Orphan file cleanup is not applied to this path.
       </td>
     </tr>
     <tr>
@@ -242,6 +278,31 @@ SELECT image FROM blob_table;
 ALTER TABLE blob_table SET ('blob-as-descriptor' = 'false');
 SELECT image FROM blob_table;
 ```
+
+### External-Storage Descriptor Fields
+
+If you want Paimon to accept raw BLOB input, write the data to an external location, and store only descriptor bytes inline, configure the target field(s) like this:
+
+```sql
+'blob-descriptor-field' = 'image',
+'blob-external-storage-field' = 'image',
+'blob-external-storage-path' = 's3://my-bucket/paimon-external-blobs/'
+```
+
+For these configured fields:
+
+- Paimon writes the raw blob data to `blob-external-storage-path`
+- Paimon stores serialized `BlobDescriptor` bytes inline in normal data files
+- the field remains descriptor-based when reading and updating
+- orphan file cleanup is not applied to the external storage path
+
+### MERGE INTO Support
+
+For Data Evolution writes in Flink and Spark:
+
+- raw-data BLOB columns are still rejected in partial-column `MERGE INTO` updates
+- descriptor-based BLOB columns are allowed
+- fields configured in `blob-external-storage-field` are also allowed because they are descriptor-based fields
 
 ## Java API Usage
 
@@ -447,7 +508,8 @@ Paimon write path is descriptor-aware automatically:
 
 1. For blob fields stored in `.blob` files, input can be either blob bytes or a `BlobDescriptor`.
 2. For fields configured in `blob-descriptor-field`, Paimon stores descriptor bytes inline in data files (no `.blob` files for those fields), and input must be a descriptor.
-3. This behavior does not depend on `blob-as-descriptor`.
+3. For fields configured in `blob-external-storage-field`, Paimon writes the blob data to `blob-external-storage-path` and stores descriptor bytes inline in data files.
+4. This behavior does not depend on `blob-as-descriptor`.
 
 ```java
 import org.apache.paimon.catalog.Catalog;
@@ -575,12 +637,30 @@ If you want downstream tables to **reuse** upstream blob files (no copying and n
 
 For these configured fields, Paimon stores only serialized <code>BlobDescriptor</code> bytes in normal data files. Reading the blob follows the descriptor URI to access bytes, and writing requires descriptor input for those fields.
 
+### Blob storage mode: EXTERNAL STORAGE
+
+If you want Paimon to write raw blob data to a separate external location while keeping only descriptor bytes inline, configure the target blob field(s):
+
+```sql
+'blob-descriptor-field' = 'image',
+'blob-external-storage-field' = 'image',
+'blob-external-storage-path' = 'oss://bucket/path/'
+```
+
+For these configured fields:
+
+- raw blob data is written to the configured external storage path
+- normal data files keep only serialized <code>BlobDescriptor</code> bytes
+- writes can still start from raw BLOB input
+- the field is treated as descriptor-based for operations such as `MERGE INTO`
+
 ## Limitations
 
 1. **Append Table Only**: Blob type is designed for append-only tables. Primary key tables are not supported.
 2. **No Predicate Pushdown**: Blob columns cannot be used in filter predicates.
 3. **No Statistics**: Statistics collection is not supported for blob columns.
 4. **Required Options**: `row-tracking.enabled` and `data-evolution.enabled` must be set to `true`.
+5. **External Storage Cleanup**: Files written through `blob-external-storage-path` are outside Paimon's orphan file cleanup scope.
 
 ## Best Practices
 
@@ -590,4 +670,8 @@ For these configured fields, Paimon stores only serialized <code>BlobDescriptor<
 
 3. **Use Descriptor Fields When Reusing External Blob Files**: Configure `blob-descriptor-field` for fields that should keep descriptor references instead of writing new `.blob` files.
 
-4. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.
+4. **Use External-Storage Fields When Accepting Raw Input But Storing Descriptors**: Configure `blob-external-storage-field` together with `blob-external-storage-path` when upstream writes raw blob bytes but you want descriptor-based storage.
+
+5. **Manage External Storage Lifecycle Separately**: Files written to `blob-external-storage-path` are not cleaned up by Paimon, so retention and deletion should be managed externally.
+
+6. **Use Partitioning**: Partition your blob tables by date or other dimensions to improve query performance and data management.

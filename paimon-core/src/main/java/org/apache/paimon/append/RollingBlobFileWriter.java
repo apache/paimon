@@ -85,6 +85,7 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     private final Supplier<MultipleBlobFileWriter> blobWriterFactory;
     private final long targetFileSize;
     private final Set<String> blobDescriptorFields;
+    @Nullable private final ExternalStorageBlobWriter externalStorageBlobWriter;
 
     // State management
     private final List<FileWriterAbortExecutor> closedWriters;
@@ -112,7 +113,9 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
             boolean asyncFileWrite,
             boolean statsDenseStore,
             @Nullable BlobConsumer blobConsumer,
-            Set<String> blobDescriptorFields) {
+            Set<String> blobDescriptorFields,
+            Set<String> blobExternalStorageFields,
+            @Nullable String blobExternalStoragePath) {
         // Initialize basic fields
         this.targetFileSize = targetFileSize;
         this.results = new ArrayList<>();
@@ -151,6 +154,25 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
                                 blobTargetFileSize,
                                 blobConsumer,
                                 this.blobDescriptorFields);
+
+        // Initialize writer for descriptor fields backed by external storage if needed.
+        if (!blobExternalStorageFields.isEmpty()) {
+            this.externalStorageBlobWriter =
+                    new ExternalStorageBlobWriter(
+                            fileIO,
+                            schemaId,
+                            writeSchema,
+                            blobExternalStorageFields,
+                            blobExternalStoragePath,
+                            pathFactory,
+                            seqNumCounterSupplier,
+                            fileSource,
+                            asyncFileWrite,
+                            statsDenseStore,
+                            blobTargetFileSize);
+        } else {
+            this.externalStorageBlobWriter = null;
+        }
     }
 
     /** Creates a factory for normal data writers. */
@@ -207,14 +229,20 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
     @Override
     public void write(InternalRow row) throws IOException {
         try {
+            // Transform descriptor BLOB fields backed by external storage first.
+            InternalRow transformedRow =
+                    externalStorageBlobWriter != null
+                            ? externalStorageBlobWriter.transformRow(row)
+                            : row;
+
             if (currentWriter == null) {
                 currentWriter = writerFactory.get();
             }
             if (blobWriter == null) {
                 blobWriter = blobWriterFactory.get();
             }
-            currentWriter.write(row);
-            blobWriter.write(row);
+            blobWriter.write(transformedRow);
+            currentWriter.write(transformedRow);
             recordCount++;
 
             if (rollingFile()) {
@@ -273,6 +301,9 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
         if (blobWriter != null) {
             blobWriter.abort();
             blobWriter = null;
+        }
+        if (externalStorageBlobWriter != null) {
+            externalStorageBlobWriter.abort();
         }
     }
 
@@ -378,6 +409,9 @@ public class RollingBlobFileWriter implements RollingFileWriter<InternalRow, Dat
 
         try {
             closeCurrentWriter();
+            if (externalStorageBlobWriter != null) {
+                externalStorageBlobWriter.close();
+            }
         } catch (IOException e) {
             handleCloseException(e);
             throw e;

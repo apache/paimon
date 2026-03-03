@@ -108,7 +108,9 @@ public class RollingBlobFileWriterTest {
                         false, // asyncFileWrite
                         false, // statsDenseStore
                         null,
-                        Collections.emptySet());
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        null);
     }
 
     @Test
@@ -209,7 +211,9 @@ public class RollingBlobFileWriterTest {
                         false, // asyncFileWrite
                         false, // statsDenseStore
                         null,
-                        Collections.emptySet());
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        null);
 
         // Create large blob data that will exceed the blob target file size
         byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
@@ -287,7 +291,9 @@ public class RollingBlobFileWriterTest {
                         false, // asyncFileWrite
                         false, // statsDenseStore
                         null,
-                        Collections.emptySet());
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        null);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -367,7 +373,9 @@ public class RollingBlobFileWriterTest {
                         false, // asyncFileWrite
                         false, // statsDenseStore
                         null,
-                        Collections.emptySet());
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        null);
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -585,7 +593,9 @@ public class RollingBlobFileWriterTest {
                         false, // asyncFileWrite
                         false, // statsDenseStore
                         null,
-                        Collections.emptySet());
+                        Collections.emptySet(),
+                        Collections.emptySet(),
+                        null);
 
         // Write data
         for (int i = 0; i < 3; i++) {

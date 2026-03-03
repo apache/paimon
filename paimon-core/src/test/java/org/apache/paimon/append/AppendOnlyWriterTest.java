@@ -714,6 +714,8 @@ public class AppendOnlyWriterTest {
                         false,
                         null,
                         options.blobDescriptorField(),
+                        options.blobExternalStorageField(),
+                        options.blobExternalStoragePath(),
                         options.dataEvolutionEnabled());
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
