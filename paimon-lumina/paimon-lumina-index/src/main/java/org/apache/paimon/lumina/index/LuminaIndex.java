@@ -75,7 +75,9 @@ public class LuminaIndex implements Closeable {
         LuminaIndex index = new LuminaIndex(dimension, metric, indexType);
 
         Map<String, String> opts = new LinkedHashMap<>(extraOptions);
-        index.searcher = LuminaSearcher.create(dimension, toMetricType(metric), opts);
+        index.searcher =
+                LuminaSearcher.create(
+                        indexType.getLuminaName(), dimension, toMetricType(metric), opts);
         index.searcher.open(file);
         return index;
     }

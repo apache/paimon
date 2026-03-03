@@ -95,30 +95,9 @@ public class LuminaIndexMeta implements Serializable {
     public static LuminaIndexMeta deserialize(byte[] data) throws IOException {
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(data));
         int version = in.readInt();
-        if (version == 1) {
-            return deserializeV1(in);
-        } else if (version == VERSION) {
-            return deserializeV2(in);
-        } else {
+        if (version != VERSION) {
             throw new IOException("Unsupported Lumina index meta version: " + version);
         }
-    }
-
-    private static LuminaIndexMeta deserializeV1(DataInputStream in) throws IOException {
-        int dim = in.readInt();
-        int metricValue = in.readInt();
-        int indexTypeOrdinal = in.readInt();
-        long numVectors = in.readLong();
-        long minId = in.readLong();
-        long maxId = in.readLong();
-        String indexTypeName =
-                indexTypeOrdinal == 0
-                        ? LuminaIndexType.DISKANN.name()
-                        : LuminaIndexType.UNKNOWN.name();
-        return new LuminaIndexMeta(dim, metricValue, indexTypeName, numVectors, minId, maxId);
-    }
-
-    private static LuminaIndexMeta deserializeV2(DataInputStream in) throws IOException {
         int dim = in.readInt();
         int metricValue = in.readInt();
         String indexTypeName = in.readUTF();

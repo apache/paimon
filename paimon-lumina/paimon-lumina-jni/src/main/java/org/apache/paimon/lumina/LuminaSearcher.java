@@ -39,28 +39,33 @@ public class LuminaSearcher implements AutoCloseable {
     }
 
     /**
-     * Create a new Lumina searcher. The index type is auto-detected from the persisted file.
+     * Create a new Lumina searcher.
      *
+     * @param indexType the index type (e.g. "diskann")
      * @param dimension the vector dimension
      * @param metric the distance metric
      * @return the created searcher
      */
-    public static LuminaSearcher create(int dimension, MetricType metric) {
-        return create(dimension, metric, new LinkedHashMap<>());
+    public static LuminaSearcher create(String indexType, int dimension, MetricType metric) {
+        return create(indexType, dimension, metric, new LinkedHashMap<>());
     }
 
     /**
-     * Create a new Lumina searcher with additional options. The index type is auto-detected from
-     * the persisted file, so {@code index.type} should NOT be included in extraOptions.
+     * Create a new Lumina searcher with additional options.
      *
+     * @param indexType the index type (e.g. "diskann")
      * @param dimension the vector dimension
      * @param metric the distance metric
      * @param extraOptions additional Lumina options
      * @return the created searcher
      */
     public static LuminaSearcher create(
-            int dimension, MetricType metric, Map<String, String> extraOptions) {
+            String indexType,
+            int dimension,
+            MetricType metric,
+            Map<String, String> extraOptions) {
         Map<String, String> opts = new LinkedHashMap<>();
+        opts.put("index.type", indexType);
         opts.put("index.dimension", String.valueOf(dimension));
         opts.put("distance.metric", metric.getLuminaValue());
         opts.putAll(extraOptions);
