@@ -406,7 +406,7 @@ public class LuminaVectorGlobalIndexTest {
         Options options = new Options();
         options.setInteger("vector.dim", dimension);
         options.setString("vector.metric", "L2");
-        options.setString("vector.index-type", "BRUTEFORCE");
+        options.setString("vector.index-type", "DISKANN");
         return options;
     }
 

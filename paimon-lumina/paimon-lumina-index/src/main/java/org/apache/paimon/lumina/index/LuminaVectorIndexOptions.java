@@ -41,28 +41,14 @@ public class LuminaVectorIndexOptions {
     public static final ConfigOption<LuminaIndexType> VECTOR_INDEX_TYPE =
             ConfigOptions.key("vector.index-type")
                     .enumType(LuminaIndexType.class)
-                    .defaultValue(LuminaIndexType.IVF)
-                    .withDescription(
-                            "The type of Lumina index (BRUTEFORCE, HNSW, IVF, DISKANN)");
+                    .defaultValue(LuminaIndexType.DISKANN)
+                    .withDescription("The type of Lumina index (DISKANN)");
 
     public static final ConfigOption<String> VECTOR_ENCODING_TYPE =
             ConfigOptions.key("vector.encoding-type")
                     .stringType()
                     .defaultValue("rawf32")
-                    .withDescription(
-                            "The encoding type for vectors (rawf32, sq8, pq)");
-
-    public static final ConfigOption<Integer> VECTOR_NLIST =
-            ConfigOptions.key("vector.nlist")
-                    .intType()
-                    .defaultValue(100)
-                    .withDescription("The number of inverted lists (clusters) for IVF index");
-
-    public static final ConfigOption<Integer> VECTOR_NPROBE =
-            ConfigOptions.key("vector.nprobe")
-                    .intType()
-                    .defaultValue(64)
-                    .withDescription("The number of clusters to visit during IVF search");
+                    .withDescription("The encoding type for vectors (rawf32, sq8, pq)");
 
     public static final ConfigOption<Integer> VECTOR_SIZE_PER_INDEX =
             ConfigOptions.key("vector.size-per-index")
@@ -75,7 +61,7 @@ public class LuminaVectorIndexOptions {
                     .intType()
                     .defaultValue(50_0000)
                     .withDescription(
-                            "The number of vectors to use for pretraining IVF-based indices");
+                            "The number of vectors to use for pretraining DiskANN indices");
 
     public static final ConfigOption<Integer> VECTOR_SEARCH_FACTOR =
             ConfigOptions.key("vector.search-factor")
@@ -91,6 +77,12 @@ public class LuminaVectorIndexOptions {
                     .withDescription(
                             "Whether to L2 normalize vectors before indexing and searching");
 
+    public static final ConfigOption<Integer> VECTOR_SEARCH_LIST_SIZE =
+            ConfigOptions.key("vector.search-list-size")
+                    .intType()
+                    .defaultValue(100)
+                    .withDescription("The search list size for DiskANN search (search.list_size)");
+
     public static final ConfigOption<Double> PRETRAIN_SAMPLE_RATIO =
             ConfigOptions.key("vector.pretrain-sample-ratio")
                     .doubleType()
@@ -102,11 +94,10 @@ public class LuminaVectorIndexOptions {
     private final LuminaVectorMetric metric;
     private final LuminaIndexType indexType;
     private final String encodingType;
-    private final int nlist;
-    private final int nprobe;
     private final int sizePerIndex;
     private final int trainingSize;
     private final int searchFactor;
+    private final int searchListSize;
     private final boolean normalize;
     private final double pretrainSampleRatio;
 
@@ -115,14 +106,13 @@ public class LuminaVectorIndexOptions {
         this.metric = options.get(VECTOR_METRIC);
         this.indexType = options.get(VECTOR_INDEX_TYPE);
         this.encodingType = options.get(VECTOR_ENCODING_TYPE);
-        this.nlist = options.get(VECTOR_NLIST);
-        this.nprobe = options.get(VECTOR_NPROBE);
         this.sizePerIndex =
                 options.get(VECTOR_SIZE_PER_INDEX) > 0
                         ? options.get(VECTOR_SIZE_PER_INDEX)
                         : VECTOR_SIZE_PER_INDEX.defaultValue();
         this.trainingSize = options.get(VECTOR_TRAINING_SIZE);
         this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
+        this.searchListSize = options.get(VECTOR_SEARCH_LIST_SIZE);
         this.normalize = options.get(VECTOR_NORMALIZE);
         this.pretrainSampleRatio = options.get(PRETRAIN_SAMPLE_RATIO);
     }
@@ -143,14 +133,6 @@ public class LuminaVectorIndexOptions {
         return encodingType;
     }
 
-    public int nlist() {
-        return nlist;
-    }
-
-    public int nprobe() {
-        return nprobe;
-    }
-
     public int sizePerIndex() {
         return sizePerIndex;
     }
@@ -161,6 +143,10 @@ public class LuminaVectorIndexOptions {
 
     public int searchFactor() {
         return searchFactor;
+    }
+
+    public int searchListSize() {
+        return searchListSize;
     }
 
     public boolean normalize() {

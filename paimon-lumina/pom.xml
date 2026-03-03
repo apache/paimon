@@ -35,5 +35,6 @@ under the License.
     <modules>
         <module>paimon-lumina-jni</module>
         <module>paimon-lumina-index</module>
+        <module>paimon-lumina-e2e-test</module>
     </modules>
 </project>

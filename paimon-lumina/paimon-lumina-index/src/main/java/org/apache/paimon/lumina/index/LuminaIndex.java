@@ -61,10 +61,7 @@ public class LuminaIndex implements Closeable {
         Map<String, String> opts = new LinkedHashMap<>(extraOptions);
         index.builder =
                 LuminaBuilder.create(
-                        indexType.getLuminaName(),
-                        dimension,
-                        toMetricType(metric),
-                        opts);
+                        indexType.getLuminaName(), dimension, toMetricType(metric), opts);
         return index;
     }
 
@@ -80,15 +77,12 @@ public class LuminaIndex implements Closeable {
         Map<String, String> opts = new LinkedHashMap<>(extraOptions);
         index.searcher =
                 LuminaSearcher.create(
-                        indexType.getLuminaName(),
-                        dimension,
-                        toMetricType(metric),
-                        opts);
+                        indexType.getLuminaName(), dimension, toMetricType(metric), opts);
         index.searcher.open(file);
         return index;
     }
 
-    /** Pretrain the index (for IVF-based types). */
+    /** Pretrain the index with sample vectors before insertion. */
     public void pretrain(ByteBuffer vectorBuffer, int n) {
         ensureOpen();
         ensureBuilder();

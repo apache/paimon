@@ -117,7 +117,7 @@ public class LuminaSearcher implements AutoCloseable {
      * @param topk the number of nearest neighbors to find
      * @param distances output array for distances (n * topk floats)
      * @param ids output array for IDs (n * topk longs)
-     * @param searchOptions additional search-time options (e.g., "search.nprobe")
+     * @param searchOptions additional search-time options (e.g., "search.list_size")
      */
     public void search(
             int n,

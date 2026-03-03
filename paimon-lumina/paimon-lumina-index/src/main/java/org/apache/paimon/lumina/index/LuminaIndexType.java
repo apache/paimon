@@ -21,15 +21,6 @@ package org.apache.paimon.lumina.index;
 /** Enumeration of supported Lumina index types. */
 public enum LuminaIndexType {
 
-    /** Brute-force exact search (flat index). */
-    BRUTEFORCE("bruteforce"),
-
-    /** HNSW graph-based approximate nearest neighbor search. */
-    HNSW("hnsw"),
-
-    /** IVF (Inverted File) index with clustering. */
-    IVF("ivf"),
-
     /** DiskANN graph-based index optimized for disk-resident data. */
     DISKANN("diskann"),
 

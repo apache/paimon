@@ -48,7 +48,8 @@ import java.util.UUID;
 /**
  * Vector global index reader using Lumina.
  *
- * <p>This reader loads Lumina indices from global index files and performs vector similarity search.
+ * <p>This reader loads Lumina indices from global index files and performs vector similarity
+ * search.
  */
 public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
@@ -157,11 +158,8 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
             Map<String, String> searchOptions = new LinkedHashMap<>();
             searchOptions.put("search.topk", String.valueOf(effectiveK));
-            if (options.indexType() == LuminaIndexType.IVF) {
-                int effectiveNprobe =
-                        Math.max(options.nprobe(), (int) Math.max(1, index.size() / 10));
-                searchOptions.put("search.nprobe", String.valueOf(effectiveNprobe));
-            }
+            int listSize = Math.max(effectiveK, options.searchListSize());
+            searchOptions.put("search.list_size", String.valueOf(listSize));
 
             index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
 
@@ -296,15 +294,12 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
         LuminaIndexMeta meta = indexMetas.get(position);
         LuminaVectorMetric metric = LuminaVectorMetric.fromValue(meta.metricValue());
-        LuminaIndexType indexType =
-                LuminaIndexType.values()[
-                        Math.min(meta.indexTypeOrdinal(), LuminaIndexType.values().length - 1)];
+        LuminaIndexType indexType = meta.indexType();
 
         Map<String, String> extraOptions = new LinkedHashMap<>();
         extraOptions.put("encoding.type", options.encodingType());
 
-        return LuminaIndex.fromFile(
-                rawIndexFile, meta.dim(), metric, indexType, extraOptions);
+        return LuminaIndex.fromFile(rawIndexFile, meta.dim(), metric, indexType, extraOptions);
     }
 
     private void normalizeL2(float[] vector) {

@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * Java wrapper for Lumina's native LuminaBuilder.
  *
- * <p>Lifecycle: create → pretrain (optional) → insertBatch (repeatable) → dump → close.
+ * <p>Lifecycle: create → pretrain → insertBatch (once) → dump → close.
  *
  * <p>Thread Safety: Builder instances are NOT thread-safe.
  */
@@ -44,7 +44,7 @@ public class LuminaBuilder implements AutoCloseable {
     /**
      * Create a new Lumina builder.
      *
-     * @param indexType the index type (e.g., "bruteforce", "ivf", "diskann", "hnsw")
+     * @param indexType the index type (e.g., "diskann")
      * @param dimension the vector dimension
      * @param metric the distance metric
      * @return the created builder
@@ -87,7 +87,7 @@ public class LuminaBuilder implements AutoCloseable {
     /**
      * Pretrain the index on a set of sample vectors (zero-copy).
      *
-     * <p>Required for IVF-based indices before inserting vectors.
+     * <p>Required for DiskANN indices before inserting vectors.
      *
      * @param vectorBuffer direct ByteBuffer containing training vectors (n * dimension floats)
      * @param n the number of training vectors

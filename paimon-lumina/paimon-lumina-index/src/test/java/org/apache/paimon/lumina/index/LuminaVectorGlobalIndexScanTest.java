@@ -105,7 +105,7 @@ public class LuminaVectorGlobalIndexScanTest {
                         .option(CoreOptions.BUCKET.key(), "-1")
                         .option("vector.dim", "2")
                         .option("vector.metric", similarityMetric)
-                        .option("vector.index-type", "BRUTEFORCE")
+                        .option("vector.index-type", "DISKANN")
                         .option("data-evolution.enabled", "true")
                         .option("row-tracking.enabled", "true")
                         .build();
@@ -158,7 +158,7 @@ public class LuminaVectorGlobalIndexScanTest {
                         .option(CoreOptions.BUCKET.key(), "-1")
                         .option("vector.dim", "2")
                         .option("vector.metric", "INNER_PRODUCT")
-                        .option("vector.index-type", "BRUTEFORCE")
+                        .option("vector.index-type", "DISKANN")
                         .option("data-evolution.enabled", "true")
                         .option("row-tracking.enabled", "true")
                         .build();

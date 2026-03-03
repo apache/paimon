@@ -34,7 +34,7 @@ public class LuminaIndexMeta implements Serializable {
 
     private final int dim;
     private final int metricValue;
-    private final int indexTypeOrdinal;
+    private final String indexTypeName;
     private final long numVectors;
     private final long minId;
     private final long maxId;
@@ -42,13 +42,13 @@ public class LuminaIndexMeta implements Serializable {
     public LuminaIndexMeta(
             int dim,
             int metricValue,
-            int indexTypeOrdinal,
+            String indexTypeName,
             long numVectors,
             long minId,
             long maxId) {
         this.dim = dim;
         this.metricValue = metricValue;
-        this.indexTypeOrdinal = indexTypeOrdinal;
+        this.indexTypeName = indexTypeName;
         this.numVectors = numVectors;
         this.minId = minId;
         this.maxId = maxId;
@@ -62,12 +62,12 @@ public class LuminaIndexMeta implements Serializable {
         return metricValue;
     }
 
-    public int indexTypeOrdinal() {
-        return indexTypeOrdinal;
-    }
-
-    public long numVectors() {
-        return numVectors;
+    public LuminaIndexType indexType() {
+        try {
+            return LuminaIndexType.fromString(indexTypeName);
+        } catch (IllegalArgumentException e) {
+            return LuminaIndexType.UNKNOWN;
+        }
     }
 
     public long minId() {
@@ -84,7 +84,7 @@ public class LuminaIndexMeta implements Serializable {
         out.writeInt(VERSION);
         out.writeInt(dim);
         out.writeInt(metricValue);
-        out.writeInt(indexTypeOrdinal);
+        out.writeUTF(indexTypeName);
         out.writeLong(numVectors);
         out.writeLong(minId);
         out.writeLong(maxId);
@@ -95,15 +95,36 @@ public class LuminaIndexMeta implements Serializable {
     public static LuminaIndexMeta deserialize(byte[] data) throws IOException {
         DataInputStream in = new DataInputStream(new ByteArrayInputStream(data));
         int version = in.readInt();
-        if (version != VERSION) {
+        if (version == 1) {
+            return deserializeV1(in);
+        } else if (version == VERSION) {
+            return deserializeV2(in);
+        } else {
             throw new IOException("Unsupported Lumina index meta version: " + version);
         }
+    }
+
+    private static LuminaIndexMeta deserializeV1(DataInputStream in) throws IOException {
         int dim = in.readInt();
         int metricValue = in.readInt();
         int indexTypeOrdinal = in.readInt();
         long numVectors = in.readLong();
         long minId = in.readLong();
         long maxId = in.readLong();
-        return new LuminaIndexMeta(dim, metricValue, indexTypeOrdinal, numVectors, minId, maxId);
+        String indexTypeName =
+                indexTypeOrdinal == 0
+                        ? LuminaIndexType.DISKANN.name()
+                        : LuminaIndexType.UNKNOWN.name();
+        return new LuminaIndexMeta(dim, metricValue, indexTypeName, numVectors, minId, maxId);
+    }
+
+    private static LuminaIndexMeta deserializeV2(DataInputStream in) throws IOException {
+        int dim = in.readInt();
+        int metricValue = in.readInt();
+        String indexTypeName = in.readUTF();
+        long numVectors = in.readLong();
+        long minId = in.readLong();
+        long maxId = in.readLong();
+        return new LuminaIndexMeta(dim, metricValue, indexTypeName, numVectors, minId, maxId);
     }
 }
