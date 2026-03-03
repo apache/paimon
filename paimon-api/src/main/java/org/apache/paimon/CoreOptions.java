@@ -3409,7 +3409,7 @@ public class CoreOptions implements Serializable {
         return options.get(CLUSTERING_INCREMENTAL);
     }
 
-    public boolean preClusteringEnabled() {
+    public boolean clusteringIncrementalOptimizeWrite() {
         return options.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE);
     }
 
