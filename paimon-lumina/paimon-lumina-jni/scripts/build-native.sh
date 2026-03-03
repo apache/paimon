@@ -21,7 +21,7 @@
 #
 # Usage:
 #   LUMINA_ROOT=/path/to/lumina ./build-native.sh
-#   LUMINA_ROOT=/path/to/paimon-cpp/third_party/lumina ./build-native.sh
+#   LUMINA_ROOT=/path/to/lumina LUMINA_LIBRARY=/path/to/liblumina.so ./build-native.sh
 #
 # Prerequisites:
 #   - CMake >= 3.14, make, patchelf
@@ -98,8 +98,9 @@ export JAVA_HOME
 echo "================================================"
 echo "Building Paimon Lumina JNI"
 echo "================================================"
-echo "LUMINA_ROOT : $LUMINA_ROOT"
-echo "JAVA_HOME   : $JAVA_HOME"
+echo "LUMINA_ROOT    : $LUMINA_ROOT"
+echo "LUMINA_LIBRARY : ${LUMINA_LIBRARY:-(auto-detect)}"
+echo "JAVA_HOME      : $JAVA_HOME"
 echo ""
 
 # ==================== Detect platform ====================
@@ -131,15 +132,20 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
+CMAKE_EXTRA_ARGS=""
+if [ -n "$LUMINA_LIBRARY" ]; then
+    CMAKE_EXTRA_ARGS="-DLUMINA_LIBRARY=$LUMINA_LIBRARY"
+fi
+
 cmake -DCMAKE_BUILD_TYPE=Release \
       -DLUMINA_ROOT="$LUMINA_ROOT" \
       -DJAVA_HOME="$JAVA_HOME" \
+      $CMAKE_EXTRA_ARGS \
       ..
 
 make -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 # ==================== Install ====================
-# Move the built .so to the JAR resource directory
 SO_NAME="libpaimon_lumina_jni.so"
 if [ "$OS" = "Darwin" ]; then
     SO_NAME="libpaimon_lumina_jni.dylib"
@@ -147,32 +153,203 @@ fi
 
 cp "$BUILD_DIR/$SO_NAME" "$OUTPUT_DIR/$SO_NAME"
 
+# ==================== Resolve real ELF for liblumina.so ====================
+# liblumina.so may be a linker script (text) instead of a real ELF binary.
+# We need the actual ELF file for runtime dlopen.
+resolve_real_so() {
+    local so_path="$1"
+    if [ ! -f "$so_path" ]; then
+        return 1
+    fi
+
+    # Check if it's an ELF binary
+    if file "$so_path" | grep -q "ELF"; then
+        echo "$so_path"
+        return 0
+    fi
+
+    # It might be a linker script — try to parse the referenced library
+    # Common formats: GROUP ( /path/to/lib.so ), INPUT ( lib.so )
+    local referenced
+    referenced=$(grep -oP '(?<=\( ).*?(?= \))' "$so_path" 2>/dev/null | head -1)
+    if [ -z "$referenced" ]; then
+        referenced=$(grep -oP '/\S+\.so[\S]*' "$so_path" 2>/dev/null | head -1)
+    fi
+
+    if [ -n "$referenced" ]; then
+        # If it's a relative path, resolve relative to the .so's directory
+        if [[ "$referenced" != /* ]]; then
+            local dir
+            dir="$(dirname "$so_path")"
+            referenced="$dir/$referenced"
+        fi
+        referenced="$(readlink -f "$referenced" 2>/dev/null || echo "$referenced")"
+        if [ -f "$referenced" ] && file "$referenced" | grep -q "ELF"; then
+            echo "$referenced"
+            return 0
+        fi
+    fi
+
+    # Last resort: try readlink -f (handles symlink chains)
+    local resolved
+    resolved="$(readlink -f "$so_path")"
+    if [ -f "$resolved" ] && file "$resolved" | grep -q "ELF"; then
+        echo "$resolved"
+        return 0
+    fi
+
+    return 1
+}
+
+# ==================== Bundle liblumina.so ====================
+LUMINA_SO_TO_BUNDLE=""
+if [ -n "$LUMINA_LIBRARY" ] && [[ "$LUMINA_LIBRARY" == *.so* ]]; then
+    LUMINA_SO_TO_BUNDLE="$LUMINA_LIBRARY"
+else
+    for candidate in "$LUMINA_ROOT/lib/liblumina.so" "$LUMINA_ROOT/lib64/liblumina.so"; do
+        if [ -f "$candidate" ]; then
+            LUMINA_SO_TO_BUNDLE="$candidate"
+            break
+        fi
+    done
+fi
+
+if [ -n "$LUMINA_SO_TO_BUNDLE" ]; then
+    echo ""
+    echo "Resolving liblumina.so..."
+    echo "  Input: $LUMINA_SO_TO_BUNDLE"
+
+    LUMINA_SO_REAL="$(resolve_real_so "$LUMINA_SO_TO_BUNDLE")" || true
+
+    if [ -n "$LUMINA_SO_REAL" ] && [ -f "$LUMINA_SO_REAL" ]; then
+        echo "  Resolved ELF: $LUMINA_SO_REAL"
+        cp "$LUMINA_SO_REAL" "$OUTPUT_DIR/liblumina.so"
+        chmod +x "$OUTPUT_DIR/liblumina.so"
+        echo "  Bundled: $OUTPUT_DIR/liblumina.so"
+        ls -lh "$OUTPUT_DIR/liblumina.so"
+    else
+        echo "  WARNING: Could not resolve to a real ELF binary!"
+        echo "  file $LUMINA_SO_TO_BUNDLE:"
+        file "$LUMINA_SO_TO_BUNDLE"
+        echo ""
+        echo "  If it's a linker script, find the actual .so and set LUMINA_LIBRARY to it."
+    fi
+fi
+
+# ==================== Bundle liblumina.so dependencies ====================
+if [ "$OS" = "Linux" ] && [ -f "$OUTPUT_DIR/liblumina.so" ]; then
+    echo ""
+    echo "Checking liblumina.so dependencies..."
+    MISSING_DEPS=""
+    while IFS= read -r line; do
+        lib_name=$(echo "$line" | awk '{print $1}')
+        lib_path=$(echo "$line" | grep -oP '=> \K/\S+' || true)
+
+        # Skip system libs that are always available
+        case "$lib_name" in
+            linux-vdso*|libpthread*|libdl*|libm.*|libc.*|librt*|ld-linux*)
+                continue ;;
+        esac
+
+        if echo "$line" | grep -q "not found"; then
+            MISSING_DEPS="$MISSING_DEPS $lib_name"
+            continue
+        fi
+
+        if [ -n "$lib_path" ] && [ -f "$lib_path" ]; then
+            case "$lib_name" in
+                libgomp*|libgcc_s*|libstdc++*)
+                    if [ ! -f "$OUTPUT_DIR/$lib_name" ]; then
+                        echo "  Bundling dependency: $lib_name <- $lib_path"
+                        cp "$lib_path" "$OUTPUT_DIR/$lib_name"
+                        chmod +x "$OUTPUT_DIR/$lib_name"
+                    fi
+                    ;;
+            esac
+        fi
+    done < <(ldd "$OUTPUT_DIR/liblumina.so" 2>/dev/null || true)
+
+    if [ -n "$MISSING_DEPS" ]; then
+        echo "  WARNING: Missing dependencies:$MISSING_DEPS"
+    fi
+fi
+
 # ==================== patchelf ====================
 if [ "$OS" = "Linux" ] && command -v patchelf &>/dev/null; then
     echo ""
     echo "Setting rpath..."
-    patchelf --force-rpath --set-rpath \
-        '/usr/local/lib64:/usr/lib/jvm/java/jre/lib/amd64:/usr/lib/jvm/java/jre/lib/amd64/server' \
-        "$OUTPUT_DIR/$SO_NAME"
+    for lib in "$OUTPUT_DIR"/*.so*; do
+        if [ -f "$lib" ] && file "$lib" | grep -q "ELF"; then
+            echo "  patchelf: $(basename "$lib")"
+            patchelf --force-rpath --set-rpath \
+                '$ORIGIN:/usr/local/lib64:/usr/lib/jvm/java/jre/lib/amd64:/usr/lib/jvm/java/jre/lib/amd64/server' \
+                "$lib" 2>/dev/null || true
+        fi
+    done
     echo "Done"
 fi
 
-# ==================== Summary ====================
+# ==================== Verification ====================
 echo ""
 echo "============================================"
-echo "Build completed successfully!"
+echo "Build completed!"
 echo "============================================"
 echo ""
-echo "Library: $OUTPUT_DIR/$SO_NAME"
-ls -lh "$OUTPUT_DIR/$SO_NAME"
+echo "Bundled files:"
+ls -lh "$OUTPUT_DIR/"
 echo ""
 
+# Verify all bundled .so are real ELF binaries
+VERIFY_OK=true
+for lib in "$OUTPUT_DIR"/*.so*; do
+    if [ -f "$lib" ]; then
+        if file "$lib" | grep -q "ELF"; then
+            echo "  OK  $(basename "$lib") — ELF binary"
+        else
+            echo "  ERR $(basename "$lib") — NOT an ELF binary!"
+            file "$lib"
+            VERIFY_OK=false
+        fi
+    fi
+done
+echo ""
+
+# Show dependency tree for the JNI library
 if [ "$OS" = "Linux" ]; then
-    echo "Dependencies:"
+    echo "Dependency tree for $SO_NAME:"
     ldd "$OUTPUT_DIR/$SO_NAME" 2>/dev/null || true
+    echo ""
+
+    if [ -f "$OUTPUT_DIR/liblumina.so" ]; then
+        echo "Dependency tree for liblumina.so:"
+        ldd "$OUTPUT_DIR/liblumina.so" 2>/dev/null || true
+        echo ""
+    fi
+
+    # Final check: any "not found" in ldd output?
+    NOT_FOUND=$(ldd "$OUTPUT_DIR/$SO_NAME" 2>/dev/null | grep "not found" || true)
+    if [ -f "$OUTPUT_DIR/liblumina.so" ]; then
+        NOT_FOUND="$NOT_FOUND$(ldd "$OUTPUT_DIR/liblumina.so" 2>/dev/null | grep "not found" || true)"
+    fi
+
+    if [ -n "$NOT_FOUND" ]; then
+        echo "WARNING: Some dependencies are not found on this system:"
+        echo "$NOT_FOUND"
+        echo ""
+        echo "  These may be resolved at runtime via LD_LIBRARY_PATH or by"
+        echo "  the NativeLibraryLoader (if bundled in the JAR)."
+    else
+        echo "All dependencies resolved on this system."
+    fi
 elif [ "$OS" = "Darwin" ]; then
     echo "Dependencies:"
     otool -L "$OUTPUT_DIR/$SO_NAME" 2>/dev/null || true
+fi
+
+if [ "$VERIFY_OK" = false ]; then
+    echo ""
+    echo "ERROR: Some bundled files are not valid ELF binaries. See above."
+    exit 1
 fi
 
 echo ""

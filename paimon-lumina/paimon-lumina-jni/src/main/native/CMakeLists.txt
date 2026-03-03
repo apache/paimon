@@ -50,48 +50,80 @@ if(NOT LUMINA_INCLUDE_DIR)
 endif()
 message(STATUS "Found Lumina headers: ${LUMINA_INCLUDE_DIR}")
 
-# Prefer static library for fat-linking, fall back to shared
-set(LUMINA_LIB_SEARCH_PATHS
-    ${LUMINA_ROOT}/lib
-    ${LUMINA_ROOT}/lib64
-    /usr/local/lib
-    /usr/local/lib64
-    /usr/lib
-    /usr/lib64
-)
+# ==================== Locate Lumina library ====================
+# Priority: LUMINA_LIBRARY (exact path) > liblumina.a (static) > liblumina.so (shared)
 
-# 1. Try static archive first (best for fat .so)
-find_library(LUMINA_STATIC_LIBRARY
-    NAMES liblumina.a
-    PATHS ${LUMINA_LIB_SEARCH_PATHS}
-    NO_DEFAULT_PATH
-)
-if(NOT LUMINA_STATIC_LIBRARY)
-    find_library(LUMINA_STATIC_LIBRARY NAMES liblumina.a)
-endif()
-
-# 2. Fall back to shared library
-find_library(LUMINA_SHARED_LIBRARY
-    NAMES lumina
-    PATHS ${LUMINA_LIB_SEARCH_PATHS}
-    NO_DEFAULT_PATH
-)
-if(NOT LUMINA_SHARED_LIBRARY)
-    find_library(LUMINA_SHARED_LIBRARY NAMES lumina)
-endif()
-
-if(LUMINA_STATIC_LIBRARY)
-    set(LUMINA_LIBRARY ${LUMINA_STATIC_LIBRARY})
-    set(LUMINA_IS_STATIC TRUE)
-    message(STATUS "Found Lumina static library: ${LUMINA_LIBRARY}")
-elseif(LUMINA_SHARED_LIBRARY)
-    set(LUMINA_LIBRARY ${LUMINA_SHARED_LIBRARY})
-    set(LUMINA_IS_STATIC FALSE)
-    message(STATUS "Found Lumina shared library: ${LUMINA_LIBRARY}")
+if(LUMINA_LIBRARY)
+    # User specified exact library path via -DLUMINA_LIBRARY=...
+    if(NOT EXISTS "${LUMINA_LIBRARY}")
+        message(FATAL_ERROR "LUMINA_LIBRARY does not exist: ${LUMINA_LIBRARY}")
+    endif()
+    if(LUMINA_LIBRARY MATCHES "\\.a$")
+        set(LUMINA_IS_STATIC TRUE)
+    else()
+        set(LUMINA_IS_STATIC FALSE)
+    endif()
+    message(STATUS ">>> Using user-specified Lumina library: ${LUMINA_LIBRARY} (static=${LUMINA_IS_STATIC})")
 else()
-    message(FATAL_ERROR
-        "Lumina library not found. Set LUMINA_ROOT.\n"
-        "  Searched for liblumina.a / liblumina.so in: ${LUMINA_LIB_SEARCH_PATHS}")
+    set(LUMINA_LIB_SEARCH_PATHS
+        ${LUMINA_ROOT}/lib
+        ${LUMINA_ROOT}/lib64
+        /usr/local/lib
+        /usr/local/lib64
+        /usr/lib
+        /usr/lib64
+    )
+
+    # List files in lib directories to help diagnose
+    foreach(_dir ${LUMINA_LIB_SEARCH_PATHS})
+        if(EXISTS "${_dir}")
+            file(GLOB _libs "${_dir}/liblumina*")
+            if(_libs)
+                message(STATUS "Lumina libs in ${_dir}: ${_libs}")
+            endif()
+        endif()
+    endforeach()
+
+    # 1. Try static archive first (best for fat .so)
+    set(_ORIG_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
+    find_library(LUMINA_STATIC_LIB
+        NAMES lumina
+        PATHS ${LUMINA_LIB_SEARCH_PATHS}
+        NO_DEFAULT_PATH
+    )
+    if(NOT LUMINA_STATIC_LIB)
+        find_library(LUMINA_STATIC_LIB NAMES lumina)
+    endif()
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_ORIG_SUFFIXES})
+
+    # 2. Fall back to shared library
+    find_library(LUMINA_SHARED_LIB
+        NAMES lumina
+        PATHS ${LUMINA_LIB_SEARCH_PATHS}
+        NO_DEFAULT_PATH
+    )
+    if(NOT LUMINA_SHARED_LIB)
+        find_library(LUMINA_SHARED_LIB NAMES lumina)
+    endif()
+
+    message(STATUS "Static library search result : ${LUMINA_STATIC_LIB}")
+    message(STATUS "Shared library search result : ${LUMINA_SHARED_LIB}")
+
+    if(LUMINA_STATIC_LIB)
+        set(LUMINA_LIBRARY ${LUMINA_STATIC_LIB})
+        set(LUMINA_IS_STATIC TRUE)
+        message(STATUS ">>> Using Lumina STATIC library: ${LUMINA_LIBRARY}")
+    elseif(LUMINA_SHARED_LIB)
+        set(LUMINA_LIBRARY ${LUMINA_SHARED_LIB})
+        set(LUMINA_IS_STATIC FALSE)
+        message(STATUS ">>> Using Lumina SHARED library: ${LUMINA_LIBRARY}")
+    else()
+        message(FATAL_ERROR
+            "Lumina library not found. Set LUMINA_ROOT or LUMINA_LIBRARY.\n"
+            "  Searched in: ${LUMINA_LIB_SEARCH_PATHS}\n"
+            "  Or specify directly: -DLUMINA_LIBRARY=/path/to/liblumina.so")
+    endif()
 endif()
 
 # ==================== Build JNI shared library ====================
@@ -111,8 +143,7 @@ if(LUMINA_IS_STATIC)
         "-Wl,--exclude-libs,ALL"
     )
 else()
-    # Shared: link normally (the .so must be present at runtime)
-    # Use the directory so the linker finds the real ELF file
+    # Shared: link at build time, liblumina.so must be present at runtime
     get_filename_component(LUMINA_LIB_DIR ${LUMINA_LIBRARY} DIRECTORY)
     target_link_libraries(paimon_lumina_jni PRIVATE
         -L${LUMINA_LIB_DIR} -llumina
