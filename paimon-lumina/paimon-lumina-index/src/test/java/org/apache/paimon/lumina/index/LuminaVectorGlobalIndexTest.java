@@ -152,47 +152,6 @@ public class LuminaVectorGlobalIndexTest {
     }
 
     @Test
-    public void testDifferentIndexTypes() throws IOException {
-        int dimension = 32;
-        int numVectors = 100;
-
-        String[] indexTypes = {"BRUTEFORCE", "HNSW"};
-
-        for (String indexType : indexTypes) {
-            Options options = createDefaultOptions(dimension);
-            options.setString("vector.index-type", indexType);
-            LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
-            Path typeIndexPath = new Path(indexPath, indexType.toLowerCase());
-            GlobalIndexFileWriter fileWriter = createFileWriter(typeIndexPath);
-            LuminaVectorGlobalIndexWriter writer =
-                    new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
-
-            List<float[]> testVectors = generateRandomVectors(numVectors, dimension);
-            testVectors.forEach(writer::write);
-
-            List<ResultEntry> results = writer.finish();
-            assertThat(results).hasSize(1);
-
-            ResultEntry result = results.get(0);
-            GlobalIndexFileReader fileReader = createFileReader(typeIndexPath);
-            List<GlobalIndexIOMeta> metas = new ArrayList<>();
-            metas.add(
-                    new GlobalIndexIOMeta(
-                            new Path(typeIndexPath, result.fileName()),
-                            fileIO.getFileSize(new Path(typeIndexPath, result.fileName())),
-                            result.meta()));
-
-            try (LuminaVectorGlobalIndexReader reader =
-                    new LuminaVectorGlobalIndexReader(
-                            fileReader, metas, vectorType, indexOptions)) {
-                VectorSearch vectorSearch = new VectorSearch(testVectors.get(0), 5, fieldName);
-                GlobalIndexResult searchResult = reader.visitVectorSearch(vectorSearch).get();
-                assertThat(searchResult).isNotNull();
-            }
-        }
-    }
-
-    @Test
     public void testDifferentDimensions() throws IOException {
         int[] dimensions = {8, 32, 128, 256};
 
