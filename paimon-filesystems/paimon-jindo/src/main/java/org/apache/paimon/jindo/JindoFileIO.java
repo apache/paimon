@@ -25,6 +25,7 @@ import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.StringUtils;
 
 import com.aliyun.jindodata.common.JindoHadoopSystem;
 import com.aliyun.jindodata.dls.JindoDlsFileSystem;
@@ -45,6 +46,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
+import static org.apache.paimon.rest.RESTTokenFileIO.DLF_ACCESS_TRACKING_EXTENDED_INFO;
 
 /** Jindo {@link FileIO}. */
 public class JindoFileIO extends HadoopCompliantFileIO {
@@ -64,6 +66,7 @@ public class JindoFileIO extends HadoopCompliantFileIO {
     private static final String OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {
@@ -128,6 +131,18 @@ public class JindoFileIO extends HadoopCompliantFileIO {
             context.hadoopConf()
                     .iterator()
                     .forEachRemaining(entry -> hadoopOptions.set(entry.getKey(), entry.getValue()));
+        }
+
+        String dlfAccessTrackingExtendedInfo =
+                context.options().get(DLF_ACCESS_TRACKING_EXTENDED_INFO);
+        if (!StringUtils.isNullOrWhitespaceOnly(dlfAccessTrackingExtendedInfo)) {
+            LOG.info("Adding DLF access tracking extended info: {}", dlfAccessTrackingExtendedInfo);
+            String existedUserAgentExtended = hadoopOptions.get(OSS_USER_AGENT_EXTENDED);
+            hadoopOptions.set(
+                    OSS_USER_AGENT_EXTENDED,
+                    StringUtils.isNullOrWhitespaceOnly(existedUserAgentExtended)
+                            ? dlfAccessTrackingExtendedInfo
+                            : existedUserAgentExtended + " " + dlfAccessTrackingExtendedInfo);
         }
 
         // another config when enable cache
