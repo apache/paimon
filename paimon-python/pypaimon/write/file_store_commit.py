@@ -150,7 +150,7 @@ class FileStoreCommit:
 
         self._try_commit(commit_kind=commit_kind,
                          commit_identifier=commit_identifier,
-                         commit_entries_plan=lambda: commit_entries,
+                         commit_entries_plan=lambda snapshot: commit_entries,
                          detect_conflicts=detect_conflicts,
                          allow_rollback=allow_rollback)
 
@@ -238,7 +238,7 @@ class FileStoreCommit:
         thread_id = threading.current_thread().name
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
-            commit_entries = commit_entries_plan()
+            commit_entries = commit_entries_plan(latest_snapshot)
 
             # No entries to commit (e.g. drop_partitions with no matching data): skip commit
             # to avoid creating manifest/snapshot with empty partition_stats (causes read errors).
