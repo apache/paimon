@@ -48,11 +48,58 @@ if [ ! -d "$LUMINA_ROOT/include/lumina" ]; then
     exit 1
 fi
 
+# ==================== Auto-detect JAVA_HOME ====================
+find_jdk_home() {
+    # 1. Resolve from java binary symlink
+    if command -v java &>/dev/null; then
+        local java_bin
+        java_bin="$(readlink -f "$(command -v java)")"
+        local candidate
+        candidate="$(dirname "$(dirname "$java_bin")")"
+        if [ -d "$candidate/include" ]; then
+            echo "$candidate"; return
+        fi
+        # java may be at jre/bin/java, so go one level up
+        candidate="$(dirname "$candidate")"
+        if [ -d "$candidate/include" ]; then
+            echo "$candidate"; return
+        fi
+    fi
+    # 2. Scan /usr/lib/jvm for any JDK that has include/
+    for d in /usr/lib/jvm/java-*-openjdk-* /usr/lib/jvm/java /usr/lib/jvm/default-java; do
+        if [ -d "$d/include" ]; then
+            echo "$d"; return
+        fi
+    done
+    return 1
+}
+
+if [ -n "$JAVA_HOME" ] && [ ! -d "$JAVA_HOME/include" ]; then
+    echo "WARNING: JAVA_HOME=$JAVA_HOME has no include/ directory (JRE?), searching for a JDK..."
+    unset JAVA_HOME
+fi
+
+if [ -z "$JAVA_HOME" ]; then
+    JAVA_HOME="$(find_jdk_home)" || true
+fi
+
+if [ -z "$JAVA_HOME" ] || [ ! -d "$JAVA_HOME/include" ]; then
+    echo "ERROR: Could not find a JDK with JNI headers."
+    echo ""
+    echo "  Install the JDK development package, e.g.:"
+    echo "    apt-get install openjdk-8-jdk-headless"
+    echo ""
+    echo "  Or set JAVA_HOME to a JDK (not a JRE) that contains include/jni.h:"
+    echo "    export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64"
+    exit 1
+fi
+export JAVA_HOME
+
 echo "================================================"
 echo "Building Paimon Lumina JNI"
 echo "================================================"
 echo "LUMINA_ROOT : $LUMINA_ROOT"
-echo "JAVA_HOME   : ${JAVA_HOME:-<auto-detect>}"
+echo "JAVA_HOME   : $JAVA_HOME"
 echo ""
 
 # ==================== Detect platform ====================
@@ -86,6 +133,7 @@ cd "$BUILD_DIR"
 
 cmake -DCMAKE_BUILD_TYPE=Release \
       -DLUMINA_ROOT="$LUMINA_ROOT" \
+      -DJAVA_HOME="$JAVA_HOME" \
       ..
 
 make -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"

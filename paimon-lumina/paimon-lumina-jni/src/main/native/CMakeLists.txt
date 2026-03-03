@@ -22,6 +22,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ==================== Find JNI ====================
+if(JAVA_HOME AND NOT DEFINED ENV{JAVA_HOME})
+    set(ENV{JAVA_HOME} "${JAVA_HOME}")
+endif()
+if(DEFINED ENV{JAVA_HOME})
+    set(JAVA_AWT_LIBRARY NotNeeded)
+    set(JAVA_AWT_INCLUDE_PATH "$ENV{JAVA_HOME}/include")
+endif()
 find_package(JNI REQUIRED)
 include_directories(${JNI_INCLUDE_DIRS})
 
@@ -43,36 +50,72 @@ if(NOT LUMINA_INCLUDE_DIR)
 endif()
 message(STATUS "Found Lumina headers: ${LUMINA_INCLUDE_DIR}")
 
-find_library(LUMINA_LIBRARY
-    NAMES lumina
-    PATHS
-        ${LUMINA_ROOT}/lib
-        /usr/local/lib
-        /usr/local/lib64
-        /usr/lib
-        /usr/lib64
+# Prefer static library for fat-linking, fall back to shared
+set(LUMINA_LIB_SEARCH_PATHS
+    ${LUMINA_ROOT}/lib
+    ${LUMINA_ROOT}/lib64
+    /usr/local/lib
+    /usr/local/lib64
+    /usr/lib
+    /usr/lib64
 )
 
-if(NOT LUMINA_LIBRARY)
-    message(FATAL_ERROR "Lumina library not found. Set LUMINA_ROOT.")
+# 1. Try static archive first (best for fat .so)
+find_library(LUMINA_STATIC_LIBRARY
+    NAMES liblumina.a
+    PATHS ${LUMINA_LIB_SEARCH_PATHS}
+    NO_DEFAULT_PATH
+)
+if(NOT LUMINA_STATIC_LIBRARY)
+    find_library(LUMINA_STATIC_LIBRARY NAMES liblumina.a)
 endif()
-message(STATUS "Found Lumina library: ${LUMINA_LIBRARY}")
+
+# 2. Fall back to shared library
+find_library(LUMINA_SHARED_LIBRARY
+    NAMES lumina
+    PATHS ${LUMINA_LIB_SEARCH_PATHS}
+    NO_DEFAULT_PATH
+)
+if(NOT LUMINA_SHARED_LIBRARY)
+    find_library(LUMINA_SHARED_LIBRARY NAMES lumina)
+endif()
+
+if(LUMINA_STATIC_LIBRARY)
+    set(LUMINA_LIBRARY ${LUMINA_STATIC_LIBRARY})
+    set(LUMINA_IS_STATIC TRUE)
+    message(STATUS "Found Lumina static library: ${LUMINA_LIBRARY}")
+elseif(LUMINA_SHARED_LIBRARY)
+    set(LUMINA_LIBRARY ${LUMINA_SHARED_LIBRARY})
+    set(LUMINA_IS_STATIC FALSE)
+    message(STATUS "Found Lumina shared library: ${LUMINA_LIBRARY}")
+else()
+    message(FATAL_ERROR
+        "Lumina library not found. Set LUMINA_ROOT.\n"
+        "  Searched for liblumina.a / liblumina.so in: ${LUMINA_LIB_SEARCH_PATHS}")
+endif()
 
 # ==================== Build JNI shared library ====================
 add_library(paimon_lumina_jni SHARED paimon_lumina_jni.cpp)
 
 target_include_directories(paimon_lumina_jni PRIVATE ${LUMINA_INCLUDE_DIR})
 
-# Link everything into one .so:
-#   -Wl,--whole-archive  : pull all symbols from liblumina.a / liblumina.so
-#   -static-libstdc++ -static-libgcc : embed C++ runtime
-#   -Wl,--exclude-libs,ALL : hide all third-party symbols
-target_link_libraries(paimon_lumina_jni PRIVATE
-    -Wl,--whole-archive ${LUMINA_LIBRARY} -Wl,--no-whole-archive
-    pthread dl m
-)
-target_link_options(paimon_lumina_jni PRIVATE
-    -static-libstdc++
-    -static-libgcc
-    "-Wl,--exclude-libs,ALL"
-)
+if(LUMINA_IS_STATIC)
+    # Static: embed all symbols into the fat .so
+    target_link_libraries(paimon_lumina_jni PRIVATE
+        -Wl,--whole-archive ${LUMINA_LIBRARY} -Wl,--no-whole-archive
+        pthread dl m
+    )
+    target_link_options(paimon_lumina_jni PRIVATE
+        -static-libstdc++
+        -static-libgcc
+        "-Wl,--exclude-libs,ALL"
+    )
+else()
+    # Shared: link normally (the .so must be present at runtime)
+    # Use the directory so the linker finds the real ELF file
+    get_filename_component(LUMINA_LIB_DIR ${LUMINA_LIBRARY} DIRECTORY)
+    target_link_libraries(paimon_lumina_jni PRIVATE
+        -L${LUMINA_LIB_DIR} -llumina
+        pthread dl m
+    )
+endif()

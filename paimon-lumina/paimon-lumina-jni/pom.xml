@@ -22,29 +22,31 @@ under the License.
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <parent>
-        <artifactId>paimon-lumina</artifactId>
-        <groupId>org.apache.paimon</groupId>
-        <version>1.4-SNAPSHOT</version>
-    </parent>
-
+    <groupId>org.apache.paimon</groupId>
     <artifactId>paimon-lumina-jni</artifactId>
+    <version>1.4-SNAPSHOT</version>
     <name>Paimon : Lumina JNI</name>
 
     <properties>
         <lumina.version>0.1.0</lumina.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <target.java.version>1.8</target.java.version>
+        <slf4j.version>1.7.32</slf4j.version>
+        <junit5.version>5.8.1</junit5.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
         </dependency>
 
         <!-- Test dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
+            <version>${junit5.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -53,7 +55,17 @@ under the License.
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.0</version>
+                <configuration>
+                    <source>${target.java.version}</source>
+                    <target>${target.java.version}</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
+                <version>3.1.0</version>
                 <configuration>
                     <nonFilteredFileExtensions>
                         <nonFilteredFileExtension>so</nonFilteredFileExtension>
