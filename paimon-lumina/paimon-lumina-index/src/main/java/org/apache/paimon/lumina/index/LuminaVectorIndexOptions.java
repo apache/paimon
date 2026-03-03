@@ -81,7 +81,7 @@ public class LuminaVectorIndexOptions {
             ConfigOptions.key("vector.search-list-size")
                     .intType()
                     .defaultValue(100)
-                    .withDescription("The search list size for DiskANN search (search.list_size)");
+                    .withDescription("The search list size for DiskANN search (list_size)");
 
     public static final ConfigOption<Double> PRETRAIN_SAMPLE_RATIO =
             ConfigOptions.key("vector.pretrain-sample-ratio")

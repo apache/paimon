@@ -113,7 +113,7 @@ final class LuminaNative {
      * @param topk the number of nearest neighbors to find
      * @param distances output array for distances (n * topk floats)
      * @param ids output array for vector IDs (n * topk longs)
-     * @param optionKeys search option keys (e.g., "search.topk", "search.list_size")
+     * @param optionKeys search option keys (e.g., "list_size")
      * @param optionValues search option values
      */
     static native void searcherSearch(
