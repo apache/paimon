@@ -115,11 +115,11 @@ class FileStoreCommit:
         if not commit_messages:
             return
 
-        # Extract snapshot_for_update from commit messages
-        for msg in commit_messages:
-            if msg.snapshot_for_update != -1:
-                self.conflict_detection._row_id_check_from_snapshot = msg.snapshot_for_update
-                break
+        # Extract the minimum check_from_snapshot from commit messages
+        valid_snapshots = [msg.check_from_snapshot for msg in commit_messages
+                           if msg.check_from_snapshot != -1]
+        if valid_snapshots:
+            self.conflict_detection._row_id_check_from_snapshot = min(valid_snapshots)
 
         logger.info(
             "Ready to commit to table %s, number of commit messages: %d",
