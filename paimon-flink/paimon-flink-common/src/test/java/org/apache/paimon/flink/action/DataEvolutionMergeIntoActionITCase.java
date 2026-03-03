@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BlobDescriptor;
+
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -441,6 +444,173 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 action.rewriteMergeCondition(mergeCondition));
     }
 
+    @Test
+    public void testUpdateRawBlobColumnThrowsError() throws Exception {
+        // Create a table with raw-data BLOB column
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_T",
+                        Arrays.asList("id INT", "name STRING", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                            }
+                        }));
+        insertInto("RAW_BLOB_T", "(1, 'name1', X'48656C6C6F')");
+
+        // Create source table
+        sEnv.executeSql(
+                buildDdl(
+                        "RAW_BLOB_S",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                            }
+                        }));
+        insertInto("RAW_BLOB_S", "(1, X'4E4557')");
+
+        DataEvolutionMergeIntoAction action =
+                builder(warehouse, database, "RAW_BLOB_T")
+                        .withMergeCondition("RAW_BLOB_T.id=RAW_BLOB_S.id")
+                        .withMatchedUpdateSet("RAW_BLOB_T.picture=RAW_BLOB_S.picture")
+                        .withSourceTable("RAW_BLOB_S")
+                        .withSinkParallelism(1)
+                        .build();
+
+        Throwable t = Assertions.assertThrows(IllegalStateException.class, () -> action.run());
+        Assertions.assertTrue(
+                t.getMessage().contains("raw-data BLOB column"),
+                "Expected error about raw-data BLOB column but got: " + t.getMessage());
+    }
+
+    @Test
+    public void testUpdateNonBlobColumnOnDescriptorBlobTableSucceeds() throws Exception {
+        // Create a table with descriptor BLOB column.
+        // Previously, MERGE INTO would reject ANY table with BLOB columns.
+        // With our change, tables with descriptor-based BLOB columns are accepted
+        // as long as the BLOB column itself is descriptor-based.
+        sEnv.executeSql(
+                buildDdl(
+                        "DESC_BLOB_T",
+                        Arrays.asList("id INT", "name STRING", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                                put("blob-descriptor-field", "picture");
+                            }
+                        }));
+
+        // Insert data with descriptor-based BLOB
+        BlobDescriptor desc1 = new BlobDescriptor("file:///dummy/blob1", 0, 2);
+        BlobDescriptor desc2 = new BlobDescriptor("file:///dummy/blob2", 0, 2);
+        insertInto(
+                "DESC_BLOB_T", String.format("(1, 'name1', X'%s')", bytesToHex(desc1.serialize())));
+        insertInto(
+                "DESC_BLOB_T", String.format("(2, 'name2', X'%s')", bytesToHex(desc2.serialize())));
+
+        // Create source table for the update (only non-BLOB columns)
+        sEnv.executeSql(
+                buildDdl(
+                        "DESC_BLOB_S",
+                        Arrays.asList("id INT", "name STRING"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                            }
+                        }));
+        insertInto("DESC_BLOB_S", "(1, 'updated_name1')");
+
+        // Update only the 'name' column via MERGE INTO.
+        // This should succeed — the table has BLOB columns but they are descriptor-based.
+        builder(warehouse, database, "DESC_BLOB_T")
+                .withMergeCondition("DESC_BLOB_T.id=DESC_BLOB_S.id")
+                .withMatchedUpdateSet("DESC_BLOB_T.name=DESC_BLOB_S.name")
+                .withSourceTable("DESC_BLOB_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        // Verify: id=1 name updated, id=2 unchanged
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 1, "updated_name1"), changelogRow("+I", 2, "name2"));
+        testBatchRead("SELECT id, name FROM DESC_BLOB_T ORDER BY id", expected);
+    }
+
+    @Test
+    public void testUpdateExternalStorageBlobColumnSucceeds() throws Exception {
+        // Create a temp path for descriptor blobs backed by external storage.
+        String externalStoragePath = getTempDirPath("external-storage-path");
+
+        // Create a table with a descriptor BLOB column backed by external storage.
+        sEnv.executeSql(
+                buildDdl(
+                        "COPY_UPD_T",
+                        Arrays.asList("id INT", "name STRING", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                                put("blob-field", "picture");
+                                put("blob-descriptor-field", "picture");
+                                put(CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(), "picture");
+                                put(
+                                        CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
+                                        externalStoragePath);
+                            }
+                        }));
+
+        // Insert initial row with raw bytes; write path stores data in external storage and keeps
+        // descriptor bytes.
+        insertInto("COPY_UPD_T", "(1, 'name1', X'48656C6C6F')");
+
+        // Create source table with new raw bytes for the BLOB column
+        sEnv.executeSql(
+                buildDdl(
+                        "COPY_UPD_S",
+                        Arrays.asList("id INT", "picture BYTES"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        new HashMap<String, String>() {
+                            {
+                                put(ROW_TRACKING_ENABLED.key(), "true");
+                                put(DATA_EVOLUTION_ENABLED.key(), "true");
+                            }
+                        }));
+        insertInto("COPY_UPD_S", "(1, X'574F524C44')");
+
+        // Update this descriptor BLOB column backed by external storage via MERGE INTO.
+        builder(warehouse, database, "COPY_UPD_T")
+                .withMergeCondition("COPY_UPD_T.id=COPY_UPD_S.id")
+                .withMatchedUpdateSet("COPY_UPD_T.picture=COPY_UPD_S.picture")
+                .withSourceTable("COPY_UPD_S")
+                .withSinkParallelism(1)
+                .build()
+                .run();
+
+        // Verify: name stays the same, BLOB column should have new data
+        List<Row> expected = Arrays.asList(changelogRow("+I", 1, "name1"));
+        testBatchRead("SELECT id, name FROM COPY_UPD_T ORDER BY id", expected);
+    }
+
     private void prepareTargetTable() throws Exception {
         sEnv.executeSql(
                 buildDdl(
@@ -570,5 +740,17 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
         public DataEvolutionMergeIntoAction build() {
             return createAction(DataEvolutionMergeIntoAction.class, args);
         }
+    }
+
+    private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
+
+    private static String bytesToHex(byte[] bytes) {
+        char[] hexChars = new char[bytes.length * 2];
+        for (int j = 0; j < bytes.length; j++) {
+            int v = bytes[j] & 0xFF;
+            hexChars[j * 2] = HEX_ARRAY[v >>> 4];
+            hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
+        }
+        return new String(hexChars);
     }
 }

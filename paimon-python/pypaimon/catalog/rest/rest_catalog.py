@@ -45,7 +45,6 @@ from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
 from pypaimon.table.iceberg.iceberg_table import IcebergTable
 
-
 FORMAT_TABLE_TYPE = "format-table"
 ICEBERG_TABLE_TYPE = "iceberg-table"
 
@@ -253,6 +252,34 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
                 raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def rollback_to(self, identifier, instant, from_snapshot=None):
+        """Rollback table by the given identifier and instant.
+
+        Args:
+            identifier: Path of the table (Identifier or string).
+            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
+            from_snapshot: Optional snapshot ID. Success only occurs when the
+                latest snapshot is this snapshot.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            TableNoPermissionException: If no permission to access this table.
+        """
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.rollback_to(identifier, instant, from_snapshot)
+        except NoSuchResourceException as e:
+            if e.resource_type == "snapshot":
+                raise ValueError(
+                    "Rollback snapshot '{}' doesn't exist.".format(e.resource_name)) from e
+            elif e.resource_type == "tag":
+                raise ValueError(
+                    "Rollback tag '{}' doesn't exist.".format(e.resource_name)) from e
+            raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 

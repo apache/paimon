@@ -45,7 +45,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 TableAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.json_util import JSON
+from pypaimon.common.json_util import JSON, json_field
 from pypaimon import Schema
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
@@ -66,10 +66,22 @@ class ErrorResponse(RESTResponse):
     RESOURCE_TYPE_DEFINITION = "definition"
     RESOURCE_TYPE_DIALECT = "dialect"
 
-    resource_type: Optional[str]
-    resource_name: Optional[str]
-    message: str
-    code: int
+    resource_type: Optional[str] = json_field("resourceType", default=None)
+    resource_name: Optional[str] = json_field("resourceName", default=None)
+    message: Optional[str] = json_field("message", default=None)
+    code: Optional[int] = json_field("code", default=None)
+
+    def __init__(
+        self,
+        resource_type: Optional[str] = None,
+        resource_name: Optional[str] = None,
+        message: Optional[str] = None,
+        code: Optional[int] = None,
+    ):
+        self.resource_type = resource_type
+        self.resource_name = resource_name
+        self.message = message
+        self.code = code
 
 
 # Constants
@@ -480,6 +492,8 @@ class RESTCatalogServer:
                 return self._table_commit_handle(method, data, lookup_identifier, branch_part)
             elif operation == "token":
                 return self._table_token_handle(method, lookup_identifier)
+            elif operation == "rollback":
+                return self._table_rollback_handle(method, data, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
@@ -661,6 +675,113 @@ class RESTCatalogServer:
             return self._mock_response(
                 ErrorResponse(None, None, f"Commit failed: {str(e)}", 500), 500
             )
+
+    def _table_rollback_handle(self, method: str, data: str,
+                               identifier: Identifier) -> Tuple[str, int]:
+        """Handle table rollback operations"""
+        if method != "POST":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        try:
+            import json as json_module
+            from pypaimon.table.instant import Instant, SnapshotInstant, TagInstant
+
+            request_dict = json_module.loads(data)
+            instant_dict = request_dict.get("instant")
+            from_snapshot = request_dict.get("fromSnapshot")
+
+            instant = Instant.from_dict(instant_dict)
+
+            if isinstance(instant, SnapshotInstant):
+                return self._rollback_table_by_snapshot(
+                    identifier, instant.snapshot_id, from_snapshot)
+            elif isinstance(instant, TagInstant):
+                return self._rollback_table_by_tag(identifier, instant.tag_name)
+            else:
+                return self._mock_response(
+                    ErrorResponse(None, None, "Unknown instant type", 400), 400)
+
+        except Exception as e:
+            self.logger.error(f"Error in rollback operation: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            return self._mock_response(
+                ErrorResponse(None, None, f"Rollback failed: {str(e)}", 500), 500)
+
+    def _rollback_table_by_snapshot(self, identifier: Identifier, snapshot_id: int,
+                                    from_snapshot: Optional[int]) -> Tuple[str, int]:
+        """Rollback table to a specific snapshot ID by delegating to table.rollback_to()."""
+        table = self._get_file_table(identifier)
+
+        snapshot_mgr = table.snapshot_manager()
+        snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+        if snapshot is None:
+            return self._mock_response(
+                ErrorResponse(ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                              str(snapshot_id), "", 404), 404)
+
+        latest = snapshot_mgr.get_latest_snapshot()
+        if latest is None:
+            return self._mock_response(
+                ErrorResponse(None, None, "No latest snapshot found", 500), 500)
+
+        if from_snapshot is not None and from_snapshot != latest.id:
+            return self._mock_response(
+                ErrorResponse(None, None,
+                              f"Latest snapshot {latest.id} is not {from_snapshot}",
+                              500), 500)
+
+        table.rollback_to(snapshot_id)
+        return self._mock_response("", 200)
+
+    def _rollback_table_by_tag(self, identifier: Identifier,
+                               tag_name: str) -> Tuple[str, int]:
+        """Rollback table to a specific tag by delegating to table.rollback_to()."""
+        table = self._get_file_table(identifier)
+
+        tag_mgr = table.tag_manager()
+        if not tag_mgr.tag_exists(tag_name):
+            return self._mock_response(
+                ErrorResponse(ErrorResponse.RESOURCE_TYPE_TAG,
+                              tag_name, "", 404), 404)
+
+        table.rollback_to(tag_name)
+        return self._mock_response("", 200)
+
+    def _get_file_table(self, identifier: Identifier):
+        """Construct a FileStoreTable from the metadata store.
+
+        Mirrors Java RESTCatalogServer.getFileTable(): loads the schema from
+        the metadata store, builds a CatalogEnvironment (without catalog
+        loader so rollback goes through local file cleanup), and returns a
+        FileStoreTable.
+        """
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.options.options import Options
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        table_metadata = self.table_metadata_store.get(identifier.get_full_name())
+        if table_metadata is None:
+            raise TableNotExistException(identifier)
+
+        table_schema = table_metadata.schema
+        table_path = (
+            f'file://{self.data_path}/{self.warehouse}/'
+            f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+
+        catalog_env = CatalogEnvironment(
+            identifier=identifier,
+            uuid=table_metadata.uuid,
+            catalog_loader=None,
+            supports_version_management=False
+        )
+
+        file_io = FileIO.get(table_path, Options({}))
+        return FileStoreTable(file_io, identifier, table_path, table_schema, catalog_env)
 
     def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
         """Write snapshot and related files to the file system"""
@@ -887,9 +1008,9 @@ class RESTCatalogServer:
                 or metadata_table_type == table_type
             )
             if (identifier.get_database_name() == database_name and
-                    table_type_matches and
-                    (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
-                                                                        table_name_pattern))):
+                table_type_matches and
+                (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
+                                                                    table_name_pattern))):
                 tables.append(identifier.get_table_name())
 
         return tables
