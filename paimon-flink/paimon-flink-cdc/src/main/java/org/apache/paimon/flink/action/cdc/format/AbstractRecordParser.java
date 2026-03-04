@@ -60,17 +60,9 @@ public abstract class AbstractRecordParser
     protected CdcSourceRecord currentRecord; // Store current record for metadata access
 
     public AbstractRecordParser(TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        this(typeMapping, computedColumns, new CdcMetadataConverter[0]);
-    }
-
-    public AbstractRecordParser(
-            TypeMapping typeMapping,
-            List<ComputedColumn> computedColumns,
-            CdcMetadataConverter[] metadataConverters) {
         this.typeMapping = typeMapping;
         this.computedColumns = computedColumns;
-        this.metadataConverters =
-                metadataConverters != null ? metadataConverters : new CdcMetadataConverter[0];
+        this.metadataConverters = new CdcMetadataConverter[0];
     }
 
     /** Sets metadata converters and returns this parser for chaining. */

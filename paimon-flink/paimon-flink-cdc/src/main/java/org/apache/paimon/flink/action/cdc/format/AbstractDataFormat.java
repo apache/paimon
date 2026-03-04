@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.format;
 
-import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
@@ -48,15 +47,6 @@ public abstract class AbstractDataFormat implements DataFormat {
     public AbstractRecordParser createParser(
             TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         return parser().createParser(typeMapping, computedColumns);
-    }
-
-    @Override
-    public AbstractRecordParser createParser(
-            TypeMapping typeMapping,
-            List<ComputedColumn> computedColumns,
-            CdcMetadataConverter[] metadataConverters) {
-        return createParser(typeMapping, computedColumns)
-                .withMetadataConverters(metadataConverters);
     }
 
     @Override

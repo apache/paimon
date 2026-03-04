@@ -43,10 +43,8 @@ public interface DataFormat {
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link AbstractRecordParser}.
      */
-    default AbstractRecordParser createParser(
-            TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return createParser(typeMapping, computedColumns, new CdcMetadataConverter[0]);
-    }
+    AbstractRecordParser createParser(
+            TypeMapping typeMapping, List<ComputedColumn> computedColumns);
 
     /**
      * Creates a new instance of {@link AbstractRecordParser} for this data format with the
@@ -57,10 +55,13 @@ public interface DataFormat {
      * @param metadataConverters Array of metadata converters for extracting CDC metadata
      * @return A new instance of {@link AbstractRecordParser}.
      */
-    AbstractRecordParser createParser(
+    default AbstractRecordParser createParser(
             TypeMapping typeMapping,
             List<ComputedColumn> computedColumns,
-            CdcMetadataConverter[] metadataConverters);
+            CdcMetadataConverter[] metadataConverters) {
+        return createParser(typeMapping, computedColumns)
+                .withMetadataConverters(metadataConverters);
+    }
 
     KafkaDeserializationSchema<CdcSourceRecord> createKafkaDeserializer(
             Configuration cdcSourceConfig);
