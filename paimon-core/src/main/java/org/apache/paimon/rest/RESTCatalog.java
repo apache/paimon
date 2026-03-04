@@ -647,6 +647,28 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        try {
+            return api.listPartitionsByNames(identifier, partitions);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            // not a metastore partitioned table, filter from file system partitions
+            List<Partition> allPartitions = listPartitionsFromFileSystem(getTable(identifier));
+            return allPartitions.stream()
+                    .filter(
+                            partition ->
+                                    partitions.stream()
+                                            .anyMatch(spec -> partition.spec().equals(spec)))
+                    .collect(java.util.stream.Collectors.toList());
+        }
+    }
+
+    @Override
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
         try {

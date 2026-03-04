@@ -1642,6 +1642,40 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListPartitionsByNamesExceedsLimit() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_by_names_limit_db";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        // Create a list with more than 1000 partition specs
+        List<Map<String, String>> tooManySpecs = new ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            tooManySpecs.add(singletonMap("dt", String.format("202501%04d", i)));
+        }
+
+        // Should throw IllegalArgumentException
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listPartitionsByNames(identifier, tooManySpecs));
+    }
+
+    @Test
     void testPartitionExpire() throws Exception {
         // create table
         Identifier identifier = Identifier.create("test_db", "test_partition_expire");

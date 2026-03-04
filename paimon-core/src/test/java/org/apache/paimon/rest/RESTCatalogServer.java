@@ -57,6 +57,7 @@ import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
@@ -133,6 +134,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -413,6 +415,12 @@ public class RESTCatalogServer {
                                         && "partitions".equals(resources[3])
                                         && "mark".equals(resources[4]);
 
+                        boolean isListPartitionsByNames =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "list-by-names".equals(resources[4]);
+
                         boolean isBranches =
                                 resources.length >= 4
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -460,6 +468,13 @@ public class RESTCatalogServer {
                         } else if (isPartitions) {
                             return partitionsApiHandle(
                                     restAuthParameter.method(), parameters, identifier);
+                        } else if (isListPartitionsByNames) {
+                            ListPartitionsByNamesRequest listPartitionsByNamesRequest =
+                                    RESTApi.fromJson(data, ListPartitionsByNamesRequest.class);
+                            return listPartitionsByNames(
+                                    parameters,
+                                    identifier,
+                                    listPartitionsByNamesRequest.getPartitionSpecs());
                         } else if (isBranches) {
                             return branchApiHandle(
                                     resources,
@@ -1695,6 +1710,25 @@ public class RESTCatalogServer {
             default:
                 return new MockResponse().setResponseCode(404);
         }
+    }
+
+    private MockResponse listPartitionsByNames(
+            Map<String, String> parameters,
+            Identifier tableIdentifier,
+            List<Map<String, String>> partitionSpecs) {
+        List<Partition> partitions = new ArrayList<>();
+        Set<Map<String, String>> partitionSpecSet = new HashSet<>(partitionSpecs);
+        for (Map.Entry<String, List<Partition>> entry : tablePartitionsStore.entrySet()) {
+            String objectName = Identifier.fromString(entry.getKey()).getObjectName();
+            if (objectName.equals(tableIdentifier.getObjectName())) {
+                for (Partition partition : entry.getValue()) {
+                    if (partitionSpecSet.contains(partition.spec())) {
+                        partitions.add(partition);
+                    }
+                }
+            }
+        }
+        return generateFinalListPartitionsResponse(parameters, partitions);
     }
 
     private MockResponse branchApiHandle(

@@ -192,6 +192,11 @@ public class CatalogUtils {
     }
 
     public static List<Partition> listPartitionsFromFileSystem(Table table) {
+        return listPartitionsFromFileSystem(table, null);
+    }
+
+    public static List<Partition> listPartitionsFromFileSystem(
+            Table table, @Nullable List<Map<String, String>> partitionSpecs) {
         Options options = Options.fromMap(table.options());
         InternalRowPartitionComputer computer =
                 new InternalRowPartitionComputer(
@@ -206,8 +211,11 @@ public class CatalogUtils {
         // https://github.com/apache/paimon/pull/6531 for details
         List<PartitionEntry> partitionEntries;
         if (scan instanceof InnerTableScan) {
-            partitionEntries =
-                    ((InnerTableScan) scan).withLevelFilter(level -> true).listPartitionEntries();
+            InnerTableScan innerTableScan = (InnerTableScan) scan;
+            if (partitionSpecs != null && !partitionSpecs.isEmpty()) {
+                innerTableScan = innerTableScan.withPartitionsFilter(partitionSpecs);
+            }
+            partitionEntries = innerTableScan.withLevelFilter(level -> true).listPartitionEntries();
         } else {
             partitionEntries = scan.listPartitionEntries();
         }

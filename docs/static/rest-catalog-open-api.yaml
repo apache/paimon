@@ -983,6 +983,48 @@ paths:
           $ref: '#/components/responses/TableNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/partitions/list-by-names:
+    post:
+      tags:
+        - partition
+      summary: List partitions by names
+      operationId: listPartitionsByNames
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListPartitionsByNamesRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPartitionsResponse'
+        "400":
+          $ref: '#/components/responses/BadRequestErrorResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches:
     get:
       tags:
@@ -2170,6 +2212,16 @@ components:
           type: array
           items:
             type: object
+    ListPartitionsByNamesRequest:
+      type: object
+      properties:
+        specs:
+          type: array
+          description: List of partition specs to query
+          items:
+            type: object
+            additionalProperties:
+              type: string
     CreateDatabaseResponse:
       type: object
       properties:
