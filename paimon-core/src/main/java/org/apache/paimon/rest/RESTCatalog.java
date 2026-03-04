@@ -657,14 +657,7 @@ public class RESTCatalog implements Catalog {
         } catch (ForbiddenException e) {
             throw new TableNoPermissionException(identifier, e);
         } catch (NotImplementedException e) {
-            // not a metastore partitioned table, filter from file system partitions
-            List<Partition> allPartitions = listPartitionsFromFileSystem(getTable(identifier));
-            return allPartitions.stream()
-                    .filter(
-                            partition ->
-                                    partitions.stream()
-                                            .anyMatch(spec -> partition.spec().equals(spec)))
-                    .collect(java.util.stream.Collectors.toList());
+            return listPartitionsFromFileSystem(getTable(identifier), partitions);
         }
     }
 
