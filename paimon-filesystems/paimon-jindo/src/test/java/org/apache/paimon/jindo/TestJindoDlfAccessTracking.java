@@ -25,12 +25,13 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 
-import static org.apache.paimon.rest.RESTTokenFileIO.DLF_ACCESS_TRACKING_EXTENDED_INFO;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for DLF access tracking extended info in {@link JindoFileIO}. */
 public class TestJindoDlfAccessTracking {
 
+    private static final String DLF_ACCESS_TRACKING_EXTENDED_INFO =
+            "dlf.access-tracking.extended-info";
     private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
 
     private Options getHadoopOptions(JindoFileIO fileIO) {

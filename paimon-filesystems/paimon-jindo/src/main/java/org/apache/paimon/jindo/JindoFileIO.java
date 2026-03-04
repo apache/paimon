@@ -46,7 +46,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
-import static org.apache.paimon.rest.RESTTokenFileIO.DLF_ACCESS_TRACKING_EXTENDED_INFO;
 
 /** Jindo {@link FileIO}. */
 public class JindoFileIO extends HadoopCompliantFileIO {
@@ -67,6 +66,8 @@ public class JindoFileIO extends HadoopCompliantFileIO {
     private static final String OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
     private static final String OSS_SECURITY_TOKEN = "fs.oss.securityToken";
     private static final String OSS_USER_AGENT_EXTENDED = "fs.oss.user.agent.extended";
+    private static final String DLF_ACCESS_TRACKING_EXTENDED_INFO =
+            "dlf.access-tracking.extended-info";
 
     private static final Map<String, String> CASE_SENSITIVE_KEYS =
             new HashMap<String, String>() {

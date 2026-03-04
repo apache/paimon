@@ -113,13 +113,6 @@ public class RESTCatalogOptions {
                                     + "'openapi' (for DlfNext/2026-01-18). "
                                     + "If not set, will be automatically selected based on endpoint host.");
 
-    public static final ConfigOption<Boolean> DLF_ACCESS_TRACKING_REPORT_ENABLED =
-            ConfigOptions.key("dlf.access-tracking.report-enabled")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Whether to enable access tracking report to DLF OSS, default is true.");
-
     public static final ConfigOption<Boolean> IO_CACHE_ENABLED =
             ConfigOptions.key("io-cache.enabled")
                     .booleanType()

@@ -50,7 +50,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
-import static org.apache.paimon.rest.RESTCatalogOptions.DLF_ACCESS_TRACKING_REPORT_ENABLED;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
 
 /** A {@link FileIO} to support getting token from REST Server. */
@@ -63,12 +62,6 @@ public class RESTTokenFileIO implements FileIO {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription("Whether to support data token provided by the REST server.");
-
-    public static final ConfigOption<String> DLF_ACCESS_TRACKING_EXTENDED_INFO =
-            ConfigOptions.key("dlf.access-tracking.extended-info")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Extended info for access tracking report to DLF OSS.");
 
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
@@ -245,13 +238,6 @@ public class RESTTokenFileIO implements FileIO {
         String dlfOssEndpoint = catalogContext.options().get(DLF_OSS_ENDPOINT.key());
         if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
-        }
-        boolean dlfAccessTrackingReport =
-                catalogContext.options().get(DLF_ACCESS_TRACKING_REPORT_ENABLED);
-        if (!dlfAccessTrackingReport) {
-            LOG.info(
-                    "DLF access tracking report is disabled, will remove extended info from token");
-            newToken.remove(DLF_ACCESS_TRACKING_EXTENDED_INFO.key());
         }
         return ImmutableMap.copyOf(newToken);
     }
