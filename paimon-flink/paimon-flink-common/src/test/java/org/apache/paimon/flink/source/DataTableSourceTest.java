@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -43,6 +42,7 @@ import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
+import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
 import org.apache.flink.table.data.RowData;
@@ -75,7 +75,7 @@ class DataTableSourceTest {
         DataTableSource tableSource =
                 new DataTableSource(
                         ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
-        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        DataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         sEnv1.setParallelism(-1);
         DataStream<RowData> sourceStream1 =
@@ -105,7 +105,7 @@ class DataTableSourceTest {
         DataTableSource tableSource =
                 new DataTableSource(
                         ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
-        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        DataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         DataStream<RowData> sourceStream1 =
@@ -123,7 +123,7 @@ class DataTableSourceTest {
 
         SystemTableSource tableSource =
                 new SystemTableSource(ro, false, ObjectIdentifier.of("cat", "db", "table"));
-        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+        DataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         Configuration configuration = new Configuration();
         configuration.set(ExecutionOptions.RUNTIME_MODE, RuntimeExecutionMode.BATCH);
@@ -133,8 +133,8 @@ class DataTableSourceTest {
         assertThat(sourceStream1.getParallelism()).isEqualTo(3);
     }
 
-    private PaimonDataStreamScanProvider runtimeProvider(FlinkTableSource tableSource) {
-        return (PaimonDataStreamScanProvider)
+    private DataStreamScanProvider runtimeProvider(FlinkTableSource tableSource) {
+        return (DataStreamScanProvider)
                 tableSource.getScanRuntimeProvider(
                         new ScanTableSource.ScanContext() {
                             @Override
