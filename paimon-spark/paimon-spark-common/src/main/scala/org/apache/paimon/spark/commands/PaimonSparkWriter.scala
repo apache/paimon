@@ -314,7 +314,7 @@ case class PaimonSparkWriter(
         writeWithoutBucket(input)
 
       case HASH_FIXED =>
-        if (paimonExtensionEnabled && BucketFunction.supportsTable(table)) {
+        if (paimonExtensionEnabled(sparkSession) && BucketFunction.supportsTable(table)) {
           // Topology: input -> shuffle by partition & bucket
           val bucketNumber = coreOptions.bucket()
           val bucketKeyCol = tableSchema
