@@ -2574,7 +2574,8 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         batchWrite(fileStoreTable, singletonList(1));
 
         // Create consumers
-        ConsumerManager consumerManager = new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
         consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
         consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
 
