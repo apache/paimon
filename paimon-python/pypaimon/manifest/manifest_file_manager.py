@@ -16,27 +16,27 @@
 # limitations under the License.
 ################################################################################
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from io import BytesIO
-from typing import List
+from typing import List, Optional
 
 import fastavro
-
-from datetime import datetime
+from cachetools import LRUCache
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
-from pypaimon.table.row.binary_row import BinaryRow
 
 
 class ManifestFileManager:
     """Writer for manifest files in Avro format using unified FileIO."""
 
-    def __init__(self, table):
+    def __init__(self, table, cache_max_size: int = 100):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -46,6 +46,13 @@ class ManifestFileManager:
         self.partition_keys_fields = self.table.partition_keys_fields
         self.primary_keys_fields = self.table.primary_keys_fields
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
+
+        # LRU cache for manifest file contents
+        self._cache: Optional[LRUCache] = (
+            LRUCache(maxsize=cache_max_size) if cache_max_size > 0 else None
+        )
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_entry_filter=None,
                               drop_stats=True, max_workers=8) -> List[ManifestEntry]:
@@ -82,6 +89,38 @@ class ManifestFileManager:
         return final_entries
 
     def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
+        # Check cache first (cache stores unfiltered entries with stats)
+        if self._cache is not None and manifest_file_name in self._cache:
+            self._cache_hits += 1
+            entries = self._cache[manifest_file_name]
+            return self._apply_post_read(entries, manifest_entry_filter, drop_stats)
+
+        self._cache_misses += 1
+
+        # Read from storage
+        entries = self._read_from_storage(manifest_file_name)
+
+        # Cache the unfiltered entries
+        if self._cache is not None:
+            self._cache[manifest_file_name] = entries
+
+        return self._apply_post_read(entries, manifest_entry_filter, drop_stats)
+
+    def _apply_post_read(self, entries: List[ManifestEntry], manifest_entry_filter,
+                         drop_stats: bool) -> List[ManifestEntry]:
+        """Apply filtering and stats dropping to entries."""
+        result = []
+        for entry in entries:
+            if manifest_entry_filter is not None and not manifest_entry_filter(entry):
+                continue
+            if drop_stats:
+                result.append(entry.copy_without_stats())
+            else:
+                result.append(entry)
+        return result
+
+    def _read_from_storage(self, manifest_file_name: str) -> List[ManifestEntry]:
+        """Read manifest entries from storage (no filtering, with stats)."""
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
@@ -152,10 +191,6 @@ class ManifestFileManager:
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
             )
-            if manifest_entry_filter is not None and not manifest_entry_filter(entry):
-                continue
-            if drop_stats:
-                entry = entry.copy_without_stats()
             entries.append(entry)
         return entries
 

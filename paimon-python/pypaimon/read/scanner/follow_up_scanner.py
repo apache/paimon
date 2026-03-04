@@ -15,24 +15,35 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-# Core dependencies for pypaimon
-cachetools>=4.2,<6; python_version=="3.6"
-cachetools>=5,<6; python_version>"3.6"
-dataclasses>=0.8; python_version < "3.7"
-fastavro>=1.4,<2
-fsspec>=2021.10,<2026; python_version<"3.8"
-fsspec>=2023,<2026; python_version>="3.8"
-# ossfs moved to extras_require (pip install pypaimon[oss])
-packaging>=21,<26
-pandas>=1.1,<2; python_version < "3.7"
-pandas>=1.3,<3; python_version >= "3.7" and python_version < "3.9"
-pandas>=1.5,<3; python_version >= "3.9"
-polars>=0.9,<1; python_version<"3.8"
-polars>=1,<2; python_version>="3.8"
-pyarrow>=6,<7; python_version < "3.8"
-pyarrow>=16,<20; python_version >= "3.8"
-# pylance moved to extras_require (pip install pypaimon[lance])
-pyroaring
-readerwriterlock>=1,<2
-zstandard>=0.19,<1
-cramjam>=1.3.0,<3; python_version>="3.7"
+"""
+FollowUpScanner interface for streaming table scans.
+
+This is the Python equivalent of Java's FollowUpScanner interface used in
+DataTableStreamScan for follow-up planning after the initial scan.
+"""
+
+from abc import ABC, abstractmethod
+
+from pypaimon.snapshot.snapshot import Snapshot
+
+
+class FollowUpScanner(ABC):
+    """
+    Helper class for the follow-up planning of streaming table scans.
+
+    After the initial scan (handled by StartingScanner), the FollowUpScanner
+    determines which subsequent snapshots should be scanned and how to read
+    their delta data.
+    """
+
+    @abstractmethod
+    def should_scan(self, snapshot: Snapshot) -> bool:
+        """
+        Determine whether the given snapshot should be scanned.
+
+        Args:
+            snapshot: The snapshot to evaluate
+
+        Returns:
+            True if the snapshot should be scanned, False to skip it
+        """

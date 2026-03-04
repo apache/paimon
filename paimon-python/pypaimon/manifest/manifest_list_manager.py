@@ -20,6 +20,7 @@ from io import BytesIO
 from typing import List, Optional
 
 import fastavro
+from cachetools import LRUCache
 
 from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
@@ -32,13 +33,20 @@ from pypaimon.table.row.generic_row import GenericRowSerializer
 class ManifestListManager:
     """Manager for manifest list files in Avro format using unified FileIO."""
 
-    def __init__(self, table):
+    def __init__(self, table, cache_max_size: int = 50):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         manifest_path = table.table_path.rstrip('/')
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
+
+        # LRU cache for manifest list contents
+        self._cache: Optional[LRUCache] = (
+            LRUCache(maxsize=cache_max_size) if cache_max_size > 0 else None
+        )
+        self._cache_hits = 0
+        self._cache_misses = 0
 
     def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
         if snapshot is None:
@@ -50,10 +58,60 @@ class ManifestListManager:
         manifest_files.extend(delta_manifests)
         return manifest_files
 
+    def read_base(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """
+        Read only base manifest list (all files at this snapshot point).
+
+        This is useful for computing diffs between two snapshots, where
+        we only need the base state and not the delta changes.
+
+        Args:
+            snapshot: The snapshot to read base manifest from
+
+        Returns:
+            List of ManifestFileMeta representing all files at this snapshot
+        """
+        return self.read(snapshot.base_manifest_list)
+
     def read_delta(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
         return self.read(snapshot.delta_manifest_list)
 
+    def read_changelog(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """
+        Read changelog manifest files from snapshot.
+
+        For primary key tables with changelog-producer=input/full-compaction/lookup,
+        changelog files are stored in a separate manifest list.
+
+        Args:
+            snapshot: The snapshot to read changelog from
+
+        Returns:
+            List of ManifestFileMeta for changelog files, or empty list if no changelog
+        """
+        if snapshot.changelog_manifest_list is None:
+            return []
+        return self.read(snapshot.changelog_manifest_list)
+
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        # Check cache first
+        if self._cache is not None and manifest_list_name in self._cache:
+            self._cache_hits += 1
+            return self._cache[manifest_list_name]
+
+        self._cache_misses += 1
+
+        # Read from storage
+        result = self._read_from_storage(manifest_list_name)
+
+        # Cache the result
+        if self._cache is not None:
+            self._cache[manifest_list_name] = result
+
+        return result
+
+    def _read_from_storage(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        """Read manifest list from storage."""
         manifest_files = []
 
         manifest_list_path = f"{self.manifest_path}/{manifest_list_name}"
