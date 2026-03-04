@@ -424,6 +424,13 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        return wrapped.listPartitionsByNames(identifier, partitions);
+    }
+
+    @Override
     public TableQueryAuthResult authTableQuery(Identifier identifier, @Nullable List<String> select)
             throws TableNotExistException {
         return wrapped.authTableQuery(identifier, select);

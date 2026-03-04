@@ -45,6 +45,7 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
@@ -106,6 +107,7 @@ import static org.apache.paimon.rest.RESTFunctionValidator.checkFunctionName;
 import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * REST API for REST Catalog.
@@ -820,6 +822,38 @@ public class RESTApi {
             return new PagedList<>(emptyList(), null);
         }
         return new PagedList<>(partitions, response.getNextPageToken());
+    }
+
+    /**
+     * List partitions by partition names for table.
+     *
+     * @param identifier database name and table name.
+     * @param partitionSpecs partition specs to be queried
+     * @return a list of partitions matching the given partition specs
+     * @throws IllegalArgumentException if the number of partition specs exceeds 1000
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitionSpecs) {
+        checkArgument(
+                partitionSpecs.size() <= 1000,
+                "The number of partition specs must not exceed 1000, but got %s",
+                partitionSpecs.size());
+        ListPartitionsByNamesRequest request = new ListPartitionsByNamesRequest(partitionSpecs);
+        ListPartitionsResponse response =
+                client.post(
+                        resourcePaths.listPartitionsByNames(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        request,
+                        ListPartitionsResponse.class,
+                        restAuthFunction);
+        List<Partition> partitions = response.getPartitions();
+        if (partitions == null) {
+            return emptyList();
+        }
+        return partitions;
     }
 
     /**

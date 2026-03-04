@@ -202,6 +202,18 @@ public class ResourcePaths {
                 "mark");
     }
 
+    public String listPartitionsByNames(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                PARTITIONS,
+                "list-by-names");
+    }
+
     public String branches(String databaseName, String objectName) {
         return SLASH.join(
                 V1,

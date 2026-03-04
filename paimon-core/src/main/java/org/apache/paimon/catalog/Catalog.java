@@ -403,6 +403,19 @@ public interface Catalog extends AutoCloseable {
             @Nullable String partitionNamePattern)
             throws TableNotExistException;
 
+    /**
+     * Get Partition list by partition names of the table.
+     *
+     * @param identifier path of the table to list partitions
+     * @param partitions partition names to be queried
+     * @return a list of the partitions matching the given partition names
+     * @throws IllegalArgumentException if the number of partition specs exceeds 1000
+     * @throws TableNotExistException if the table does not exist
+     */
+    List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException;
+
     // ======================= view methods ===============================
 
     /**
