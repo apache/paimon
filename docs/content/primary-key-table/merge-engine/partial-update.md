@@ -219,7 +219,7 @@ SELECT *
 FROM AGG;
 -- output 1, 3, 2, 2, "1", 1, 2
 
--- g_1, g_3 are smaller, a should not beupdated
+-- g_1, g_3 are smaller, a should not be updated
 INSERT INTO AGG
 VALUES (1, 3, 3, 2, '3', 3, 1);
 

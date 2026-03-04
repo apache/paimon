@@ -1103,7 +1103,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "The expiration interval of a partition. A partition will be expired if"
-                                    + " it‘s lifetime is over this value. Partition time is extracted from"
+                                    + " it's lifetime is over this value. Partition time is extracted from"
                                     + " the partition value.");
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_CHECK_INTERVAL =

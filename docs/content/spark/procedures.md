@@ -77,7 +77,7 @@ This section introduce all available spark procedures about paimon.
       <td>
          To expire partitions. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
+            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
