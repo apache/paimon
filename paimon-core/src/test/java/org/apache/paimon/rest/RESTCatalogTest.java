@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -2573,9 +2574,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         batchWrite(fileStoreTable, singletonList(1));
 
         // Create consumers
-        org.apache.paimon.consumer.ConsumerManager consumerManager =
-                new org.apache.paimon.consumer.ConsumerManager(
-                        fileStoreTable.fileIO(), fileStoreTable.location());
+        ConsumerManager consumerManager = new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
         consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
         consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
 
