@@ -788,6 +788,28 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException;
 
     /**
+     * Create a branch for this table with option to ignore if the branch already exists.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param branch the branch name
+     * @param fromTag from the tag
+     * @param ignoreIfExists if true, do nothing when branch already exists
+     * @throws TableNotExistException if the table in identifier doesn't exist
+     * @throws BranchAlreadyExistException if the branch already exists and ignoreIfExists is false
+     * @throws TagNotExistException if the tag doesn't exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default void createBranch(
+            Identifier identifier, String branch, @Nullable String fromTag, boolean ignoreIfExists)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        if (ignoreIfExists && listBranches(identifier).contains(branch)) {
+            return;
+        }
+        createBranch(identifier, branch, fromTag);
+    }
+
+    /**
      * Drop the branch for this table.
      *
      * @param identifier path of the table, cannot be system or branch name.

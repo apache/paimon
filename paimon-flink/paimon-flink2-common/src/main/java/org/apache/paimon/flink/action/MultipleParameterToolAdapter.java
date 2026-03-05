@@ -64,6 +64,14 @@ public class MultipleParameterToolAdapter {
         return value;
     }
 
+    public Boolean getBoolean(String key, Boolean defaultValue) {
+        String value = get(key);
+        if (value == null) {
+            return defaultValue;
+        }
+        return Boolean.parseBoolean(value);
+    }
+
     public MultipleParameterToolAdapter mergeWith(MultipleParameterToolAdapter other) {
         return new MultipleParameterToolAdapter(this.params.mergeWith(other.params));
     }

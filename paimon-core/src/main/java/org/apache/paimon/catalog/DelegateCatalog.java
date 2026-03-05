@@ -229,6 +229,13 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void createBranch(
+            Identifier identifier, String branch, @Nullable String fromTag, boolean ignoreIfExists)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        wrapped.createBranch(identifier, branch, fromTag, ignoreIfExists);
+    }
+
+    @Override
     public void dropBranch(Identifier identifier, String branch) throws BranchNotExistException {
         wrapped.dropBranch(identifier, branch);
     }
