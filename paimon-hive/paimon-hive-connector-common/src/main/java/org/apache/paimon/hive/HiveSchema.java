@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.utils.HiveUtils;
@@ -200,7 +201,7 @@ public class HiveSchema {
         Path path = new Path(location);
         Options options = HiveUtils.extractCatalogConfig(configuration);
         options.set(CoreOptions.PATH, location);
-        CatalogContext context = CatalogContext.create(options, configuration);
+        CatalogContext context = CatalogHadoopContext.create(options, configuration);
         try {
             return new SchemaManager(FileIO.get(path, context), path).latest();
         } catch (IOException e) {

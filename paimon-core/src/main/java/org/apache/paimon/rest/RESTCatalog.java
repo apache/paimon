@@ -107,12 +107,7 @@ public class RESTCatalog implements Catalog {
 
     public RESTCatalog(CatalogContext context, boolean configRequired) {
         this.api = new RESTApi(context.options(), configRequired);
-        this.context =
-                CatalogContext.create(
-                        api.options(),
-                        context.hadoopConf(),
-                        context.preferIO(),
-                        context.fallbackIO());
+        this.context = context.copy(api.options());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
     }
