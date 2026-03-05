@@ -35,8 +35,10 @@ from pypaimon.schema.schema import Schema
 from pypaimon.table.row.generic_row import GenericRow
 
 
-class ManifestFileCacheTest(unittest.TestCase):
-    """Tests for ManifestFileManager caching."""
+class _ManifestCacheTestBase(unittest.TestCase):
+    """Shared setup for manifest cache tests."""
+
+    _table_name: str  # Subclasses must set this
 
     @classmethod
     def setUpClass(cls):
@@ -47,20 +49,36 @@ class ManifestFileCacheTest(unittest.TestCase):
         cls.catalog.create_database('default', False)
 
     def setUp(self):
-        # Clean up any existing table
+        table_id = f'default.{self._table_name}'
         try:
-            table_identifier = Identifier.from_string('default.cache_test')
+            table_identifier = Identifier.from_string(table_id)
             table_path = self.catalog.get_table_path(table_identifier)
             if self.catalog.file_io.exists(table_path):
                 self.catalog.file_io.delete(table_path, recursive=True)
         except Exception:
             pass
 
-        # Create test table
         pa_schema = pa.schema([('id', pa.int32()), ('value', pa.string())])
         schema = Schema.from_pyarrow_schema(pa_schema)
-        self.catalog.create_table('default.cache_test', schema, False)
-        self.table = self.catalog.get_table('default.cache_test')
+        self.catalog.create_table(table_id, schema, False)
+        self.table = self.catalog.get_table(table_id)
+
+    def _create_manifest_file_meta(self, file_name):
+        """Helper to create ManifestFileMeta."""
+        return ManifestFileMeta(
+            file_name=file_name,
+            file_size=1024,
+            num_added_files=1,
+            num_deleted_files=0,
+            partition_stats=SimpleStats.empty_stats(),
+            schema_id=0
+        )
+
+
+class ManifestFileCacheTest(_ManifestCacheTestBase):
+    """Tests for ManifestFileManager caching."""
+
+    _table_name = 'cache_test'
 
     def _create_file_meta(self, file_name):
         """Helper to create DataFileMeta with common defaults."""
@@ -196,42 +214,26 @@ class ManifestFileCacheTest(unittest.TestCase):
         self.assertEqual(manager._cache.maxsize, 100)
 
 
-class ManifestListCacheTest(unittest.TestCase):
+class ManifestListCacheTest(_ManifestCacheTestBase):
     """Tests for ManifestListManager caching."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls.tempdir = tempfile.mkdtemp()
-        cls.catalog = FileSystemCatalog(
-            Options({CatalogOptions.WAREHOUSE.key(): cls.tempdir})
-        )
-        cls.catalog.create_database('default', False)
+    _table_name = 'list_cache_test'
 
-    def setUp(self):
-        # Clean up any existing table
-        try:
-            table_identifier = Identifier.from_string('default.list_cache_test')
-            table_path = self.catalog.get_table_path(table_identifier)
-            if self.catalog.file_io.exists(table_path):
-                self.catalog.file_io.delete(table_path, recursive=True)
-        except Exception:
-            pass
-
-        # Create test table
-        pa_schema = pa.schema([('id', pa.int32()), ('value', pa.string())])
-        schema = Schema.from_pyarrow_schema(pa_schema)
-        self.catalog.create_table('default.list_cache_test', schema, False)
-        self.table = self.catalog.get_table('default.list_cache_test')
-
-    def _create_manifest_file_meta(self, file_name):
-        """Helper to create ManifestFileMeta."""
-        return ManifestFileMeta(
-            file_name=file_name,
-            file_size=1024,
-            num_added_files=1,
-            num_deleted_files=0,
-            partition_stats=SimpleStats.empty_stats(),
-            schema_id=0
+    def _make_snapshot(self, base_manifest_list, delta_manifest_list="delta-manifest-list"):
+        """Helper to create a Snapshot with common defaults."""
+        from pypaimon.snapshot.snapshot import Snapshot
+        return Snapshot(
+            version=3,
+            id=1,
+            schema_id=0,
+            base_manifest_list=base_manifest_list,
+            delta_manifest_list=delta_manifest_list,
+            commit_user="test",
+            commit_identifier=1,
+            commit_kind="APPEND",
+            time_millis=1234567890,
+            total_record_count=100,
+            delta_record_count=10,
         )
 
     def test_second_read_uses_cache(self):
@@ -278,8 +280,6 @@ class ManifestListCacheTest(unittest.TestCase):
 
     def test_read_base_returns_only_base_manifest(self):
         """read_base() should only read base_manifest_list, not delta."""
-        from pypaimon.snapshot.snapshot import Snapshot
-
         manager = ManifestListManager(self.table, cache_max_size=10)
 
         # Write base and delta manifest lists
@@ -288,20 +288,7 @@ class ManifestListCacheTest(unittest.TestCase):
         manager.write("base-manifest-list", [base_meta])
         manager.write("delta-manifest-list", [delta_meta])
 
-        # Create mock snapshot with both base and delta
-        snapshot = Snapshot(
-            version=3,
-            id=1,
-            schema_id=0,
-            base_manifest_list="base-manifest-list",
-            delta_manifest_list="delta-manifest-list",
-            commit_user="test",
-            commit_identifier=1,
-            commit_kind="APPEND",
-            time_millis=1234567890,
-            total_record_count=100,
-            delta_record_count=10,
-        )
+        snapshot = self._make_snapshot("base-manifest-list", "delta-manifest-list")
 
         # read_base should only return base manifests
         result = manager.read_base(snapshot)
@@ -311,28 +298,13 @@ class ManifestListCacheTest(unittest.TestCase):
 
     def test_read_base_uses_cache(self):
         """read_base() should use LRU cache."""
-        from pypaimon.snapshot.snapshot import Snapshot
-
         manager = ManifestListManager(self.table, cache_max_size=10)
 
         # Write base manifest list
         base_meta = self._create_manifest_file_meta("manifest-base.avro")
         manager.write("base-manifest-list", [base_meta])
 
-        # Create mock snapshot
-        snapshot = Snapshot(
-            version=3,
-            id=1,
-            schema_id=0,
-            base_manifest_list="base-manifest-list",
-            delta_manifest_list="delta-manifest-list",
-            commit_user="test",
-            commit_identifier=1,
-            commit_kind="APPEND",
-            time_millis=1234567890,
-            total_record_count=100,
-            delta_record_count=10,
-        )
+        snapshot = self._make_snapshot("base-manifest-list")
 
         # First read - cache miss
         manager.read_base(snapshot)
