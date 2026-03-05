@@ -685,6 +685,63 @@ Row kind values:
 - `+U`: Update after (new value)
 - `-D`: Delete
 
+## Command Line Interface
+
+PyPaimon includes a CLI tool for quick data exploration and debugging.
+
+### Installation
+
+The CLI is installed automatically with PyPaimon:
+
+```bash
+pip install pypaimon
+```
+
+### paimon tail
+
+Stream data from a Paimon table, similar to `kafka-console-consumer`:
+
+```bash
+# Tail latest data (wait for new records)
+paimon tail s3://bucket/warehouse database.table --follow
+
+# Start from earliest snapshot
+paimon tail s3://bucket/warehouse database.table --from earliest
+
+# Start from specific snapshot
+paimon tail s3://bucket/warehouse database.table --from snapshot:12345
+
+# Start from 1 hour ago
+paimon tail s3://bucket/warehouse database.table --from time:-1h
+
+# Output as CSV with specific columns
+paimon tail s3://bucket/warehouse database.table -o csv -c id,name,timestamp
+
+# Filter records
+paimon tail s3://bucket/warehouse database.table -f status=active -f amount>100
+
+# Limit output
+paimon tail s3://bucket/warehouse database.table -n 100
+
+# With consumer ID for checkpointing
+paimon tail s3://bucket/warehouse database.table --consumer-id my-consumer --follow
+```
+
+**Options**:
+
+| Option | Description |
+|:-------|:------------|
+| `--from`, `-s` | Start position: `earliest`, `latest`, `snapshot:ID`, `time:TIMESTAMP` |
+| `--output`, `-o` | Output format: `jsonl` (default), `json`, `csv`, `table` |
+| `--filter`, `-f` | Filter expression (repeatable): `col=val`, `col>val`, `col~prefix` |
+| `--columns`, `-c` | Columns to output (comma-separated) |
+| `--limit`, `-n` | Exit after N records |
+| `--follow`, `-F` | Keep waiting for new data |
+| `--poll-interval` | Poll interval in milliseconds (default: 1000) |
+| `--consumer-id` | Consumer ID for checkpointing |
+| `--include-row-kind` | Include `_row_kind` column |
+| `--verbose`, `-v` | Print status messages to stderr |
+
 ## Data Types
 
 | Python Native Type  | PyArrow Type                                     | Paimon Type                       |
@@ -761,3 +818,5 @@ The following shows the supported features of Python Paimon compared to Java Pai
     - Streaming reads
     - Parallel consumption with bucket filtering
     - Row kind support for changelog streams
+- Command Line Interface
+    - `paimon tail` for streaming reads

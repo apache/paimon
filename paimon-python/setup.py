@@ -53,7 +53,7 @@ setup(
     install_requires=install_requires,
     entry_points={
         'console_scripts': [
-            'paimon=pypaimon.cli:main',
+            'paimon=pypaimon.cli.main:main',
         ],
     },
     extras_require={
