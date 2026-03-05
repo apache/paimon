@@ -94,7 +94,10 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         boolean blobFileSizeCountInSplitting = options.blobSplitByFileSize();
         return coreOptions().dataEvolutionEnabled()
                 ? new DataEvolutionSplitGenerator(
-                        targetSplitSize, openFileCost, blobFileSizeCountInSplitting)
+                        targetSplitSize,
+                        openFileCost,
+                        blobFileSizeCountInSplitting,
+                        options.dataEvolutionForceSplitRowRangeContigous())
                 : new AppendOnlySplitGenerator(targetSplitSize, openFileCost, bucketMode());
     }
 

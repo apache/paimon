@@ -42,11 +42,36 @@ public class DataEvolutionSplitGeneratorTest {
                         newFile("file2.parquet", 100L, 100L, 50),
                         newBlobFile("file2", 100L, 100L, 50000));
 
-        DataEvolutionSplitGenerator generator = new DataEvolutionSplitGenerator(500, 1, true);
+        DataEvolutionSplitGenerator generator =
+                new DataEvolutionSplitGenerator(500, 1, true, false);
         List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
         assertThat(splits.size()).isEqualTo(2);
 
-        generator = new DataEvolutionSplitGenerator(500, 1, false);
+        generator = new DataEvolutionSplitGenerator(500, 1, false, false);
+        splits = generator.splitForBatch(files);
+        assertThat(splits.size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testForceSplitRowRangeContigous() {
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        newFile("file1.parquet", 0L, 11L, 10),
+                        newFile("file2.parquet", 1000L, 1001L, 10));
+
+        DataEvolutionSplitGenerator generator =
+                new DataEvolutionSplitGenerator(1000, 1, false, false);
+        List<SplitGenerator.SplitGroup> splits = generator.splitForBatch(files);
+        assertThat(splits.size()).isEqualTo(1);
+
+        generator = new DataEvolutionSplitGenerator(1000, 1, false, true);
+        splits = generator.splitForBatch(files);
+        assertThat(splits.size()).isEqualTo(2);
+
+        files =
+                Arrays.asList(
+                        newFile("file3.parquet", 0L, 11L, 10),
+                        newFile("file4.parquet", 11L, 10L, 10));
         splits = generator.splitForBatch(files);
         assertThat(splits.size()).isEqualTo(1);
     }

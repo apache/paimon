@@ -2092,6 +2092,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether enable data evolution for row tracking table.");
 
+    public static final ConfigOption<Boolean> DATA_EVOLUTION_FORCE_SPLIT_ROW_RANGE_CONTIGOUS =
+            key("data-evolution.force-split-row-range-contiguous")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether force each split group to contain only row-range-contiguous files for data evolution table scan splitting.");
+
     public static final ConfigOption<Boolean> SNAPSHOT_IGNORE_EMPTY_COMMIT =
             key("snapshot.ignore-empty-commit")
                     .booleanType()
@@ -3411,6 +3418,10 @@ public class CoreOptions implements Serializable {
 
     public boolean dataEvolutionEnabled() {
         return options.get(DATA_EVOLUTION_ENABLED);
+    }
+
+    public boolean dataEvolutionForceSplitRowRangeContigous() {
+        return options.get(DATA_EVOLUTION_FORCE_SPLIT_ROW_RANGE_CONTIGOUS);
     }
 
     public boolean prepareCommitWaitCompaction() {

@@ -19,8 +19,10 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
@@ -30,6 +32,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
@@ -87,8 +90,15 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     @Nullable private PartitionPredicate partitionPredicate;
 
     public BTreeGlobalIndexBuilder(Table table) {
-        this.table = (FileStoreTable) table;
-        this.rowType = table.rowType();
+        FileStoreTable copied =
+                ((FileStoreTable) table)
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.DATA_EVOLUTION_FORCE_SPLIT_ROW_RANGE_CONTIGOUS
+                                                .key(),
+                                        "true"));
+        this.table = copied;
+        this.rowType = copied.rowType();
         this.options = this.table.coreOptions().toConfiguration();
         this.recordsPerRange =
                 (long) (options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE) * FLOATING);
@@ -132,8 +142,44 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         if (partitionPredicate != null) {
             snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
         }
+        Snapshot latestSnapshot = snapshotReader.snapshotManager().latestSnapshot();
+        if (latestSnapshot == null) {
+            return Collections.emptyList();
+        }
+        snapshotReader = snapshotReader.withSnapshot(latestSnapshot);
 
+        Preconditions.checkArgument(indexType != null, "indexType must be set before scan.");
+        Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
+
+        Range dataRange = new Range(0, latestSnapshot.nextRowId() - 1);
+        List<Range> indexedRanges = indexedRowRanges(latestSnapshot);
+        List<Range> nonIndexedRanges = dataRange.exclude(indexedRanges);
+        if (nonIndexedRanges.isEmpty()) {
+            return Collections.emptyList();
+        }
+        snapshotReader = snapshotReader.withRowRanges(nonIndexedRanges);
         return snapshotReader.read().dataSplits();
+    }
+
+    private List<Range> indexedRowRanges(Snapshot snapshot) {
+        List<Range> ranges = new ArrayList<>();
+        for (IndexManifestEntry entry :
+                table.store().newIndexFileHandler().scan(snapshot, indexType)) {
+            if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
+                continue;
+            }
+            if (entry.indexFile().globalIndexMeta() == null) {
+                continue;
+            }
+            if (entry.indexFile().globalIndexMeta().indexFieldId() != indexField.id()) {
+                continue;
+            }
+            ranges.add(
+                    new Range(
+                            entry.indexFile().globalIndexMeta().rowRangeStart(),
+                            entry.indexFile().globalIndexMeta().rowRangeEnd()));
+        }
+        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     public List<CommitMessage> build(List<DataSplit> splits, IOManager ioManager)
@@ -226,6 +272,43 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return commitMessages;
     }
 
+    public List<CommitMessage> buildForSinglePartition(
+            Range rowRange,
+            BinaryRow partition,
+            Iterator<InternalRow> data,
+            int indexFieldPos,
+            int rowIdPos)
+            throws IOException {
+        long counter = 0;
+        GlobalIndexParallelWriter currentWriter = null;
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        FieldGetter indexFieldGetter =
+                InternalRow.createFieldGetter(indexField.type(), indexFieldPos);
+
+        while (data.hasNext()) {
+            InternalRow row = data.next();
+
+            if (currentWriter != null && counter >= recordsPerRange) {
+                commitMessages.add(flushIndex(rowRange, currentWriter.finish(), partition));
+                currentWriter = null;
+                counter = 0;
+            }
+
+            counter++;
+            if (currentWriter == null) {
+                currentWriter = createWriter();
+            }
+
+            long localRowId = row.getLong(rowIdPos) - rowRange.from;
+            currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
+        }
+
+        if (counter > 0) {
+            commitMessages.add(flushIndex(rowRange, currentWriter.finish(), partition));
+        }
+        return commitMessages;
+    }
+
     public GlobalIndexParallelWriter createWriter() throws IOException {
         GlobalIndexParallelWriter currentWriter;
         GlobalIndexWriter indexWriter = createIndexWriter(table, indexType, indexField, options);
@@ -242,22 +325,34 @@ public class BTreeGlobalIndexBuilder implements Serializable {
             Range rowRange, List<ResultEntry> resultEntries, BinaryRow partition)
             throws IOException {
         List<IndexFileMeta> indexFileMetas =
-                toIndexFileMetas(table, rowRange, indexField.id(), indexType, resultEntries);
+                toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        indexField.id(),
+                        indexType,
+                        resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());
     }
 
     public static Range calcRowRange(List<DataSplit> dataSplits) {
-        long start = Long.MAX_VALUE;
-        long end = Long.MIN_VALUE;
+        List<Range> ranges = calcRowRanges(dataSplits);
+        if (ranges.isEmpty()) {
+            return null;
+        }
+        return new Range(ranges.get(0).from, ranges.get(ranges.size() - 1).to);
+    }
+
+    public static List<Range> calcRowRanges(List<DataSplit> dataSplits) {
+        List<Range> ranges = new ArrayList<>();
         for (DataSplit dataSplit : dataSplits) {
             for (DataFileMeta file : dataSplit.dataFiles()) {
-                Range range = file.nonNullRowIdRange();
-                start = Math.min(start, range.from);
-                end = Math.max(end, range.to);
+                ranges.add(file.nonNullRowIdRange());
             }
         }
-        return start == Long.MAX_VALUE ? null : new Range(start, end);
+        return Range.sortAndMergeOverlap(ranges, true);
     }
 }
