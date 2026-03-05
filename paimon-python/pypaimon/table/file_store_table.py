@@ -19,21 +19,22 @@
 from typing import List, Optional
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.read.stream_read_builder import StreamReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
                                               PostponeBucketRowKeyExtractor,
                                               RowKeyExtractor,
                                               UnawareBucketRowKeyExtractor)
+from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
 class FileStoreTable(Table):
@@ -61,6 +62,20 @@ class FileStoreTable(Table):
         self.total_buckets = self.options.bucket()
 
         self.schema_manager = SchemaManager(file_io, table_path)
+
+    @property
+    def bucket_count(self) -> int:
+        """
+        Get the number of buckets configured for this table.
+
+        For fixed bucket tables, this is the configured bucket number.
+        For dynamic bucket tables (bucket=-1), this returns -1.
+        For postpone bucket tables (bucket=-2), this returns -2.
+
+        Returns:
+            The bucket count configuration value
+        """
+        return self.total_buckets
 
     @classmethod
     def from_path(cls, table_path: str) -> 'FileStoreTable':
@@ -102,12 +117,12 @@ class FileStoreTable(Table):
     ) -> None:
         """
         Create a tag for a snapshot.
-        
+
         Args:
             tag_name: Name for the tag
             snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
             ignore_if_exists: If True, don't raise error if tag already exists
-            
+
         Raises:
             ValueError: If no snapshot exists or tag already exists (when ignore_if_exists=False)
         """
@@ -129,10 +144,10 @@ class FileStoreTable(Table):
     def delete_tag(self, tag_name: str) -> bool:
         """
         Delete a tag.
-        
+
         Args:
             tag_name: Name of the tag to delete
-            
+
         Returns:
             True if tag was deleted, False if tag didn't exist
         """
@@ -310,10 +325,8 @@ class FileStoreTable(Table):
         if not self.options.global_index_enabled():
             return None
 
-        from pypaimon.globalindex.global_index_scan_builder_impl import (
+        from pypaimon.globalindex.global_index_scan_builder_impl import \
             GlobalIndexScanBuilderImpl
-        )
-
         from pypaimon.index.index_file_handler import IndexFileHandler
 
         return GlobalIndexScanBuilderImpl(
@@ -324,6 +337,9 @@ class FileStoreTable(Table):
             snapshot_manager=self.snapshot_manager(),
             index_file_handler=IndexFileHandler(table=self)
         )
+
+    def new_stream_read_builder(self) -> 'StreamReadBuilder':
+        return StreamReadBuilder(self)
 
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)
@@ -366,10 +382,10 @@ class FileStoreTable(Table):
     def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
         """
         Try to resolve time travel options and return the corresponding schema.
-        
+
         Supports the following time travel options:
         - scan.tag-name: Travel to a specific tag
-        
+
         Returns:
             The TableSchema at the time travel point, or None if no time travel option is set.
         """
@@ -385,6 +401,7 @@ class FileStoreTable(Table):
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
+
         from pypaimon.common.options.core_options import ExternalPathStrategy
 
         external_paths_str = self.options.data_file_external_paths()
