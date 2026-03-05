@@ -19,6 +19,7 @@
 package org.apache.paimon.rest.responses;
 
 import org.apache.paimon.consumer.ConsumerInfo;
+
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
