@@ -16,6 +16,7 @@
 # limitations under the License.
 ##########################################################################
 import os
+
 from setuptools import find_packages, setup
 
 VERSION = "1.4.dev"
@@ -64,11 +65,19 @@ setup(
         ],
         'oss': [
             'ossfs>=2021.8; python_version<"3.8"',
-            'ossfs>=2023; python_version>="3.8"'
+            'ossfs>=2023; python_version>="3.8"',
         ],
         'lance': [
             'pylance>=0.20,<1; python_version>="3.9"',
-            'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"'
+            'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"',
+        ],
+        'all': [
+            'ray>=2.10,<3; python_version>="3.7"',
+            'torch',
+            'ossfs>=2021.8; python_version<"3.8"',
+            'ossfs>=2023; python_version>="3.8"',
+            'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"',
+            'pylance>=0.20,<1; python_version>="3.9"',
         ],
     },
     description="Apache Paimon Python API",

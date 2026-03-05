@@ -26,39 +26,40 @@ from pypaimon.common.predicate import Predicate
 from pypaimon.deletionvectors import ApplyDeletionVectorReader
 from pypaimon.deletionvectors.deletion_vector import DeletionVector
 from pypaimon.globalindex import Range
+from pypaimon.globalindex.indexed_split import IndexedSplit
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.interval_partition import IntervalPartition, SortedRun
 from pypaimon.read.partition_info import PartitionInfo
-from pypaimon.read.push_down_utils import trim_predicate_by_fields
+from pypaimon.read.push_down_utils import (_get_all_fields,
+                                           trim_predicate_by_fields)
 from pypaimon.read.reader.concat_batch_reader import (ConcatBatchReader,
-                                                      MergeAllBatchReader, DataEvolutionMergeReader)
+                                                      DataEvolutionMergeReader,
+                                                      MergeAllBatchReader)
 from pypaimon.read.reader.concat_record_reader import ConcatRecordReader
-
 from pypaimon.read.reader.data_file_batch_reader import DataFileBatchReader
 from pypaimon.read.reader.drop_delete_reader import DropDeleteRecordReader
 from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch
+from pypaimon.read.reader.filter_record_batch_reader import \
+    FilterRecordBatchReader
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
-from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
-from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
-from pypaimon.read.reader.format_lance_reader import FormatLanceReader
 from pypaimon.read.reader.format_pyarrow_reader import FormatPyArrowReader
-from pypaimon.read.reader.iface.record_batch_reader import (RecordBatchReader,
-                                                            RowPositionReader, EmptyRecordBatchReader)
+from pypaimon.read.reader.iface.record_batch_reader import (
+    EmptyRecordBatchReader, RecordBatchReader, RowPositionReader)
 from pypaimon.read.reader.iface.record_reader import RecordReader
 from pypaimon.read.reader.key_value_unwrap_reader import \
     KeyValueUnwrapRecordReader
 from pypaimon.read.reader.key_value_wrap_reader import KeyValueWrapReader
+from pypaimon.read.reader.row_range_filter_record_reader import \
+    RowIdFilterRecordBatchReader
 from pypaimon.read.reader.shard_batch_reader import ShardBatchReader
 from pypaimon.read.reader.sort_merge_reader import SortMergeReaderWithMinHeap
-from pypaimon.read.push_down_utils import _get_all_fields
-from pypaimon.read.split import Split
 from pypaimon.read.sliced_split import SlicedSplit
+from pypaimon.read.split import Split
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.special_fields import SpecialFields
-from pypaimon.globalindex.indexed_split import IndexedSplit
 
 KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
@@ -134,6 +135,8 @@ class SplitRead(ABC):
                                              self.read_fields, read_arrow_predicate, blob_as_descriptor,
                                              batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_LANCE:
+            from pypaimon.read.reader.format_lance_reader import \
+                FormatLanceReader
             format_reader = FormatLanceReader(self.table.file_io, file_path, read_file_fields,
                                               read_arrow_predicate, batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
