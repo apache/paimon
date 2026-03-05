@@ -229,7 +229,25 @@ JNIEXPORT void JNICALL Java_org_apache_paimon_lumina_LuminaNative_searcherSearch
         auto* wrapper = reinterpret_cast<SearcherWrapper*>(handle);
         lumina::api::Options<lumina::api::OptionsType::Search> searchOpts;
         searchOpts.Set(std::string(lumina::core::kTopK), static_cast<int64_t>(topk));
-        searchOpts.Set(std::string("diskann.search.list_size"), static_cast<int64_t>(topk));
+        if (optionKeys != nullptr && optionValues != nullptr) {
+            jsize optLen = env->GetArrayLength(optionKeys);
+            for (jsize i = 0; i < optLen; i++) {
+                jstring jkey = (jstring)env->GetObjectArrayElement(optionKeys, i);
+                std::string key = jstringToString(env, jkey);
+                if (key == "list_size") {
+                    jstring jval = (jstring)env->GetObjectArrayElement(optionValues, i);
+                    std::string val = jstringToString(env, jval);
+                    try {
+                        size_t pos;
+                        long long intVal = std::stoll(val, &pos);
+                        if (pos == val.size()) {
+                            searchOpts.Set(std::string("diskann.search.list_size"), static_cast<int64_t>(intVal));
+                        }
+                    } catch (...) {}
+                    break;
+                }
+            }
+        }
 
         auto info = wrapper->searcher.GetMeta();
 
