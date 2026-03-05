@@ -50,10 +50,45 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'temurin'
 
+      - name: Checkout paimon-cpp (Lumina library)
+        uses: actions/checkout@v6
+        with:
+          repository: alibaba/paimon-cpp
+          ref: release-0.1
+          path: paimon-cpp
+          lfs: true
+
+      - name: Install GCC 9 and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-9 g++-9 patchelf
+
+      - name: Install CMake 3.30.1
+        run: |
+          wget -q https://github.com/Kitware/CMake/releases/download/v3.30.1/cmake-3.30.1-linux-x86_64.tar.gz
+          tar xzf cmake-3.30.1-linux-x86_64.tar.gz
+          echo "${{ github.workspace }}/cmake-3.30.1-linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Build Lumina JNI native library
+        run: |
+          export CC=gcc-9
+          export CXX=g++-9
+          export LUMINA_ROOT=${{ github.workspace }}/paimon-cpp/third_party/lumina
+          chmod +x paimon-lumina/paimon-lumina-jni/scripts/build-native.sh
+          paimon-lumina/paimon-lumina-jni/scripts/build-native.sh
+          rm -rf paimon-lumina/paimon-lumina-jni/src/main/native/build
+          rm -rf ${{ github.workspace }}/paimon-cpp
+          rm -rf cmake-3.30.1-linux-x86_64
+
+      - name: Install paimon-lumina-jni
+        run: |
+          mvn -B -ntp -f paimon-lumina/paimon-lumina-jni/pom.xml install -DskipTests \
+            -Dcheckstyle.skip -Dspotless.check.skip -Denforcer.skip
+
       - name: Build Others
         run: |
           echo "Start compiling modules"
-          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3
+          mvn -T 2C -B -ntp clean install -DskipTests -Pflink1,spark3,paimon-lumina
 
       - name: Test Others
         timeout-minutes: 60
