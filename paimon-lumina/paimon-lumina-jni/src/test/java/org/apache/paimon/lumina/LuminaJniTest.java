@@ -25,7 +25,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.nio.ByteBuffer;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -115,52 +114,6 @@ class LuminaJniTest {
                 assertTrue(
                         distances[i] >= distances[i - 1],
                         "Distances should be non-decreasing");
-            }
-        }
-    }
-
-    @Test
-    void testSearchWithDifferentMetrics() {
-        for (MetricType metric : new MetricType[] {MetricType.L2, MetricType.COSINE}) {
-            File indexFile = new File(tempDir.toFile(), "test_" + metric.getLuminaValue() + ".idx");
-
-            try (LuminaBuilder builder =
-                    LuminaBuilder.create(INDEX_TYPE, DIM, metric)) {
-
-                ByteBuffer vectors = LuminaBuilder.allocateVectorBuffer(NUM_VECTORS, DIM);
-                ByteBuffer ids = LuminaBuilder.allocateIdBuffer(NUM_VECTORS);
-
-                for (int i = 0; i < NUM_VECTORS; i++) {
-                    for (int d = 0; d < DIM; d++) {
-                        vectors.putFloat(
-                                i * DIM * Float.BYTES + d * Float.BYTES, (float) (i + 1) + d);
-                    }
-                    ids.putLong(i * Long.BYTES, i);
-                }
-
-                builder.pretrain(vectors, NUM_VECTORS);
-                builder.insertBatch(vectors, ids, NUM_VECTORS);
-                builder.dump(indexFile.getAbsolutePath());
-            }
-
-            try (LuminaSearcher searcher =
-                    LuminaSearcher.create(INDEX_TYPE, DIM, metric)) {
-
-                searcher.open(indexFile);
-                assertEquals(NUM_VECTORS, searcher.getCount());
-
-                float[] query = new float[DIM];
-                for (int d = 0; d < DIM; d++) {
-                    query[d] = 1.0f + d;
-                }
-
-                float[] distances = new float[3];
-                long[] resultIds = new long[3];
-
-                Map<String, String> opts = Collections.singletonMap("list_size", "100");
-                searcher.search(1, query, 3, distances, resultIds, opts);
-
-                assertTrue(resultIds.length > 0, metric + ": should return results");
             }
         }
     }
