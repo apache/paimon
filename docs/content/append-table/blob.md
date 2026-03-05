@@ -576,7 +576,7 @@ public class BlobDescriptorExample {
             long fileSize = 2L * 1024 * 1024 * 1024;  // 2GB
 
             BlobDescriptor descriptor = new BlobDescriptor(externalUri, 0, fileSize);
-            // file io should be accessable to externalUri
+            // file io should be accessible to externalUri
             FileIO fileIO = Table.fileIO();
             UriReader uriReader = UriReader.fromFile(fileIO);
             Blob blob = Blob.fromDescriptor(uriReader, descriptor);
