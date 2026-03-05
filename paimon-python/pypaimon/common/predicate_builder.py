@@ -101,6 +101,24 @@ class PredicateBuilder:
         """Create a between predicate."""
         return self._build_predicate('between', field, [included_lower_bound, included_upper_bound])
 
+    def not_between(self, field: str, included_lower_bound: Any, included_upper_bound: Any) -> Predicate:
+        """Create a not-between predicate."""
+        return self._build_predicate('notBetween', field, [included_lower_bound, included_upper_bound])
+
+    def like(self, field: str, pattern_literal: Any) -> Predicate:
+        """Create a SQL LIKE predicate. Supports '%' (any sequence) and '_' (any single char)."""
+        return self._build_predicate('like', field, [pattern_literal])
+
+    @staticmethod
+    def always_true() -> Predicate:
+        """Create a predicate that always evaluates to true."""
+        return Predicate(method='alwaysTrue', index=None, field=None, literals=None)
+
+    @staticmethod
+    def always_false() -> Predicate:
+        """Create a predicate that always evaluates to false."""
+        return Predicate(method='alwaysFalse', index=None, field=None, literals=None)
+
     @staticmethod
     def and_predicates(predicates: List[Predicate]) -> Optional[Predicate]:
         """Create an AND predicate from multiple predicates."""

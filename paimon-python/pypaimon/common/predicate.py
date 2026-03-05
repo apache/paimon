@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import re
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import reduce
@@ -53,12 +54,49 @@ class Predicate:
             field=self.field,
             literals=literals)
 
+    def negate(self) -> Optional['Predicate']:
+        """Return the negation of this predicate, or None if negation is not supported."""
+        if self.method == 'and':
+            negated_children = []
+            for child in self.literals:
+                negated = child.negate()
+                if negated is None:
+                    return None
+                negated_children.append(negated)
+            return Predicate(method='or', index=None, field=None, literals=negated_children)
+
+        if self.method == 'or':
+            negated_children = []
+            for child in self.literals:
+                negated = child.negate()
+                if negated is None:
+                    return None
+                negated_children.append(negated)
+            return Predicate(method='and', index=None, field=None, literals=negated_children)
+
+        tester = Predicate.testers.get(self.method)
+        if tester is None:
+            return None
+        negated_name = tester.negate()
+        if negated_name is None:
+            return None
+        return Predicate(
+            method=negated_name,
+            index=self.index,
+            field=self.field,
+            literals=self.literals
+        )
+
     def test(self, record: InternalRow) -> bool:
         if self.method == 'and':
             return all(p.test(record) for p in self.literals)
         if self.method == 'or':
             t = any(p.test(record) for p in self.literals)
             return t
+        if self.method == 'alwaysTrue':
+            return True
+        if self.method == 'alwaysFalse':
+            return False
 
         field_value = record.get_field(self.index)
         tester = Predicate.testers.get(self.method)
@@ -72,6 +110,10 @@ class Predicate:
             return all(p.test_by_simple_stats(stat, row_count) for p in self.literals)
         if self.method == 'or':
             return any(p.test_by_simple_stats(stat, row_count) for p in self.literals)
+        if self.method == 'alwaysTrue':
+            return True
+        if self.method == 'alwaysFalse':
+            return False
 
         null_count = stat.null_counts[self.index]
 
@@ -94,48 +136,55 @@ class Predicate:
 
     def to_arrow(self) -> Any:
         if self.method == 'and':
-            return reduce(lambda x, y: x & y,
-                          [p.to_arrow() for p in self.literals])
+            arrow_children = [p.to_arrow() for p in self.literals]
+            # Filter out None (alwaysTrue) children — they don't constrain anything
+            valid = [c for c in arrow_children if c is not None]
+            if not valid:
+                return None
+            return reduce(lambda x, y: x & y, valid)
         if self.method == 'or':
-            return reduce(lambda x, y: x | y,
-                          [p.to_arrow() for p in self.literals])
+            arrow_children = [p.to_arrow() for p in self.literals]
+            # If any child is None (alwaysTrue), the whole OR is always true
+            if any(c is None for c in arrow_children):
+                return None
+            return reduce(lambda x, y: x | y, arrow_children)
+        if self.method == 'alwaysTrue':
+            return None
+        if self.method == 'alwaysFalse':
+            return pyarrow_compute.scalar(False)
 
         if self.method == 'startsWith':
             pattern = self.literals[0]
-            # For PyArrow compatibility - improved approach
             try:
                 field_ref = pyarrow_dataset.field(self.field)
-                # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
-                result = pyarrow_compute.starts_with(string_field, pattern)
-                return result
+                return pyarrow_compute.starts_with(string_field, pattern)
             except Exception:
-                # Fallback to True
-                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
+                return None
         if self.method == 'endsWith':
             pattern = self.literals[0]
-            # For PyArrow compatibility
             try:
                 field_ref = pyarrow_dataset.field(self.field)
-                # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
-                result = pyarrow_compute.ends_with(string_field, pattern)
-                return result
+                return pyarrow_compute.ends_with(string_field, pattern)
             except Exception:
-                # Fallback to True
-                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
+                return None
         if self.method == 'contains':
             pattern = self.literals[0]
-            # For PyArrow compatibility
             try:
                 field_ref = pyarrow_dataset.field(self.field)
-                # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
-                result = pyarrow_compute.match_substring(string_field, pattern)
-                return result
+                return pyarrow_compute.match_substring(string_field, pattern)
             except Exception:
-                # Fallback to True
-                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
+                return None
+        if self.method == 'like':
+            pattern = self.literals[0]
+            try:
+                field_ref = pyarrow_dataset.field(self.field)
+                string_field = field_ref.cast(pyarrow.string())
+                return pyarrow_compute.match_like(string_field, pattern)
+            except Exception:
+                return None
 
         field = pyarrow_dataset.field(self.field)
         tester = Predicate.testers.get(self.method)
@@ -173,6 +222,10 @@ class Tester(ABC, metaclass=RegisterMeta):
         Test based on the specific arrow value and literals.
         """
 
+    @abstractmethod
+    def negate(self) -> Optional[str]:
+        """Return the name of the negated function, or None if negation is not supported."""
+
 
 class Equal(Tester):
     name = 'equal'
@@ -187,6 +240,9 @@ class Equal(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val == literals[0]
+
+    def negate(self) -> Optional[str]:
+        return 'notEqual'
 
 
 class NotEqual(Tester):
@@ -203,6 +259,9 @@ class NotEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val != literals[0]
 
+    def negate(self) -> Optional[str]:
+        return 'equal'
+
 
 class LessThan(Tester):
     name = "lessThan"
@@ -217,6 +276,9 @@ class LessThan(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val < literals[0]
+
+    def negate(self) -> Optional[str]:
+        return 'greaterOrEqual'
 
 
 class LessOrEqual(Tester):
@@ -233,6 +295,9 @@ class LessOrEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val <= literals[0]
 
+    def negate(self) -> Optional[str]:
+        return 'greaterThan'
+
 
 class GreaterThan(Tester):
     name = "greaterThan"
@@ -247,6 +312,9 @@ class GreaterThan(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val > literals[0]
+
+    def negate(self) -> Optional[str]:
+        return 'lessOrEqual'
 
 
 class GreaterOrEqual(Tester):
@@ -263,6 +331,9 @@ class GreaterOrEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val >= literals[0]
 
+    def negate(self) -> Optional[str]:
+        return 'lessThan'
+
 
 class In(Tester):
     name = "in"
@@ -277,6 +348,9 @@ class In(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val.isin(literals)
+
+    def negate(self) -> Optional[str]:
+        return 'notIn'
 
 
 class NotIn(Tester):
@@ -293,6 +367,9 @@ class NotIn(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return ~val.isin(literals)
 
+    def negate(self) -> Optional[str]:
+        return 'in'
+
 
 class Between(Tester):
     name = "between"
@@ -307,6 +384,9 @@ class Between(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return (val >= literals[0]) & (val <= literals[1])
+
+    def negate(self) -> Optional[str]:
+        return 'notBetween'
 
 
 class StartsWith(Tester):
@@ -325,6 +405,9 @@ class StartsWith(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
+    def negate(self) -> Optional[str]:
+        return None
+
 
 class EndsWith(Tester):
     name = "endsWith"
@@ -333,6 +416,9 @@ class EndsWith(Tester):
         if val is None or not literals:
             return False
         return isinstance(val, str) and val.endswith(literals[0])
+
+    def negate(self) -> Optional[str]:
+        return None
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
         return True
@@ -355,6 +441,9 @@ class Contains(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
+    def negate(self) -> Optional[str]:
+        return None
+
 
 class IsNull(Tester):
     name = "isNull"
@@ -368,6 +457,9 @@ class IsNull(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val.is_null()
 
+    def negate(self) -> Optional[str]:
+        return 'isNotNull'
+
 
 class IsNotNull(Tester):
     name = "isNotNull"
@@ -380,3 +472,107 @@ class IsNotNull(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val.is_valid()
+
+    def negate(self) -> Optional[str]:
+        return 'isNull'
+
+
+class NotBetween(Tester):
+    name = "notBetween"
+
+    def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals or len(literals) < 2:
+            return False
+        return val < literals[0] or val > literals[1]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return literals[0] > min_v or literals[1] < max_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return (val < literals[0]) | (val > literals[1])
+
+    def negate(self) -> Optional[str]:
+        return 'between'
+
+
+class Like(Tester):
+    name = "like"
+
+    @staticmethod
+    def _sql_like_to_regex(pattern: str, escape_char: str = '\\') -> str:
+        """Convert a SQL LIKE pattern to a Python regex pattern."""
+        regex_parts = []
+        index = 0
+        length = len(pattern)
+        while index < length:
+            char = pattern[index]
+            if char == escape_char:
+                if index + 1 < length:
+                    next_char = pattern[index + 1]
+                    if next_char in ('_', '%', escape_char):
+                        regex_parts.append(re.escape(next_char))
+                        index += 2
+                        continue
+                    else:
+                        raise ValueError(
+                            f"Invalid escape sequence '{pattern}' at position {index}")
+                else:
+                    raise ValueError(
+                        f"Invalid escape sequence '{pattern}' at position {index}")
+            elif char == '_':
+                regex_parts.append('.')
+            elif char == '%':
+                regex_parts.append('(?s:.*)')
+            else:
+                regex_parts.append(re.escape(char))
+            index += 1
+        return ''.join(regex_parts)
+
+    def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
+        if not isinstance(val, str):
+            return False
+        pattern = self._sql_like_to_regex(str(literals[0]))
+        return bool(re.fullmatch(pattern, val))
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
+
+    def negate(self) -> Optional[str]:
+        return None
+
+
+class AlwaysTrue(Tester):
+    name = "alwaysTrue"
+
+    def test_by_value(self, val, literals) -> bool:
+        return True
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
+
+    def negate(self) -> Optional[str]:
+        return 'alwaysFalse'
+
+
+class AlwaysFalse(Tester):
+    name = "alwaysFalse"
+
+    def test_by_value(self, val, literals) -> bool:
+        return False
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return False
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return False
+
+    def negate(self) -> Optional[str]:
+        return 'alwaysTrue'
