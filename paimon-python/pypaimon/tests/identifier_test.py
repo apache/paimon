@@ -41,9 +41,9 @@ class IdentifierTest(unittest.TestCase):
 
     def test_backtick_quoted_database_name_with_period(self):
         """Backtick-quoted database name containing a period."""
-        identifier = Identifier.from_string("`bunsen.private`.cal_assignment_logs_v2")
-        self.assertEqual(identifier.database, "bunsen.private")
-        self.assertEqual(identifier.object, "cal_assignment_logs_v2")
+        identifier = Identifier.from_string("`db.name`.table_name")
+        self.assertEqual(identifier.database, "db.name")
+        self.assertEqual(identifier.object, "table_name")
 
     def test_backtick_quoted_both_parts(self):
         """Both database and table names backtick-quoted."""
