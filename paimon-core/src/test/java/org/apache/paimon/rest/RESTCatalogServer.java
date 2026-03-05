@@ -28,6 +28,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.TableMetadata;
+import org.apache.paimon.consumer.ConsumerInfo;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -75,6 +77,7 @@ import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
+import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
@@ -388,6 +391,10 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.SNAPSHOTS.equals(resources[3]);
+                        boolean isListConsumers =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.CONSUMERS.equals(resources[3]);
                         boolean isLoadSnapshot =
                                 resources.length == 5
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -494,6 +501,8 @@ public class RESTCatalogServer {
                             return snapshotHandle(identifier);
                         } else if (isListSnapshots) {
                             return listSnapshots(identifier);
+                        } else if (isListConsumers) {
+                            return listConsumers(identifier);
                         } else if (isLoadSnapshot) {
                             return loadSnapshot(identifier, resources[4]);
                         } else if (isTableAuth) {
@@ -782,6 +791,19 @@ public class RESTCatalogServer {
             snapshotList.add(snapshots.next());
         }
         ListSnapshotsResponse response = new ListSnapshotsResponse(snapshotList, null);
+        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+    }
+
+    private MockResponse listConsumers(Identifier identifier) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        ConsumerManager consumerManager =
+                new ConsumerManager(table.fileIO(), table.location(), "main");
+        Map<String, Long> consumers = consumerManager.consumers();
+        List<ConsumerInfo> consumerEntries =
+                consumers.entrySet().stream()
+                        .map(e -> new ConsumerInfo(e.getKey(), e.getValue()))
+                        .collect(Collectors.toList());
+        ListConsumersResponse response = new ListConsumersResponse(consumerEntries, null);
         return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
     }
 

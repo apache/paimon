@@ -34,6 +34,7 @@ public class ResourcePaths {
     protected static final String BRANCHES = "branches";
     protected static final String TAGS = "tags";
     protected static final String SNAPSHOTS = "snapshots";
+    protected static final String CONSUMERS = "consumers";
     protected static final String VIEWS = "views";
     protected static final String TABLE_DETAILS = "table-details";
     protected static final String VIEW_DETAILS = "view-details";
@@ -259,6 +260,17 @@ public class ResourcePaths {
                 TABLES,
                 encodeString(objectName),
                 TAGS);
+    }
+
+    public String consumers(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                CONSUMERS);
     }
 
     public String tag(String databaseName, String objectName, String tagName) {
