@@ -31,6 +31,13 @@ under the License.
     <artifactId>paimon-lumina-index</artifactId>
     <name>Paimon : Lumina Index</name>
 
+    <repositories>
+        <repository>
+            <id>lumina</id>
+            <url>https://lumina-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+        </repository>
+    </repositories>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
@@ -41,7 +48,7 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-lumina-jni</artifactId>
-            <version>${project.version}</version>
+            <version>0.1.0</version>
         </dependency>
 
         <!-- test dependencies -->
