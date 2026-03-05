@@ -80,6 +80,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
 
     @Override
     protected void setRoot(CdcSourceRecord record) {
+        super.setRoot(record); // Store current record for metadata access
         keyRecord = (GenericRecord) record.getKey();
         valueRecord = (GenericRecord) record.getValue();
     }
@@ -159,6 +160,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
         }
 
         evalComputedColumns(resultMap, schemaBuilder);
+        evalMetadataColumns(resultMap, schemaBuilder);
         return resultMap;
     }
 
