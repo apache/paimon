@@ -258,25 +258,28 @@ public class HiveCatalog extends AbstractCatalog {
             String databaseName = identifier.getDatabaseName();
             String tableName = identifier.getTableName();
             Optional<Path> tablePath =
-                    clients().run(
-                            client -> {
-                                if (table != null) {
-                                    String location = locationHelper.getTableLocation(table);
-                                    if (location != null) {
-                                        return Optional.of(new Path(location));
-                                    }
-                                } else {
-                                    // If the table does not exist,
-                                    // we should use the database path to generate the table path.
-                                    String dbLocation =
-                                            locationHelper.getDatabaseLocation(
-                                                    client.getDatabase(databaseName));
-                                    if (dbLocation != null) {
-                                        return Optional.of(new Path(dbLocation, tableName));
-                                    }
-                                }
-                                return Optional.empty();
-                            });
+                    clients()
+                            .run(
+                                    client -> {
+                                        if (table != null) {
+                                            String location =
+                                                    locationHelper.getTableLocation(table);
+                                            if (location != null) {
+                                                return Optional.of(new Path(location));
+                                            }
+                                        } else {
+                                            // If the table does not exist,
+                                            // we should use the database path to generate the table
+                                            // path.
+                                            String dbLocation =
+                                                    locationHelper.getDatabaseLocation(
+                                                            client.getDatabase(databaseName));
+                                            if (dbLocation != null) {
+                                                return Optional.of(new Path(dbLocation, tableName));
+                                            }
+                                        }
+                                        return Optional.empty();
+                                    });
             return tablePath.orElse(super.getTableLocation(identifier));
         } catch (TException e) {
             throw new RuntimeException("Can not get table " + identifier + " from metastore.", e);
@@ -448,13 +451,14 @@ public class HiveCatalog extends AbstractCatalog {
             for (Map<String, String> part : metaPartitions) {
                 List<String> partitionValues = new ArrayList<>(part.values());
                 try {
-                    clients().execute(
-                            client ->
-                                    client.dropPartition(
-                                            identifier.getDatabaseName(),
-                                            identifier.getTableName(),
-                                            partitionValues,
-                                            false));
+                    clients()
+                            .execute(
+                                    client ->
+                                            client.dropPartition(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getTableName(),
+                                                    partitionValues,
+                                                    false));
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
                 } catch (Exception e) {
@@ -512,22 +516,24 @@ public class HiveCatalog extends AbstractCatalog {
 
                 try {
                     Partition hivePartition =
-                            clients().run(
-                                    client ->
-                                            client.getPartition(
-                                                    identifier.getDatabaseName(),
-                                                    identifier.getObjectName(),
-                                                    partitionValues));
+                            clients()
+                                    .run(
+                                            client ->
+                                                    client.getPartition(
+                                                            identifier.getDatabaseName(),
+                                                            identifier.getObjectName(),
+                                                            partitionValues));
                     hivePartition.setValues(partitionValues);
                     hivePartition.setLastAccessTime(
                             (int) (partition.lastFileCreationTime() / 1000));
                     hivePartition.getParameters().putAll(statistic);
-                    clients().execute(
-                            client ->
-                                    client.alter_partition(
-                                            identifier.getDatabaseName(),
-                                            identifier.getObjectName(),
-                                            hivePartition));
+                    clients()
+                            .execute(
+                                    client ->
+                                            client.alter_partition(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getObjectName(),
+                                                    hivePartition));
                 } catch (NoSuchObjectException e) {
                     // do nothing if the partition not exists
                 } catch (Exception e) {
@@ -541,16 +547,17 @@ public class HiveCatalog extends AbstractCatalog {
     public void markDonePartitions(Identifier identifier, List<Map<String, String>> partitions)
             throws TableNotExistException {
         try {
-            clients().execute(
-                    client -> {
-                        for (Map<String, String> partition : partitions) {
-                            client.markPartitionForEvent(
-                                    identifier.getDatabaseName(),
-                                    identifier.getTableName(),
-                                    partition,
-                                    PartitionEventType.LOAD_DONE);
-                        }
-                    });
+            clients()
+                    .execute(
+                            client -> {
+                                for (Map<String, String> partition : partitions) {
+                                    client.markPartitionForEvent(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            partition,
+                                            PartitionEventType.LOAD_DONE);
+                                }
+                            });
         } catch (NoSuchObjectException e) {
             // do nothing if the partition not exists
         } catch (UnknownTableException e) {
@@ -610,12 +617,13 @@ public class HiveCatalog extends AbstractCatalog {
     @VisibleForTesting
     public List<Partition> listPartitionsFromHms(Identifier identifier)
             throws TException, InterruptedException {
-        return clients().run(
-                client ->
-                        client.listPartitions(
-                                identifier.getDatabaseName(),
-                                identifier.getTableName(),
-                                Short.MAX_VALUE));
+        return clients()
+                .run(
+                        client ->
+                                client.listPartitions(
+                                        identifier.getDatabaseName(),
+                                        identifier.getTableName(),
+                                        Short.MAX_VALUE));
     }
 
     private List<Map<String, String>> removePartitionsExistsInOtherBranches(
@@ -883,14 +891,15 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         try {
-            clients().execute(
-                    client ->
-                            client.dropTable(
-                                    identifier.getDatabaseName(),
-                                    identifier.getTableName(),
-                                    false,
-                                    false,
-                                    false));
+            clients()
+                    .execute(
+                            client ->
+                                    client.dropTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            false,
+                                            false,
+                                            false));
         } catch (TException e) {
             throw new RuntimeException("Failed to drop view " + identifier.getFullName(), e);
         } catch (InterruptedException e) {
@@ -908,8 +917,8 @@ public class HiveCatalog extends AbstractCatalog {
         getDatabase(databaseName);
 
         try {
-            return clients().run(
-                    client -> client.getTables(databaseName, "*", TableType.VIRTUAL_VIEW));
+            return clients()
+                    .run(client -> client.getTables(databaseName, "*", TableType.VIRTUAL_VIEW));
         } catch (TException e) {
             throw new RuntimeException("Failed to list views in database " + databaseName, e);
         } catch (InterruptedException e) {
@@ -1031,14 +1040,15 @@ public class HiveCatalog extends AbstractCatalog {
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
             boolean externalTable = isExternalTable(getHmsTable(identifier));
-            clients().execute(
-                    client ->
-                            client.dropTable(
-                                    identifier.getDatabaseName(),
-                                    identifier.getTableName(),
-                                    !externalTable,
-                                    false,
-                                    true));
+            clients()
+                    .execute(
+                            client ->
+                                    client.dropTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            !externalTable,
+                                            false,
+                                            true));
 
             // When drop a Hive external table, only the hive metadata is deleted and the data files
             // are not deleted.
@@ -1076,11 +1086,12 @@ public class HiveCatalog extends AbstractCatalog {
     protected void createTableImpl(Identifier identifier, Schema schema) {
         try {
             boolean tableExists =
-                    clients().run(
-                            (client ->
-                                    client.tableExists(
-                                            identifier.getDatabaseName(),
-                                            identifier.getTableName())));
+                    clients()
+                            .run(
+                                    (client ->
+                                            client.tableExists(
+                                                    identifier.getDatabaseName(),
+                                                    identifier.getTableName())));
             if (tableExists) {
                 throw new RuntimeException(
                         "Table "
@@ -1109,11 +1120,15 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         try {
-            clients().execute(
-                    client ->
-                            client.createTable(
-                                    createHiveTable(
-                                            identifier, tableSchema, location, externalTable)));
+            clients()
+                    .execute(
+                            client ->
+                                    client.createTable(
+                                            createHiveTable(
+                                                    identifier,
+                                                    tableSchema,
+                                                    location,
+                                                    externalTable)));
         } catch (Exception e) {
             try {
                 if (!externalTable) {
@@ -1197,10 +1212,13 @@ public class HiveCatalog extends AbstractCatalog {
 
                 // update location
                 locationHelper.specifyTableLocation(table, toPath.toString());
-                clients().execute(
-                        client ->
-                                client.alter_table(
-                                        toTable.getDatabaseName(), toTable.getTableName(), table));
+                clients()
+                        .execute(
+                                client ->
+                                        client.alter_table(
+                                                toTable.getDatabaseName(),
+                                                toTable.getTableName(),
+                                                table));
             }
         } catch (TException e) {
             throw new RuntimeException("Failed to rename table " + fromTable.getFullName(), e);
@@ -1412,10 +1430,12 @@ public class HiveCatalog extends AbstractCatalog {
     public Table getHmsTable(Identifier identifier)
             throws TableNotExistException, TableNoPermissionException {
         try {
-            return clients().run(
-                    client ->
-                            client.getTable(
-                                    identifier.getDatabaseName(), identifier.getTableName()));
+            return clients()
+                    .run(
+                            client ->
+                                    client.getTable(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName()));
         } catch (NoSuchObjectException e) {
             throw new TableNotExistException(identifier);
         } catch (TException e) {
