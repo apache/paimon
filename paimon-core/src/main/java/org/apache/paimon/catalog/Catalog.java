@@ -746,10 +746,9 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    default PagedList<ConsumerInfo>
-            listConsumersPaged(
-                    Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
-                    throws TableNotExistException {
+    default PagedList<ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
         throw new UnsupportedOperationException("This catalog does not support list consumers");
     }
 
