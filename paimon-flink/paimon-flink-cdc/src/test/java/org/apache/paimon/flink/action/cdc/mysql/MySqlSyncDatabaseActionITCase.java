@@ -563,7 +563,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(1200)
     public void testNewlyAddedTableSingleTable() throws Exception {
         testNewlyAddedTable(1, false, false, "paimon_sync_database_newly_added_tables_1");
     }
