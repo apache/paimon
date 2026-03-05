@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.TableMetadata;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -783,9 +784,9 @@ public class RESTCatalogServer {
         ConsumerManager consumerManager =
                 new ConsumerManager(table.fileIO(), table.location(), "main");
         Map<String, Long> consumers = consumerManager.consumers();
-        List<ListConsumersResponse.ConsumerInfo> consumerEntries =
+        List<ConsumerInfo> consumerEntries =
                 consumers.entrySet().stream()
-                        .map(e -> new ListConsumersResponse.ConsumerInfo(e.getKey(), e.getValue()))
+                        .map(e -> new ConsumerInfo(e.getKey(), e.getValue()))
                         .collect(Collectors.toList());
         ListConsumersResponse response = new ListConsumersResponse(consumerEntries, null);
         return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));

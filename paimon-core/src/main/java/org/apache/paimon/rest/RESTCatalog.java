@@ -31,6 +31,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
@@ -360,7 +361,7 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public PagedList<ListConsumersResponse.ConsumerInfo> listConsumersPaged(
+    public PagedList<ConsumerInfo> listConsumersPaged(
             Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
             throws TableNotExistException {
         try {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.rest.responses;
 
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -27,7 +28,7 @@ import java.util.List;
 
 /** Response for list consumers. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ListConsumersResponse implements PagedResponse<ListConsumersResponse.ConsumerInfo> {
+public class ListConsumersResponse implements PagedResponse<ConsumerInfo> {
 
     private static final String FIELD_CONSUMERS = "consumers";
     private static final String FIELD_NEXT_PAGE_TOKEN = "nextPageToken";
@@ -63,36 +64,5 @@ public class ListConsumersResponse implements PagedResponse<ListConsumersRespons
     @JsonGetter(FIELD_NEXT_PAGE_TOKEN)
     public String getNextPageToken() {
         return this.nextPageToken;
-    }
-
-    /** Entry representing a consumer with id and nextSnapshot. */
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class ConsumerInfo {
-        private static final String FIELD_CONSUMER_ID = "consumerId";
-        private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";
-
-        @JsonProperty(FIELD_CONSUMER_ID)
-        private final String consumerId;
-
-        @JsonProperty(FIELD_NEXT_SNAPSHOT)
-        private final Long nextSnapshot;
-
-        @JsonCreator
-        public ConsumerInfo(
-                @JsonProperty(FIELD_CONSUMER_ID) String consumerId,
-                @JsonProperty(FIELD_NEXT_SNAPSHOT) Long nextSnapshot) {
-            this.consumerId = consumerId;
-            this.nextSnapshot = nextSnapshot;
-        }
-
-        @JsonGetter(FIELD_CONSUMER_ID)
-        public String getConsumerId() {
-            return consumerId;
-        }
-
-        @JsonGetter(FIELD_NEXT_SNAPSHOT)
-        public Long getNextSnapshot() {
-            return nextSnapshot;
-        }
     }
 }

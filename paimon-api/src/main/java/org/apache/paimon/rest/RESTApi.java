@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -608,7 +609,7 @@ public class RESTApi {
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public PagedList<ListConsumersResponse.ConsumerInfo> listConsumersPaged(
+    public PagedList<ConsumerInfo> listConsumersPaged(
             Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
         ListConsumersResponse response =
                 client.get(
@@ -617,7 +618,7 @@ public class RESTApi {
                         buildPagedQueryParams(maxResults, pageToken),
                         ListConsumersResponse.class,
                         restAuthFunction);
-        List<ListConsumersResponse.ConsumerInfo> consumers = response.getConsumers();
+        List<ConsumerInfo> consumers = response.getConsumers();
         if (consumers == null) {
             return new PagedList<>(emptyList(), null);
         }

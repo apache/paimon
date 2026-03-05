@@ -22,6 +22,7 @@ import org.apache.paimon.PagedList;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.partition.Partition;
@@ -745,7 +746,7 @@ public interface Catalog extends AutoCloseable {
      * @throws UnsupportedOperationException if the catalog does not {@link
      *     #supportsVersionManagement()}
      */
-    default PagedList<org.apache.paimon.rest.responses.ListConsumersResponse.ConsumerInfo>
+    default PagedList<ConsumerInfo>
             listConsumersPaged(
                     Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
                     throws TableNotExistException {

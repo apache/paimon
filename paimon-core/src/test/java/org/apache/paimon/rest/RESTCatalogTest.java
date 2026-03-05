@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -2585,14 +2586,14 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
         // Test with RESTApi directly
         RESTApi api = ((RESTCatalog) catalog).api();
-        List<ListConsumersResponse.ConsumerInfo> consumers =
+        List<ConsumerInfo> consumers =
                 PagedList.listAllFromPagedApi(
                         token -> api.listConsumersPaged(identifier, null, token));
         assertThat(consumers)
-                .extracting(ListConsumersResponse.ConsumerInfo::getConsumerId)
+                .extracting(ConsumerInfo::getConsumerId)
                 .containsExactlyInAnyOrder("consumer1", "consumer2");
         assertThat(consumers)
-                .extracting(ListConsumersResponse.ConsumerInfo::getNextSnapshot)
+                .extracting(ConsumerInfo::getNextSnapshot)
                 .containsExactlyInAnyOrder(1L, 2L);
     }
 
