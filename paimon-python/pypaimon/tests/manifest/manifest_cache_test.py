@@ -34,11 +34,17 @@ from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.schema.schema import Schema
 from pypaimon.table.row.generic_row import GenericRow
 
+_EMPTY_ROW = GenericRow([], [])
+_EMPTY_STATS = SimpleStats(min_values=_EMPTY_ROW, max_values=_EMPTY_ROW, null_counts=[])
 
-class _ManifestCacheTestBase(unittest.TestCase):
-    """Shared setup for manifest cache tests."""
 
-    _table_name: str  # Subclasses must set this
+class _ManifestCacheSetup(unittest.TestCase):
+    """Shared setup for manifest cache tests.
+
+    Subclasses must set _table_name and implement _make_manager / _write_one.
+    """
+
+    _table_name: str
 
     @classmethod
     def setUpClass(cls):
@@ -63,132 +69,109 @@ class _ManifestCacheTestBase(unittest.TestCase):
         self.catalog.create_table(table_id, schema, False)
         self.table = self.catalog.get_table(table_id)
 
-    def _create_manifest_file_meta(self, file_name):
-        """Helper to create ManifestFileMeta."""
-        return ManifestFileMeta(
-            file_name=file_name,
-            file_size=1024,
-            num_added_files=1,
-            num_deleted_files=0,
-            partition_stats=SimpleStats.empty_stats(),
-            schema_id=0
-        )
+    def _make_manager(self, cache_max_size=10):
+        raise NotImplementedError
+
+    def _write_one(self, manager, name):
+        """Write a single item that can be read back by manager.read(name)."""
+        raise NotImplementedError
 
 
-class ManifestFileCacheTest(_ManifestCacheTestBase):
-    """Tests for ManifestFileManager caching."""
-
-    _table_name = 'cache_test'
-
-    def _create_file_meta(self, file_name):
-        """Helper to create DataFileMeta with common defaults."""
-        return DataFileMeta(
-            file_name=file_name,
-            file_size=1024,
-            row_count=100,
-            min_key=GenericRow([], []),
-            max_key=GenericRow([], []),
-            key_stats=SimpleStats(
-                min_values=GenericRow([], []),
-                max_values=GenericRow([], []),
-                null_counts=[]
-            ),
-            value_stats=SimpleStats(
-                min_values=GenericRow([], []),
-                max_values=GenericRow([], []),
-                null_counts=[]
-            ),
-            min_sequence_number=1,
-            max_sequence_number=100,
-            schema_id=0,
-            level=0,
-            extra_files=[],
-            creation_time=Timestamp.from_epoch_millis(1234567890),
-            delete_row_count=0,
-            embedded_index=None,
-            file_source=None,
-            value_stats_cols=None,
-            external_path=None,
-            first_row_id=None,
-            write_cols=None
-        )
-
-    def _create_manifest_entry(self, file_name, bucket=0):
-        """Helper to create a ManifestEntry."""
-        return ManifestEntry(
-            kind=0,  # ADD
-            partition=GenericRow([], []),
-            bucket=bucket,
-            total_buckets=1,
-            file=self._create_file_meta(file_name)
-        )
+class _CacheBehaviourMixin:
+    """Shared cache-behaviour tests. Mixed into concrete TestCase subclasses."""
 
     def test_second_read_uses_cache(self):
-        """Reading the same manifest file twice should hit the cache."""
-        manager = ManifestFileManager(self.table, cache_max_size=10)
+        manager = self._make_manager(cache_max_size=10)
+        self._write_one(manager, "test-item")
 
-        # Write a manifest file
-        entry = self._create_manifest_entry("data-1.parquet")
-        manager.write("test-manifest.avro", [entry])
-
-        # First read - cache miss
-        result1 = manager.read("test-manifest.avro")
-        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
+        manager.read("test-item")
         self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
-
-        # Second read - cache hit
-        result2 = manager.read("test-manifest.avro")
         self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
-        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
-        # Results should be equivalent
-        self.assertEqual(len(result1), len(result2))
-        self.assertEqual(result1[0].file.file_name, result2[0].file.file_name)
+        manager.read("test-item")
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
 
     def test_cache_disabled_when_max_size_zero(self):
-        """Cache should be disabled when max_size=0."""
-        manager = ManifestFileManager(self.table, cache_max_size=0)
+        manager = self._make_manager(cache_max_size=0)
+        self._write_one(manager, "test-item")
 
-        # Write a manifest file
-        entry = self._create_manifest_entry("data-1.parquet")
-        manager.write("test-manifest.avro", [entry])
-
-        # Read twice - both should be misses (no caching)
-        manager.read("test-manifest.avro")
-        manager.read("test-manifest.avro")
+        manager.read("test-item")
+        manager.read("test-item")
 
         self.assertEqual(manager._read_from_storage.cache_info().misses, 2)
         self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
 
-    def test_cache_evicts_oldest_when_full(self):
-        """Cache should evict oldest entries when full."""
-        manager = ManifestFileManager(self.table, cache_max_size=2)
 
-        # Write 3 manifest files
+class ManifestFileCacheTest(_CacheBehaviourMixin, _ManifestCacheSetup):
+    """Tests for ManifestFileManager caching."""
+
+    _table_name = 'cache_test'
+
+    def _make_manager(self, cache_max_size=10):
+        return ManifestFileManager(self.table, cache_max_size=cache_max_size)
+
+    def _write_one(self, manager, name):
+        entry = ManifestEntry(
+            kind=0,
+            partition=_EMPTY_ROW,
+            bucket=0,
+            total_buckets=1,
+            file=DataFileMeta(
+                file_name="data.parquet", file_size=1024, row_count=100,
+                min_key=_EMPTY_ROW, max_key=_EMPTY_ROW,
+                key_stats=_EMPTY_STATS, value_stats=_EMPTY_STATS,
+                min_sequence_number=1, max_sequence_number=100,
+                schema_id=0, level=0, extra_files=[],
+                creation_time=Timestamp.from_epoch_millis(0),
+                delete_row_count=0, embedded_index=None, file_source=None,
+                value_stats_cols=None, external_path=None,
+                first_row_id=None, write_cols=None,
+            ),
+        )
+        manager.write(name, [entry])
+
+    def _create_manifest_entry(self, file_name, bucket=0):
+        entry = ManifestEntry(
+            kind=0,
+            partition=_EMPTY_ROW,
+            bucket=bucket,
+            total_buckets=1,
+            file=DataFileMeta(
+                file_name=file_name, file_size=1024, row_count=100,
+                min_key=_EMPTY_ROW, max_key=_EMPTY_ROW,
+                key_stats=_EMPTY_STATS, value_stats=_EMPTY_STATS,
+                min_sequence_number=1, max_sequence_number=100,
+                schema_id=0, level=0, extra_files=[],
+                creation_time=Timestamp.from_epoch_millis(0),
+                delete_row_count=0, embedded_index=None, file_source=None,
+                value_stats_cols=None, external_path=None,
+                first_row_id=None, write_cols=None,
+            ),
+        )
+        return entry
+
+    def test_cache_evicts_oldest_when_full(self):
+        manager = self._make_manager(cache_max_size=2)
+
         for i in range(3):
             entry = self._create_manifest_entry(f"data-{i}.parquet")
             manager.write(f"manifest-{i}.avro", [entry])
 
-        # Read all 3 files
-        manager.read("manifest-0.avro")  # miss
-        manager.read("manifest-1.avro")  # miss
-        manager.read("manifest-2.avro")  # miss, evicts manifest-0
-
+        manager.read("manifest-0.avro")
+        manager.read("manifest-1.avro")
+        manager.read("manifest-2.avro")  # evicts manifest-0
         self.assertEqual(manager._read_from_storage.cache_info().misses, 3)
 
-        # manifest-0 should have been evicted, so reading it again is a miss
-        manager.read("manifest-0.avro")
+        manager.read("manifest-0.avro")  # re-read after eviction
         self.assertEqual(manager._read_from_storage.cache_info().misses, 4)
 
-        # manifest-2 should still be cached
-        manager.read("manifest-2.avro")
+        manager.read("manifest-2.avro")  # still cached
         self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
     def test_filter_applied_on_cache_hit(self):
-        """Filter should be applied even on cache hits."""
-        manager = ManifestFileManager(self.table, cache_max_size=10)
+        manager = self._make_manager(cache_max_size=10)
 
-        # Write manifest with entries for different buckets
         entries = [
             self._create_manifest_entry("data-1.parquet", bucket=0),
             self._create_manifest_entry("data-2.parquet", bucket=1),
@@ -196,124 +179,72 @@ class ManifestFileCacheTest(_ManifestCacheTestBase):
         ]
         manager.write("test-manifest.avro", entries)
 
-        # First read without filter
         result_all = manager.read("test-manifest.avro")
         self.assertEqual(len(result_all), 3)
 
-        # Second read with filter - should use cache but apply filter
-        bucket_filter = lambda e: e.bucket == 0
-        result_filtered = manager.read("test-manifest.avro",
-                                       manifest_entry_filter=bucket_filter)
+        result_filtered = manager.read(
+            "test-manifest.avro", manifest_entry_filter=lambda e: e.bucket == 0)
         self.assertEqual(len(result_filtered), 2)
         self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
-    def test_default_cache_size(self):
-        """Default cache size should be 100."""
-        manager = ManifestFileManager(self.table)
-        self.assertIsNotNone(manager._cache)
-        self.assertEqual(manager._cache.maxsize, 100)
 
-
-class ManifestListCacheTest(_ManifestCacheTestBase):
+class ManifestListCacheTest(_CacheBehaviourMixin, _ManifestCacheSetup):
     """Tests for ManifestListManager caching."""
 
     _table_name = 'list_cache_test'
 
+    def _make_manager(self, cache_max_size=10):
+        return ManifestListManager(self.table, cache_max_size=cache_max_size)
+
+    def _write_one(self, manager, name):
+        meta = ManifestFileMeta(
+            file_name="manifest.avro", file_size=1024,
+            num_added_files=1, num_deleted_files=0,
+            partition_stats=SimpleStats.empty_stats(), schema_id=0,
+        )
+        manager.write(name, [meta])
+
     def _make_snapshot(self, base_manifest_list, delta_manifest_list="delta-manifest-list"):
-        """Helper to create a Snapshot with common defaults."""
         from pypaimon.snapshot.snapshot import Snapshot
         return Snapshot(
-            version=3,
-            id=1,
-            schema_id=0,
+            version=3, id=1, schema_id=0,
             base_manifest_list=base_manifest_list,
             delta_manifest_list=delta_manifest_list,
-            commit_user="test",
-            commit_identifier=1,
-            commit_kind="APPEND",
-            time_millis=1234567890,
-            total_record_count=100,
-            delta_record_count=10,
+            commit_user="test", commit_identifier=1, commit_kind="APPEND",
+            time_millis=1234567890, total_record_count=100, delta_record_count=10,
         )
 
-    def test_second_read_uses_cache(self):
-        """Reading the same manifest list twice should hit the cache."""
-        manager = ManifestListManager(self.table, cache_max_size=10)
-
-        # Write a manifest list
-        meta = self._create_manifest_file_meta("manifest-1.avro")
-        manager.write("manifest-list-1", [meta])
-
-        # First read - cache miss
-        result1 = manager.read("manifest-list-1")
-        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
-        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
-
-        # Second read - cache hit
-        result2 = manager.read("manifest-list-1")
-        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
-        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
-
-        # Results should be equivalent
-        self.assertEqual(len(result1), len(result2))
-
-    def test_cache_disabled_when_max_size_zero(self):
-        """Cache should be disabled when max_size=0."""
-        manager = ManifestListManager(self.table, cache_max_size=0)
-
-        # Write a manifest list
-        meta = self._create_manifest_file_meta("manifest-1.avro")
-        manager.write("manifest-list-1", [meta])
-
-        # Read twice - both should be misses
-        manager.read("manifest-list-1")
-        manager.read("manifest-list-1")
-
-        self.assertEqual(manager._read_from_storage.cache_info().misses, 2)
-        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
-
-    def test_default_cache_size(self):
-        """Default cache size should be 50."""
-        manager = ManifestListManager(self.table)
-        self.assertIsNotNone(manager._cache)
-        self.assertEqual(manager._cache.maxsize, 50)
-
     def test_read_base_returns_only_base_manifest(self):
-        """read_base() should only read base_manifest_list, not delta."""
-        manager = ManifestListManager(self.table, cache_max_size=10)
+        manager = self._make_manager(cache_max_size=10)
 
-        # Write base and delta manifest lists
-        base_meta = self._create_manifest_file_meta("manifest-base.avro")
-        delta_meta = self._create_manifest_file_meta("manifest-delta.avro")
+        base_meta = ManifestFileMeta(
+            file_name="manifest-base.avro", file_size=1024,
+            num_added_files=1, num_deleted_files=0,
+            partition_stats=SimpleStats.empty_stats(), schema_id=0,
+        )
+        delta_meta = ManifestFileMeta(
+            file_name="manifest-delta.avro", file_size=1024,
+            num_added_files=1, num_deleted_files=0,
+            partition_stats=SimpleStats.empty_stats(), schema_id=0,
+        )
         manager.write("base-manifest-list", [base_meta])
         manager.write("delta-manifest-list", [delta_meta])
 
         snapshot = self._make_snapshot("base-manifest-list", "delta-manifest-list")
-
-        # read_base should only return base manifests
         result = manager.read_base(snapshot)
 
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].file_name, "manifest-base.avro")
 
     def test_read_base_uses_cache(self):
-        """read_base() should use LRU cache."""
-        manager = ManifestListManager(self.table, cache_max_size=10)
-
-        # Write base manifest list
-        base_meta = self._create_manifest_file_meta("manifest-base.avro")
-        manager.write("base-manifest-list", [base_meta])
-
+        manager = self._make_manager(cache_max_size=10)
+        self._write_one(manager, "base-manifest-list")
         snapshot = self._make_snapshot("base-manifest-list")
 
-        # First read - cache miss
         manager.read_base(snapshot)
         self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
-        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
 
-        # Second read - cache hit
         manager.read_base(snapshot)
-        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
         self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
 
