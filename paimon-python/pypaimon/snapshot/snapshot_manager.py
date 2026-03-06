@@ -185,7 +185,7 @@ class SnapshotManager:
             return None
         return self._load_snapshot(snapshot_id)
 
-    @cachedmethod(lambda self: self._cache, key=lambda self, sid: sid, info=True)
+    @cachedmethod(lambda self: self._cache)
     def _load_snapshot(self, snapshot_id: int) -> Snapshot:
         """Load a snapshot from storage."""
         snapshot_content = self.file_io.read_file_utf8(self.get_snapshot_path(snapshot_id))

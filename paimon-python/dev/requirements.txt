@@ -17,7 +17,7 @@
 ################################################################################
 # Core dependencies for pypaimon
 cachetools>=4.2,<6; python_version=="3.6"
-cachetools>=7,<8; python_version>"3.6"
+cachetools>=5,<6; python_version>"3.6"
 dataclasses>=0.8; python_version < "3.7"
 fastavro>=1.4,<2
 fsspec>=2021.10,<2026; python_version<"3.8"
