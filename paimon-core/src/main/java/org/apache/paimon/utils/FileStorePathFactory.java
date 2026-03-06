@@ -218,7 +218,10 @@ public class FileStorePathFactory {
             return null;
         }
         return ExternalPathProvider.create(
-                strategy, externalPaths, relativeBucketPath(partition, bucket), externalPathWeights);
+                strategy,
+                externalPaths,
+                relativeBucketPath(partition, bucket),
+                externalPathWeights);
     }
 
     public List<Path> getExternalPaths() {
