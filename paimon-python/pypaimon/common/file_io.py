@@ -53,18 +53,7 @@ class FileIO(ABC):
         pass
 
     def exists_batch(self, paths: List[str]) -> Dict[str, bool]:
-        """
-        Check existence of multiple paths.
-
-        Default implementation calls exists() for each path sequentially.
-        Subclasses may override to provide more efficient batch operations.
-
-        Args:
-            paths: List of file paths to check
-
-        Returns:
-            Dictionary mapping each path to its existence status
-        """
+        """Check existence of multiple paths, returning {path: bool}."""
         return {path: self.exists(path) for path in paths}
 
     @abstractmethod

@@ -19,7 +19,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, List, Optional
 
-from cachetools import LRUCache
+from cachetools import LRUCache, cachedmethod
 
 from pypaimon.common.file_io import FileIO
 
@@ -31,7 +31,6 @@ from pypaimon.snapshot.snapshot import Snapshot
 class SnapshotManager:
     """Manager for snapshot files using unified FileIO."""
 
-    # Default cache size for snapshots (matching Java's typical cache size)
     DEFAULT_CACHE_SIZE = 100
 
     def __init__(self, table, cache_size: int = DEFAULT_CACHE_SIZE):
@@ -43,10 +42,7 @@ class SnapshotManager:
         self.snapshot_dir = f"{snapshot_path}/snapshot"
         self.latest_file = f"{self.snapshot_dir}/LATEST"
 
-        # LRU cache for snapshots (like Java's Cache<Path, Snapshot>)
         self._cache: LRUCache = LRUCache(maxsize=cache_size)
-        self._cache_hits = 0
-        self._cache_misses = 0
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
         snapshot_json = self.get_latest_snapshot_json()
@@ -113,15 +109,7 @@ class SnapshotManager:
         return str(max_snapshot_id)
 
     def get_snapshot_path(self, snapshot_id: int) -> str:
-        """
-        Get the path for a snapshot file.
-
-        Args:
-            snapshot_id: The snapshot ID
-
-        Returns:
-            Path to the snapshot file
-        """
+        """Get the file path for the given snapshot ID."""
         return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
 
     def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
@@ -191,50 +179,22 @@ class SnapshotManager:
         return final_snapshot
 
     def get_snapshot_by_id(self, snapshot_id: int) -> Optional[Snapshot]:
-        """
-        Get a snapshot by its ID, using cache if available.
-
-        Args:
-            snapshot_id: The snapshot ID
-
-        Returns:
-            The snapshot with the specified ID, or None if not found
-        """
-        # Check cache first
-        if snapshot_id in self._cache:
-            self._cache_hits += 1
-            return self._cache[snapshot_id]
-
-        self._cache_misses += 1
+        """Get a snapshot by its ID, using cache if available."""
         snapshot_file = self.get_snapshot_path(snapshot_id)
         if not self.file_io.exists(snapshot_file):
             return None
+        return self._load_snapshot(snapshot_id)
 
-        snapshot_content = self.file_io.read_file_utf8(snapshot_file)
-        snapshot = JSON.from_json(snapshot_content, Snapshot)
-
-        # Cache the result
-        if snapshot is not None:
-            self._cache[snapshot_id] = snapshot
-
-        return snapshot
+    @cachedmethod(lambda self: self._cache, key=lambda self, sid: sid, info=True)
+    def _load_snapshot(self, snapshot_id: int) -> Snapshot:
+        """Load a snapshot from storage."""
+        snapshot_content = self.file_io.read_file_utf8(self.get_snapshot_path(snapshot_id))
+        return JSON.from_json(snapshot_content, Snapshot)
 
     def get_snapshots_batch(
         self, snapshot_ids: List[int], max_workers: int = 4
     ) -> Dict[int, Optional[Snapshot]]:
-        """
-        Fetch multiple snapshots in parallel.
-
-        This is more efficient than sequential fetches when reading from S3
-        or other high-latency storage systems.
-
-        Args:
-            snapshot_ids: List of snapshot IDs to fetch
-            max_workers: Maximum number of parallel workers
-
-        Returns:
-            Dictionary mapping snapshot ID to Snapshot (or None if not found)
-        """
+        """Fetch multiple snapshots in parallel, returning {id: Snapshot|None}."""
         if not snapshot_ids:
             return {}
 
@@ -273,26 +233,7 @@ class SnapshotManager:
         lookahead_size: int = 10,
         max_workers: int = 4
     ) -> tuple:
-        """
-        Find the next scannable snapshot using batch lookahead.
-
-        This method batch-fetches multiple snapshots ahead and finds the first
-        one that passes the should_scan filter. This is more efficient than
-        sequential fetching when many snapshots may be skipped (e.g., COMPACT
-        commits when only APPEND is desired).
-
-        Args:
-            start_id: Starting snapshot ID to search from
-            should_scan: Function that returns True if a snapshot should be scanned
-            lookahead_size: Number of snapshots to fetch ahead (default 10)
-            max_workers: Maximum parallel workers for batch fetch
-
-        Returns:
-            Tuple of (snapshot, next_id, skipped_count):
-            - snapshot: The first scannable snapshot, or None if not found
-            - next_id: The next snapshot ID to check (after found or after lookahead)
-            - skipped_count: Number of non-scannable snapshots skipped
-        """
+        """Find the next snapshot passing should_scan, using batch lookahead."""
         # Generate the range of snapshot IDs to check
         snapshot_ids = list(range(start_id, start_id + lookahead_size))
 
@@ -316,10 +257,3 @@ class SnapshotManager:
         # Return next_id pointing past the batch
         return (None, start_id + lookahead_size, skipped_count)
 
-    def get_cache_stats(self) -> Dict[str, int]:
-        """Return cache statistics for monitoring."""
-        return {
-            "cache_hits": self._cache_hits,
-            "cache_misses": self._cache_misses,
-            "cache_size": len(self._cache),
-        }
