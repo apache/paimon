@@ -83,6 +83,7 @@ public class FileStorePathFactory {
     private final AtomicInteger statsFileCount;
     private final List<Path> externalPaths;
     private final ExternalPathStrategy strategy;
+    @Nullable private final int[] externalPathWeights;
     @Nullable private final Path globalIndexExternalRootDir;
 
     public FileStorePathFactory(
@@ -98,6 +99,7 @@ public class FileStorePathFactory {
             @Nullable String dataFilePathDirectory,
             List<Path> externalPaths,
             ExternalPathStrategy strategy,
+            @Nullable int[] externalPathWeights,
             boolean indexFileInDataFileDir,
             @Nullable Path globalIndexExternalRootDir) {
         this.root = root;
@@ -120,6 +122,7 @@ public class FileStorePathFactory {
         this.statsFileCount = new AtomicInteger(0);
         this.externalPaths = externalPaths;
         this.strategy = strategy;
+        this.externalPathWeights = externalPathWeights;
         this.globalIndexExternalRootDir = globalIndexExternalRootDir;
     }
 
@@ -215,7 +218,7 @@ public class FileStorePathFactory {
             return null;
         }
         return ExternalPathProvider.create(
-                strategy, externalPaths, relativeBucketPath(partition, bucket));
+                strategy, externalPaths, relativeBucketPath(partition, bucket), externalPathWeights);
     }
 
     public List<Path> getExternalPaths() {

@@ -95,6 +95,7 @@ public class FileStorePathFactoryTest {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
+                        null,
                         false,
                         null);
 
@@ -141,6 +142,7 @@ public class FileStorePathFactoryTest {
                 null,
                 null,
                 CoreOptions.ExternalPathStrategy.NONE,
+                null,
                 false,
                 null);
     }

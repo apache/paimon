@@ -176,6 +176,7 @@ public class ManifestListTest {
                 null,
                 null,
                 CoreOptions.ExternalPathStrategy.NONE,
+                null,
                 false,
                 null);
     }

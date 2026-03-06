@@ -113,6 +113,7 @@ public class TestChangelogDataReadWrite {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
+                        null,
                         false,
                         null);
         this.snapshotManager = newSnapshotManager(LocalFileIO.create(), new Path(root));
