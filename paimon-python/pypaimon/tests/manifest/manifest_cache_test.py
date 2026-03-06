@@ -133,13 +133,13 @@ class ManifestFileCacheTest(_ManifestCacheTestBase):
 
         # First read - cache miss
         result1 = manager.read("test-manifest.avro")
-        self.assertEqual(manager._cache_misses, 1)
-        self.assertEqual(manager._cache_hits, 0)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
 
         # Second read - cache hit
         result2 = manager.read("test-manifest.avro")
-        self.assertEqual(manager._cache_misses, 1)
-        self.assertEqual(manager._cache_hits, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
         # Results should be equivalent
         self.assertEqual(len(result1), len(result2))
@@ -157,8 +157,8 @@ class ManifestFileCacheTest(_ManifestCacheTestBase):
         manager.read("test-manifest.avro")
         manager.read("test-manifest.avro")
 
-        self.assertEqual(manager._cache_misses, 2)
-        self.assertEqual(manager._cache_hits, 0)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 2)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
 
     def test_cache_evicts_oldest_when_full(self):
         """Cache should evict oldest entries when full."""
@@ -174,15 +174,15 @@ class ManifestFileCacheTest(_ManifestCacheTestBase):
         manager.read("manifest-1.avro")  # miss
         manager.read("manifest-2.avro")  # miss, evicts manifest-0
 
-        self.assertEqual(manager._cache_misses, 3)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 3)
 
         # manifest-0 should have been evicted, so reading it again is a miss
         manager.read("manifest-0.avro")
-        self.assertEqual(manager._cache_misses, 4)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 4)
 
         # manifest-2 should still be cached
         manager.read("manifest-2.avro")
-        self.assertEqual(manager._cache_hits, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
     def test_filter_applied_on_cache_hit(self):
         """Filter should be applied even on cache hits."""
@@ -205,7 +205,7 @@ class ManifestFileCacheTest(_ManifestCacheTestBase):
         result_filtered = manager.read("test-manifest.avro",
                                        manifest_entry_filter=bucket_filter)
         self.assertEqual(len(result_filtered), 2)
-        self.assertEqual(manager._cache_hits, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
     def test_default_cache_size(self):
         """Default cache size should be 100."""
@@ -246,13 +246,13 @@ class ManifestListCacheTest(_ManifestCacheTestBase):
 
         # First read - cache miss
         result1 = manager.read("manifest-list-1")
-        self.assertEqual(manager._cache_misses, 1)
-        self.assertEqual(manager._cache_hits, 0)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
 
         # Second read - cache hit
         result2 = manager.read("manifest-list-1")
-        self.assertEqual(manager._cache_misses, 1)
-        self.assertEqual(manager._cache_hits, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
         # Results should be equivalent
         self.assertEqual(len(result1), len(result2))
@@ -269,8 +269,8 @@ class ManifestListCacheTest(_ManifestCacheTestBase):
         manager.read("manifest-list-1")
         manager.read("manifest-list-1")
 
-        self.assertEqual(manager._cache_misses, 2)
-        self.assertEqual(manager._cache_hits, 0)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 2)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
 
     def test_default_cache_size(self):
         """Default cache size should be 50."""
@@ -308,13 +308,13 @@ class ManifestListCacheTest(_ManifestCacheTestBase):
 
         # First read - cache miss
         manager.read_base(snapshot)
-        self.assertEqual(manager._cache_misses, 1)
-        self.assertEqual(manager._cache_hits, 0)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 0)
 
         # Second read - cache hit
         manager.read_base(snapshot)
-        self.assertEqual(manager._cache_misses, 1)
-        self.assertEqual(manager._cache_hits, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().misses, 1)
+        self.assertEqual(manager._read_from_storage.cache_info().hits, 1)
 
 
 if __name__ == '__main__':

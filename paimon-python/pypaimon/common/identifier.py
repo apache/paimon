@@ -37,29 +37,7 @@ class Identifier:
 
     @classmethod
     def from_string(cls, full_name: str) -> "Identifier":
-        """
-        Parse an identifier from a string.
-
-        Supports two modes:
-        1. Backtick-quoted (for names with periods):
-           - `database.name`.table → database="database.name", object="table"
-           - `db`.`table` → database="db", object="table"
-
-        2. Simple split on first period (Java-compatible fallback):
-           - database.table → database="database", object="table"
-
-        For database names containing periods, use backticks or
-        Identifier.create("database.name", "table") directly.
-
-        Args:
-            full_name: The full identifier string
-
-        Returns:
-            Identifier instance
-
-        Raises:
-            ValueError: If the format is invalid
-        """
+        """Parse a 'database.object' identifier, with optional backtick quoting."""
         if not full_name or not full_name.strip():
             raise ValueError("fullName cannot be null or empty")
 
@@ -79,13 +57,6 @@ class Identifier:
 
     @classmethod
     def _parse_with_backticks(cls, full_name: str) -> "Identifier":
-        """
-        Parse identifier with backtick-quoted segments.
-
-        Examples:
-        - `db.name`.table → database="db.name", object="table"
-        - `db`.`table` → database="db", object="table"
-        """
         parts = []
         current = ""
         in_backticks = False
