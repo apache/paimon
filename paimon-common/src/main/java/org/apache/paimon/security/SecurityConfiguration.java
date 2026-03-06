@@ -93,6 +93,6 @@ public class SecurityConfiguration {
             return keytabFile.exists() && keytabFile.isFile() && keytabFile.canRead();
         }
 
-        return true;
+        return false;
     }
 }
