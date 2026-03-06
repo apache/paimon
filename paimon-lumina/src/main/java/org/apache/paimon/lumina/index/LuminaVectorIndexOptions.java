@@ -53,13 +53,13 @@ public class LuminaVectorIndexOptions {
     public static final ConfigOption<Integer> VECTOR_SIZE_PER_INDEX =
             ConfigOptions.key("vector.size-per-index")
                     .intType()
-                    .defaultValue(200_0000)
+                    .defaultValue(2_000_000)
                     .withDescription("The number of vectors stored in each index file");
 
     public static final ConfigOption<Integer> VECTOR_TRAINING_SIZE =
             ConfigOptions.key("vector.training-size")
                     .intType()
-                    .defaultValue(50_0000)
+                    .defaultValue(500_000)
                     .withDescription(
                             "The number of vectors to use for pretraining DiskANN indices");
 
@@ -106,10 +106,16 @@ public class LuminaVectorIndexOptions {
         this.metric = options.get(VECTOR_METRIC);
         this.indexType = options.get(VECTOR_INDEX_TYPE);
         this.encodingType = options.get(VECTOR_ENCODING_TYPE);
-        this.sizePerIndex =
-                options.get(VECTOR_SIZE_PER_INDEX) > 0
-                        ? options.get(VECTOR_SIZE_PER_INDEX)
-                        : VECTOR_SIZE_PER_INDEX.defaultValue();
+
+        int sizePerIndexValue = options.get(VECTOR_SIZE_PER_INDEX);
+        if (sizePerIndexValue <= 0) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid value for '%s': %d. Must be a positive integer.",
+                            VECTOR_SIZE_PER_INDEX.key(), sizePerIndexValue));
+        }
+        this.sizePerIndex = sizePerIndexValue;
+
         this.trainingSize = options.get(VECTOR_TRAINING_SIZE);
         this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
         this.searchListSize = options.get(VECTOR_DISKANN_SEARCH_LIST_SIZE);

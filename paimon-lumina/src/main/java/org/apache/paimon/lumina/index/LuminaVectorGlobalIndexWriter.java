@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 
 /**
@@ -45,6 +46,11 @@ import java.util.UUID;
  * <p>Vectors are collected until the current index reaches {@code sizePerIndex} vectors, then
  * pretrained, inserted in a single batch, and dumped to a file. DiskANN requires exactly one
  * pretrain and one insertBatch call per index.
+ *
+ * <p>Each written vector is assigned a monotonically increasing 64-bit row ID ({@code count}) that
+ * spans across all produced index files. The second index file's IDs therefore start from {@code
+ * sizePerIndex}, not from 0. The min/max IDs stored in {@link LuminaIndexMeta} reflect this global
+ * range, enabling the reader to skip index files that have no overlap with a given filter set.
  */
 public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter {
 
@@ -54,7 +60,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private final int dim;
     private final DataType fieldType;
 
-    private long count = 0;
+    private long count = 0; // monotonically increasing global row ID across all index files
     private long currentIndexMinId = Long.MAX_VALUE;
     private long currentIndexMaxId = Long.MIN_VALUE;
     private final List<VectorEntry> pendingBatch;
@@ -142,10 +148,13 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
         try {
             int trainingSize = Math.min(n, options.trainingSize());
+            // Use reservoir sampling so training covers the full distribution, not just the
+            // first trainingSize vectors which may be biased toward earlier data.
+            int[] sampleIndices = reservoirSample(n, trainingSize);
             ByteBuffer trainingBuffer = LuminaIndex.allocateVectorBuffer(trainingSize, dim);
             FloatBuffer trainingFloatView = trainingBuffer.asFloatBuffer();
             for (int i = 0; i < trainingSize; i++) {
-                float[] vector = pendingBatch.get(i).vector;
+                float[] vector = pendingBatch.get(sampleIndices[i]).vector;
                 for (int j = 0; j < dim; j++) {
                     trainingFloatView.put(i * dim + j, vector[j]);
                 }
@@ -213,6 +222,30 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         }
 
         return LuminaIndex.createForBuild(dim, options.metric(), options.indexType(), extraOptions);
+    }
+
+    /**
+     * Selects {@code k} indices from [0, n) using reservoir sampling (Algorithm R).
+     *
+     * <p>When {@code k >= n} all indices are returned in order. Otherwise a random representative
+     * subset is chosen, ensuring training data covers the full vector distribution instead of being
+     * biased toward the first {@code k} inserted vectors.
+     */
+    private static int[] reservoirSample(int n, int k) {
+        int[] reservoir = new int[k];
+        for (int i = 0; i < k; i++) {
+            reservoir[i] = i;
+        }
+        if (k < n) {
+            Random random = new Random();
+            for (int i = k; i < n; i++) {
+                int j = random.nextInt(i + 1);
+                if (j < k) {
+                    reservoir[j] = i;
+                }
+            }
+        }
+        return reservoir;
     }
 
     private void checkDimension(float[] vector) {

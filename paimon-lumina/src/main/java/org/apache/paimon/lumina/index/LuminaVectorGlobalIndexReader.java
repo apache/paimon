@@ -88,7 +88,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 List<Integer> matchingIndices = new ArrayList<>();
                 for (int i = 0; i < indexMetas.size(); i++) {
                     LuminaIndexMeta meta = indexMetas.get(i);
-                    if (hasOverlap(meta.minId(), meta.maxId(), includeRowIds)) {
+                    if (includeRowIds.containsRange(meta.minId(), meta.maxId())) {
                         matchingIndices.add(i);
                     }
                 }
@@ -108,18 +108,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                             vectorSearch.fieldName(), vectorSearch.limit()),
                     e);
         }
-    }
-
-    private boolean hasOverlap(long minId, long maxId, RoaringNavigableMap64 includeRowIds) {
-        for (Long id : includeRowIds) {
-            if (id >= minId && id <= maxId) {
-                return true;
-            }
-            if (id > maxId) {
-                break;
-            }
-        }
-        return false;
     }
 
     private GlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
@@ -254,6 +242,20 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             for (int pos : positions) {
                 if (indices.get(pos) == null) {
                     loadIndexAt(pos);
+                }
+            }
+            // If every index slot is now populated, mark as fully loaded so that a subsequent
+            // call with includeRowIds==null won't redundantly reload all indices.
+            if (!indicesLoaded && indices.size() == ioMetas.size()) {
+                boolean allLoaded = true;
+                for (LuminaIndex idx : indices) {
+                    if (idx == null) {
+                        allLoaded = false;
+                        break;
+                    }
+                }
+                if (allLoaded) {
+                    indicesLoaded = true;
                 }
             }
         }
