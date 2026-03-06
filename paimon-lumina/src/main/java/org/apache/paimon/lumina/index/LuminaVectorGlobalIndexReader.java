@@ -158,7 +158,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
             Map<String, String> searchOptions = new LinkedHashMap<>();
             int listSize = Math.max(effectiveK, options.searchListSize());
-            searchOptions.put("list_size", String.valueOf(listSize));
+            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
 
             index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
 

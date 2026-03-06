@@ -77,8 +77,8 @@ public class LuminaVectorIndexOptions {
                     .withDescription(
                             "Whether to L2 normalize vectors before indexing and searching");
 
-    public static final ConfigOption<Integer> VECTOR_SEARCH_LIST_SIZE =
-            ConfigOptions.key("vector.search-list-size")
+    public static final ConfigOption<Integer> VECTOR_DISKANN_SEARCH_LIST_SIZE =
+            ConfigOptions.key("vector.diskann.search-list-size")
                     .intType()
                     .defaultValue(100)
                     .withDescription("The search list size for DiskANN search (list_size)");
@@ -112,7 +112,7 @@ public class LuminaVectorIndexOptions {
                         : VECTOR_SIZE_PER_INDEX.defaultValue();
         this.trainingSize = options.get(VECTOR_TRAINING_SIZE);
         this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
-        this.searchListSize = options.get(VECTOR_SEARCH_LIST_SIZE);
+        this.searchListSize = options.get(VECTOR_DISKANN_SEARCH_LIST_SIZE);
         this.normalize = options.get(VECTOR_NORMALIZE);
         this.pretrainSampleRatio = options.get(PRETRAIN_SAMPLE_RATIO);
     }
