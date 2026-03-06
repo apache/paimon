@@ -56,7 +56,7 @@ public class ChainSplitTest {
         }
         ChainSplit split =
                 new ChainSplit(
-                        logicalPartition, dataFiles, fileBucketPathMapping, fileBranchMapping);
+                        logicalPartition, dataFiles, fileBranchMapping, fileBucketPathMapping);
         byte[] bytes = InstantiationUtil.serializeObject(split);
         ChainSplit newSplit =
                 InstantiationUtil.deserializeObject(bytes, ChainSplit.class.getClassLoader());
