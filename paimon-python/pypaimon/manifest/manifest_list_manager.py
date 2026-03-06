@@ -69,7 +69,7 @@ class ManifestListManager:
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         return self._read_from_storage(manifest_list_name)
 
-    @cachedmethod(lambda self: self._cache, key=lambda self, name: name, info=True)
+    @cachedmethod(lambda self: self._cache)
     def _read_from_storage(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         """Read manifest list from storage."""
         manifest_files = []
