@@ -20,6 +20,7 @@ package org.apache.paimon.spark.globalindex.btree;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.options.Options;
@@ -109,6 +110,8 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         List<CommitMessage> allMessages = new ArrayList<>();
         List<String> sortColumns = new ArrayList<>();
         sortColumns.add(indexField.name());
+        final int partitionKeyNum = table.partitionKeys().size();
+        BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
         for (Map.Entry<BinaryRow, Map<Range, List<DataSplit>>> partitionEntry :
                 partitionRangeSplits.entrySet()) {
             for (Map.Entry<Range, List<DataSplit>> entry : partitionEntry.getValue().entrySet()) {
@@ -141,6 +144,8 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                 .sortWithinPartitions(sortFields);
 
                 final byte[] serializedBuilder = InstantiationUtil.serializeObject(indexBuilder);
+                final byte[] partitionBytes =
+                        binaryRowSerializer.serializeToBytes(partitionEntry.getKey());
                 JavaRDD<byte[]> written =
                         partitioned
                                 .javaRDD()
@@ -152,7 +157,8 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                                                                 iter,
                                                                 serializedBuilder,
                                                                 range,
-                                                                partitionEntry.getKey(),
+                                                                partitionKeyNum,
+                                                                partitionBytes,
                                                                 indexFieldPos,
                                                                 rowIdPos));
                 List<byte[]> commitBytes = written.collect();
@@ -218,10 +224,13 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             Iterator<InternalRow> input,
             byte[] serializedBuilder,
             Range range,
-            BinaryRow partition,
+            int partitionKeyNum,
+            byte[] partitionBytes,
             int indexFieldPos,
             int rowIdPos)
             throws IOException, ClassNotFoundException {
+        final BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
+        BinaryRow partition = binaryRowSerializer.deserializeFromBytes(partitionBytes);
         BTreeGlobalIndexBuilder builder =
                 InstantiationUtil.deserializeObject(
                         serializedBuilder, BTreeGlobalIndexBuilder.class.getClassLoader());
