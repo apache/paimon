@@ -22,32 +22,25 @@ package org.apache.paimon.lumina.index;
 public enum LuminaVectorMetric {
 
     /** L2 (Euclidean) distance metric. Lower values indicate more similar vectors. */
-    L2(0, "l2"),
+    L2(0),
 
     /** Cosine distance metric. Lower values indicate more similar vectors. */
-    COSINE(1, "cosine"),
+    COSINE(1),
 
     /**
      * Inner product (dot product) metric. Higher values indicate more similar vectors. For
      * normalized vectors, this is equivalent to cosine similarity.
      */
-    INNER_PRODUCT(2, "inner_product");
+    INNER_PRODUCT(2);
 
     private final int value;
-    private final String luminaName;
 
-    LuminaVectorMetric(int value, String luminaName) {
+    LuminaVectorMetric(int value) {
         this.value = value;
-        this.luminaName = luminaName;
     }
 
     public int getValue() {
         return value;
-    }
-
-    /** Get the Lumina native option string for this metric. */
-    public String getLuminaName() {
-        return luminaName;
     }
 
     public static LuminaVectorMetric fromString(String name) {

@@ -261,6 +261,72 @@ public class LuminaVectorGlobalIndexTest {
     }
 
     @Test
+    public void testSearchContainsIdsAcrossMultipleIndexFiles() throws IOException {
+        int dimension = 2;
+        Options options = createDefaultOptions(dimension);
+        options.setInteger("vector.size-per-index", 3);
+
+        // 6 vectors split into 2 index files (rows 0-2 in file 0, rows 3-5 in file 1).
+        float[][] vectors =
+                new float[][] {
+                    new float[] {1.0f, 0.0f},
+                    new float[] {0.95f, 0.1f},
+                    new float[] {0.9f, 0.2f},
+                    new float[] {-1.0f, 0.0f},
+                    new float[] {-0.95f, 0.1f},
+                    new float[] {-0.9f, 0.2f}
+                };
+
+        GlobalIndexFileWriter fileWriter = createFileWriter(indexPath);
+        LuminaVectorIndexOptions indexOptions = new LuminaVectorIndexOptions(options);
+        LuminaVectorGlobalIndexWriter writer =
+                new LuminaVectorGlobalIndexWriter(fileWriter, vectorType, indexOptions);
+        Arrays.stream(vectors).forEach(writer::write);
+        List<ResultEntry> results = writer.finish();
+        assertThat(results).hasSize(2);
+
+        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        List<GlobalIndexIOMeta> metas = new ArrayList<>();
+        for (ResultEntry result : results) {
+            metas.add(
+                    new GlobalIndexIOMeta(
+                            new Path(indexPath, result.fileName()),
+                            fileIO.getFileSize(new Path(indexPath, result.fileName())),
+                            result.meta()));
+        }
+
+        try (LuminaVectorGlobalIndexReader reader =
+                new LuminaVectorGlobalIndexReader(fileReader, metas, vectorType, indexOptions)) {
+
+            // Unfiltered: query (1,0) top-3 should come from the first cluster (rows 0,1,2).
+            VectorSearch search = new VectorSearch(vectors[0], 3, fieldName);
+            LuminaScoredGlobalIndexResult result =
+                    (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(search).get();
+            assertThat(result.results().contains(0L)).isTrue();
+            assertThat(result.results().contains(1L)).isTrue();
+            assertThat(result.results().contains(2L)).isTrue();
+
+            // Filter to row 3 (in the second index file) -- result should only have row 3.
+            RoaringNavigableMap64 filter = new RoaringNavigableMap64();
+            filter.add(3L);
+            search = new VectorSearch(vectors[0], 3, fieldName).withIncludeRowIds(filter);
+            result = (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(search).get();
+            assertThat(result.results().contains(3L)).isTrue();
+            assertThat(result.results().getLongCardinality()).isEqualTo(1);
+
+            // Filter spanning both files: rows {1, 4}.
+            RoaringNavigableMap64 crossFilter = new RoaringNavigableMap64();
+            crossFilter.add(1L);
+            crossFilter.add(4L);
+            search = new VectorSearch(vectors[0], 6, fieldName).withIncludeRowIds(crossFilter);
+            result = (LuminaScoredGlobalIndexResult) reader.visitVectorSearch(search).get();
+            assertThat(result.results().contains(1L)).isTrue();
+            assertThat(result.results().contains(4L)).isTrue();
+            assertThat(result.results().getLongCardinality()).isEqualTo(2);
+        }
+    }
+
+    @Test
     public void testInvalidTopK() {
         assertThatThrownBy(() -> new VectorSearch(new float[] {0.1f}, 0, fieldName))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -428,11 +494,5 @@ public class LuminaVectorGlobalIndexTest {
             vectors.add(vector);
         }
         return vectors;
-    }
-
-    private boolean containsRowId(GlobalIndexResult result, long rowId) {
-        List<Long> resultIds = new ArrayList<>();
-        result.results().iterator().forEachRemaining(resultIds::add);
-        return resultIds.contains(rowId);
     }
 }
