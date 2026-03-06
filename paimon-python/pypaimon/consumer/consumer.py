@@ -15,13 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""
-Consumer class for tracking streaming read progress.
-
-A Consumer contains the next snapshot ID to be read. This is persisted to
-the table's consumer directory to track progress across restarts and to
-inform snapshot expiration which snapshots are still needed.
-"""
+"""Consumer dataclass for streaming read progress."""
 
 import json
 from dataclasses import dataclass
@@ -29,34 +23,16 @@ from dataclasses import dataclass
 
 @dataclass
 class Consumer:
-    """
-    Consumer which contains next snapshot.
-
-    This is the Python equivalent of Java's Consumer class. It stores the
-    next snapshot ID that should be read by this consumer.
-    """
+    """Consumer which contains the next snapshot to be read."""
 
     next_snapshot: int
 
     def to_json(self) -> str:
-        """
-        Serialize the consumer to JSON.
-
-        Returns:
-            JSON string with nextSnapshot field
-        """
+        """Serialize to JSON."""
         return json.dumps({"nextSnapshot": self.next_snapshot})
 
     @staticmethod
     def from_json(json_str: str) -> 'Consumer':
-        """
-        Deserialize a consumer from JSON.
-
-        Args:
-            json_str: JSON string with nextSnapshot field
-
-        Returns:
-            Consumer instance
-        """
+        """Deserialize from JSON."""
         data = json.loads(json_str)
         return Consumer(next_snapshot=data["nextSnapshot"])

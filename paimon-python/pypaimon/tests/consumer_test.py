@@ -15,10 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""
-Tests for Consumer and ConsumerManager.
-TDD: These tests are written first, before the implementation.
-"""
+"""Tests for Consumer and ConsumerManager."""
 
 import json
 import os
@@ -33,11 +30,6 @@ from pypaimon.consumer.consumer_manager import ConsumerManager
 
 class ConsumerTest(unittest.TestCase):
     """Tests for Consumer data class."""
-
-    def test_consumer_creation(self):
-        """Consumer should store next_snapshot value."""
-        consumer = Consumer(next_snapshot=42)
-        self.assertEqual(consumer.next_snapshot, 42)
 
     def test_consumer_to_json(self):
         """Consumer should serialize to JSON with nextSnapshot field."""
@@ -187,8 +179,25 @@ class ConsumerManagerTest(unittest.TestCase):
 
         path = manager._consumer_path("test-id")
 
-        expected = os.path.join(self.table_path, "consumer", "consumer-test-id")
+        expected = f"{self.table_path}/consumer/consumer-test-id"
         self.assertEqual(path, expected)
+
+    def test_validate_rejects_empty(self):
+        manager = ConsumerManager(self.file_io, self.table_path)
+        with self.assertRaises(ValueError):
+            manager._consumer_path("")
+
+    def test_validate_rejects_path_separators(self):
+        manager = ConsumerManager(self.file_io, self.table_path)
+        for bad_id in ("foo/bar", "foo\\bar"):
+            with self.assertRaises(ValueError, msg=bad_id):
+                manager._consumer_path(bad_id)
+
+    def test_validate_rejects_relative_components(self):
+        manager = ConsumerManager(self.file_io, self.table_path)
+        for bad_id in (".", ".."):
+            with self.assertRaises(ValueError, msg=bad_id):
+                manager._consumer_path(bad_id)
 
 
 if __name__ == '__main__':
