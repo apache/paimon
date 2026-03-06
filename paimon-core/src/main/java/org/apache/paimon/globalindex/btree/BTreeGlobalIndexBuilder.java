@@ -90,15 +90,14 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     @Nullable private PartitionPredicate partitionPredicate;
 
     public BTreeGlobalIndexBuilder(Table table) {
-        FileStoreTable copied =
+        this.table =
                 ((FileStoreTable) table)
                         .copy(
                                 Collections.singletonMap(
                                         CoreOptions.DATA_EVOLUTION_FORCE_SPLIT_ROW_RANGE_CONTIGOUS
                                                 .key(),
                                         "true"));
-        this.table = copied;
-        this.rowType = copied.rowType();
+        this.rowType = this.table.rowType();
         this.options = this.table.coreOptions().toConfiguration();
         this.recordsPerRange =
                 (long) (options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE) * FLOATING);
