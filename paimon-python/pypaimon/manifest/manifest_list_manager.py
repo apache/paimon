@@ -20,6 +20,7 @@ from io import BytesIO
 from typing import List, Optional
 
 import fastavro
+from cachetools import LRUCache, cachedmethod
 
 from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
@@ -32,13 +33,15 @@ from pypaimon.table.row.generic_row import GenericRowSerializer
 class ManifestListManager:
     """Manager for manifest list files in Avro format using unified FileIO."""
 
-    def __init__(self, table):
+    def __init__(self, table, cache_max_size: int = 50):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         manifest_path = table.table_path.rstrip('/')
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
+
+        self._cache: LRUCache = LRUCache(maxsize=max(cache_max_size, 0))
 
     def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
         if snapshot is None:
@@ -50,10 +53,25 @@ class ManifestListManager:
         manifest_files.extend(delta_manifests)
         return manifest_files
 
+    def read_base(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read only the base manifest list for the given snapshot."""
+        return self.read(snapshot.base_manifest_list)
+
     def read_delta(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
         return self.read(snapshot.delta_manifest_list)
 
+    def read_changelog(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read changelog manifest files from snapshot, or empty list if none."""
+        if snapshot.changelog_manifest_list is None:
+            return []
+        return self.read(snapshot.changelog_manifest_list)
+
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        return self._read_from_storage(manifest_list_name)
+
+    @cachedmethod(lambda self: self._cache)
+    def _read_from_storage(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        """Read manifest list from storage."""
         manifest_files = []
 
         manifest_list_path = f"{self.manifest_path}/{manifest_list_name}"
