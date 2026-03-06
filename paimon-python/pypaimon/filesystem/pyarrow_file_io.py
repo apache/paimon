@@ -34,8 +34,9 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
-from pypaimon.schema.data_types import DataField, AtomicType, PyarrowFieldParser
-from pypaimon.table.row.blob import BlobData, BlobDescriptor, Blob
+from pypaimon.schema.data_types import (AtomicType, DataField,
+                                        PyarrowFieldParser)
+from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
@@ -189,7 +190,7 @@ class PyArrowFileIO(FileIO):
                 parent_dir = '/'.join(path_str.split('/')[:-1])
             else:
                 parent_dir = ''
-            
+
             if parent_dir and not self.exists(parent_dir):
                 self.mkdirs(parent_dir)
         else:
@@ -214,10 +215,10 @@ class PyArrowFileIO(FileIO):
     def get_file_status(self, path: str):
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-        
+
         if file_info.type == pafs.FileType.NotFound:
             raise FileNotFoundError(f"File {path} (resolved as {path_str}) does not exist")
-        
+
         return file_info
 
     def list_status(self, path: str):
@@ -233,13 +234,25 @@ class PyArrowFileIO(FileIO):
         path_str = self.to_filesystem_path(path)
         return self._get_file_info(path_str).type != pafs.FileType.NotFound
 
+    def exists_batch(self, paths: List[str]) -> Dict[str, bool]:
+        """Check existence of multiple paths in a single batched API call."""
+        if not paths:
+            return {}
+
+        path_strs = [self.to_filesystem_path(p) for p in paths]
+        file_infos = self.filesystem.get_file_info(path_strs)
+        return {
+            paths[i]: info.type != pyarrow.fs.FileType.NotFound
+            for i, info in enumerate(file_infos)
+        }
+
     def delete(self, path: str, recursive: bool = False) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-        
+
         if file_info.type == pafs.FileType.NotFound:
             return False
-        
+
         if file_info.type == pafs.FileType.Directory:
             if not recursive:
                 selector = pafs.FileSelector(path_str, recursive=False, allow_not_found=True)
@@ -258,7 +271,7 @@ class PyArrowFileIO(FileIO):
     def mkdirs(self, path: str) -> bool:
         path_str = self.to_filesystem_path(path)
         file_info = self._get_file_info(path_str)
-        
+
         if file_info.type == pafs.FileType.NotFound:
             self.filesystem.create_dir(path_str, recursive=True)
             return True
@@ -266,7 +279,7 @@ class PyArrowFileIO(FileIO):
             return True
         elif file_info.type == pafs.FileType.File:
             raise FileExistsError(f"Path exists but is not a directory: {path}")
-        
+
         self.filesystem.create_dir(path_str, recursive=True)
         return True
 
@@ -275,13 +288,13 @@ class PyArrowFileIO(FileIO):
         dst_parent = Path(dst_str).parent
         if str(dst_parent) and not self.exists(str(dst_parent)):
             self.mkdirs(str(dst_parent))
-        
+
         src_str = self.to_filesystem_path(src)
-        
+
         try:
             if hasattr(self.filesystem, 'rename'):
                 return self.filesystem.rename(src_str, dst_str)
-            
+
             dst_file_info = self._get_file_info(dst_str)
             if dst_file_info.type != pafs.FileType.NotFound:
                 if dst_file_info.type == pafs.FileType.File:
@@ -293,7 +306,7 @@ class PyArrowFileIO(FileIO):
                 final_dst_info = self._get_file_info(dst_str)
                 if final_dst_info.type != pafs.FileType.NotFound:
                     return False
-            
+
             self.filesystem.move(src_str, dst_str)
             return True
         except FileNotFoundError:
@@ -331,7 +344,7 @@ class PyArrowFileIO(FileIO):
             file_info = self._get_file_info(path_str)
             if file_info.type == pafs.FileType.Directory:
                 return False
-        
+
         temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
@@ -349,7 +362,7 @@ class PyArrowFileIO(FileIO):
         source_str = self.to_filesystem_path(source_path)
         target_str = self.to_filesystem_path(target_path)
         target_parent = Path(target_str).parent
-        
+
         if str(target_parent) and not self.exists(str(target_parent)):
             self.mkdirs(str(target_parent))
 
@@ -373,13 +386,14 @@ class PyArrowFileIO(FileIO):
                   zstd_level: int = 1, **kwargs):
         try:
             """Write ORC file using PyArrow ORC writer.
-            
+
             Note: PyArrow's ORC writer doesn't support compression_level parameter.
             ORC files will use zstd compression with default level
             (which is 3, see https://github.com/facebook/zstd/blob/dev/programs/zstdcli.c)
             instead of the specified level.
             """
             import sys
+
             import pyarrow.orc as orc
 
             with self.new_output_stream(path) as output_stream:
@@ -432,7 +446,7 @@ class PyArrowFileIO(FileIO):
             'zstd': 'zstandard',  # zstd is commonly used in Paimon
         }
         compression_lower = compression.lower()
-        
+
         codec = codec_map.get(compression_lower)
         if codec is None:
             raise ValueError(
@@ -448,6 +462,7 @@ class PyArrowFileIO(FileIO):
     def write_lance(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             import lance
+
             from pypaimon.read.reader.lance_utils import to_lance_specified
             file_path_for_lance, storage_options = to_lance_specified(self, path)
 
@@ -514,8 +529,9 @@ class PyArrowFileIO(FileIO):
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
 
     def to_filesystem_path(self, path: str) -> str:
-        from pyarrow.fs import S3FileSystem
         import re
+
+        from pyarrow.fs import S3FileSystem
 
         parsed = urlparse(path)
         normalized_path = re.sub(r'/+', '/', parsed.path) if parsed.path else ''
