@@ -122,7 +122,6 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 }
                 int partitionNum = Math.max((int) (range.count() / recordsPerRange), 1);
                 partitionNum = Math.min(partitionNum, maxParallelism);
-                partitionNum = Math.min(partitionNum, rangeSplits.size());
 
                 Dataset<Row> source =
                         PaimonUtils.createDataset(

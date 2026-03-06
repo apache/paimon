@@ -177,7 +177,6 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         .asScala
         .filter(_.indexFile().indexType() == "btree")
         .map(_.indexFile())
-      table.store().newGlobalIndexScanBuilder().shardList()
       assert(btreeEntries.nonEmpty)
 
       // 1. assert total row count, file count and row range

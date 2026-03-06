@@ -132,7 +132,6 @@ public class BTreeIndexTopoBuilder {
                 }
                 int parallelism = Math.max((int) (range.count() / recordsPerRange), 1);
                 parallelism = Math.min(parallelism, maxParallelism);
-                parallelism = Math.min(parallelism, rangeSplits.size());
 
                 DataStream<DataSplit> sourceStream =
                         env.fromData(
