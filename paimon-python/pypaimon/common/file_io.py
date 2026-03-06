@@ -19,7 +19,7 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import pyarrow  # noqa: F401
 import pyarrow.fs as pafs
@@ -31,7 +31,7 @@ class FileIO(ABC):
     """
     File IO interface to read and write files.
     """
-    
+
     @abstractmethod
     def new_input_stream(self, path: str):
         pass
@@ -39,11 +39,11 @@ class FileIO(ABC):
     @abstractmethod
     def new_output_stream(self, path: str):
         pass
-    
+
     @abstractmethod
     def get_file_status(self, path: str):
         pass
-    
+
     @abstractmethod
     def list_status(self, path: str):
         pass
@@ -52,18 +52,22 @@ class FileIO(ABC):
     def exists(self, path: str) -> bool:
         pass
 
+    def exists_batch(self, paths: List[str]) -> Dict[str, bool]:
+        """Check existence of multiple paths, returning {path: bool}."""
+        return {path: self.exists(path) for path in paths}
+
     @abstractmethod
     def delete(self, path: str, recursive: bool = False) -> bool:
         pass
-    
+
     @abstractmethod
     def mkdirs(self, path: str) -> bool:
         pass
-    
+
     @abstractmethod
     def rename(self, src: str, dst: str) -> bool:
         pass
-    
+
     def delete_quietly(self, path: str):
         logger = logging.getLogger(__name__)
         if logger.isEnabledFor(logging.DEBUG):
@@ -115,7 +119,7 @@ class FileIO(ABC):
         if self.exists(path):
             if self.is_dir(path):
                 return False
-        
+
         temp_path = path + str(uuid.uuid4()) + ".tmp"
         success = False
         try:
@@ -143,7 +147,7 @@ class FileIO(ABC):
 
         target_str = self.to_filesystem_path(target_path)
         target_parent = Path(target_str).parent
-        
+
         if str(target_parent) and not self.exists(str(target_parent)):
             self.mkdirs(str(target_parent))
 
@@ -191,8 +195,8 @@ class FileIO(ABC):
         return path
 
     def parse_location(self, location: str):
-        from urllib.parse import urlparse
         import os
+        from urllib.parse import urlparse
 
         uri = urlparse(location)
         if not uri.scheme:
@@ -220,10 +224,10 @@ class FileIO(ABC):
     def write_blob(self, path: str, data, **kwargs):
         """Write Blob format file."""
         raise NotImplementedError("write_blob must be implemented by FileIO subclasses")
-    
+
     def close(self):
         pass
-    
+
     @staticmethod
     def get(path: str, catalog_options: Optional[Options] = None) -> 'FileIO':
         """
@@ -232,13 +236,13 @@ class FileIO(ABC):
         - PyArrowFileIO for remote file systems (oss://, s3://, hdfs://, etc.)
         """
         from urllib.parse import urlparse
-        
+
         uri = urlparse(path)
         scheme = uri.scheme
-        
+
         if not scheme or scheme == "file":
             from pypaimon.filesystem.local_file_io import LocalFileIO
             return LocalFileIO(path, catalog_options)
-        
+
         from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
         return PyArrowFileIO(path, catalog_options or Options({}))
