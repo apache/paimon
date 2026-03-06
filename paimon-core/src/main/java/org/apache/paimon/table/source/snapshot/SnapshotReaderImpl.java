@@ -526,8 +526,19 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     totalBuckets = beforeEntries.get(0).totalBuckets();
                 }
 
-                // deduplicate
-                beforeEntries.removeIf(dataEntries::remove);
+                // deduplicate: remove entries common to both lists
+                // Use HashSet for O(n+m) instead of O(n*m) with List.remove()
+                Set<ManifestEntry> afterSet = new HashSet<>(dataEntries);
+                Set<ManifestEntry> commonEntries = new HashSet<>();
+                beforeEntries.removeIf(
+                        entry -> {
+                            if (afterSet.contains(entry)) {
+                                commonEntries.add(entry);
+                                return true;
+                            }
+                            return false;
+                        });
+                dataEntries.removeAll(commonEntries);
 
                 List<DataFileMeta> before =
                         beforeEntries.stream()
