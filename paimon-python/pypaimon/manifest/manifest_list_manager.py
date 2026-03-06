@@ -44,6 +44,7 @@ class ManifestListManager:
         self._cache: LRUCache = LRUCache(maxsize=max(cache_max_size, 0))
 
     def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
+        """Read base + delta manifest lists for full file state."""
         if snapshot is None:
             return []
         manifest_files = []
