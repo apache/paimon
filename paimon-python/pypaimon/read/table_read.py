@@ -30,7 +30,6 @@ from pypaimon.read.split_read import (DataEvolutionSplitRead,
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 from pypaimon.table.row.offset_row import OffsetRow
 
-# Column name for row kind in Arrow output
 ROW_KIND_COLUMN = "_row_kind"
 
 

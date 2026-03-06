@@ -15,38 +15,14 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""
-DeltaFollowUpScanner for append-only streaming reads.
-
-This scanner only processes APPEND commits, skipping compaction, overwrite,
-and other maintenance operations. It is the Python equivalent of Java's
-DeltaFollowUpScanner used when changelog producer is NONE.
-"""
+"""DeltaFollowUpScanner for append-only streaming reads."""
 
 from pypaimon.read.scanner.follow_up_scanner import FollowUpScanner
 from pypaimon.snapshot.snapshot import Snapshot
 
 
 class DeltaFollowUpScanner(FollowUpScanner):
-    """
-    FollowUpScanner for changelog producer NONE.
-
-    This scanner only scans APPEND commits, which contain new data files.
-    Other commit types (COMPACT, OVERWRITE, EXPIRE, ANALYZE) are skipped
-    as they don't add new user data.
-    """
+    """Scans only APPEND commits; skips compaction and maintenance."""
 
     def should_scan(self, snapshot: Snapshot) -> bool:
-        """
-        Determine whether to scan the snapshot based on its commit kind.
-
-        Only APPEND commits are scanned, as they contain new data.
-        Other commit types are maintenance operations that don't add user data.
-
-        Args:
-            snapshot: The snapshot to evaluate
-
-        Returns:
-            True if snapshot.commit_kind == "APPEND", False otherwise
-        """
         return snapshot.commit_kind == "APPEND"
