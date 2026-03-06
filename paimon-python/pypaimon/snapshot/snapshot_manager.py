@@ -256,4 +256,3 @@ class SnapshotManager:
         # All fetched snapshots were skipped, but more may exist
         # Return next_id pointing past the batch
         return (None, start_id + lookahead_size, skipped_count)
-
