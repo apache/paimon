@@ -53,13 +53,13 @@ public class LuminaVectorIndexOptions {
     public static final ConfigOption<Integer> VECTOR_SIZE_PER_INDEX =
             ConfigOptions.key("vector.size-per-index")
                     .intType()
-                    .defaultValue(200_0000)
+                    .defaultValue(2_000_000)
                     .withDescription("The number of vectors stored in each index file");
 
     public static final ConfigOption<Integer> VECTOR_TRAINING_SIZE =
             ConfigOptions.key("vector.training-size")
                     .intType()
-                    .defaultValue(50_0000)
+                    .defaultValue(500_000)
                     .withDescription(
                             "The number of vectors to use for pretraining DiskANN indices");
 
@@ -77,8 +77,8 @@ public class LuminaVectorIndexOptions {
                     .withDescription(
                             "Whether to L2 normalize vectors before indexing and searching");
 
-    public static final ConfigOption<Integer> VECTOR_SEARCH_LIST_SIZE =
-            ConfigOptions.key("vector.search-list-size")
+    public static final ConfigOption<Integer> VECTOR_DISKANN_SEARCH_LIST_SIZE =
+            ConfigOptions.key("vector.diskann.search-list-size")
                     .intType()
                     .defaultValue(100)
                     .withDescription("The search list size for DiskANN search (list_size)");
@@ -90,6 +90,28 @@ public class LuminaVectorIndexOptions {
                     .withDescription(
                             "The sample ratio for pretraining (Lumina's pretrain.sample_ratio)");
 
+    public static final ConfigOption<Integer> DISKANN_EF_CONSTRUCTION =
+            ConfigOptions.key("vector.diskann.ef-construction")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "DiskANN build ef_construction parameter. "
+                                    + "Controls the size of the dynamic candidate list during graph construction.");
+
+    public static final ConfigOption<Integer> DISKANN_NEIGHBOR_COUNT =
+            ConfigOptions.key("vector.diskann.neighbor-count")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "DiskANN build neighbor count. "
+                                    + "Maximum number of neighbors per node in the graph.");
+
+    public static final ConfigOption<Integer> DISKANN_BUILD_THREAD_COUNT =
+            ConfigOptions.key("vector.diskann.build-thread-count")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription("Number of threads used for DiskANN index building.");
+
     private final int dimension;
     private final LuminaVectorMetric metric;
     private final LuminaIndexType indexType;
@@ -100,21 +122,33 @@ public class LuminaVectorIndexOptions {
     private final int searchListSize;
     private final boolean normalize;
     private final double pretrainSampleRatio;
+    private final Integer diskannEfConstruction;
+    private final Integer diskannNeighborCount;
+    private final Integer diskannBuildThreadCount;
 
     public LuminaVectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
         this.metric = options.get(VECTOR_METRIC);
         this.indexType = options.get(VECTOR_INDEX_TYPE);
         this.encodingType = options.get(VECTOR_ENCODING_TYPE);
-        this.sizePerIndex =
-                options.get(VECTOR_SIZE_PER_INDEX) > 0
-                        ? options.get(VECTOR_SIZE_PER_INDEX)
-                        : VECTOR_SIZE_PER_INDEX.defaultValue();
+
+        int sizePerIndexValue = options.get(VECTOR_SIZE_PER_INDEX);
+        if (sizePerIndexValue <= 0) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid value for '%s': %d. Must be a positive integer.",
+                            VECTOR_SIZE_PER_INDEX.key(), sizePerIndexValue));
+        }
+        this.sizePerIndex = sizePerIndexValue;
+
         this.trainingSize = options.get(VECTOR_TRAINING_SIZE);
         this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
-        this.searchListSize = options.get(VECTOR_SEARCH_LIST_SIZE);
+        this.searchListSize = options.get(VECTOR_DISKANN_SEARCH_LIST_SIZE);
         this.normalize = options.get(VECTOR_NORMALIZE);
         this.pretrainSampleRatio = options.get(PRETRAIN_SAMPLE_RATIO);
+        this.diskannEfConstruction = options.getOptional(DISKANN_EF_CONSTRUCTION).orElse(null);
+        this.diskannNeighborCount = options.getOptional(DISKANN_NEIGHBOR_COUNT).orElse(null);
+        this.diskannBuildThreadCount = options.getOptional(DISKANN_BUILD_THREAD_COUNT).orElse(null);
     }
 
     public int dimension() {
@@ -155,5 +189,17 @@ public class LuminaVectorIndexOptions {
 
     public double pretrainSampleRatio() {
         return pretrainSampleRatio;
+    }
+
+    public Integer diskannEfConstruction() {
+        return diskannEfConstruction;
+    }
+
+    public Integer diskannNeighborCount() {
+        return diskannNeighborCount;
+    }
+
+    public Integer diskannBuildThreadCount() {
+        return diskannBuildThreadCount;
     }
 }

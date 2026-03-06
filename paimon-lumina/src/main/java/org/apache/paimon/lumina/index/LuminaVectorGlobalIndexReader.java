@@ -36,6 +36,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -53,8 +54,8 @@ import java.util.UUID;
  */
 public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
-    private final List<LuminaIndex> indices;
-    private final List<LuminaIndexMeta> indexMetas;
+    private final LuminaIndex[] indices;
+    private final LuminaIndexMeta[] indexMetas;
     private final List<File> localIndexFiles;
     private final List<GlobalIndexIOMeta> ioMetas;
     private final GlobalIndexFileReader fileReader;
@@ -72,9 +73,9 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         this.ioMetas = ioMetas;
         this.fieldType = fieldType;
         this.options = options;
-        this.indices = new ArrayList<>();
-        this.indexMetas = new ArrayList<>();
-        this.localIndexFiles = new ArrayList<>();
+        this.indices = new LuminaIndex[ioMetas.size()];
+        this.indexMetas = new LuminaIndexMeta[ioMetas.size()];
+        this.localIndexFiles = Collections.synchronizedList(new ArrayList<>());
     }
 
     @Override
@@ -86,9 +87,9 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
             if (includeRowIds != null) {
                 List<Integer> matchingIndices = new ArrayList<>();
-                for (int i = 0; i < indexMetas.size(); i++) {
-                    LuminaIndexMeta meta = indexMetas.get(i);
-                    if (hasOverlap(meta.minId(), meta.maxId(), includeRowIds)) {
+                for (int i = 0; i < indexMetas.length; i++) {
+                    LuminaIndexMeta meta = indexMetas[i];
+                    if (includeRowIds.containsRange(meta.minId(), meta.maxId())) {
                         matchingIndices.add(i);
                     }
                 }
@@ -110,23 +111,11 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private boolean hasOverlap(long minId, long maxId, RoaringNavigableMap64 includeRowIds) {
-        for (Long id : includeRowIds) {
-            if (id >= minId && id <= maxId) {
-                return true;
-            }
-            if (id > maxId) {
-                break;
-            }
-        }
-        return false;
-    }
-
     private GlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
         validateVectorType(vectorSearch.vector());
         float[] queryVector = ((float[]) vectorSearch.vector()).clone();
         if (options.normalize()) {
-            normalizeL2(queryVector);
+            LuminaVectorUtils.normalizeL2(queryVector);
         }
         int limit = vectorSearch.limit();
 
@@ -135,12 +124,39 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
 
-        int searchK = limit;
+        // Extract filter IDs once for native pre-filtering
+        long[] filterIds = null;
         if (includeRowIds != null) {
-            searchK =
-                    Math.max(
-                            limit * options.searchFactor(),
-                            (int) includeRowIds.getLongCardinality());
+            long cardinality = includeRowIds.getLongCardinality();
+            if (cardinality <= 0) {
+                // Empty filter — no rows can match.
+                return new LuminaScoredGlobalIndexResult(
+                        new RoaringNavigableMap64(), new HashMap<>());
+            }
+            if (cardinality > Integer.MAX_VALUE) {
+                throw new RuntimeException(
+                        "Filter bitmap cardinality ("
+                                + cardinality
+                                + ") exceeds maximum supported size for native pre-filtering");
+            }
+            filterIds = new long[(int) cardinality];
+            int idx = 0;
+            for (long id : includeRowIds) {
+                filterIds[idx++] = id;
+            }
+        }
+
+        Map<String, String> searchOptions = new LinkedHashMap<>();
+        if (filterIds != null) {
+            // With native pre-filtering, increase list_size to improve recall under
+            // selective filters. DiskANN's graph traversal skips filtered-out nodes,
+            // so a larger list_size helps find enough qualifying candidates.
+            int listSize = Math.max(limit * options.searchFactor(), options.searchListSize());
+            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
+            searchOptions.put("search.thread_safe_filter", "true");
+        } else {
+            int listSize = Math.max(limit, options.searchListSize());
+            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
         }
 
         for (LuminaIndex index : indices) {
@@ -148,7 +164,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 continue;
             }
 
-            int effectiveK = (int) Math.min(searchK, index.size());
+            int effectiveK = (int) Math.min(limit, index.size());
             if (effectiveK <= 0) {
                 continue;
             }
@@ -156,19 +172,16 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             float[] distances = new float[effectiveK];
             long[] labels = new long[effectiveK];
 
-            Map<String, String> searchOptions = new LinkedHashMap<>();
-            int listSize = Math.max(effectiveK, options.searchListSize());
-            searchOptions.put("list_size", String.valueOf(listSize));
-
-            index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
+            if (filterIds != null) {
+                index.searchWithFilter(
+                        queryVector, 1, effectiveK, distances, labels, filterIds, searchOptions);
+            } else {
+                index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
+            }
 
             for (int i = 0; i < effectiveK; i++) {
                 long rowId = labels[i];
                 if (rowId < 0) {
-                    continue;
-                }
-
-                if (includeRowIds != null && !includeRowIds.contains(rowId)) {
                     continue;
                 }
 
@@ -222,10 +235,9 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         if (!metasLoaded) {
             synchronized (this) {
                 if (!metasLoaded) {
-                    for (GlobalIndexIOMeta ioMeta : ioMetas) {
-                        byte[] metaBytes = ioMeta.metadata();
-                        LuminaIndexMeta meta = LuminaIndexMeta.deserialize(metaBytes);
-                        indexMetas.add(meta);
+                    for (int i = 0; i < ioMetas.size(); i++) {
+                        byte[] metaBytes = ioMetas.get(i).metadata();
+                        indexMetas[i] = LuminaIndexMeta.deserialize(metaBytes);
                     }
                     metasLoaded = true;
                 }
@@ -238,7 +250,9 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             synchronized (this) {
                 if (!indicesLoaded) {
                     for (int i = 0; i < ioMetas.size(); i++) {
-                        loadIndexAt(i);
+                        if (indices[i] == null) {
+                            loadIndexAt(i);
+                        }
                     }
                     indicesLoaded = true;
                 }
@@ -248,12 +262,22 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
     private void ensureLoadIndices(List<Integer> positions) throws IOException {
         synchronized (this) {
-            while (indices.size() < ioMetas.size()) {
-                indices.add(null);
-            }
             for (int pos : positions) {
-                if (indices.get(pos) == null) {
+                if (indices[pos] == null) {
                     loadIndexAt(pos);
+                }
+            }
+            // Check if all indices are now loaded.
+            if (!indicesLoaded) {
+                boolean allLoaded = true;
+                for (LuminaIndex idx : indices) {
+                    if (idx == null) {
+                        allLoaded = false;
+                        break;
+                    }
+                }
+                if (allLoaded) {
+                    indicesLoaded = true;
                 }
             }
         }
@@ -264,14 +288,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         LuminaIndex index = null;
         try (SeekableInputStream in = fileReader.getInputStream(ioMeta)) {
             index = loadIndex(in, position);
-            if (indices.size() <= position) {
-                while (indices.size() < position) {
-                    indices.add(null);
-                }
-                indices.add(index);
-            } else {
-                indices.set(position, index);
-            }
+            indices[position] = index;
         } catch (Exception e) {
             IOUtils.closeQuietly(index);
             throw e;
@@ -291,34 +308,23 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             }
         }
 
-        LuminaIndexMeta meta = indexMetas.get(position);
+        LuminaIndexMeta meta = indexMetas[position];
         LuminaVectorMetric metric = LuminaVectorMetric.fromValue(meta.metricValue());
         LuminaIndexType indexType = meta.indexType();
 
+        // Searcher only accepts index.dimension and index.type per Lumina API.
+        // Do not pass builder-only options like encoding.type.
         Map<String, String> extraOptions = new LinkedHashMap<>();
-        extraOptions.put("encoding.type", options.encodingType());
 
         return LuminaIndex.fromFile(rawIndexFile, meta.dim(), metric, indexType, extraOptions);
-    }
-
-    private void normalizeL2(float[] vector) {
-        float norm = 0.0f;
-        for (float v : vector) {
-            norm += v * v;
-        }
-        norm = (float) Math.sqrt(norm);
-        if (norm > 0) {
-            for (int i = 0; i < vector.length; i++) {
-                vector[i] /= norm;
-            }
-        }
     }
 
     @Override
     public void close() throws IOException {
         Throwable firstException = null;
 
-        for (LuminaIndex index : indices) {
+        for (int i = 0; i < indices.length; i++) {
+            LuminaIndex index = indices[i];
             if (index == null) {
                 continue;
             }
@@ -331,8 +337,8 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                     firstException.addSuppressed(t);
                 }
             }
+            indices[i] = null;
         }
-        indices.clear();
 
         for (File localFile : localIndexFiles) {
             try {

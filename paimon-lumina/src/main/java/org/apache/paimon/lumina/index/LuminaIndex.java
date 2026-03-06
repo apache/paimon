@@ -74,10 +74,18 @@ public class LuminaIndex implements Closeable {
             Map<String, String> extraOptions) {
         LuminaIndex index = new LuminaIndex(dimension, metric, indexType);
 
-        Map<String, String> opts = new LinkedHashMap<>(extraOptions);
+        // Searcher only accepts index.dimension, index.type, and diskann.search.* per Lumina API.
+        // Filter out builder-only options like encoding.type and distance.metric.
+        Map<String, String> searcherOpts = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : extraOptions.entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("diskann.search.")) {
+                searcherOpts.put(key, entry.getValue());
+            }
+        }
         index.searcher =
                 LuminaSearcher.create(
-                        indexType.getLuminaName(), dimension, toMetricType(metric), opts);
+                        indexType.getLuminaName(), dimension, toMetricType(metric), searcherOpts);
         index.searcher.open(file);
         return index;
     }
@@ -114,6 +122,20 @@ public class LuminaIndex implements Closeable {
         ensureOpen();
         ensureSearcher();
         searcher.search(n, queryVectors, k, distances, labels, searchOptions);
+    }
+
+    /** Search for k nearest neighbors with native pre-filtering on vector IDs. */
+    public void searchWithFilter(
+            float[] queryVectors,
+            int n,
+            int k,
+            float[] distances,
+            long[] labels,
+            long[] filterIds,
+            Map<String, String> searchOptions) {
+        ensureOpen();
+        ensureSearcher();
+        searcher.searchWithFilter(n, queryVectors, k, distances, labels, filterIds, searchOptions);
     }
 
     /** Get the number of vectors (searcher mode). */
