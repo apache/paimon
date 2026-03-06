@@ -15,52 +15,25 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""
-ConsumerManager for managing consumer progress.
+"""ConsumerManager for persisting streaming read progress."""
 
-A ConsumerManager reads and writes consumer state files in the table's
-consumer directory. This enables tracking streaming read progress across
-restarts and informs snapshot expiration which snapshots are still needed.
-"""
-
-import os
 from typing import Optional
 
 from pypaimon.consumer.consumer import Consumer
 
 
 class ConsumerManager:
-    """
-    Manages consumer state for streaming reads.
-
-    Consumer state is persisted to {table_path}/consumer/consumer-{consumer_id}.
-    This is the Python equivalent of Java's ConsumerManager class.
-    """
+    """Manages consumer state stored at {table_path}/consumer/consumer-{id}."""
 
     CONSUMER_PREFIX = "consumer-"
 
     def __init__(self, file_io, table_path: str):
-        """
-        Create a ConsumerManager.
-
-        Args:
-            file_io: FileIO instance for reading/writing files
-            table_path: Root path of the table
-        """
         self._file_io = file_io
         self._table_path = table_path
 
     @staticmethod
     def _validate_consumer_id(consumer_id: str) -> None:
-        """
-        Validate consumer ID to prevent path traversal attacks.
-
-        Args:
-            consumer_id: The consumer identifier to validate
-
-        Raises:
-            ValueError: If consumer_id contains path separators or is empty
-        """
+        """Validate consumer_id to prevent path traversal."""
         if not consumer_id:
             raise ValueError("consumer_id cannot be empty")
         if '/' in consumer_id or '\\' in consumer_id:
@@ -73,35 +46,15 @@ class ConsumerManager:
             )
 
     def _consumer_path(self, consumer_id: str) -> str:
-        """
-        Get the path to a consumer file.
-
-        Args:
-            consumer_id: The consumer identifier
-
-        Returns:
-            Path to the consumer file: {table_path}/consumer/consumer-{id}
-
-        Raises:
-            ValueError: If consumer_id is invalid
-        """
+        """Return the path to a consumer file."""
         self._validate_consumer_id(consumer_id)
-        return os.path.join(
-            self._table_path,
-            "consumer",
+        return (
+            f"{self._table_path}/consumer/"
             f"{self.CONSUMER_PREFIX}{consumer_id}"
         )
 
     def consumer(self, consumer_id: str) -> Optional[Consumer]:
-        """
-        Get the consumer state for the given consumer ID.
-
-        Args:
-            consumer_id: The consumer identifier
-
-        Returns:
-            Consumer instance if exists, None otherwise
-        """
+        """Get consumer state, or None if not found."""
         path = self._consumer_path(consumer_id)
         if not self._file_io.exists(path):
             return None
@@ -110,22 +63,11 @@ class ConsumerManager:
         return Consumer.from_json(json_str)
 
     def reset_consumer(self, consumer_id: str, consumer: Consumer) -> None:
-        """
-        Write or update consumer state.
-
-        Args:
-            consumer_id: The consumer identifier
-            consumer: The consumer state to persist
-        """
+        """Write or update consumer state."""
         path = self._consumer_path(consumer_id)
         self._file_io.overwrite_file_utf8(path, consumer.to_json())
 
     def delete_consumer(self, consumer_id: str) -> None:
-        """
-        Delete a consumer.
-
-        Args:
-            consumer_id: The consumer identifier to delete
-        """
+        """Delete a consumer."""
         path = self._consumer_path(consumer_id)
         self._file_io.delete_quietly(path)
