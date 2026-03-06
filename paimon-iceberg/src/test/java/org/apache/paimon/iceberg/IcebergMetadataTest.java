@@ -512,8 +512,17 @@ class IcebergMetadataTest {
         // Verify snapshot summary contains operation information
         assertThat(snapshot.summary().operation()).isEqualTo("append");
         assertThat(snapshot.summary().getSummary().get("operation")).isEqualTo("append");
+
+        // Verify required fields for Redshift Spectrum compatibility
         assertThat(snapshot.summary().getSummary().get("total-records")).isEqualTo("10");
+        assertThat(snapshot.summary().getSummary().get("total-data-files")).isEqualTo("1");
+        assertThat(snapshot.summary().getSummary().get("total-delete-files")).isEqualTo("0");
+        assertThat(snapshot.summary().getSummary().get("total-position-deletes")).isEqualTo("0");
+        assertThat(snapshot.summary().getSummary().get("total-equality-deletes")).isEqualTo("0");
+
+        // Verify change fields
         assertThat(snapshot.summary().getSummary().get("added-data-files")).isEqualTo("1");
+        assertThat(snapshot.summary().getSummary().get("added-records")).isEqualTo("10");
         assertThat(snapshot.summary().getSummary().get("added-files-size")).isEqualTo("100");
     }
 
