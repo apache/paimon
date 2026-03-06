@@ -100,7 +100,7 @@ class ManifestFileManager:
                 result.append(entry)
         return result
 
-    @cachedmethod(lambda self: self._cache, key=lambda self, name: name, info=True)
+    @cachedmethod(lambda self: self._cache)
     def _read_from_storage(self, manifest_file_name: str) -> List[ManifestEntry]:
         """Read manifest entries from storage (no filtering, with stats)."""
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
