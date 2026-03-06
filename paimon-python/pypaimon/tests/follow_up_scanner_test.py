@@ -15,10 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""
-Tests for FollowUpScanner implementations.
-TDD: These tests are written first, before the implementation.
-"""
+"""Tests for FollowUpScanner implementations."""
 
 import unittest
 from unittest.mock import Mock
@@ -34,10 +31,6 @@ class FollowUpScannerInterfaceTest(unittest.TestCase):
         """FollowUpScanner should be an abstract base class."""
         with self.assertRaises(TypeError):
             FollowUpScanner()
-
-    def test_follow_up_scanner_requires_should_scan_method(self):
-        """FollowUpScanner subclasses must implement should_scan."""
-        self.assertTrue(hasattr(FollowUpScanner, 'should_scan'))
 
 
 class DeltaFollowUpScannerTest(unittest.TestCase):
@@ -55,41 +48,11 @@ class DeltaFollowUpScannerTest(unittest.TestCase):
 
         self.assertTrue(result)
 
-    def test_should_scan_returns_false_for_compact_commit(self):
-        """DeltaFollowUpScanner should skip COMPACT commits."""
-        snapshot = Mock()
-        snapshot.commit_kind = "COMPACT"
-
-        result = self.scanner.should_scan(snapshot)
-
-        self.assertFalse(result)
-
-    def test_should_scan_returns_false_for_overwrite_commit(self):
-        """DeltaFollowUpScanner should skip OVERWRITE commits."""
-        snapshot = Mock()
-        snapshot.commit_kind = "OVERWRITE"
-
-        result = self.scanner.should_scan(snapshot)
-
-        self.assertFalse(result)
-
-    def test_should_scan_returns_false_for_expire_commit(self):
-        """DeltaFollowUpScanner should skip EXPIRE commits."""
-        snapshot = Mock()
-        snapshot.commit_kind = "EXPIRE"
-
-        result = self.scanner.should_scan(snapshot)
-
-        self.assertFalse(result)
-
-    def test_should_scan_returns_false_for_analyze_commit(self):
-        """DeltaFollowUpScanner should skip ANALYZE commits."""
-        snapshot = Mock()
-        snapshot.commit_kind = "ANALYZE"
-
-        result = self.scanner.should_scan(snapshot)
-
-        self.assertFalse(result)
+    def test_should_scan_returns_false_for_non_append_commits(self):
+        """DeltaFollowUpScanner should skip non-APPEND commits."""
+        for kind in ("COMPACT", "OVERWRITE", "EXPIRE", "ANALYZE"):
+            snapshot = Mock(commit_kind=kind)
+            self.assertFalse(self.scanner.should_scan(snapshot), kind)
 
 
 if __name__ == '__main__':

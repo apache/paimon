@@ -15,12 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""
-FollowUpScanner interface for streaming table scans.
-
-This is the Python equivalent of Java's FollowUpScanner interface used in
-DataTableStreamScan for follow-up planning after the initial scan.
-"""
+"""FollowUpScanner interface for streaming table scans."""
 
 from abc import ABC, abstractmethod
 
@@ -28,22 +23,7 @@ from pypaimon.snapshot.snapshot import Snapshot
 
 
 class FollowUpScanner(ABC):
-    """
-    Helper class for the follow-up planning of streaming table scans.
-
-    After the initial scan (handled by StartingScanner), the FollowUpScanner
-    determines which subsequent snapshots should be scanned and how to read
-    their delta data.
-    """
+    """Determines which snapshots to scan after the initial streaming scan."""
 
     @abstractmethod
-    def should_scan(self, snapshot: Snapshot) -> bool:
-        """
-        Determine whether the given snapshot should be scanned.
-
-        Args:
-            snapshot: The snapshot to evaluate
-
-        Returns:
-            True if the snapshot should be scanned, False to skip it
-        """
+    def should_scan(self, snapshot: Snapshot) -> bool: ...
