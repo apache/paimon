@@ -16,7 +16,10 @@
 # limitations under the License.
 ################################################################################
 import logging
-from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Dict, List, Optional
+
+from cachetools import LRUCache, cachedmethod
 
 from pypaimon.common.file_io import FileIO
 
@@ -28,7 +31,9 @@ from pypaimon.snapshot.snapshot import Snapshot
 class SnapshotManager:
     """Manager for snapshot files using unified FileIO."""
 
-    def __init__(self, table):
+    DEFAULT_CACHE_SIZE = 100
+
+    def __init__(self, table, cache_size: int = DEFAULT_CACHE_SIZE):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -36,6 +41,8 @@ class SnapshotManager:
         snapshot_path = self.table.table_path.rstrip('/')
         self.snapshot_dir = f"{snapshot_path}/snapshot"
         self.latest_file = f"{self.snapshot_dir}/LATEST"
+
+        self._cache: LRUCache = LRUCache(maxsize=cache_size)
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
         snapshot_json = self.get_latest_snapshot_json()
@@ -102,15 +109,7 @@ class SnapshotManager:
         return str(max_snapshot_id)
 
     def get_snapshot_path(self, snapshot_id: int) -> str:
-        """
-        Get the path for a snapshot file.
-
-        Args:
-            snapshot_id: The snapshot ID
-
-        Returns:
-            Path to the snapshot file
-        """
+        """Get the file path for the given snapshot ID."""
         return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
 
     def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
@@ -137,13 +136,35 @@ class SnapshotManager:
         Returns:
             The latest snapshot with time_millis <= timestamp, or None if no such snapshot exists
         """
-        earliest = 1
-        latest = self.get_latest_snapshot().id
+        earliest_snap = self.try_get_earliest_snapshot()
+        latest_snap = self.get_latest_snapshot()
+
+        if earliest_snap is None or latest_snap is None:
+            return None
+
+        earliest = earliest_snap.id
+        latest = latest_snap.id
         final_snapshot = None
 
         while earliest <= latest:
             mid = earliest + (latest - earliest) // 2
             snapshot = self.get_snapshot_by_id(mid)
+
+            # Handle gaps in snapshot sequence (expired snapshots)
+            if snapshot is None:
+                # Search forward to find next existing snapshot
+                found = False
+                for i in range(mid + 1, latest + 1):
+                    snapshot = self.get_snapshot_by_id(i)
+                    if snapshot is not None:
+                        mid = i
+                        found = True
+                        break
+                if not found:
+                    # No snapshots from mid to latest, search lower half
+                    latest = mid - 1
+                    continue
+
             commit_time = snapshot.time_millis
 
             if commit_time > timestamp:
@@ -158,18 +179,80 @@ class SnapshotManager:
         return final_snapshot
 
     def get_snapshot_by_id(self, snapshot_id: int) -> Optional[Snapshot]:
-        """
-        Get a snapshot by its ID.
-
-        Args:
-            snapshot_id: The snapshot ID
-
-        Returns:
-            The snapshot with the specified ID, or None if not found
-        """
+        """Get a snapshot by its ID, using cache if available."""
         snapshot_file = self.get_snapshot_path(snapshot_id)
         if not self.file_io.exists(snapshot_file):
             return None
+        return self._load_snapshot(snapshot_id)
 
-        snapshot_content = self.file_io.read_file_utf8(snapshot_file)
+    @cachedmethod(lambda self: self._cache)
+    def _load_snapshot(self, snapshot_id: int) -> Snapshot:
+        """Load a snapshot from storage."""
+        snapshot_content = self.file_io.read_file_utf8(self.get_snapshot_path(snapshot_id))
         return JSON.from_json(snapshot_content, Snapshot)
+
+    def get_snapshots_batch(
+        self, snapshot_ids: List[int], max_workers: int = 4
+    ) -> Dict[int, Optional[Snapshot]]:
+        """Fetch multiple snapshots in parallel, returning {id: Snapshot|None}."""
+        if not snapshot_ids:
+            return {}
+
+        # First, batch check which snapshot files exist
+        paths = [self.get_snapshot_path(sid) for sid in snapshot_ids]
+        existence = self.file_io.exists_batch(paths)
+
+        # Filter to only existing snapshots
+        existing_ids = [
+            sid for sid, path in zip(snapshot_ids, paths)
+            if existence.get(path, False)
+        ]
+
+        if not existing_ids:
+            return {sid: None for sid in snapshot_ids}
+
+        # Fetch existing snapshots in parallel
+        def fetch_one(sid: int) -> tuple:
+            try:
+                return (sid, self.get_snapshot_by_id(sid))
+            except Exception:
+                return (sid, None)
+
+        results = {sid: None for sid in snapshot_ids}
+
+        with ThreadPoolExecutor(max_workers=min(len(existing_ids), max_workers)) as executor:
+            for sid, snapshot in executor.map(fetch_one, existing_ids):
+                results[sid] = snapshot
+
+        return results
+
+    def find_next_scannable(
+        self,
+        start_id: int,
+        should_scan: Callable[[Snapshot], bool],
+        lookahead_size: int = 10,
+        max_workers: int = 4
+    ) -> tuple:
+        """Find the next snapshot passing should_scan, using batch lookahead."""
+        # Generate the range of snapshot IDs to check
+        snapshot_ids = list(range(start_id, start_id + lookahead_size))
+
+        # Batch fetch all snapshots
+        snapshots = self.get_snapshots_batch(snapshot_ids, max_workers)
+
+        # Find the first scannable snapshot in order
+        skipped_count = 0
+        for sid in snapshot_ids:
+            snapshot = snapshots.get(sid)
+            if snapshot is None:
+                # No more snapshots exist at this ID
+                # Return next_id = sid so caller knows where to wait
+                return (None, sid, skipped_count)
+            if should_scan(snapshot):
+                # Found a scannable snapshot
+                return (snapshot, sid + 1, skipped_count)
+            skipped_count += 1
+
+        # All fetched snapshots were skipped, but more may exist
+        # Return next_id pointing past the batch
+        return (None, start_id + lookahead_size, skipped_count)
