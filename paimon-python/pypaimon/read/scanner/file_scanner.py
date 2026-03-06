@@ -197,7 +197,6 @@ class FileScanner:
         self.partition_key_predicate = trim_and_transform_predicate(
             self.predicate, self.table.field_names, self.table.partition_keys)
         options = self.table.options
-        # Get split target size and open file cost from table options
         self.target_split_size = options.source_split_target_size()
         self.open_file_cost = options.source_split_open_file_cost()
 
@@ -252,7 +251,6 @@ class FileScanner:
         if not entries:
             return Plan([])
 
-        # Configure sharding if needed
         if self.idx_of_this_subtask is not None:
             split_generator.with_shard(self.idx_of_this_subtask, self.number_of_para_subtasks)
         elif self.start_pos_of_this_subtask is not None:
@@ -369,7 +367,7 @@ class FileScanner:
         return result
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
-        max_workers = max(8, self.table.options.scan_manifest_parallelism(os.cpu_count() or 8))
+        max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         manifest_files = [entry for entry in manifest_files if self._filter_manifest_file(entry)]
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,
