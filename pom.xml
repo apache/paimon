@@ -72,6 +72,7 @@ under the License.
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-api</module>
+        <module>paimon-lumina</module>
     </modules>
 
     <properties>
@@ -508,16 +509,6 @@ under the License.
             </modules>
             <activation>
                 <jdk>11</jdk>
-            </activation>
-        </profile>
-
-        <profile>
-            <id>paimon-lumina</id>
-            <modules>
-                <module>paimon-lumina</module>
-            </modules>
-            <activation>
-                <activeByDefault>true</activeByDefault>
             </activation>
         </profile>
     </profiles>

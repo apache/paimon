@@ -18,9 +18,9 @@
 
 package org.apache.paimon.lumina.index;
 
-import org.apache.paimon.lumina.LuminaBuilder;
-import org.apache.paimon.lumina.LuminaSearcher;
-import org.apache.paimon.lumina.MetricType;
+import org.aliyun.lumina.LuminaBuilder;
+import org.aliyun.lumina.LuminaSearcher;
+import org.aliyun.lumina.MetricType;
 
 import java.io.Closeable;
 import java.io.File;

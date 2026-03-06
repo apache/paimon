@@ -27,8 +27,6 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
-import org.apache.paimon.lumina.Lumina;
-import org.apache.paimon.lumina.LuminaException;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
@@ -36,6 +34,8 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
+import org.aliyun.lumina.Lumina;
+import org.aliyun.lumina.LuminaException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;

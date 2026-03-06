@@ -22,8 +22,8 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import scala.collection.JavaConverters._
 
-/** End-to-end tests for Lumina vector index read/write operations on Spark 3.5. */
-class LuminaVectorIndexE2ETest extends PaimonSparkTestBase {
+/** Tests for Lumina vector index read/write operations. */
+class LuminaVectorIndexTest extends PaimonSparkTestBase {
 
   private val indexType = "lumina-vector-ann"
   private val defaultOptions = "vector.dim=3,vector.index-type=DISKANN"

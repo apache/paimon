@@ -32,8 +32,6 @@ import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
-import org.apache.paimon.lumina.Lumina;
-import org.apache.paimon.lumina.LuminaException;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.schema.Schema;
@@ -51,6 +49,8 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.aliyun.lumina.Lumina;
+import org.aliyun.lumina.LuminaException;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
