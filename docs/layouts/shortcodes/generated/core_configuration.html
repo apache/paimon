@@ -57,6 +57,7 @@ under the License.
             <td>Write blob field using blob descriptor rather than blob bytes.</td>
         </tr>
         <tr>
+<<<<<<< HEAD
             <td><h5>blob-external-storage-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -69,6 +70,8 @@ under the License.
             <td>The external storage path where raw BLOB data from fields configured by 'blob-external-storage-field' is written at write time. Orphan file cleanup is not applied to this path.</td>
         </tr>
         <tr>
+=======
+>>>>>>> 9c7d9a7be1 (Fix docs)
             <td><h5>blob-descriptor-field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -409,6 +412,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether enable data evolution for row tracking table.</td>
+        </tr>
+        <tr>
+            <td><h5>data-evolution.force-split-row-range-contiguous</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether force each split group to contain only row-range-contiguous files for data evolution table scan splitting.</td>
         </tr>
         <tr>
             <td><h5>data-file.external-paths</h5></td>
