@@ -25,28 +25,37 @@ import org.assertj.core.api.Assertions.assertThat
 
 class TriggerTagAutomaticCreationProcedureTest extends PaimonSparkTestBase {
 
-  test("Paimon procedure: trigger tag automatic creation test") {
+  test("Paimon procedure: trigger tag automatic creation test with data") {
+    autoTagTest(true);
+  }
+
+  test("Paimon procedure: trigger tag automatic creation test without data") {
+    autoTagTest(false);
+  }
+
+  def autoTagTest(haveData: Boolean) = {
     spark.sql("""CREATE TABLE T (id INT, name STRING)
                 |USING PAIMON
                 |TBLPROPERTIES (
                 |'primary-key'='id'
                 |)""".stripMargin)
 
-    spark.sql("insert into T values(1, 'a')")
-
     val table = loadTable("T")
-    assertResult(1)(table.snapshotManager().snapshotCount())
+    if (haveData) {
+      spark.sql("insert into T values(1, 'a')")
+      assertResult(1)(table.snapshotManager().snapshotCount())
+    }
 
     assertResult(0)(spark.sql("show tags T").count())
 
     spark.sql("""alter table T set tblproperties(
                 |'tag.automatic-creation'='process-time',
                 |'tag.creation-period'='daily',
-                |'tag.creation-delay'='10 m',
+                |'tag.creation-delay'='0 m',
                 |'tag.num-retained-max'='90'
                 |)""".stripMargin)
 
-    spark.sql("CALL paimon.sys.trigger_tag_automatic_creation(table => 'test.T')")
+    spark.sql("CALL paimon.sys.trigger_tag_automatic_creation(table => 'test.T', force => true)")
     assertResult(1)(spark.sql("show tags T").count())
     assertResult(
       spark
