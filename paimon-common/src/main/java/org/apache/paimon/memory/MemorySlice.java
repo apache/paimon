@@ -129,6 +129,6 @@ public final class MemorySlice implements Comparable<MemorySlice> {
                 return res;
             }
         }
-        return length - other.length;
+        return Integer.compare(length, other.length);
     }
 }

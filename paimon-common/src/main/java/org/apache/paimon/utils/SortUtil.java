@@ -272,7 +272,7 @@ public class SortUtil {
                 return result;
             }
         }
-        return length1 - length2;
+        return Integer.compare(length1, length2);
     }
 
     private static int unsignedByteToInt(byte value) {
