@@ -2271,6 +2271,17 @@ public class CoreOptions implements Serializable {
                             .withDescription(
                                     "Defines the action to take when an update modifies columns that are covered by a global index.");
 
+    public static final ConfigOption<Boolean> MERGE_INTO_SKIP_FILE_PRUNING =
+            key("merge-into.skip-file-pruning")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, skips the file-level pruning step (the extra collect() Spark job) "
+                                    + "in MergeInto partial column update. "
+                                    + "Use this when most files in the target partition are expected to be "
+                                    + "updated, so that the overhead of collecting touched file IDs outweighs "
+                                    + "the benefit of pruning untouched files.");
+
     public static final ConfigOption<MemorySize> LOOKUP_MERGE_BUFFER_SIZE =
             key("lookup.merge-buffer-size")
                     .memoryType()
@@ -3221,6 +3232,10 @@ public class CoreOptions implements Serializable {
 
     public GlobalIndexColumnUpdateAction globalIndexColumnUpdateAction() {
         return options.get(GLOBAL_INDEX_COLUMN_UPDATE_ACTION);
+    }
+
+    public boolean mergeIntoSkipFilePruning() {
+        return options.get(MERGE_INTO_SKIP_FILE_PRUNING);
     }
 
     public LookupStrategy lookupStrategy() {

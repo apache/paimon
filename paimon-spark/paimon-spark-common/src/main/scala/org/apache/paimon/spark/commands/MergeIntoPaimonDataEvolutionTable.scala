@@ -27,6 +27,7 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
 import org.apache.paimon.spark.catalyst.analysis.PaimonUpdateTable.toColumn
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.util.ScanPlanHelper.createNewScanPlan
 import org.apache.paimon.table.FileStoreTable
@@ -61,7 +62,8 @@ case class MergeIntoPaimonDataEvolutionTable(
     notMatchedActions: Seq[MergeAction],
     notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
-  with WithFileStoreTable {
+  with WithFileStoreTable
+  with ExpressionHelper {
 
   private lazy val writer = PaimonSparkWriter(table)
 
@@ -141,7 +143,39 @@ case class MergeIntoPaimonDataEvolutionTable(
   }
 
   private def invokeMergeInto(sparkSession: SparkSession): Unit = {
-    val plan = table.newSnapshotReader().read()
+    // When mergeIntoSkipFilePruning is enabled, file-level pruning is skipped entirely, so we
+    // push down partition-column-only filters from the merge condition into the snapshot reader.
+    // This avoids a full-table scan by limiting tableSplits to the relevant partitions.
+    // When mergeIntoSkipFilePruning is disabled, the join-based file pruning already handles
+    // split selection precisely, so partition pushdown is unnecessary.
+    val snapshotReader = table.newSnapshotReader()
+    if (table.coreOptions().mergeIntoSkipFilePruning()) {
+      val partitionKeys: Set[String] = table.schema().partitionKeys().asScala.toSet
+      if (partitionKeys.nonEmpty) {
+        // Step 1: keep only sub-predicates that can be evaluated on the target table alone.
+        // Step 2: further restrict to those whose referenced columns are all partition columns.
+        val partitionCondition: Option[Expression] =
+          getExpressionOnlyRelated(matchedCondition, targetTable).flatMap {
+            targetOnlyCond =>
+              val partitionPredicates = splitConjunctivePredicates(targetOnlyCond).filter {
+                expr =>
+                  expr.references.forall(
+                    attr => partitionKeys.exists(pk => resolver(pk, attr.name)))
+              }
+              partitionPredicates.reduceOption(org.apache.spark.sql.catalyst.expressions.And)
+          }
+        partitionCondition.foreach {
+          cond =>
+            val filter = convertConditionToPaimonPredicate(
+              cond,
+              targetRelation.output,
+              rowType,
+              ignorePartialFailure = true)
+            filter.foreach(snapshotReader.withFilter)
+        }
+      }
+    }
+    val plan = snapshotReader.read()
     val tableSplits: Seq[DataSplit] = plan
       .splits()
       .asScala
@@ -213,6 +247,15 @@ case class MergeIntoPaimonDataEvolutionTable(
     // Self-Merge shortcut:
     // In Self-Merge mode, every row in the table may be updated, so we scan all splits.
     if (isSelfMergeOnRowId) {
+      return tableSplits
+    }
+
+    // Skip file-level pruning shortcut:
+    // When most files in the target partition are expected to be updated, the overhead of
+    // collecting touched firstRowIds (an extra Spark job) outweighs the benefit of pruning
+    // untouched files. In this case, return all splits directly and let the LeftOuter join
+    // handle unmatched rows via notMatchedBySourceInstructions (pass-through).
+    if (table.coreOptions().mergeIntoSkipFilePruning()) {
       return tableSplits
     }
 
