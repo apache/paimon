@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.spark.procedure.AlterFunctionProcedure;
 import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
+import org.apache.paimon.spark.procedure.CompactChainTableProcedure;
 import org.apache.paimon.spark.procedure.CompactDatabaseProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
@@ -100,6 +101,7 @@ public class SparkProcedures {
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
         procedureBuilders.put("compact_database", CompactDatabaseProcedure::builder);
+        procedureBuilders.put("compact_chain_table", CompactChainTableProcedure::builder);
         procedureBuilders.put("rescale", RescaleProcedure::builder);
         procedureBuilders.put("migrate_database", MigrateDatabaseProcedure::builder);
         procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);

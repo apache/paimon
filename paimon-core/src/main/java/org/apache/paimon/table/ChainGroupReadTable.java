@@ -42,6 +42,8 @@ import org.apache.paimon.utils.ChainTableUtils;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -169,7 +171,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                 splits.add(
                         new ChainSplit(
                                 dataSplit.partition(),
-                                dataSplit.dataFiles(),
+                                Lists.newArrayList(dataSplit),
                                 fileBucketPathMapping,
                                 fileBranchMapping));
                 completePartitions.add(dataSplit.partition());
@@ -277,10 +279,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                         ChainSplit split =
                                 new ChainSplit(
                                         partitionParis.getKey(),
-                                        entry.getValue().stream()
-                                                .flatMap(
-                                                        datsSplit -> datsSplit.dataFiles().stream())
-                                                .collect(Collectors.toList()),
+                                        entry.getValue(),
                                         fileBucketPathMapping,
                                         fileBranchMapping);
                         splits.add(split);

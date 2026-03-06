@@ -20,7 +20,6 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
@@ -36,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
+import java.util.stream.Collectors;
 
 /**
  * A split describes chain table read scope. It follows DataSplit's custom serialization pattern and
@@ -48,23 +48,34 @@ public class ChainSplit implements Split {
     private static final int VERSION = 1;
 
     private BinaryRow logicalPartition;
+    private List<DataSplit> dataSplits;
     private List<DataFileMeta> dataFiles;
     private Map<String, String> fileBranchMapping;
     private Map<String, String> fileBucketPathMapping;
 
     public ChainSplit(
             BinaryRow logicalPartition,
-            List<DataFileMeta> dataFiles,
+            List<DataSplit> dataSplits,
             Map<String, String> fileBranchMapping,
             Map<String, String> fileBucketPathMapping) {
         this.logicalPartition = logicalPartition;
-        this.dataFiles = dataFiles;
+        this.dataSplits = dataSplits;
+        this.dataFiles =
+                dataSplits == null
+                        ? null
+                        : dataSplits.stream()
+                                .flatMap(dataSplit -> dataSplit.dataFiles().stream())
+                                .collect(Collectors.toList());
         this.fileBranchMapping = fileBranchMapping;
         this.fileBucketPathMapping = fileBucketPathMapping;
     }
 
     public BinaryRow logicalPartition() {
         return logicalPartition;
+    }
+
+    public List<DataSplit> dataSplits() {
+        return dataSplits;
     }
 
     public List<DataFileMeta> dataFiles() {
@@ -103,12 +114,12 @@ public class ChainSplit implements Split {
         }
         ChainSplit that = (ChainSplit) o;
         return Objects.equals(logicalPartition, that.logicalPartition)
-                && Objects.equals(dataFiles, that.dataFiles);
+                && Objects.equals(dataSplits, that.dataSplits);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(logicalPartition, dataFiles);
+        return Objects.hash(logicalPartition, dataSplits);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -121,6 +132,7 @@ public class ChainSplit implements Split {
 
     protected void assign(ChainSplit other) {
         this.logicalPartition = other.logicalPartition;
+        this.dataSplits = other.dataSplits;
         this.dataFiles = other.dataFiles;
         this.fileBranchMapping = other.fileBranchMapping;
         this.fileBucketPathMapping = other.fileBucketPathMapping;
@@ -131,12 +143,11 @@ public class ChainSplit implements Split {
 
         SerializationUtils.serializeBinaryRow(logicalPartition, out);
 
-        DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
-        int size = dataFiles == null ? 0 : dataFiles.size();
+        int size = dataSplits == null ? 0 : dataSplits.size();
         out.writeInt(size);
         if (size > 0) {
-            for (DataFileMeta file : dataFiles) {
-                dataFileSer.serialize(file, out);
+            for (DataSplit file : dataSplits) {
+                file.serialize(out);
             }
         }
 
@@ -161,10 +172,9 @@ public class ChainSplit implements Split {
         BinaryRow logicalPartition = SerializationUtils.deserializeBinaryRow(in);
 
         int n = in.readInt();
-        List<DataFileMeta> dataFiles = new ArrayList<>(n);
-        DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
+        List<DataSplit> dataSplits = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
-            dataFiles.add(dataFileSer.deserialize(in));
+            dataSplits.add(DataSplit.deserialize(in));
         }
 
         int size = in.readInt();
@@ -183,6 +193,6 @@ public class ChainSplit implements Split {
         }
 
         return new ChainSplit(
-                logicalPartition, dataFiles, fileBucketPathMapping, fileBranchMapping);
+                logicalPartition, dataSplits, fileBucketPathMapping, fileBranchMapping);
     }
 }

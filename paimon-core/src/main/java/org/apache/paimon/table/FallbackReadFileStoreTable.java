@@ -411,6 +411,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             return this;
         }
 
+        public InnerTableScan withPartitionFilter(
+                PartitionPredicate mainPartitionPredicate,
+                PartitionPredicate fallbackPartitionPredicate) {
+            mainScan.withPartitionFilter(mainPartitionPredicate);
+            fallbackScan.withPartitionFilter(fallbackPartitionPredicate);
+            return this;
+        }
+
         @Override
         public FallbackReadScan withBucketFilter(Filter<Integer> bucketFilter) {
             mainScan.withBucketFilter(bucketFilter);
