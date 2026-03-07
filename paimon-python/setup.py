@@ -50,6 +50,11 @@ setup(
     packages=PACKAGES,
     include_package_data=True,
     install_requires=install_requires,
+    entry_points={
+        'console_scripts': [
+            'paimon=pypaimon.cli:main',
+        ],
+    },
     extras_require={
         'ray': [
             'ray>=2.10,<3; python_version>="3.7"',
