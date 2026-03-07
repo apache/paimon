@@ -298,6 +298,7 @@ This section introduce all available spark procedures about paimon.
             <li>table: the target table identifier or branch identifier. Cannot be empty.</li>
             <li>branch: name of the branch to be merged.</li>
             <li>tag: name of the new tag. Cannot be empty.</li>
+            <li>ignoreIfExists: ignore if branch exists, default is false.</li>
       </td>
       <td>
           CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch')<br/><br/>

@@ -760,21 +760,14 @@ All available procedures are listed below.
    <tr>
       <td>create_branch</td>
       <td>
-         -- Use named argument<br/>
          CALL [catalog.]sys.create_branch(`table` => 'identifier', branch => 'branchName', tag => 'tagName')<br/><br/>
-         -- Use indexed argument<br/>
-         -- based on the specified tag <br/>
-         CALL [catalog.]sys.create_branch('identifier', 'branchName', 'tagName')<br/>
-         -- based on the specified branch's tag <br/>
-         CALL [catalog.]sys.create_branch('branch_table', 'branchName', 'tagName')<br/>
-         -- create empty branch <br/>
-         CALL [catalog.]sys.create_branch('identifier', 'branchName')
       </td>
       <td>
          To create a branch based on given tag, or just create empty branch. Arguments:
             <li>table: the target table identifier or branch identifier. Cannot be empty.</li>
-            <li>branchName: name of the new branch.</li>
-            <li>tagName: name of the tag which the new branch is based on.</li>
+            <li>branch: name of the new branch.</li>
+            <li>tag: name of the tag which the new branch is based on.</li>
+            <li>ignoreIfExists: ignore if branch exists, default is false.</li>
       </td>
       <td>
          CALL sys.create_branch(`table` => 'default.T', branch => 'branch1', tag => 'tag1')<br/>
