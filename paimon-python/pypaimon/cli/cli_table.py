@@ -236,7 +236,11 @@ def cmd_table_create(args):
                 sys.exit(1)
             
             # Convert type string to PyArrow type
-            pa_type = _parse_field_type(field_type)
+            from pypaimon.schema.data_types import DataTypeParser, PyarrowFieldParser
+
+            # Parse type string to Paimon DataType, then convert to PyArrow type
+            paimon_type = DataTypeParser.parse_data_type(field_type)
+            pa_type = PyarrowFieldParser.from_paimon_type(paimon_type)
             pa_fields.append(pa.field(field_name, pa_type))
         
         pa_schema = pa.schema(pa_fields)
@@ -265,60 +269,6 @@ def cmd_table_create(args):
     except Exception as e:
         print(f"Error: Failed to create table: {e}", file=sys.stderr)
         sys.exit(1)
-
-
-def _parse_field_type(type_str: str):
-    """
-    Parse a type string to PyArrow data type.
-    
-    Args:
-        type_str: Type string (e.g., 'INT', 'STRING', 'BIGINT')
-    
-    Returns:
-        PyArrow data type.
-    """
-    import pyarrow as pa
-    
-    type_upper = type_str.upper().strip()
-    
-    # Map common type names to PyArrow types
-    type_mapping = {
-        'INT': pa.int32(),
-        'INTEGER': pa.int32(),
-        'BIGINT': pa.int64(),
-        'LONG': pa.int64(),
-        'SMALLINT': pa.int16(),
-        'TINYINT': pa.int8(),
-        'FLOAT': pa.float32(),
-        'DOUBLE': pa.float64(),
-        'BOOLEAN': pa.bool_(),
-        'BOOL': pa.bool_(),
-        'STRING': pa.string(),
-        'VARCHAR': pa.string(),
-        'CHAR': pa.string(),
-        'BINARY': pa.binary(),
-        'VARBINARY': pa.binary(),
-        'DATE': pa.date32(),
-        'TIMESTAMP': pa.timestamp('us'),
-        'TIMESTAMP(6)': pa.timestamp('us'),
-        'TIMESTAMP(3)': pa.timestamp('ms'),
-    }
-    
-    if type_upper in type_mapping:
-        return type_mapping[type_upper]
-    
-    # Handle DECIMAL(precision, scale)
-    if type_upper.startswith('DECIMAL'):
-        import re
-        match = re.match(r'DECIMAL\((\d+),\s*(\d+)\)', type_upper)
-        if match:
-            precision = int(match.group(1))
-            scale = int(match.group(2))
-            return pa.decimal128(precision, scale)
-    
-    # Default to string if unknown
-    print(f"Warning: Unknown type '{type_str}', defaulting to STRING", file=sys.stderr)
-    return pa.string()
 
 
 def add_table_subcommands(table_parser):

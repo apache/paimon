@@ -179,8 +179,6 @@ Table Options:
 
 Create a new Paimon table with a schema defined in a JSON or YAML file.
 
-#### Basic Usage
-
 ```shell
 paimon table create DATABASE.TABLE --schema-file SCHEMA_FILE
 ```
@@ -189,8 +187,6 @@ paimon table create DATABASE.TABLE --schema-file SCHEMA_FILE
 
 - `--schema-file, -s`: Path to schema definition file (JSON or YAML) - **Required**
 - `--ignore-if-exists, -i`: Do not raise error if table already exists
-
-#### Schema File Format
 
 The schema file should be a JSON or YAML file with the following structure:
 
@@ -248,15 +244,3 @@ options:
 
 comment: User information table
 ```
-
-#### Supported Data Types
-
-The following data types are supported:
-
-- **Integer Types**: `INT`, `INTEGER`, `BIGINT`, `LONG`, `SMALLINT`, `TINYINT`
-- **Floating Types**: `FLOAT`, `DOUBLE`
-- **Boolean Type**: `BOOLEAN`, `BOOL`
-- **String Types**: `STRING`, `VARCHAR`, `CHAR`
-- **Binary Types**: `BINARY`, `VARBINARY`
-- **Date/Time Types**: `DATE`, `TIMESTAMP`, `TIMESTAMP(6)`, `TIMESTAMP(3)`
-- **Decimal Type**: `DECIMAL(precision, scale)` - e.g., `DECIMAL(10, 2)`
