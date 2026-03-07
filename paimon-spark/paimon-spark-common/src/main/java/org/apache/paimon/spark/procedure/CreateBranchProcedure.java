@@ -35,7 +35,8 @@ public class CreateBranchProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.required("branch", StringType),
-                ProcedureParameter.optional("tag", StringType)
+                ProcedureParameter.optional("tag", StringType),
+                ProcedureParameter.optional("ignoreIfExists", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -63,14 +64,15 @@ public class CreateBranchProcedure extends BaseProcedure {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String branch = args.getString(1);
         String tag = args.isNullAt(2) ? null : args.getString(2);
+        boolean ignoreIfExists = !args.isNullAt(3) && Boolean.parseBoolean(args.getString(3));
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
                     if (tag != null) {
-                        table.createBranch(branch, tag);
+                        table.createBranch(branch, tag, ignoreIfExists);
                     } else {
-                        table.createBranch(branch);
+                        table.createBranch(branch, ignoreIfExists);
                     }
 
                     InternalRow outputRow = newInternalRow(true);

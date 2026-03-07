@@ -674,6 +674,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        branchManager().createBranch(branchName, ignoreIfExists);
+    }
+
+    @Override
+    public void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        branchManager().createBranch(branchName, tagName, ignoreIfExists);
+    }
+
+    @Override
     public void deleteBranch(String branchName) {
         String fallbackBranch =
                 coreOptions().toConfiguration().get(CoreOptions.SCAN_FALLBACK_BRANCH);
