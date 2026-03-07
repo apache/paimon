@@ -327,6 +327,7 @@ public class KeyValueFileReadWriteTest {
                                 null,
                                 null,
                                 CoreOptions.ExternalPathStrategy.NONE,
+                                null,
                                 false,
                                 null);
 
