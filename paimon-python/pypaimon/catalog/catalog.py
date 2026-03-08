@@ -48,6 +48,41 @@ class Catalog(ABC):
         """Create a database with properties."""
 
     @abstractmethod
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        """Drop a database.
+
+        Args:
+            name: Name of the database to drop.
+            ignore_if_not_exists: If True, do not raise error if database does not exist.
+            cascade: If True, drop all tables in the database before dropping it.
+        """
+
+    @abstractmethod
+    def list_tables(self, database_name: str) -> List[str]:
+        """List all table names in the given database.
+
+        Args:
+            database_name: Name of the database.
+
+        Returns:
+            List of table names.
+        """
+
+    def alter_database(self, name: str, changes: list):
+        """Alter database properties.
+
+        Args:
+            name: Name of the database.
+            changes: List of PropertyChange objects.
+
+        Raises:
+            NotImplementedError: If the catalog does not support alter database.
+        """
+        raise NotImplementedError(
+            "alter_database is not supported by this catalog."
+        )
+
+    @abstractmethod
     def get_table(self, identifier: Union[str, Identifier]) -> 'Table':
         """Get paimon table identified by the given Identifier."""
 
@@ -66,6 +101,20 @@ class Catalog(ABC):
         Raises:
             TableNotExistException: If table does not exist and ignore_if_not_exists is False
         """
+
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        """Rename a table.
+
+        Args:
+            source_identifier: Current table identifier.
+            target_identifier: New table identifier.
+
+        Raises:
+            NotImplementedError: If the catalog does not support rename table.
+        """
+        raise NotImplementedError(
+            "rename_table is not supported by this catalog."
+        )
 
     @abstractmethod
     def alter_table(

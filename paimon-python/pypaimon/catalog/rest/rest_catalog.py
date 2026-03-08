@@ -139,12 +139,24 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        if not cascade:
+            try:
+                tables = self.list_tables(name)
+                if tables:
+                    raise ValueError(
+                        f"Database {name} is not empty. "
+                        f"Use cascade=True to drop all tables first."
+                    )
+            except DatabaseNotExistException:
+                if not ignore_if_not_exists:
+                    raise
+                return
+
         try:
             self.rest_api.drop_database(name)
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
-                # Convert REST API exception to catalog exception
                 raise DatabaseNotExistException(name) from e
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
@@ -205,6 +217,20 @@ class RESTCatalog(Catalog):
         except AlreadyExistsException as e:
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
+
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+        try:
+            self.rest_api.rename_table(source_identifier, target_identifier)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(source_identifier) from e
+        except AlreadyExistsException as e:
+            raise TableAlreadyExistException(target_identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(source_identifier) from e
 
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
         if not isinstance(identifier, Identifier):

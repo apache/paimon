@@ -70,7 +70,7 @@ paimon [OPTIONS] COMMAND [ARGS]...
 - `-c, --config PATH`: Path to catalog configuration file (default: `paimon.yaml`)
 - `--help`: Show help message and exit
 
-## Commands
+## Table Commands
 
 ### Table Read
 
@@ -230,6 +230,21 @@ Successfully imported 3 rows into 'mydb.users'.
 - Data types should be compatible with the table schema
 - The import operation appends data to the existing table
 
+### Table Rename
+
+Rename a table in the catalog. Both source and target must be specified in `database.table` format.
+
+```shell
+paimon table rename mydb.old_name mydb.new_name
+```
+
+Output:
+```
+Table 'mydb.old_name' renamed to 'mydb.new_name' successfully.
+```
+
+**Note:** Both filesystem and REST catalogs support table rename. For filesystem catalogs, the rename is performed by renaming the underlying table directory.
+
 ### Table Drop
 
 Drop a table from the catalog. This will permanently delete the table and all its data.
@@ -351,4 +366,82 @@ paimon table alter mydb.users alter-column -n age -t BIGINT -c 'User age in year
 
 ```shell
 paimon table alter mydb.users update-comment -c "Updated user information table"
+```
+
+## Database Commands
+
+### DB Get
+
+Get and display database information in JSON format.
+
+```shell
+paimon db get mydb
+```
+
+Output:
+```json
+{
+  "name": "mydb",
+  "options": {}
+}
+```
+
+### DB Create
+
+Create a new database.
+
+```shell
+# Create a simple database
+paimon db create mydb
+
+# Create with properties
+paimon db create mydb -p '{"key1": "value1", "key2": "value2"}'
+
+# Create and ignore if already exists
+paimon db create mydb -i
+```
+
+### DB Drop
+
+Drop an existing database.
+
+```shell
+# Drop a database
+paimon db drop mydb
+
+# Drop and ignore if not exists
+paimon db drop mydb --ignore-if-not-exists
+
+# Drop with all tables (cascade)
+paimon db drop mydb --cascade
+```
+
+### DB Alter
+
+Alter database properties by setting or removing properties.
+
+```shell
+# Set properties
+paimon db alter mydb --set '{"key1": "value1", "key2": "value2"}'
+
+# Remove properties
+paimon db alter mydb --remove key1 key2
+
+# Set and remove properties in one command
+paimon db alter mydb --set '{"key1": "new_value"}' --remove key2
+```
+
+### DB List Tables
+
+List all tables in a database.
+
+```shell
+paimon db list-tables mydb
+```
+
+Output:
+```
+orders
+products
+users
 ```
