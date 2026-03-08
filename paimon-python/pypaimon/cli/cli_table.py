@@ -252,6 +252,8 @@ def cmd_table_import(args):
         sys.exit(1)
     
     # Write data to table
+    table_write = None
+    table_commit = None
     try:
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -270,14 +272,17 @@ def cmd_table_import(args):
         
         # Commit write
         table_commit.commit(table_write.prepare_commit())
-        table_write.close()
-        table_commit.close()
         
         print(f"Successfully imported {len(df)} rows into '{database_name}.{table_name}'.")
         
     except Exception as e:
         print(f"Error: Failed to import data: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        if table_write is not None:
+            table_write.close()
+        if table_commit is not None:
+            table_commit.close()
 
 
 def cmd_table_drop(args):
