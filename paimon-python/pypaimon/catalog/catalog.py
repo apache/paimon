@@ -56,6 +56,18 @@ class Catalog(ABC):
         """Create table with schema."""
 
     @abstractmethod
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+        """Drop a table from the catalog.
+
+        Args:
+            identifier: Table identifier (string or Identifier instance)
+            ignore_if_not_exists: If True, do not raise error if table does not exist
+
+        Raises:
+            TableNotExistException: If table does not exist and ignore_if_not_exists is False
+        """
+
+    @abstractmethod
     def alter_table(
         self,
         identifier: Union[str, Identifier],
