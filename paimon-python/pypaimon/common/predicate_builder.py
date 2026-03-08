@@ -110,16 +110,6 @@ class PredicateBuilder:
         return self._build_predicate('like', field, [pattern_literal])
 
     @staticmethod
-    def always_true() -> Predicate:
-        """Create a predicate that always evaluates to true."""
-        return Predicate(method='alwaysTrue', index=None, field=None, literals=None)
-
-    @staticmethod
-    def always_false() -> Predicate:
-        """Create a predicate that always evaluates to false."""
-        return Predicate(method='alwaysFalse', index=None, field=None, literals=None)
-
-    @staticmethod
     def and_predicates(predicates: List[Predicate]) -> Optional[Predicate]:
         """Create an AND predicate from multiple predicates."""
         if len(predicates) == 0:

@@ -26,7 +26,6 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
 from pypaimon.common.predicate import Predicate
-from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.manifest.schema.simple_stats import SimpleStats
 from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
 from pypaimon.table.row.offset_row import OffsetRow
@@ -405,75 +404,6 @@ class PredicateTest(unittest.TestCase):
         predicate = predicate_builder.or_predicates([predicate1, predicate2])
         _check_filtered_result(table.new_read_builder().with_filter(predicate),
                                self.df.loc[[0, 3, 4]])
-
-    def test_always_true(self):
-        predicate = PredicateBuilder.always_true()
-        record = OffsetRow([1, 'abc'], 0, 2)
-        self.assertTrue(predicate.test(record))
-
-    def test_always_true_null_record(self):
-        # mirrors testAlwaysTrueRow with null value
-        predicate = PredicateBuilder.always_true()
-        self.assertTrue(predicate.test(OffsetRow([None], 0, 1)))
-
-    def test_always_true_stats(self):
-        # mirrors testAlwaysTrueMinMax
-        predicate = PredicateBuilder.always_true()
-        stat = SimpleStats(
-            min_values=GenericRow([1], [False]),
-            max_values=GenericRow([10], [False]),
-            null_counts=[0],
-        )
-        self.assertTrue(predicate.test_by_simple_stats(stat, 10))
-        # also with null stats (row_count=1, null stats)
-        stat_null = SimpleStats(
-            min_values=GenericRow([], []),
-            max_values=GenericRow([], []),
-            null_counts=[None],
-        )
-        self.assertTrue(predicate.test_by_simple_stats(stat_null, 1))
-
-    def test_always_false(self):
-        predicate = PredicateBuilder.always_false()
-        record = OffsetRow([1, 'abc'], 0, 2)
-        self.assertFalse(predicate.test(record))
-
-    def test_always_false_null_record(self):
-        # mirrors testAlwaysFalseRow with null value
-        predicate = PredicateBuilder.always_false()
-        self.assertFalse(predicate.test(OffsetRow([None], 0, 1)))
-
-    def test_always_false_stats(self):
-        # mirrors testAlwaysFalseMinMax
-        predicate = PredicateBuilder.always_false()
-        stat = SimpleStats(
-            min_values=GenericRow([1], [False]),
-            max_values=GenericRow([10], [False]),
-            null_counts=[0],
-        )
-        self.assertFalse(predicate.test_by_simple_stats(stat, 10))
-        stat_null = SimpleStats(
-            min_values=GenericRow([], []),
-            max_values=GenericRow([], []),
-            null_counts=[None],
-        )
-        self.assertFalse(predicate.test_by_simple_stats(stat_null, 1))
-
-    def test_always_true_and_other(self):
-        table = self.catalog.get_table('default.test_append')
-        predicate_builder = table.new_read_builder().new_predicate_builder()
-        always_true = PredicateBuilder.always_true()
-        equal_pred = predicate_builder.equal('f0', 1)
-        predicate = predicate_builder.and_predicates([always_true, equal_pred])
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[0]])
-
-    def test_always_false_or_other(self):
-        table = self.catalog.get_table('default.test_append')
-        predicate_builder = table.new_read_builder().new_predicate_builder()
-        always_false = PredicateBuilder.always_false()
-        equal_pred = predicate_builder.equal('f0', 1)
-        predicate = predicate_builder.or_predicates([always_false, equal_pred])
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[0]])
 
     def test_is_null(self):
         stat_no_count = SimpleStats(

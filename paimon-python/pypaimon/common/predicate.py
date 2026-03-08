@@ -60,11 +60,6 @@ class Predicate:
         if self.method == 'or':
             t = any(p.test(record) for p in self.literals)
             return t
-        if self.method == 'alwaysTrue':
-            return True
-        if self.method == 'alwaysFalse':
-            return False
-
         field_value = record.get_field(self.index)
         tester = Predicate.testers.get(self.method)
         if tester:
@@ -77,10 +72,6 @@ class Predicate:
             return all(p.test_by_simple_stats(stat, row_count) for p in self.literals)
         if self.method == 'or':
             return any(p.test_by_simple_stats(stat, row_count) for p in self.literals)
-        if self.method == 'alwaysTrue':
-            return True
-        if self.method == 'alwaysFalse':
-            return False
 
         null_count = stat.null_counts[self.index]
 
@@ -108,10 +99,6 @@ class Predicate:
         if self.method == 'or':
             return reduce(lambda x, y: x | y,
                           [p.to_arrow() for p in self.literals])
-        if self.method == 'alwaysTrue':
-            return pyarrow_compute.scalar(True)
-        if self.method == 'alwaysFalse':
-            return pyarrow_compute.scalar(False)
 
         if self.method == 'startsWith':
             pattern = self.literals[0]
@@ -465,29 +452,3 @@ class Like(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return True
-
-
-class AlwaysTrue(Tester):
-    name = "alwaysTrue"
-
-    def test_by_value(self, val, literals) -> bool:
-        return True
-
-    def test_by_stats(self, min_v, max_v, literals) -> bool:
-        return True
-
-    def test_by_arrow(self, val, literals) -> bool:
-        return True
-
-
-class AlwaysFalse(Tester):
-    name = "alwaysFalse"
-
-    def test_by_value(self, val, literals) -> bool:
-        return False
-
-    def test_by_stats(self, min_v, max_v, literals) -> bool:
-        return False
-
-    def test_by_arrow(self, val, literals) -> bool:
-        return False
