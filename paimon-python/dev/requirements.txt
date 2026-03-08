@@ -33,3 +33,4 @@ pyroaring
 readerwriterlock>=1,<2
 zstandard>=0.19,<1
 cramjam>=1.3.0,<3; python_version>="3.7"
+pyyaml>=5.4,<7
