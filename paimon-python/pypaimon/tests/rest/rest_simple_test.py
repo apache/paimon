@@ -740,6 +740,16 @@ class RESTSimpleTest(RESTBaseTest):
         except DatabaseNotExistException:
             self.fail("drop_database with ignore_if_not_exists=True should not raise DatabaseNotExistException")
 
+        # test drop database cascade
+        self.rest_catalog.create_database("db2", False)
+        self.rest_catalog.create_table("db2.tbl2",
+                                       Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt']),
+                                       False)
+        self.rest_catalog.drop_database("db2", False, True)
+        with self.assertRaises(DatabaseNotExistException) as context:
+            self.rest_catalog.get_database("db2")
+        self.assertEqual("Database db2 does not exist", str(context.exception))
+
     def test_alter_table(self):
         catalog = self.rest_catalog
         catalog.create_database("test_db_alter", True)
