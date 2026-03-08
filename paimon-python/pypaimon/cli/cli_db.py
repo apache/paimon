@@ -195,6 +195,7 @@ def cmd_db_list(args):
         for database_name in databases:
             print(database_name)
 
+
 def cmd_db_list_tables(args):
     """
     Execute the 'db list-tables' command.
