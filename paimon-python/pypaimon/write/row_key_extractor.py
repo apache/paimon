@@ -180,11 +180,12 @@ def _pick_randomly(bucket_list: List[int]) -> int:
 
 
 class _SimplePartitionIndex:
-    def __init__(self) -> None:
+    def __init__(self, num_assigners: int, assign_id: int, max_buckets_num: int) -> None:
         self.hash2bucket: Dict[int, int] = {}
         self.bucket_information: Dict[int, int] = {}
         self.bucket_list: List[int] = []
         self.current_bucket: int = 0
+        self._load_new_bucket(max_buckets_num, num_assigners, assign_id)
 
     def assign(
         self,
@@ -248,7 +249,8 @@ class SimpleHashBucketAssigner:
 
     def assign(self, partition: Tuple, hash_value: int) -> int:
         if partition not in self._partition_index:
-            self._partition_index[partition] = _SimplePartitionIndex()
+            self._partition_index[partition] = _SimplePartitionIndex(
+                self.num_assigners, self.assign_id, self.max_buckets_num)
         index = self._partition_index[partition]
 
         assigned, self.max_bucket_id = index.assign(
