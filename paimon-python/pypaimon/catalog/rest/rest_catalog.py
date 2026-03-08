@@ -139,12 +139,24 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        if not cascade:
+            try:
+                tables = self.list_tables(name)
+                if tables:
+                    raise ValueError(
+                        f"Database {name} is not empty. "
+                        f"Use cascade=True to drop all tables first."
+                    )
+            except DatabaseNotExistException:
+                if not ignore_if_not_exists:
+                    raise
+                return
+
         try:
             self.rest_api.drop_database(name)
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
-                # Convert REST API exception to catalog exception
                 raise DatabaseNotExistException(name) from e
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e

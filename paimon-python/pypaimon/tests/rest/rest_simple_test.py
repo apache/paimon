@@ -713,6 +713,11 @@ class RESTSimpleTest(RESTBaseTest):
         except TableAlreadyExistException:
             self.fail("create_table with ignore_if_exists=True should not raise TableAlreadyExistException")
 
+        # test drop database cascade false
+        with self.assertRaises(ValueError) as context:
+            self.rest_catalog.drop_database("db1", False, False)
+        self.assertIn("Database db1 is not empty", str(context.exception))
+
         # test drop table
         self.rest_catalog.drop_table("db1.tbl1", False)
         with self.assertRaises(TableNotExistException) as context:
