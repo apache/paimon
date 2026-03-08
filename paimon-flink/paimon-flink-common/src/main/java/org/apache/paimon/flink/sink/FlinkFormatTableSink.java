@@ -57,10 +57,12 @@ public class FlinkFormatTableSink
 
     @Override
     public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
-        return new PaimonDataStreamSinkProvider(
+        return PaimonDataStreamSinkProvider.createProvider(
                 (dataStream) ->
                         new FlinkFormatTableDataStreamSink(table, overwrite, staticPartitions)
-                                .sinkFrom(dataStream));
+                                .sinkFrom(dataStream),
+                tableIdentifier.asSummaryString(),
+                table);
     }
 
     @Override

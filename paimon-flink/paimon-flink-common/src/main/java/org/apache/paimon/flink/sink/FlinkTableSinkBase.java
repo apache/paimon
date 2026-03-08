@@ -105,18 +105,22 @@ public abstract class FlinkTableSinkBase
             throw new UnsupportedOperationException(
                     "Paimon doesn't support streaming INSERT OVERWRITE.");
         }
+        String name = tableIdentifier.asSummaryString();
+
         if (table instanceof FormatTable) {
             FormatTable formatTable = (FormatTable) table;
-            return new PaimonDataStreamSinkProvider(
+            return PaimonDataStreamSinkProvider.createProvider(
                     (dataStream) ->
                             new FlinkFormatTableDataStreamSink(
                                             formatTable, overwrite, staticPartitions)
-                                    .sinkFrom(dataStream));
+                                    .sinkFrom(dataStream),
+                    name,
+                    table);
         }
 
         Options conf = Options.fromMap(table.options());
         // Do not sink to log store when overwrite mode
-        return new PaimonDataStreamSinkProvider(
+        return PaimonDataStreamSinkProvider.createProvider(
                 (dataStream) -> {
                     FlinkSinkBuilder builder = createSinkBuilder();
                     builder.forRowData(
@@ -136,7 +140,9 @@ public abstract class FlinkTableSinkBase
                     }
                     conf.getOptional(SINK_PARALLELISM).ifPresent(builder::parallelism);
                     return builder.build();
-                });
+                },
+                name,
+                table);
     }
 
     protected FlinkSinkBuilder createSinkBuilder() {
