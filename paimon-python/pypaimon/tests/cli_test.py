@@ -179,20 +179,20 @@ class CliTest(unittest.TestCase):
                 
                 output = mock_stdout.getvalue()
                 
-                # Verify output contains table information
-                self.assertIn('Table: test_db.users', output)
-                self.assertIn('Schema ID:', output)
-                self.assertIn('Fields:', output)
+                # Verify output is valid JSON
+                import json
+                schema_json = json.loads(output)
                 
-                # Verify field names are displayed
-                self.assertIn('id', output)
-                self.assertIn('name', output)
-                self.assertIn('age', output)
-                self.assertIn('city', output)
+                # Verify schema structure
+                self.assertIn('fields', schema_json)
+                self.assertIsInstance(schema_json['fields'], list)
                 
-                # Verify field types are displayed
-                self.assertIn('INT', output)
-                self.assertIn('STRING', output)
+                # Verify field names are present
+                field_names = [field['name'] for field in schema_json['fields']]
+                self.assertIn('id', field_names)
+                self.assertIn('name', field_names)
+                self.assertIn('age', field_names)
+                self.assertIn('city', field_names)
 
     def test_cli_table_get_nonexistent_table(self):
         """Test CLI error handling for nonexistent table in table get."""
@@ -218,30 +218,25 @@ class CliTest(unittest.TestCase):
 
     def test_cli_table_create_basic(self):
         """Test basic table create via CLI."""
-        # Create schema file
-        schema_file = os.path.join(self.tempdir, 'test_schema.yaml')
-        with open(schema_file, 'w') as f:
-            f.write("""
-fields:
-  - name: product_id
-    type: BIGINT
-  - name: product_name
-    type: STRING
-  - name: price
-    type: DOUBLE
-  - name: category
-    type: STRING
-
-primary_keys:
-  - product_id
-
-options:
-  bucket: "2"
-
-comment: Test products table
-""")
+        # Create schema file in JSON format (CLI only supports JSON)
+        import json
+        schema_file = os.path.join(self.tempdir, 'test_schema.json')
+        schema_data = {
+            'fields': [
+                {'id': 0, 'name': 'product_id', 'type': 'BIGINT'},
+                {'id': 1, 'name': 'product_name', 'type': 'STRING'},
+                {'id': 2, 'name': 'price', 'type': 'DOUBLE'},
+                {'id': 3, 'name': 'category', 'type': 'STRING'}
+            ],
+            'primaryKeys': ['product_id'],
+            'options': {'bucket': '2'},
+            'comment': 'Test products table'
+        }
         
-        # Simulate CLI command: paimon -c <config> table create test_db.products -s schema.yaml
+        with open(schema_file, 'w') as f:
+            json.dump(schema_data, f)
+        
+        # Simulate CLI command: paimon -c <config> table create test_db.products -s schema.json
         with patch('sys.argv',
                    ['paimon', '-c', self.config_file, 'table', 'create', 'test_db.products', '-s', schema_file]):
             with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
@@ -266,11 +261,11 @@ comment: Test products table
         schema_file = os.path.join(self.tempdir, 'test_schema.json')
         schema_data = {
             'fields': [
-                {'name': 'order_id', 'type': 'BIGINT'},
-                {'name': 'customer_id', 'type': 'INT'},
-                {'name': 'amount', 'type': 'DOUBLE'}
+                {'id': 0, 'name': 'order_id', 'type': 'BIGINT'},
+                {'id': 1, 'name': 'customer_id', 'type': 'INT'},
+                {'id': 2, 'name': 'amount', 'type': 'DOUBLE'}
             ],
-            'partition_keys': ['customer_id'],
+            'partitionKeys': ['customer_id'],
             'options': {'bucket': '3'}
         }
         
@@ -296,15 +291,17 @@ comment: Test products table
 
     def test_cli_table_create_ignore_if_exists(self):
         """Test table create with ignore-if-exists flag."""
-        schema_file = os.path.join(self.tempdir, 'test_schema2.yaml')
+        import json
+        schema_file = os.path.join(self.tempdir, 'test_schema2.json')
+        schema_data = {
+            'fields': [
+                {'id': 0, 'name': 'id', 'type': 'INT'},
+                {'id': 1, 'name': 'value', 'type': 'STRING'}
+            ]
+        }
+        
         with open(schema_file, 'w') as f:
-            f.write("""
-fields:
-  - name: id
-    type: INT
-  - name: value
-    type: STRING
-""")
+            json.dump(schema_data, f)
         
         # Create table first time
         with patch('sys.argv',
@@ -338,9 +335,15 @@ fields:
 
     def test_cli_table_create_invalid_table_identifier(self):
         """Test CLI error handling for invalid table identifier format in table create."""
-        schema_file = os.path.join(self.tempdir, 'dummy_schema.yaml')
+        import json
+        schema_file = os.path.join(self.tempdir, 'dummy_schema.json')
+        schema_data = {
+            'fields': [
+                {'id': 0, 'name': 'id', 'type': 'INT'}
+            ]
+        }
         with open(schema_file, 'w') as f:
-            f.write('fields:\n  - name: id\n    type: INT')
+            json.dump(schema_data, f)
         
         with patch('sys.argv',
                    ['paimon', '-c', self.config_file, 'table', 'create', 'invalid_format', '-s', schema_file]):
@@ -360,9 +363,9 @@ fields:
                     self.config_file,
                     'table',
                     'create',
-                    'test_db.test',
+                    'test_db.missing_table',
                     '-s',
-                    '/nonexistent/schema.yaml']):
+                    '/nonexistent/path/schema.json']):
             with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
                 with self.assertRaises(SystemExit) as context:
                     main()

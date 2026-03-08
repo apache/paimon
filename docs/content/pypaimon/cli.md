@@ -127,7 +127,7 @@ Output:
 
 ### Table Get
 
-Get and display detailed schema information about a Paimon table.
+Get and display table schema information in JSON format. The output format is the same as the schema JSON format used in table create, making it easy to export and reuse table schemas.
 
 ```shell
 paimon table get DATABASE.TABLE
@@ -140,71 +140,19 @@ paimon table get mydb.users
 ```
 
 Output:
-```
-================================================================================
-Table: mydb.users
-================================================================================
-
-Schema ID: 0
-
-Comment: User information table
-
-================================================================================
-Fields:
-================================================================================
-ID    Name              Type                 Nullable   Description
------ ------------------ -------------------- --------- --------------------------
-0     user_id           BIGINT               YES        
-1     username          STRING               YES        
-2     email             STRING               YES        
-3     age               INT                  YES        
-4     city              STRING               YES        
-5     created_at        TIMESTAMP(6)         YES        
-6     is_active         BOOLEAN              YES        
-
-================================================================================
-Partition Keys: city
-
-================================================================================
-Primary Keys: user_id
-
-================================================================================
-Table Options:
-================================================================================
-  bucket                                   = 4
-  changelog-producer                       = input
-```
-
-### Table Create
-
-Create a new Paimon table with a schema defined in a JSON or YAML file.
-
-```shell
-paimon table create DATABASE.TABLE --schema-file SCHEMA_FILE
-```
-
-**Options:**
-
-- `--schema-file, -s`: Path to schema definition file (JSON or YAML) - **Required**
-- `--ignore-if-exists, -i`: Do not raise error if table already exists
-
-The schema file should be a JSON or YAML file with the following structure:
-
-**JSON Example (`schema.json`):**
-
 ```json
 {
   "fields": [
-    {"name": "user_id", "type": "BIGINT"},
-    {"name": "username", "type": "STRING"},
-    {"name": "email", "type": "STRING"},
-    {"name": "age", "type": "INT"},
-    {"name": "city", "type": "STRING"},
-    {"name": "created_at", "type": "TIMESTAMP"},
-    {"name": "is_active", "type": "BOOLEAN"}
+    {"id": 0, "name": "user_id", "type": "BIGINT"},
+    {"id": 1, "name": "username", "type": "STRING"},
+    {"id": 2, "name": "email", "type": "STRING"},
+    {"id": 3, "name": "age", "type": "INT"},
+    {"id": 4, "name": "city", "type": "STRING"},
+    {"id": 5, "name": "created_at", "type": "TIMESTAMP"},
+    {"id": 6, "name": "is_active", "type": "BOOLEAN"}
   ],
-  "partition_keys": ["city"],
-  "primary_keys": ["user_id"],
+  "partitionKeys": ["city"],
+  "primaryKeys": ["user_id"],
   "options": {
     "bucket": "4",
     "changelog-producer": "input"
@@ -213,34 +161,46 @@ The schema file should be a JSON or YAML file with the following structure:
 }
 ```
 
-**YAML Example (`schema.yaml`):**
+**Note:** The output JSON can be saved to a file and used directly with the `table create` command to recreate the table structure.
 
-```yaml
-fields:
-  - name: user_id
-    type: BIGINT
-  - name: username
-    type: STRING
-  - name: email
-    type: STRING
-  - name: age
-    type: INT
-  - name: city
-    type: STRING
-  - name: created_at
-    type: TIMESTAMP
-  - name: is_active
-    type: BOOLEAN
+### Table Create
 
-partition_keys:
-  - city
+Create a new Paimon table with a schema defined in a JSON file. The schema JSON format is the same as the output from `table get`, ensuring consistency and easy schema reuse.
 
-primary_keys:
-  - user_id
-
-options:
-  bucket: "4"
-  changelog-producer: input
-
-comment: User information table
+```shell
+paimon table create DATABASE.TABLE --schema SCHEMA_FILE
 ```
+
+**Options:**
+
+- `--schema, -s`: Path to schema JSON file - **Required**
+- `--ignore-if-exists, -i`: Do not raise error if table already exists
+
+The schema JSON file follows the same format as output by `table get`:
+
+**Field Properties:**
+
+- `id`: Field ID (integer, typically starts from 0) - **Required**
+- `name`: Field name - **Required**
+- `type`: Field data type (e.g., `INT`, `BIGINT`, `STRING`, `TIMESTAMP`, `DECIMAL(10,2)`) - **Required**
+- `description`: Optional field description
+
+**Schema Properties:**
+
+- `fields`: List of field definitions - **Required**
+- `partitionKeys`: List of partition key column names
+- `primaryKeys`: List of primary key column names
+- `options`: Table options as key-value pairs
+- `comment`: Table comment
+
+**Example Workflow:**
+
+1. Export schema from an existing table:
+   ```shell
+   paimon table get mydb.users > users_schema.json
+   ```
+
+2. Create a new table with the same schema:
+   ```shell
+   paimon table create mydb.users_copy --schema users_schema.json
+   ```

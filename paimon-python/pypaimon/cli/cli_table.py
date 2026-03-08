@@ -22,6 +22,7 @@ This module provides table-related commands for the CLI.
 """
 
 import sys
+from pypaimon.common.json_util import JSON
 
 
 def cmd_table_read(args):
@@ -85,7 +86,7 @@ def cmd_table_get(args):
     """
     Execute the 'table get' command.
     
-    Gets and displays table schema information.
+    Gets and displays table schema information in JSON format.
     
     Args:
         args: Parsed command line arguments.
@@ -116,52 +117,9 @@ def cmd_table_get(args):
         print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
         sys.exit(1)
     
-    # Get table schema
-    schema = table.table_schema
-    
-    # Display table information
-    print("=" * 80)
-    print(f"Table: {database_name}.{table_name}")
-    print("=" * 80)
-    
-    # Display schema ID
-    print(f"\nSchema ID: {schema.id}")
-    
-    # Display comment if exists
-    if schema.comment:
-        print(f"\nComment: {schema.comment}")
-    
-    # Display fields
-    print(f"\n{'='*80}")
-    print("Fields:")
-    print(f"{'='*80}")
-    print(f"{'ID':<5} {'Name':<18} {'Type':<20} {'Nullable':<9} {'Description'}")
-    print(f"{'-'*5} {'-'*18} {'-'*20} {'-'*9} {'-'*26}")
-    
-    for field in schema.fields:
-        nullable = "YES" if field.type.nullable else "NO"
-        description = field.description or ""
-        print(f"{field.id:<5} {field.name:<18} {str(field.type):<20} {nullable:<9} {description}")
-    
-    # Display partition keys
-    if schema.partition_keys:
-        print(f"\n{'='*80}")
-        print(f"Partition Keys: {', '.join(schema.partition_keys)}")
-    
-    # Display primary keys
-    if schema.primary_keys:
-        print(f"\n{'='*80}")
-        print(f"Primary Keys: {', '.join(schema.primary_keys)}")
-    
-    # Display options
-    if schema.options:
-        print(f"\n{'='*80}")
-        print("Table Options:")
-        print(f"{'='*80}")
-        for key, value in sorted(schema.options.items()):
-            print(f"  {key:<40} = {value}")
-    
-    print(f"\n{'='*80}\n")
+    # Get table schema and convert to Schema, then output as JSON
+    schema = table.table_schema.to_schema()
+    print(JSON.to_json(schema, indent=2))
 
 
 def cmd_table_create(args):
@@ -174,7 +132,6 @@ def cmd_table_create(args):
         args: Parsed command line arguments.
     """
     import json
-    import yaml
     from pypaimon.cli.cli import load_catalog_config, create_catalog
     from pypaimon import Schema
     
@@ -195,72 +152,29 @@ def cmd_table_create(args):
     
     database_name, table_name = parts
     
-    # Load schema from file
-    schema_file = args.schema_file
+    # Load schema from JSON file
+    schema_file = args.schema
     if not schema_file:
-        print("Error: Schema file is required. Use --schema-file option.", file=sys.stderr)
+        print("Error: Schema is required. Use --schema option.", file=sys.stderr)
         sys.exit(1)
     
     try:
         with open(schema_file, 'r', encoding='utf-8') as f:
-            if schema_file.endswith('.json'):
-                schema_def = json.load(f)
-            elif schema_file.endswith('.yaml') or schema_file.endswith('.yml'):
-                schema_def = yaml.safe_load(f)
-            else:
-                print("Error: Unsupported schema file format. Use .json, .yaml, or .yml", file=sys.stderr)
-                sys.exit(1)
+            schema_json = f.read()
+        paimon_schema = JSON.from_json(schema_json, Schema)
+        
     except FileNotFoundError:
         print(f"Error: Schema file not found: {schema_file}", file=sys.stderr)
         sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON format in schema file: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"Error: Failed to read schema file: {e}", file=sys.stderr)
+        print(f"Error: Failed to parse schema: {e}", file=sys.stderr)
         sys.exit(1)
     
-    # Parse schema definition
+    # Create table
     try:
-        # Validate required fields
-        if 'fields' not in schema_def:
-            print("Error: Schema must contain 'fields' section", file=sys.stderr)
-            sys.exit(1)
-        
-        # Build PyArrow schema from definition
-        import pyarrow as pa
-        pa_fields = []
-        for field in schema_def['fields']:
-            field_name = field.get('name')
-            field_type = field.get('type')
-            
-            if not field_name or not field_type:
-                print("Error: Each field must have 'name' and 'type'", file=sys.stderr)
-                sys.exit(1)
-            
-            # Convert type string to PyArrow type
-            from pypaimon.schema.data_types import DataTypeParser, PyarrowFieldParser
-
-            # Parse type string to Paimon DataType, then convert to PyArrow type
-            paimon_type = DataTypeParser.parse_data_type(field_type)
-            pa_type = PyarrowFieldParser.from_paimon_type(paimon_type)
-            pa_fields.append(pa.field(field_name, pa_type))
-        
-        pa_schema = pa.schema(pa_fields)
-        
-        # Extract optional parameters
-        partition_keys = schema_def.get('partition_keys', [])
-        primary_keys = schema_def.get('primary_keys', [])
-        options = schema_def.get('options', {})
-        comment = schema_def.get('comment')
-        
-        # Create Paimon schema
-        paimon_schema = Schema.from_pyarrow_schema(
-            pa_schema,
-            partition_keys=partition_keys if partition_keys else None,
-            primary_keys=primary_keys if primary_keys else None,
-            options=options if options else None,
-            comment=comment
-        )
-        
-        # Create table
         ignore_if_exists = args.ignore_if_exists
         catalog.create_table(f"{database_name}.{table_name}", paimon_schema, ignore_if_exists)
         
@@ -309,9 +223,9 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     create_parser.add_argument(
-        '--schema-file', '-s',
+        '--schema', '-s',
         required=True,
-        help='Path to schema definition file (JSON or YAML)'
+        help='Path to schema JSON file'
     )
     create_parser.add_argument(
         '--ignore-if-exists', '-i',
