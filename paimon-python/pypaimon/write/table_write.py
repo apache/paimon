@@ -45,6 +45,7 @@ class TableWrite:
             self.write_arrow_batch(batch)
 
     def write_arrow_batch(self, data: pa.RecordBatch):
+        self._validate_pyarrow_schema(data.schema)
         partitions, buckets = self.row_key_extractor.extract_partition_bucket_batch(data)
 
         partition_bucket_groups = defaultdict(list)

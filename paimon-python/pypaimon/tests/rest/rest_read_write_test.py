@@ -20,7 +20,6 @@ import logging
 
 import pandas as pd
 import pyarrow as pa
-import unittest
 
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext

@@ -196,7 +196,8 @@ class _SimplePartitionIndex:
         assign_id: int,
     ) -> Tuple[int, int]:
         if hash_value in self.hash2bucket:
-            return self.hash2bucket[hash_value], max_bucket_id
+            assigned = self.hash2bucket[hash_value]
+            return assigned, max(max_bucket_id, assigned)
 
         if self.current_bucket not in self.bucket_information:
             self.bucket_list.append(self.current_bucket)
@@ -223,7 +224,6 @@ class _SimplePartitionIndex:
     def _load_new_bucket(
         self, max_buckets_num: int, num_assigners: int, assign_id: int
     ) -> None:
-        """Java: loadNewBucket() — uses outer maxBucketsNum, numAssigners, assignId."""
         for i in range(_SHORT_MAX_VALUE):
             if _is_my_bucket(i, num_assigners, assign_id) and (
                 i not in self.bucket_information
@@ -237,37 +237,43 @@ class _SimplePartitionIndex:
         )
 
 
+class SimpleHashBucketAssigner:
+    def __init__(self, num_assigners, assign_id, target_bucket_row_number, max_buckets_num):
+        self.num_assigners = num_assigners
+        self.assign_id = assign_id
+        self.target_bucket_row_number = target_bucket_row_number
+        self.max_buckets_num = max_buckets_num
+        self.max_bucket_id = 0
+        self._partition_index: Dict[Tuple, _SimplePartitionIndex] = {}
+
+    def assign(self, partition: Tuple, hash_value: int) -> int:
+        if partition not in self._partition_index:
+            self._partition_index[partition] = _SimplePartitionIndex()
+        index = self._partition_index[partition]
+
+        assigned, self.max_bucket_id = index.assign(
+            hash_value,
+            self.max_bucket_id,
+            self.target_bucket_row_number,
+            self.max_buckets_num,
+            self.num_assigners,
+            self.assign_id,
+        )
+        return assigned
+
+
 def _dynamic_bucket_assign(
     partitions: List[Tuple],
     key_hashes: List[int],
     target_bucket_row_number: int,
     max_buckets_num: int,
-    num_assigners: int = 1,
-    assign_id: int = 0,
+    num_assigners: int,
+    assign_id: int,
 ) -> List[int]:
-    partition_index: Dict[Tuple, _SimplePartitionIndex] = {}
-    max_bucket_id = -1
-    buckets_out: List[int] = []
-
-    for row_idx in range(len(partitions)):
-        partition = partitions[row_idx]
-        hash_value = key_hashes[row_idx]
-
-        if partition not in partition_index:
-            partition_index[partition] = _SimplePartitionIndex()
-        index = partition_index[partition]
-
-        assigned, max_bucket_id = index.assign(
-            hash_value,
-            max_bucket_id,
-            target_bucket_row_number,
-            max_buckets_num,
-            num_assigners,
-            assign_id,
-        )
-        buckets_out.append(assigned)
-
-    return buckets_out
+    assigner = SimpleHashBucketAssigner(
+        num_assigners, assign_id, target_bucket_row_number, max_buckets_num)
+    return [assigner.assign(partitions[i], key_hashes[i])
+            for i in range(len(partitions))]
 
 
 class DynamicBucketRowKeyExtractor(RowKeyExtractor):
@@ -285,13 +291,14 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                 + str(num_buckets)
             )
         opts = CoreOptions.from_dict(table_schema.options)
-        self._target_bucket_row_number = opts.dynamic_bucket_target_row_num() or 2_000_000
-        self._max_buckets_num = opts.dynamic_bucket_max_buckets()
-        if self._max_buckets_num is None:
-            self._max_buckets_num = -1
-        bucket_key_option = opts.bucket_key()
-        if bucket_key_option and bucket_key_option.strip():
-            self._bucket_keys = [k.strip() for k in bucket_key_option.split(',')]
+        self._assigner = SimpleHashBucketAssigner(
+            num_assigners=1,
+            assign_id=0,
+            target_bucket_row_number=opts.dynamic_bucket_target_row_num(),
+            max_buckets_num=opts.dynamic_bucket_max_buckets(),
+        )
+        if opts.bucket_key() and opts.bucket_key().strip():
+            self._bucket_keys = [k.strip() for k in opts.bucket_key().split(',')]
         else:
             self._bucket_keys = [
                 pk for pk in table_schema.primary_keys
@@ -303,11 +310,12 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
             field_map[name] for name in self._bucket_keys if name in field_map
         ]
 
-    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
+    def extract_partition_bucket_batch(self, data: pa.RecordBatch) -> Tuple[List[Tuple], List[int]]:
         partitions = self._extract_partitions_batch(data)
         columns = [data.column(i) for i in self._bucket_key_indices]
-        key_hashes = [
-            _hash_bytes_by_words(
+        buckets = []
+        for row_idx in range(data.num_rows):
+            key_hash = _hash_bytes_by_words(
                 GenericRowSerializer.to_bytes(
                     GenericRow(
                         [columns[j][row_idx].as_py() for j in range(len(columns))],
@@ -316,16 +324,11 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                     )
                 )[4:]
             )
-            for row_idx in range(data.num_rows)
-        ]
-        return _dynamic_bucket_assign(
-            partitions,
-            key_hashes,
-            self._target_bucket_row_number,
-            self._max_buckets_num,
-            num_assigners=1,
-            assign_id=0,
-        )
+            buckets.append(self._assigner.assign(partitions[row_idx], key_hash))
+        return partitions, buckets
+
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
+        raise NotImplementedError
 
 
 class PostponeBucketRowKeyExtractor(RowKeyExtractor):
