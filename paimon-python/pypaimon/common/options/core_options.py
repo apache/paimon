@@ -107,6 +107,25 @@ class CoreOptions:
         )
     )
 
+    DYNAMIC_BUCKET_TARGET_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("dynamic-bucket.target-row-num")
+        .int_type()
+        .default_value(2000000)
+        .with_description(
+            "In dynamic bucket mode (bucket=-1), target row number per bucket; "
+            "when exceeded, a new bucket is created (aligned with Java SimpleHashBucketAssigner)."
+        )
+    )
+
+    DYNAMIC_BUCKET_MAX_BUCKETS: ConfigOption[int] = (
+        ConfigOptions.key("dynamic-bucket.max-buckets")
+        .int_type()
+        .default_value(-1)
+        .with_description(
+            "In dynamic bucket mode, max buckets per partition. -1 means unlimited."
+        )
+    )
+
     SCAN_MANIFEST_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("scan.manifest.parallelism")
         .int_type()
@@ -388,6 +407,12 @@ class CoreOptions:
 
     def bucket_key(self, default=None):
         return self.options.get(CoreOptions.BUCKET_KEY, default)
+
+    def dynamic_bucket_target_row_num(self, default=None):
+        return self.options.get(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, default)
+
+    def dynamic_bucket_max_buckets(self, default=None):
+        return self.options.get(CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS, default)
 
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)

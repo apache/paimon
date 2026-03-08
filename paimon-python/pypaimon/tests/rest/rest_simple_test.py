@@ -600,14 +600,25 @@ class RESTSimpleTest(RESTBaseTest):
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
         self.assertIsInstance(table_write.row_key_extractor, DynamicBucketRowKeyExtractor)
 
         pa_table = pa.Table.from_pydict(self.data, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
 
-        with self.assertRaises(ValueError) as context:
-            table_write.write_arrow(pa_table)
-
-        self.assertEqual(str(context.exception), "Can't extract bucket from row in dynamic bucket mode")
+        splits = []
+        read_builder = table.new_read_builder()
+        splits.extend(read_builder.new_scan().with_shard(0, 3).plan().splits())
+        splits.extend(read_builder.new_scan().with_shard(1, 3).plan().splits())
+        splits.extend(read_builder.new_scan().with_shard(2, 3).plan().splits())
+        table_read = read_builder.new_read()
+        actual = table_read.to_arrow(splits)
+        expected_sorted = table_sort_by(self.expected, 'user_id')
+        actual_sorted = table_sort_by(actual, 'user_id')
+        self.assertEqual(actual_sorted, expected_sorted)
 
     def test_with_shard_pk_fixed_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],
