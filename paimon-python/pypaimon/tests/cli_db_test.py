@@ -300,13 +300,13 @@ class CliDbTest(unittest.TestCase):
                 error_output = mock_stderr.getvalue()
                 self.assertIn('Invalid JSON', error_output)
 
-    def test_cli_db_list_basic(self):
-        """Test basic list databases via CLI."""
+    def test_cli_catalog_list_dbs_basic(self):
+        """Test basic list databases via catalog CLI."""
         self.catalog.create_database('list_db_a', True)
         self.catalog.create_database('list_db_b', True)
 
         with patch('sys.argv',
-                   ['paimon', '-c', self.config_file, 'db', 'list']):
+                   ['paimon', '-c', self.config_file, 'catalog', 'list-dbs']):
             with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
                 try:
                     main()
@@ -317,12 +317,12 @@ class CliDbTest(unittest.TestCase):
                 self.assertIn('list_db_a', output)
                 self.assertIn('list_db_b', output)
 
-    def test_cli_db_list_excludes_nonexistent(self):
+    def test_cli_catalog_list_dbs_excludes_nonexistent(self):
         """Test list databases does not include non-existent databases."""
         self.catalog.create_database('list_exists_db', True)
 
         with patch('sys.argv',
-                   ['paimon', '-c', self.config_file, 'db', 'list']):
+                   ['paimon', '-c', self.config_file, 'catalog', 'list-dbs']):
             with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
                 try:
                     main()

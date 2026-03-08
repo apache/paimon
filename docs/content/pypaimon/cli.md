@@ -431,21 +431,6 @@ paimon db alter mydb --remove key1 key2
 paimon db alter mydb --set '{"key1": "new_value"}' --remove key2
 ```
 
-### DB List
-
-List all databases in the catalog.
-
-```shell
-paimon db list
-```
-
-Output:
-```
-default
-mydb
-analytics
-```
-
 ### DB List Tables
 
 List all tables in a database.
@@ -459,4 +444,21 @@ Output:
 orders
 products
 users
+```
+
+## Catalog Commands
+
+### Catalog List DBs
+
+List all databases in the catalog.
+
+```shell
+paimon catalog list-dbs
+```
+
+Output:
+```
+default
+mydb
+analytics
 ```
