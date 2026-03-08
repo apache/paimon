@@ -17,14 +17,15 @@
 ################################################################################
 import unittest
 
-from pypaimon.write.row_key_extractor import _dynamic_bucket_assign
+from pypaimon.write.row_key_extractor import SimpleHashBucketAssigner
 
 
 class SimpleHashBucketAssignerTest(unittest.TestCase):
 
     def test_assign(self):
-        hashes = list(range(301))
-        buckets = _dynamic_bucket_assign([()] * len(hashes), hashes, 100, -1, 2, 0)
+        assigner = SimpleHashBucketAssigner(2, 0, 100, -1)
+        partition = ()
+        buckets = [assigner.assign(partition, h) for h in range(301)]
         for b in buckets[:100]:
             self.assertEqual(b, 0)
         for b in buckets[100:200]:
@@ -32,8 +33,9 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
         self.assertEqual(buckets[200], 4)
 
     def test_assign_with_upper_bound(self):
-        hashes = list(range(400))
-        buckets = _dynamic_bucket_assign([()] * len(hashes), hashes, 100, 3, 1, 0)
+        assigner = SimpleHashBucketAssigner(1, 0, 100, 3)
+        partition = ()
+        buckets = [assigner.assign(partition, h) for h in range(400)]
         for b in buckets[:100]:
             self.assertEqual(b, 0)
         for b in buckets[100:200]:
@@ -46,8 +48,10 @@ class SimpleHashBucketAssignerTest(unittest.TestCase):
     def test_assign_with_same_hash(self):
         for max_buckets in [-1, 1, 2]:
             with self.subTest(max_buckets=max_buckets):
+                assigner = SimpleHashBucketAssigner(1, 0, 100, max_buckets)
+                partition = ()
                 hashes = list(range(100)) + list(range(100))
-                buckets = _dynamic_bucket_assign([()] * len(hashes), hashes, 100, max_buckets, 1, 0)
+                buckets = [assigner.assign(partition, h) for h in hashes]
                 for b in buckets[100:]:
                     self.assertEqual(b, 0)
 

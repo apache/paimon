@@ -379,4 +379,8 @@ class TableWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits)
-        self.assertEqual(actual.num_rows, self.expected.num_rows)
+        sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
+        self.assertEqual(
+            self.expected.sort_by(sort_keys),
+            actual.sort_by(sort_keys),
+        )

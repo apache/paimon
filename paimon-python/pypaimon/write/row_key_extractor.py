@@ -264,20 +264,6 @@ class SimpleHashBucketAssigner:
         return assigned
 
 
-def _dynamic_bucket_assign(
-    partitions: List[Tuple],
-    key_hashes: List[int],
-    target_bucket_row_number: int,
-    max_buckets_num: int,
-    num_assigners: int,
-    assign_id: int,
-) -> List[int]:
-    assigner = SimpleHashBucketAssigner(
-        num_assigners, assign_id, target_bucket_row_number, max_buckets_num)
-    return [assigner.assign(partitions[i], key_hashes[i])
-            for i in range(len(partitions))]
-
-
 class DynamicBucketRowKeyExtractor(RowKeyExtractor):
     """
     Row key extractor for dynamic bucket mode
@@ -299,22 +285,24 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
             target_bucket_row_number=opts.dynamic_bucket_target_row_num(),
             max_buckets_num=opts.dynamic_bucket_max_buckets(),
         )
-        if opts.bucket_key() and opts.bucket_key().strip():
-            self._bucket_keys = [k.strip() for k in opts.bucket_key().split(',')]
+        # TODO: extract bucket key init logic to base class (shared with FixedBucketRowKeyExtractor)
+        bucket_key_option = opts.bucket_key()
+        if bucket_key_option and bucket_key_option.strip():
+            self.bucket_keys = [k.strip() for k in bucket_key_option.split(',')]
         else:
-            self._bucket_keys = [
+            self.bucket_keys = [
                 pk for pk in table_schema.primary_keys
                 if pk not in table_schema.partition_keys
             ]
-        self._bucket_key_indices = self._get_field_indices(self._bucket_keys)
+        self.bucket_key_indices = self._get_field_indices(self.bucket_keys)
         field_map = {f.name: f for f in table_schema.fields}
         self._bucket_key_fields = [
-            field_map[name] for name in self._bucket_keys if name in field_map
+            field_map[name] for name in self.bucket_keys if name in field_map
         ]
 
     def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         partitions = self._extract_partitions_batch(data)
-        columns = [data.column(i) for i in self._bucket_key_indices]
+        columns = [data.column(i) for i in self.bucket_key_indices]
         buckets = []
         for row_idx in range(data.num_rows):
             key_hash = _hash_bytes_by_words(
