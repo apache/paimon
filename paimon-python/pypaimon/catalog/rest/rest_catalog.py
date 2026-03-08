@@ -218,6 +218,20 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
 
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+        try:
+            self.rest_api.rename_table(source_identifier, target_identifier)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(source_identifier) from e
+        except AlreadyExistsException as e:
+            raise TableAlreadyExistException(target_identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(source_identifier) from e
+
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)

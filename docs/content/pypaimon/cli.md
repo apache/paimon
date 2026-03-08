@@ -230,6 +230,21 @@ Successfully imported 3 rows into 'mydb.users'.
 - Data types should be compatible with the table schema
 - The import operation appends data to the existing table
 
+### Table Rename
+
+Rename a table in the catalog. Both source and target must be specified in `database.table` format.
+
+```shell
+paimon table rename mydb.old_name mydb.new_name
+```
+
+Output:
+```
+Table 'mydb.old_name' renamed to 'mydb.new_name' successfully.
+```
+
+**Note:** Both filesystem and REST catalogs support table rename. For filesystem catalogs, the rename is performed by renaming the underlying table directory.
+
 ### Table Drop
 
 Drop a table from the catalog. This will permanently delete the table and all its data.

@@ -866,5 +866,55 @@ class CliTableTest(unittest.TestCase):
         after_id_idx = field_names.index('after_id_col')
         self.assertEqual(after_id_idx, id_idx + 1)
 
+    def test_cli_table_rename_basic(self):
+        """Test basic table rename via CLI."""
+        import json
+
+        # Create a table to rename
+        schema_file = os.path.join(self.tempdir, 'rename_schema.json')
+        schema_data = {
+            'fields': [
+                {'id': 0, 'name': 'id', 'type': 'INT'},
+                {'id': 1, 'name': 'value', 'type': 'STRING'}
+            ]
+        }
+        with open(schema_file, 'w') as f:
+            json.dump(schema_data, f)
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file, 'table', 'create',
+                    'test_db.rename_source', '-s', schema_file, '-i']):
+            with patch('sys.stdout', new_callable=StringIO):
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+        # Verify source table exists
+        table = self.catalog.get_table('test_db.rename_source')
+        self.assertIsNotNone(table)
+
+        # Rename the table
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file, 'table', 'rename',
+                    'test_db.rename_source', 'test_db.rename_target']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('renamed', output)
+                self.assertIn('successfully', output)
+
+        # Verify target table exists
+        table = self.catalog.get_table('test_db.rename_target')
+        self.assertIsNotNone(table)
+
+        # Verify source table no longer exists
+        with self.assertRaises(Exception):
+            self.catalog.get_table('test_db.rename_source')
+
 if __name__ == '__main__':
     unittest.main()

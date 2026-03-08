@@ -102,6 +102,20 @@ class Catalog(ABC):
             TableNotExistException: If table does not exist and ignore_if_not_exists is False
         """
 
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        """Rename a table.
+
+        Args:
+            source_identifier: Current table identifier.
+            target_identifier: New table identifier.
+
+        Raises:
+            NotImplementedError: If the catalog does not support rename table.
+        """
+        raise NotImplementedError(
+            "rename_table is not supported by this catalog."
+        )
+
     @abstractmethod
     def alter_table(
         self,

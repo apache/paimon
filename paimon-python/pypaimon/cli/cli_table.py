@@ -325,6 +325,47 @@ def cmd_table_drop(args):
         sys.exit(1)
 
 
+def cmd_table_rename(args):
+    """
+    Execute the 'table rename' command.
+
+    Renames a Paimon table.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config_path = args.config
+    config = load_catalog_config(config_path)
+    catalog = create_catalog(config)
+
+    source_table = args.table
+    target_table = args.target
+
+    source_parts = source_table.split('.')
+    if len(source_parts) != 2:
+        print(f"Error: Invalid source table identifier '{source_table}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    target_parts = target_table.split('.')
+    if len(target_parts) != 2:
+        print(f"Error: Invalid target table identifier '{target_table}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        catalog.rename_table(source_table, target_table)
+        print(f"Table '{source_table}' renamed to '{target_table}' successfully.")
+    except NotImplementedError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: Failed to rename table: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_table_alter(args):
     """
     Execute the 'table alter' command.
@@ -488,6 +529,18 @@ def add_table_subcommands(table_parser):
     )
     import_parser.set_defaults(func=cmd_table_import)
     
+    # table rename command
+    rename_parser = table_subparsers.add_parser('rename', help='Rename a table')
+    rename_parser.add_argument(
+        'table',
+        help='Source table identifier in format: database.table'
+    )
+    rename_parser.add_argument(
+        'target',
+        help='Target table identifier in format: database.table'
+    )
+    rename_parser.set_defaults(func=cmd_table_rename)
+
     # table alter command
     alter_parser = table_subparsers.add_parser('alter', help='Alter a table with schema changes')
     alter_parser.add_argument(

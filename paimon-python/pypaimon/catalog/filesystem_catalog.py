@@ -182,6 +182,32 @@ class FileSystemCatalog(Catalog):
         except Exception as e:
             raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
 
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+
+        # Verify source table exists
+        try:
+            self.get_table(source_identifier)
+        except TableNotExistException:
+            raise
+
+        # Verify target database exists
+        self.get_database(target_identifier.get_database_name())
+
+        # Verify target table does not exist
+        try:
+            self.get_table(target_identifier)
+            raise TableAlreadyExistException(target_identifier)
+        except TableNotExistException:
+            pass
+
+        source_path = self.get_table_path(source_identifier)
+        target_path = self.get_table_path(target_identifier)
+        self.file_io.rename(source_path, target_path)
+
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
