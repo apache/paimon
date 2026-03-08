@@ -51,6 +51,8 @@ import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
+import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -692,5 +694,24 @@ public class ArrowFormatWriterTest {
             bytes[i] = (byte) RND.nextInt(10);
         }
         return bytes;
+    }
+
+    @Test
+    public void testTimestampArrowFieldTypeTimezone() {
+        for (int precision : new int[] {0, 3, 6, 9}) {
+            // TIMESTAMP_LTZ should use UTC
+            FieldType ltzFieldType =
+                    DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(precision)
+                            .accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+            ArrowType.Timestamp ltzType = (ArrowType.Timestamp) ltzFieldType.getType();
+            assertThat(ltzType.getTimezone()).isEqualTo("UTC");
+
+            // TIMESTAMP should have no timezone
+            FieldType tsFieldType =
+                    DataTypes.TIMESTAMP(precision)
+                            .accept(ArrowFieldTypeConversion.ARROW_FIELD_TYPE_VISITOR);
+            ArrowType.Timestamp tsType = (ArrowType.Timestamp) tsFieldType.getType();
+            assertThat(tsType.getTimezone()).isNull();
+        }
     }
 }
