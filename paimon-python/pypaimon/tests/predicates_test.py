@@ -472,57 +472,6 @@ class PredicateTest(unittest.TestCase):
         predicate_safe = Predicate(method='or', index=None, field=None, literals=[p_null, p_gt])
         self.assertTrue(predicate_safe.test(record_null))
 
-    def test_negate_leaf_predicates(self):
-        equal_pred = Predicate(method='equal', index=0, field='val', literals=[5])
-        negated = equal_pred.negate()
-        self.assertEqual(negated.method, 'notEqual')
-
-        record_match = OffsetRow([5], 0, 1)
-        self.assertTrue(equal_pred.test(record_match))
-        self.assertFalse(negated.test(record_match))
-
-        record_no_match = OffsetRow([3], 0, 1)
-        self.assertFalse(equal_pred.test(record_no_match))
-        self.assertTrue(negated.test(record_no_match))
-
-    def test_negate_between_to_not_between(self):
-        predicate = Predicate(method='between', index=0, field='val', literals=[3, 7])
-        negated = predicate.negate()
-        self.assertEqual(negated.method, 'notBetween')
-
-        record_inside = OffsetRow([5], 0, 1)
-        self.assertTrue(predicate.test(record_inside))
-        self.assertFalse(negated.test(record_inside))
-
-        record_outside = OffsetRow([1], 0, 1)
-        self.assertFalse(predicate.test(record_outside))
-        self.assertTrue(negated.test(record_outside))
-
-    def test_negate_compound_predicates(self):
-        child1 = Predicate(method='equal', index=0, field='val', literals=[5])
-        child2 = Predicate(method='lessThan', index=1, field='score', literals=[10])
-        and_pred = Predicate(method='and', index=None, field=None, literals=[child1, child2])
-        negated = and_pred.negate()
-        self.assertEqual(negated.method, 'or')
-        self.assertEqual(negated.literals[0].method, 'notEqual')
-        self.assertEqual(negated.literals[1].method, 'greaterOrEqual')
-
-    def test_negate_always_true_false(self):
-        always_true = Predicate(method='alwaysTrue', index=None, field=None, literals=None)
-        self.assertEqual(always_true.negate().method, 'alwaysFalse')
-
-        always_false = Predicate(method='alwaysFalse', index=None, field=None, literals=None)
-        self.assertEqual(always_false.negate().method, 'alwaysTrue')
-
-    def test_negate_like_returns_none(self):
-        predicate = Predicate(method='like', index=0, field='name', literals=['%abc%'])
-        self.assertIsNone(predicate.negate())
-
-    def test_double_negate(self):
-        predicate = Predicate(method='equal', index=0, field='val', literals=[5])
-        double_negated = predicate.negate().negate()
-        self.assertEqual(double_negated.method, predicate.method)
-
     def test_like_pattern_matching(self):
         predicate = Predicate(method='like', index=0, field='name', literals=['a%c'])
         self.assertTrue(predicate.test(OffsetRow(['abc'], 0, 1)))

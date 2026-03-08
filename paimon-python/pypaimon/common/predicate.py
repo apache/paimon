@@ -54,39 +54,6 @@ class Predicate:
             field=self.field,
             literals=literals)
 
-    def negate(self) -> Optional['Predicate']:
-        """Return the negation of this predicate, or None if negation is not supported."""
-        if self.method == 'and':
-            negated_children = []
-            for child in self.literals:
-                negated = child.negate()
-                if negated is None:
-                    return None
-                negated_children.append(negated)
-            return Predicate(method='or', index=None, field=None, literals=negated_children)
-
-        if self.method == 'or':
-            negated_children = []
-            for child in self.literals:
-                negated = child.negate()
-                if negated is None:
-                    return None
-                negated_children.append(negated)
-            return Predicate(method='and', index=None, field=None, literals=negated_children)
-
-        tester = Predicate.testers.get(self.method)
-        if tester is None:
-            return None
-        negated_name = tester.negate()
-        if negated_name is None:
-            return None
-        return Predicate(
-            method=negated_name,
-            index=self.index,
-            field=self.field,
-            literals=self.literals
-        )
-
     def test(self, record: InternalRow) -> bool:
         if self.method == 'and':
             return all(p.test(record) for p in self.literals)
@@ -222,10 +189,6 @@ class Tester(ABC, metaclass=RegisterMeta):
         Test based on the specific arrow value and literals.
         """
 
-    @abstractmethod
-    def negate(self) -> Optional[str]:
-        """Return the name of the negated function, or None if negation is not supported."""
-
 
 class Equal(Tester):
     name = 'equal'
@@ -240,9 +203,6 @@ class Equal(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val == literals[0]
-
-    def negate(self) -> Optional[str]:
-        return 'notEqual'
 
 
 class NotEqual(Tester):
@@ -259,9 +219,6 @@ class NotEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val != literals[0]
 
-    def negate(self) -> Optional[str]:
-        return 'equal'
-
 
 class LessThan(Tester):
     name = "lessThan"
@@ -276,9 +233,6 @@ class LessThan(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val < literals[0]
-
-    def negate(self) -> Optional[str]:
-        return 'greaterOrEqual'
 
 
 class LessOrEqual(Tester):
@@ -295,9 +249,6 @@ class LessOrEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val <= literals[0]
 
-    def negate(self) -> Optional[str]:
-        return 'greaterThan'
-
 
 class GreaterThan(Tester):
     name = "greaterThan"
@@ -312,9 +263,6 @@ class GreaterThan(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val > literals[0]
-
-    def negate(self) -> Optional[str]:
-        return 'lessOrEqual'
 
 
 class GreaterOrEqual(Tester):
@@ -331,9 +279,6 @@ class GreaterOrEqual(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val >= literals[0]
 
-    def negate(self) -> Optional[str]:
-        return 'lessThan'
-
 
 class In(Tester):
     name = "in"
@@ -348,9 +293,6 @@ class In(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val.isin(literals)
-
-    def negate(self) -> Optional[str]:
-        return 'notIn'
 
 
 class NotIn(Tester):
@@ -367,9 +309,6 @@ class NotIn(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return ~val.isin(literals)
 
-    def negate(self) -> Optional[str]:
-        return 'in'
-
 
 class Between(Tester):
     name = "between"
@@ -384,9 +323,6 @@ class Between(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return (val >= literals[0]) & (val <= literals[1])
-
-    def negate(self) -> Optional[str]:
-        return 'notBetween'
 
 
 class StartsWith(Tester):
@@ -405,9 +341,6 @@ class StartsWith(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
-    def negate(self) -> Optional[str]:
-        return None
-
 
 class EndsWith(Tester):
     name = "endsWith"
@@ -416,9 +349,6 @@ class EndsWith(Tester):
         if val is None or not literals:
             return False
         return isinstance(val, str) and val.endswith(literals[0])
-
-    def negate(self) -> Optional[str]:
-        return None
 
     def test_by_stats(self, min_v, max_v, literals) -> bool:
         return True
@@ -441,8 +371,6 @@ class Contains(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
-    def negate(self) -> Optional[str]:
-        return None
 
 
 class IsNull(Tester):
@@ -457,9 +385,6 @@ class IsNull(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return val.is_null()
 
-    def negate(self) -> Optional[str]:
-        return 'isNotNull'
-
 
 class IsNotNull(Tester):
     name = "isNotNull"
@@ -472,9 +397,6 @@ class IsNotNull(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val.is_valid()
-
-    def negate(self) -> Optional[str]:
-        return 'isNull'
 
 
 class NotBetween(Tester):
@@ -490,9 +412,6 @@ class NotBetween(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return (val < literals[0]) | (val > literals[1])
-
-    def negate(self) -> Optional[str]:
-        return 'between'
 
 
 class Like(Tester):
@@ -542,9 +461,6 @@ class Like(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
-    def negate(self) -> Optional[str]:
-        return None
-
 
 class AlwaysTrue(Tester):
     name = "alwaysTrue"
@@ -558,9 +474,6 @@ class AlwaysTrue(Tester):
     def test_by_arrow(self, val, literals) -> bool:
         return True
 
-    def negate(self) -> Optional[str]:
-        return 'alwaysFalse'
-
 
 class AlwaysFalse(Tester):
     name = "alwaysFalse"
@@ -573,6 +486,3 @@ class AlwaysFalse(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return False
-
-    def negate(self) -> Optional[str]:
-        return 'alwaysTrue'
