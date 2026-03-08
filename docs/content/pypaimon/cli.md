@@ -261,7 +261,7 @@ paimon table alter DATABASE.TABLE [--ignore-if-not-exists] SUBCOMMAND [OPTIONS]
 
 **Global Options:**
 
-- `--ignore-if-not-exists`: Do not raise error if table does not exist
+- `--ignore-if-not-exists, -i`: Do not raise error if table does not exist
 
 #### Set Option
 

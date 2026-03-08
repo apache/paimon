@@ -495,7 +495,7 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     alter_parser.add_argument(
-        '--ignore-if-not-exists',
+        '--ignore-if-not-exists', '-i',
         action='store_true',
         help='Do not raise error if table does not exist'
     )
