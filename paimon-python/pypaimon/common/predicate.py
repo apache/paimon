@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import re
 from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
 from functools import reduce
@@ -59,7 +60,6 @@ class Predicate:
         if self.method == 'or':
             t = any(p.test(record) for p in self.literals)
             return t
-
         field_value = record.get_field(self.index)
         tester = Predicate.testers.get(self.method)
         if tester:
@@ -136,6 +136,15 @@ class Predicate:
             except Exception:
                 # Fallback to True
                 return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
+        if self.method == 'like':
+            pattern = self.literals[0]
+            try:
+                field_ref = pyarrow_dataset.field(self.field)
+                # Ensure the field is cast to string type
+                string_field = field_ref.cast(pyarrow.string())
+                return pyarrow_compute.match_like(string_field, pattern)
+            except Exception:
+                return None
 
         field = pyarrow_dataset.field(self.field)
         tester = Predicate.testers.get(self.method)
@@ -380,3 +389,66 @@ class IsNotNull(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return val.is_valid()
+
+
+class NotBetween(Tester):
+    name = "notBetween"
+
+    def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals or len(literals) < 2:
+            return False
+        return val < literals[0] or val > literals[1]
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return literals[0] > min_v or literals[1] < max_v
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return (val < literals[0]) | (val > literals[1])
+
+
+class Like(Tester):
+    name = "like"
+
+    @staticmethod
+    def _sql_like_to_regex(pattern: str, escape_char: str = '\\') -> str:
+        """Convert a SQL LIKE pattern to a Python regex pattern."""
+        regex_parts = []
+        index = 0
+        length = len(pattern)
+        while index < length:
+            char = pattern[index]
+            if char == escape_char:
+                if index + 1 < length:
+                    next_char = pattern[index + 1]
+                    if next_char in ('_', '%', escape_char):
+                        regex_parts.append(re.escape(next_char))
+                        index += 2
+                        continue
+                    else:
+                        raise ValueError(
+                            f"Invalid escape sequence '{pattern}' at position {index}")
+                else:
+                    raise ValueError(
+                        f"Invalid escape sequence '{pattern}' at position {index}")
+            elif char == '_':
+                regex_parts.append('.')
+            elif char == '%':
+                regex_parts.append('(?s:.*)')
+            else:
+                regex_parts.append(re.escape(char))
+            index += 1
+        return ''.join(regex_parts)
+
+    def test_by_value(self, val, literals) -> bool:
+        if val is None or not literals:
+            return False
+        if not isinstance(val, str):
+            return False
+        pattern = self._sql_like_to_regex(str(literals[0]))
+        return bool(re.fullmatch(pattern, val))
+
+    def test_by_stats(self, min_v, max_v, literals) -> bool:
+        return True
+
+    def test_by_arrow(self, val, literals) -> bool:
+        return True
