@@ -169,6 +169,32 @@ def cmd_db_alter(args):
         sys.exit(1)
 
 
+def cmd_db_list(args):
+    """
+    Execute the 'db list' command.
+
+    Lists all databases in the catalog.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config = load_catalog_config(args.config)
+    catalog = create_catalog(config)
+
+    try:
+        databases = catalog.list_databases()
+    except Exception as e:
+        print(f"Error: Failed to list databases: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if not databases:
+        print("No databases found.")
+    else:
+        for database_name in databases:
+            print(database_name)
+
 def cmd_db_list_tables(args):
     """
     Execute the 'db list-tables' command.
@@ -269,6 +295,10 @@ def add_db_subcommands(db_parser):
         help='Property keys to remove'
     )
     alter_parser.set_defaults(func=cmd_db_alter)
+
+    # db list command
+    list_parser = db_subparsers.add_parser('list', help='List all databases')
+    list_parser.set_defaults(func=cmd_db_list)
 
     # db list-tables command
     list_tables_parser = db_subparsers.add_parser('list-tables', help='List all tables in a database')

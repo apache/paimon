@@ -48,6 +48,17 @@ class FileSystemCatalog(Catalog):
         self.catalog_options = catalog_options
         self.file_io = FileIO.get(self.warehouse, self.catalog_options)
 
+    def list_databases(self) -> list:
+        statuses = self.file_io.list_status(self.warehouse)
+        database_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and name.endswith(Catalog.DB_SUFFIX):
+                database_names.append(name[:-len(Catalog.DB_SUFFIX)])
+        return sorted(database_names)
+
     def get_database(self, name: str) -> Database:
         if self.file_io.exists(self.get_database_path(name)):
             return Database(name, {})
