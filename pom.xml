@@ -72,6 +72,7 @@ under the License.
         <module>paimon-arrow</module>
         <module>tools/ci/paimon-ci-tools</module>
         <module>paimon-api</module>
+        <module>paimon-lumina</module>
     </modules>
 
     <properties>

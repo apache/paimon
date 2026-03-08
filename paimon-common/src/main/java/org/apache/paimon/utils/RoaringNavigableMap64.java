@@ -142,6 +142,18 @@ public class RoaringNavigableMap64 implements Iterable<Long> {
         return Range.toRanges(roaring64NavigableMap::iterator);
     }
 
+    /**
+     * Returns true if there is at least one value in the range [minId, maxId] (inclusive on both
+     * ends) contained in this bitmap.
+     *
+     * <p>Uses {@code rankLong} for O(log N) performance instead of iterating all values.
+     */
+    public boolean containsRange(long minId, long maxId) {
+        long countUpToMax = roaring64NavigableMap.rankLong(maxId);
+        long countBeforeMin = minId > 0 ? roaring64NavigableMap.rankLong(minId - 1) : 0;
+        return countUpToMax > countBeforeMin;
+    }
+
     public static RoaringNavigableMap64 bitmapOf(long... dat) {
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         for (long ele : dat) {
