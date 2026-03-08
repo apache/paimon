@@ -354,3 +354,33 @@ class TableWriteTest(unittest.TestCase):
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
                              f"File name '{file_name}' does not match expected prefix format")
+
+    def test_dynamic_bucket_write(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '-1'}
+        )
+        self.catalog.create_table(
+            'default.test_dynamic_bucket', schema, False)
+        table = self.catalog.get_table(
+            'default.test_dynamic_bucket')
+        write_builder = table.new_batch_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(self.expected)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits)
+        sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
+        self.assertEqual(
+            self.expected.sort_by(sort_keys),
+            actual.sort_by(sort_keys),
+        )
