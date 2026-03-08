@@ -103,51 +103,57 @@ class Predicate:
 
     def to_arrow(self) -> Any:
         if self.method == 'and':
-            arrow_children = [p.to_arrow() for p in self.literals]
-            # Filter out None (alwaysTrue) children — they don't constrain anything
-            valid = [c for c in arrow_children if c is not None]
-            if not valid:
-                return None
-            return reduce(lambda x, y: x & y, valid)
+            return reduce(lambda x, y: x & y,
+                          [p.to_arrow() for p in self.literals])
         if self.method == 'or':
-            arrow_children = [p.to_arrow() for p in self.literals]
-            # If any child is None (alwaysTrue), the whole OR is always true
-            if any(c is None for c in arrow_children):
-                return None
-            return reduce(lambda x, y: x | y, arrow_children)
+            return reduce(lambda x, y: x | y,
+                          [p.to_arrow() for p in self.literals])
         if self.method == 'alwaysTrue':
-            return None
+            return pyarrow_compute.scalar(True)
         if self.method == 'alwaysFalse':
             return pyarrow_compute.scalar(False)
 
         if self.method == 'startsWith':
             pattern = self.literals[0]
+            # For PyArrow compatibility - improved approach
             try:
                 field_ref = pyarrow_dataset.field(self.field)
+                # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
-                return pyarrow_compute.starts_with(string_field, pattern)
+                result = pyarrow_compute.starts_with(string_field, pattern)
+                return result
             except Exception:
-                return None
+                # Fallback to True
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         if self.method == 'endsWith':
             pattern = self.literals[0]
+            # For PyArrow compatibility
             try:
                 field_ref = pyarrow_dataset.field(self.field)
+                # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
-                return pyarrow_compute.ends_with(string_field, pattern)
+                result = pyarrow_compute.ends_with(string_field, pattern)
+                return result
             except Exception:
-                return None
+                # Fallback to True
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         if self.method == 'contains':
             pattern = self.literals[0]
+            # For PyArrow compatibility
             try:
                 field_ref = pyarrow_dataset.field(self.field)
+                # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
-                return pyarrow_compute.match_substring(string_field, pattern)
+                result = pyarrow_compute.match_substring(string_field, pattern)
+                return result
             except Exception:
-                return None
+                # Fallback to True
+                return pyarrow_dataset.field(self.field).is_valid() | pyarrow_dataset.field(self.field).is_null()
         if self.method == 'like':
             pattern = self.literals[0]
             try:
                 field_ref = pyarrow_dataset.field(self.field)
+                # Ensure the field is cast to string type
                 string_field = field_ref.cast(pyarrow.string())
                 return pyarrow_compute.match_like(string_field, pattern)
             except Exception:
@@ -370,7 +376,6 @@ class Contains(Tester):
 
     def test_by_arrow(self, val, literals) -> bool:
         return True
-
 
 
 class IsNull(Tester):

@@ -411,10 +411,53 @@ class PredicateTest(unittest.TestCase):
         record = OffsetRow([1, 'abc'], 0, 2)
         self.assertTrue(predicate.test(record))
 
+    def test_always_true_null_record(self):
+        # mirrors testAlwaysTrueRow with null value
+        predicate = PredicateBuilder.always_true()
+        self.assertTrue(predicate.test(OffsetRow([None], 0, 1)))
+
+    def test_always_true_stats(self):
+        # mirrors testAlwaysTrueMinMax
+        predicate = PredicateBuilder.always_true()
+        stat = SimpleStats(
+            min_values=GenericRow([1], [False]),
+            max_values=GenericRow([10], [False]),
+            null_counts=[0],
+        )
+        self.assertTrue(predicate.test_by_simple_stats(stat, 10))
+        # also with null stats (row_count=1, null stats)
+        stat_null = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[None],
+        )
+        self.assertTrue(predicate.test_by_simple_stats(stat_null, 1))
+
     def test_always_false(self):
         predicate = PredicateBuilder.always_false()
         record = OffsetRow([1, 'abc'], 0, 2)
         self.assertFalse(predicate.test(record))
+
+    def test_always_false_null_record(self):
+        # mirrors testAlwaysFalseRow with null value
+        predicate = PredicateBuilder.always_false()
+        self.assertFalse(predicate.test(OffsetRow([None], 0, 1)))
+
+    def test_always_false_stats(self):
+        # mirrors testAlwaysFalseMinMax
+        predicate = PredicateBuilder.always_false()
+        stat = SimpleStats(
+            min_values=GenericRow([1], [False]),
+            max_values=GenericRow([10], [False]),
+            null_counts=[0],
+        )
+        self.assertFalse(predicate.test_by_simple_stats(stat, 10))
+        stat_null = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[None],
+        )
+        self.assertFalse(predicate.test_by_simple_stats(stat_null, 1))
 
     def test_always_true_and_other(self):
         table = self.catalog.get_table('default.test_append')
