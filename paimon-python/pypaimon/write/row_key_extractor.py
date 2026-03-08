@@ -285,10 +285,10 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
     def __init__(self, table_schema: 'TableSchema'):
         super().__init__(table_schema)
         num_buckets = int(table_schema.options.get(CoreOptions.BUCKET.key(), -1))
+
         if num_buckets != -1:
             raise ValueError(
-                "Only 'bucket' = '-1' is allowed for 'DynamicBucketRowKeyExtractor', but found: "
-                + str(num_buckets)
+                f"Only 'bucket' = '-1' is allowed for 'DynamicBucketRowKeyExtractor', but found: {num_buckets}"
             )
         opts = CoreOptions.from_dict(table_schema.options)
         self._assigner = SimpleHashBucketAssigner(
@@ -310,7 +310,7 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
             field_map[name] for name in self._bucket_keys if name in field_map
         ]
 
-    def extract_partition_bucket_batch(self, data: pa.RecordBatch) -> Tuple[List[Tuple], List[int]]:
+    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
         partitions = self._extract_partitions_batch(data)
         columns = [data.column(i) for i in self._bucket_key_indices]
         buckets = []
@@ -324,11 +324,9 @@ class DynamicBucketRowKeyExtractor(RowKeyExtractor):
                     )
                 )[4:]
             )
-            buckets.append(self._assigner.assign(partitions[row_idx], key_hash))
-        return partitions, buckets
-
-    def _extract_buckets_batch(self, data: pa.RecordBatch) -> List[int]:
-        raise NotImplementedError
+            buckets.append(
+                self._assigner.assign(partitions[row_idx], key_hash))
+        return buckets
 
 
 class PostponeBucketRowKeyExtractor(RowKeyExtractor):
