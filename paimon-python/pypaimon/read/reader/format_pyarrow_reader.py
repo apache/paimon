@@ -39,6 +39,7 @@ class FormatPyArrowReader(RecordBatchReader):
                  push_down_predicate: Any, batch_size: int = 1024):
         file_path_for_pyarrow = file_io.to_filesystem_path(file_path)
         self.dataset = ds.dataset(file_path_for_pyarrow, format=file_format, filesystem=file_io.filesystem)
+        self._file_format = file_format
         self.read_fields = read_fields
         self._read_field_names = [f.name for f in read_fields]
 
@@ -61,6 +62,9 @@ class FormatPyArrowReader(RecordBatchReader):
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
             batch = self.reader.read_next_batch()
+
+            if self._file_format == 'orc' and self._output_schema is not None:
+                batch = self._cast_orc_time_columns(batch)
 
             if not self.missing_fields:
                 return batch
@@ -98,6 +102,27 @@ class FormatPyArrowReader(RecordBatchReader):
 
         except StopIteration:
             return None
+
+    def _cast_orc_time_columns(self, batch):
+        """Cast int32 TIME columns back to time32('ms') when reading ORC.
+        """
+        columns = []
+        fields = []
+        changed = False
+        for i, name in enumerate(batch.schema.names):
+            col = batch.column(i)
+            idx = self._output_schema.get_field_index(name)
+            if idx >= 0 and pa.types.is_int32(col.type) \
+                    and pa.types.is_time(self._output_schema.field(idx).type):
+                col = col.cast(self._output_schema.field(idx).type)
+                fields.append(self._output_schema.field(idx))
+                changed = True
+            else:
+                fields.append(batch.schema.field(i))
+            columns.append(col)
+        if changed:
+            return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
+        return batch
 
     def close(self):
         if self.reader is not None:

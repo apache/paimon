@@ -208,11 +208,9 @@ class FileIO(ABC):
 
     @staticmethod
     def _cast_time_columns_for_orc(data):
-        """Cast time32/time64 columns to int32 before writing ORC.
+        """Cast time32 columns to int32 before writing ORC.
 
-        PyArrow's ORC writer does not support time types. Java Paimon stores
-        TIME as a plain INT (milliseconds) in ORC, so we cast to int32 to
-        keep the raw millis value and let the ORC writer accept it.
+        PyArrow's ORC writer does not support time types.
         """
         has_time = any(pyarrow.types.is_time(f.type) for f in data.schema)
         if not has_time:

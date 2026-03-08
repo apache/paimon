@@ -25,6 +25,7 @@ import unittest
 
 from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
+from parameterized import parameterized
 
 
 class TableWriteTest(unittest.TestCase):
@@ -386,7 +387,8 @@ class TableWriteTest(unittest.TestCase):
             actual.sort_by(sort_keys),
         )
 
-    def test_write_time_type(self):
+    @parameterized.expand([('parquet',), ('orc',), ('avro',)])
+    def test_write_time_type(self, file_format):
         time_schema = pa.schema([
             ('id', pa.int32()),
             ('t', pa.time32('ms'))
@@ -396,9 +398,10 @@ class TableWriteTest(unittest.TestCase):
             't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3)]
         }, schema=time_schema)
 
-        schema = Schema.from_pyarrow_schema(time_schema)
-        self.catalog.create_table('default.test_write_time', schema, False)
-        table = self.catalog.get_table('default.test_write_time')
+        table_name = 'default.test_write_time_' + file_format
+        schema = Schema.from_pyarrow_schema(time_schema, options={'file.format': file_format})
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
