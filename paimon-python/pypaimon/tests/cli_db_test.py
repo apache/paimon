@@ -165,7 +165,7 @@ class CliDbTest(unittest.TestCase):
         """Test database drop with ignore-if-not-exists flag."""
         with patch('sys.argv',
                    ['paimon', '-c', self.config_file, 'db', 'drop',
-                    'nonexistent_ignore_db', '--ignore-if-not-exists']):
+                    'nonexistent_ignore_db', '-i']):
             with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
                 try:
                     main()

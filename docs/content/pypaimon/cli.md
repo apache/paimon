@@ -410,7 +410,7 @@ Drop an existing database.
 paimon db drop mydb
 
 # Drop and ignore if not exists
-paimon db drop mydb --ignore-if-not-exists
+paimon db drop mydb -i
 
 # Drop with all tables (cascade)
 paimon db drop mydb --cascade

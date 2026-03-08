@@ -240,7 +240,7 @@ def add_db_subcommands(db_parser):
         help='Database name'
     )
     drop_parser.add_argument(
-        '--ignore-if-not-exists',
+        '--ignore-if-not-exists', '-i',
         action='store_true',
         help='Do not raise error if database does not exist'
     )
