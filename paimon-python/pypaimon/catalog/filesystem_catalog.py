@@ -65,6 +65,48 @@ class FileSystemCatalog(Catalog):
             path = self.get_database_path(name)
             self.file_io.mkdirs(path)
 
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        try:
+            self.get_database(name)
+        except DatabaseNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+
+        db_path = self.get_database_path(name)
+
+        if cascade:
+            for table_name in self.list_tables(name):
+                table_path = f"{db_path}/{table_name}"
+                self.file_io.delete(table_path, True)
+
+        # Check if database still has tables
+        remaining_tables = self.list_tables(name)
+        if remaining_tables and not cascade:
+            raise ValueError(
+                f"Database {name} is not empty. "
+                f"Use cascade=True to drop all tables first."
+            )
+
+        self.file_io.delete(db_path, True)
+
+    def list_tables(self, database_name: str) -> list:
+        try:
+            self.get_database(database_name)
+        except DatabaseNotExistException:
+            raise
+
+        db_path = self.get_database_path(database_name)
+        statuses = self.file_io.list_status(db_path)
+        table_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and not name.startswith("."):
+                table_names.append(name)
+        return sorted(table_names)
+
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)

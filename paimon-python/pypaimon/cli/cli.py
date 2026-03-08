@@ -107,6 +107,13 @@ def main():
     from pypaimon.cli.cli_table import add_table_subcommands
     add_table_subcommands(table_parser)
 
+    # Database commands
+    db_parser = subparsers.add_parser('db', help='Database operations')
+
+    # Import and add database subcommands
+    from pypaimon.cli.cli_db import add_db_subcommands
+    add_db_subcommands(db_parser)
+
     args = parser.parse_args()
     
     if args.command is None:
