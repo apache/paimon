@@ -28,7 +28,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.cli.cli import main
 
 
-class CliTest(unittest.TestCase):
+class CliTableTest(unittest.TestCase):
     """Integration tests for CLI with real catalog and table operations."""
 
     @classmethod
