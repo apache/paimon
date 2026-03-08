@@ -18,7 +18,9 @@
 
 package org.apache.paimon.spark.globalindex.btree;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
 import org.apache.paimon.options.Options;
@@ -34,6 +36,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
 import org.apache.spark.api.java.JavaRDD;
@@ -49,8 +52,12 @@ import org.apache.spark.sql.functions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.calcRowRange;
 
@@ -83,71 +90,152 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
         }
 
         List<DataSplit> splits = indexBuilder.scan();
-        Range range = calcRowRange(splits);
-        if (splits.isEmpty() || range == null) {
+        if (splits.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<BinaryRow, Map<Range, List<DataSplit>>> partitionRangeSplits =
+                groupSplitsByRange(splits);
+        if (partitionRangeSplits.isEmpty()) {
             return Collections.emptyList();
         }
 
-        // we need to read all partition columns for shuffle
-        List<String> selectedColumns = new ArrayList<>();
-        selectedColumns.addAll(table.partitionKeys());
-        selectedColumns.addAll(readType.getFieldNames());
+        List<String> selectedColumns = new ArrayList<>(readType.getFieldNames());
+        int indexFieldPos = readType.getFieldIndex(indexField.name());
+        int rowIdPos = readType.getFieldIndex(SpecialFields.ROW_ID.name());
 
-        Dataset<Row> source =
-                PaimonUtils.createDataset(
-                        spark,
-                        ScanPlanHelper$.MODULE$.createNewScanPlan(
-                                splits.toArray(new DataSplit[0]), relation));
-
-        Dataset<Row> selected =
-                source.select(selectedColumns.stream().map(functions::col).toArray(Column[]::new));
-
-        // 2. shuffle and sort by partitions and index keys
-        Column[] sortFields =
-                selectedColumns.stream()
-                        .filter(name -> !SpecialFields.ROW_ID.name().equals(name))
-                        .map(functions::col)
-                        .toArray(Column[]::new);
-
+        // Calculate maximum parallelism bound
         long recordsPerRange = options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
-        // this should be superfast since append only table can utilize count-start pushdown well.
-        long rowCount = source.count();
-        int partitionNum = Math.max((int) (rowCount / recordsPerRange), 1);
         int maxParallelism = options.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
-        partitionNum = Math.min(partitionNum, maxParallelism);
 
-        // For efficiency, we do not repartition within each paimon partition. Instead, we directly
-        // divide ranges by <partitions, index field>, and each subtask is expected to process
-        // records from multiple partitions. The drawback is that if a Paimon partition spans
-        // multiple Spark partitions, the first and last output files may contain relatively few
-        // records.
-        Dataset<Row> partitioned =
-                selected.repartitionByRange(partitionNum, sortFields)
-                        .sortWithinPartitions(sortFields);
+        List<CommitMessage> allMessages = new ArrayList<>();
+        List<String> sortColumns = new ArrayList<>();
+        sortColumns.add(indexField.name());
+        final int partitionKeyNum = table.partitionKeys().size();
+        BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
+        for (Map.Entry<BinaryRow, Map<Range, List<DataSplit>>> partitionEntry :
+                partitionRangeSplits.entrySet()) {
+            for (Map.Entry<Range, List<DataSplit>> entry : partitionEntry.getValue().entrySet()) {
+                Range range = entry.getKey();
+                List<DataSplit> rangeSplits = entry.getValue();
+                if (rangeSplits.isEmpty()) {
+                    continue;
+                }
+                int partitionNum = Math.max((int) (range.count() / recordsPerRange), 1);
+                partitionNum = Math.min(partitionNum, maxParallelism);
 
-        // 3. write index for each partition & range
-        final byte[] serializedBuilder = InstantiationUtil.serializeObject(indexBuilder);
-        final RowType rowType =
-                SpecialFields.rowTypeWithRowId(table.rowType()).project(selectedColumns);
-        JavaRDD<byte[]> written =
-                partitioned
-                        .javaRDD()
-                        .map(row -> (InternalRow) (new SparkRow(rowType, row)))
-                        .mapPartitions(
-                                (FlatMapFunction<Iterator<InternalRow>, byte[]>)
-                                        iter -> buildBTreeIndex(iter, serializedBuilder, range));
+                Dataset<Row> source =
+                        PaimonUtils.createDataset(
+                                spark,
+                                ScanPlanHelper$.MODULE$.createNewScanPlan(
+                                        rangeSplits.toArray(new DataSplit[0]), relation));
 
-        // 4. collect all commit messages and return
-        List<byte[]> commitBytes = written.collect();
-        return CommitMessageSerializer.deserializeAll(commitBytes);
+                Dataset<Row> selected =
+                        source.select(
+                                selectedColumns.stream()
+                                        .map(functions::col)
+                                        .toArray(Column[]::new));
+
+                Column[] sortFields =
+                        sortColumns.stream().map(functions::col).toArray(Column[]::new);
+
+                Dataset<Row> partitioned =
+                        selected.repartitionByRange(partitionNum, sortFields)
+                                .sortWithinPartitions(sortFields);
+
+                final byte[] serializedBuilder = InstantiationUtil.serializeObject(indexBuilder);
+                final byte[] partitionBytes =
+                        binaryRowSerializer.serializeToBytes(partitionEntry.getKey());
+                JavaRDD<byte[]> written =
+                        partitioned
+                                .javaRDD()
+                                .map(row -> (InternalRow) (new SparkRow(readType, row)))
+                                .mapPartitions(
+                                        (FlatMapFunction<Iterator<InternalRow>, byte[]>)
+                                                iter ->
+                                                        buildBTreeIndex(
+                                                                iter,
+                                                                serializedBuilder,
+                                                                range,
+                                                                partitionKeyNum,
+                                                                partitionBytes,
+                                                                indexFieldPos,
+                                                                rowIdPos));
+                List<byte[]> commitBytes = written.collect();
+                allMessages.addAll(CommitMessageSerializer.deserializeAll(commitBytes));
+            }
+        }
+        return allMessages;
+    }
+
+    private static Map<BinaryRow, Map<Range, List<DataSplit>>> groupSplitsByRange(
+            List<DataSplit> splits) {
+        Map<BinaryRow, List<Pair<Range, DataSplit>>> partitionSplitRanges = new HashMap<>();
+        for (DataSplit split : splits) {
+            Range splitRange = calcRowRange(Collections.singletonList(split));
+            if (splitRange == null) {
+                continue;
+            }
+            BinaryRow partition = split.partition();
+            partitionSplitRanges
+                    .computeIfAbsent(partition, p -> new ArrayList<>())
+                    .add(Pair.of(splitRange, split));
+        }
+
+        Map<BinaryRow, Map<Range, List<DataSplit>>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<Pair<Range, DataSplit>>> partitionEntry :
+                partitionSplitRanges.entrySet()) {
+            List<Pair<Range, DataSplit>> splitRanges = partitionEntry.getValue();
+            splitRanges.sort(
+                    Comparator.comparingLong((Pair<Range, DataSplit> e) -> e.getKey().from)
+                            .thenComparingLong(e -> e.getKey().to));
+
+            Map<Range, List<DataSplit>> partitionRanges = new LinkedHashMap<>();
+            Range current = null;
+            List<DataSplit> currentSplits = new ArrayList<>();
+            for (Map.Entry<Range, DataSplit> entry : splitRanges) {
+                Range splitRange = entry.getKey();
+                if (current == null) {
+                    current = splitRange;
+                    currentSplits.add(entry.getValue());
+                    continue;
+                }
+                Range merged = Range.union(current, splitRange);
+                if (merged != null) {
+                    current = merged;
+                    currentSplits.add(entry.getValue());
+                } else {
+                    partitionRanges.put(current, currentSplits);
+                    current = splitRange;
+                    currentSplits = new ArrayList<>();
+                    currentSplits.add(entry.getValue());
+                }
+            }
+            if (current != null) {
+                partitionRanges.put(current, currentSplits);
+            }
+            result.put(partitionEntry.getKey(), partitionRanges);
+        }
+
+        return result;
     }
 
     private static Iterator<byte[]> buildBTreeIndex(
-            Iterator<InternalRow> input, byte[] serializedBuilder, Range range)
+            Iterator<InternalRow> input,
+            byte[] serializedBuilder,
+            Range range,
+            int partitionKeyNum,
+            byte[] partitionBytes,
+            int indexFieldPos,
+            int rowIdPos)
             throws IOException, ClassNotFoundException {
+        final BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionKeyNum);
+        BinaryRow partition = binaryRowSerializer.deserializeFromBytes(partitionBytes);
         BTreeGlobalIndexBuilder builder =
                 InstantiationUtil.deserializeObject(
                         serializedBuilder, BTreeGlobalIndexBuilder.class.getClassLoader());
-        return CommitMessageSerializer.serializeAll(builder.build(range, input)).iterator();
+        return CommitMessageSerializer.serializeAll(
+                        builder.buildForSinglePartition(
+                                range, partition, input, indexFieldPos, rowIdPos))
+                .iterator();
     }
 }

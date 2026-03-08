@@ -84,7 +84,14 @@ public class DefaultGlobalIndexBuilder implements Serializable {
         LongCounter rowCounter = new LongCounter(0);
         List<ResultEntry> resultEntries = writePaimonRows(data, rowCounter);
         List<IndexFileMeta> indexFileMetas =
-                toIndexFileMetas(table, rowRange, indexField.id(), indexType, resultEntries);
+                toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        indexField.id(),
+                        indexType,
+                        resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());

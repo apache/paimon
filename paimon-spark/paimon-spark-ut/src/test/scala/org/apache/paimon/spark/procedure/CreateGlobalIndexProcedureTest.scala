@@ -177,7 +177,6 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         .asScala
         .filter(_.indexFile().indexType() == "btree")
         .map(_.indexFile())
-      table.store().newGlobalIndexScanBuilder().shardList()
       assert(btreeEntries.nonEmpty)
 
       // 1. assert total row count, file count and row range
@@ -237,22 +236,22 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
         (0 until 65000).map(i => s"($i, 'name_$i', 'p0')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
-      values = (0 until 35000).map(i => s"($i, 'name_$i', 'p1')").mkString(",")
-      spark.sql(s"INSERT INTO T VALUES $values")
-
       values = (0 until 22222).map(i => s"($i, 'name_$i', 'p0')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
+      values = (0 until 35000).map(i => s"($i, 'name_$i', 'p1')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
       values = (0 until 100).map(i => s"($i, 'name_$i', 'p1')").mkString(",")
+      spark.sql(s"INSERT INTO T VALUES $values")
+
+      values = (0 until 33333).map(i => s"($i, 'name_$i', 'p1')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
       values = (0 until 100).map(i => s"($i, 'name_$i', 'p2')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
       values = (0 until 33333).map(i => s"($i, 'name_$i', 'p2')").mkString(",")
-      spark.sql(s"INSERT INTO T VALUES $values")
-
-      values = (0 until 33333).map(i => s"($i, 'name_$i', 'p1')").mkString(",")
       spark.sql(s"INSERT INTO T VALUES $values")
 
       val output =
