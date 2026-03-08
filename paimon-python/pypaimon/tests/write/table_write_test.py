@@ -16,6 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import glob
+import datetime
 import os
 import shutil
 
@@ -384,3 +385,31 @@ class TableWriteTest(unittest.TestCase):
             self.expected.sort_by(sort_keys),
             actual.sort_by(sort_keys),
         )
+
+    def test_write_time_type(self):
+        time_schema = pa.schema([
+            ('id', pa.int32()),
+            ('t', pa.time32('ms'))
+        ])
+        expected = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3)]
+        }, schema=time_schema)
+
+        schema = Schema.from_pyarrow_schema(time_schema)
+        self.catalog.create_table('default.test_write_time', schema, False)
+        table = self.catalog.get_table('default.test_write_time')
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(expected)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits)
+        self.assertEqual(expected, actual)

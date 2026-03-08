@@ -134,3 +134,13 @@ class DataTypesTest(unittest.TestCase):
         self.assertEqual(len(converted_nested_field.fields), 2)
         self.assertEqual(converted_nested_field.fields[0].name, "inner_field1")
         self.assertEqual(converted_nested_field.fields[1].name, "inner_field2")
+
+    def test_time_type(self):
+        pa_type = PyarrowFieldParser.from_paimon_type(AtomicType("TIME"))
+        self.assertEqual(pa_type, pa.time32('ms'))
+
+        pa_type_with_precision = PyarrowFieldParser.from_paimon_type(AtomicType("TIME(3)"))
+        self.assertEqual(pa_type_with_precision, pa.time32('ms'))
+
+        paimon_type = PyarrowFieldParser.to_paimon_type(pa.time32('ms'), nullable=True)
+        self.assertEqual(paimon_type.type, "TIME(0)")

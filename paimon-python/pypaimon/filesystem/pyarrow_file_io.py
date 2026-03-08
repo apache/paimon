@@ -382,6 +382,8 @@ class PyArrowFileIO(FileIO):
             import sys
             import pyarrow.orc as orc
 
+            data = self._cast_time_columns_for_orc(data)
+
             with self.new_output_stream(path) as output_stream:
                 # Check Python version - if 3.6, don't use compression parameter
                 if sys.version_info[:2] == (3, 6):
