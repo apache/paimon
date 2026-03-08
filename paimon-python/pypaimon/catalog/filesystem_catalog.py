@@ -140,6 +140,22 @@ class FileSystemCatalog(Catalog):
         except Exception as e:
             raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
 
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        
+        # Check if table exists
+        try:
+            self.get_table(identifier)
+        except TableNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+        
+        # Delete the table directory
+        table_path = self.get_table_path(identifier)
+        self.file_io.delete(table_path, True)
+
     def commit_snapshot(
             self,
             identifier: Identifier,
