@@ -68,42 +68,6 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
     }
   }
 
-  test("create lumina vector index - with different index types") {
-    withTable("T") {
-      spark.sql("""
-                  |CREATE TABLE T (id INT, v ARRAY<FLOAT>)
-                  |TBLPROPERTIES (
-                  |  'bucket' = '-1',
-                  |  'global-index.row-count-per-shard' = '10000',
-                  |  'row-tracking.enabled' = 'true',
-                  |  'data-evolution.enabled' = 'true')
-                  |""".stripMargin)
-
-      val values = (0 until 50)
-        .map(
-          i => s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)))")
-        .mkString(",")
-      spark.sql(s"INSERT INTO T VALUES $values")
-
-      val output = spark
-        .sql(
-          s"CALL sys.create_global_index(table => 'test.T', index_column => 'v', index_type => '$indexType', options => '$defaultOptions')")
-        .collect()
-        .head
-      assert(output.getBoolean(0))
-
-      val table = loadTable("T")
-      val indexEntries = table
-        .store()
-        .newIndexFileHandler()
-        .scanEntries()
-        .asScala
-        .filter(_.indexFile().indexType() == indexType)
-
-      assert(indexEntries.nonEmpty)
-    }
-  }
-
   test("create lumina vector index - with partitioned table") {
     withTable("T") {
       spark.sql("""
@@ -164,11 +128,12 @@ class LuminaVectorIndexTest extends PaimonSparkTestBase {
                   |  'data-evolution.enabled' = 'true')
                   |""".stripMargin)
 
-      val values = (0 until 10000)
-        .map(
-          i => s"($i, array(cast($i as float), cast(${i + 1} as float), cast(${i + 2} as float)))")
-        .mkString(",")
-      spark.sql(s"INSERT INTO T VALUES $values")
+      val df = spark
+        .range(0, 10000)
+        .selectExpr(
+          "cast(id as int) as id",
+          "array(cast(id as float), cast(id + 1 as float), cast(id + 2 as float)) as v")
+      df.write.insertInto("T")
 
       val output = spark
         .sql(

@@ -31,7 +31,6 @@ import org.aliyun.lumina.LuminaFileOutput;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
@@ -273,9 +272,9 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
     /** Adapts a {@link PositionOutputStream} to the {@link LuminaFileOutput} JNI callback API. */
     private static class OutputStreamFileOutput implements LuminaFileOutput {
-        private final OutputStream out;
+        private final PositionOutputStream out;
 
-        OutputStreamFileOutput(OutputStream out) {
+        OutputStreamFileOutput(PositionOutputStream out) {
             this.out = out;
         }
 
@@ -290,8 +289,8 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         }
 
         @Override
-        public long getPos() {
-            return -1;
+        public long getPos() throws IOException {
+            return out.getPos();
         }
 
         @Override

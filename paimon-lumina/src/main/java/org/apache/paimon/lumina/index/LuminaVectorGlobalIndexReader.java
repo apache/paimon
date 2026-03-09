@@ -420,20 +420,30 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         }
 
         // Then close underlying streams.
-        for (SeekableInputStream stream : openStreams) {
-            try {
-                if (stream != null) {
-                    stream.close();
-                }
-            } catch (Throwable t) {
-                if (firstException == null) {
-                    firstException = t;
-                } else {
-                    firstException.addSuppressed(t);
+        List<SeekableInputStream> streamsSnapshot;
+        synchronized (openStreams) {
+            if (openStreams.isEmpty()) {
+                streamsSnapshot = null;
+            } else {
+                streamsSnapshot = new ArrayList<>(openStreams);
+                openStreams.clear();
+            }
+        }
+        if (streamsSnapshot != null) {
+            for (SeekableInputStream stream : streamsSnapshot) {
+                try {
+                    if (stream != null) {
+                        stream.close();
+                    }
+                } catch (Throwable t) {
+                    if (firstException == null) {
+                        firstException = t;
+                    } else {
+                        firstException.addSuppressed(t);
+                    }
                 }
             }
         }
-        openStreams.clear();
 
         if (firstException != null) {
             if (firstException instanceof IOException) {
