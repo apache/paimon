@@ -823,7 +823,8 @@ public class RESTCatalogServer {
         if (request.nextSnapshotId() != null) {
             table.snapshotManager().snapshot(request.nextSnapshotId());
             consumerManager.resetConsumer(
-                    request.consumerId(), new org.apache.paimon.consumer.Consumer(request.nextSnapshotId()));
+                    request.consumerId(),
+                    new org.apache.paimon.consumer.Consumer(request.nextSnapshotId()));
         } else {
             consumerManager.deleteConsumer(request.consumerId());
         }

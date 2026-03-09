@@ -2692,9 +2692,7 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                                         .api()
                                         .listConsumersPaged(identifier, null, token));
         assertThat(consumers).hasSize(1);
-        assertThat(consumers)
-                .extracting(ConsumerInfo::getConsumerId)
-                .containsExactly("consumer1");
+        assertThat(consumers).extracting(ConsumerInfo::getConsumerId).containsExactly("consumer1");
     }
 
     @Test

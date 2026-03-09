@@ -373,7 +373,8 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
-    public void resetConsumer(Identifier identifier, String consumerId, @Nullable Long nextSnapshotId)
+    public void resetConsumer(
+            Identifier identifier, String consumerId, @Nullable Long nextSnapshotId)
             throws TableNotExistException {
         try {
             api.resetConsumer(identifier, consumerId, nextSnapshotId);

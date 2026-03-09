@@ -778,8 +778,7 @@ public interface Catalog extends AutoCloseable {
     default void resetConsumer(
             Identifier identifier, String consumerId, @Nullable Long nextSnapshotId)
             throws TableNotExistException {
-        throw new UnsupportedOperationException(
-                "This catalog does not support reset consumer");
+        throw new UnsupportedOperationException("This catalog does not support reset consumer");
     }
 
     /**

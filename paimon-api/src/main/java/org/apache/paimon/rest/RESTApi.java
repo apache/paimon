@@ -642,7 +642,8 @@ public class RESTApi {
             Identifier identifier, String consumerId, @Nullable Long nextSnapshotId) {
         ResetConsumerRequest request = new ResetConsumerRequest(consumerId, nextSnapshotId);
         client.post(
-                resourcePaths.resetConsumer(identifier.getDatabaseName(), identifier.getObjectName()),
+                resourcePaths.resetConsumer(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 restAuthFunction);
     }
