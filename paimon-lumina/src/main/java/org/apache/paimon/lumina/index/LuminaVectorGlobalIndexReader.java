@@ -35,6 +35,7 @@ import org.aliyun.lumina.LuminaFileInput;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -122,12 +123,11 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
 
-        // Extract filter IDs once for native pre-filtering
-        long[] filterIds = null;
+        // Extract sorted filter IDs once; per-index scoping happens inside the loop.
+        long[] allFilterIds = null;
         if (includeRowIds != null) {
             long cardinality = includeRowIds.getLongCardinality();
             if (cardinality <= 0) {
-                // Empty filter — no rows can match.
                 return new LuminaScoredGlobalIndexResult(
                         new RoaringNavigableMap64(), new HashMap<>());
             }
@@ -137,27 +137,28 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                                 + cardinality
                                 + ") exceeds maximum supported size for native pre-filtering");
             }
-            filterIds = new long[(int) cardinality];
+            allFilterIds = new long[(int) cardinality];
             int idx = 0;
             for (long id : includeRowIds) {
-                filterIds[idx++] = id;
+                allFilterIds[idx++] = id;
             }
         }
 
-        Map<String, String> searchOptions = new LinkedHashMap<>();
-        if (filterIds != null) {
-            // With native pre-filtering, increase list_size to improve recall under
-            // selective filters. DiskANN's graph traversal skips filtered-out nodes,
-            // so a larger list_size helps find enough qualifying candidates.
+        Map<String, String> filterSearchOptions = null;
+        Map<String, String> plainSearchOptions = null;
+        if (allFilterIds != null) {
+            filterSearchOptions = new LinkedHashMap<>();
             int listSize = Math.max(limit * options.searchFactor(), options.searchListSize());
-            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
-            searchOptions.put("search.thread_safe_filter", "true");
+            filterSearchOptions.put("diskann.search.list_size", String.valueOf(listSize));
+            filterSearchOptions.put("search.thread_safe_filter", "true");
         } else {
+            plainSearchOptions = new LinkedHashMap<>();
             int listSize = Math.max(limit, options.searchListSize());
-            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
+            plainSearchOptions.put("diskann.search.list_size", String.valueOf(listSize));
         }
 
-        for (LuminaIndex index : indices) {
+        for (int i = 0; i < indices.length; i++) {
+            LuminaIndex index = indices[i];
             if (index == null) {
                 continue;
             }
@@ -167,32 +168,25 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 continue;
             }
 
-            float[] distances = new float[effectiveK];
-            long[] labels = new long[effectiveK];
-
-            if (filterIds != null) {
-                index.searchWithFilter(
-                        queryVector, 1, effectiveK, distances, labels, filterIds, searchOptions);
-            } else {
-                index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
-            }
-
-            for (int i = 0; i < effectiveK; i++) {
-                long rowId = labels[i];
-                if (rowId < 0) {
+            if (allFilterIds != null) {
+                LuminaIndexMeta meta = indexMetas[i];
+                long[] scopedIds = scopeFilterIds(allFilterIds, meta.minId(), meta.maxId());
+                if (scopedIds.length == 0) {
                     continue;
                 }
+                effectiveK = (int) Math.min(effectiveK, scopedIds.length);
 
-                float score = convertDistanceToScore(distances[i]);
-
-                if (result.size() < limit) {
-                    result.offer(new ScoredRow(rowId, score));
-                } else {
-                    if (result.peek() != null && score > result.peek().score) {
-                        result.poll();
-                        result.offer(new ScoredRow(rowId, score));
-                    }
-                }
+                float[] distances = new float[effectiveK];
+                long[] labels = new long[effectiveK];
+                index.searchWithFilter(
+                        queryVector, 1, effectiveK, distances, labels, scopedIds,
+                        filterSearchOptions);
+                collectResults(distances, labels, effectiveK, limit, result);
+            } else {
+                float[] distances = new float[effectiveK];
+                long[] labels = new long[effectiveK];
+                index.search(queryVector, 1, effectiveK, distances, labels, plainSearchOptions);
+                collectResults(distances, labels, effectiveK, limit, result);
             }
         }
 
@@ -203,6 +197,71 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             roaringBitmap64.add(scoredRow.rowId);
         }
         return new LuminaScoredGlobalIndexResult(roaringBitmap64, id2scores);
+    }
+
+    private void collectResults(
+            float[] distances, long[] labels, int count, int limit,
+            PriorityQueue<ScoredRow> result) {
+        for (int i = 0; i < count; i++) {
+            long rowId = labels[i];
+            if (rowId < 0) {
+                continue;
+            }
+            float score = convertDistanceToScore(distances[i]);
+            if (result.size() < limit) {
+                result.offer(new ScoredRow(rowId, score));
+            } else if (result.peek() != null && score > result.peek().score) {
+                result.poll();
+                result.offer(new ScoredRow(rowId, score));
+            }
+        }
+    }
+
+    /**
+     * Extract the subset of {@code sortedIds} that falls within [{@code minId}, {@code maxId}]
+     * using binary search. The input array must be sorted in ascending order (guaranteed by roaring
+     * bitmap iteration order).
+     */
+    private static long[] scopeFilterIds(long[] sortedIds, long minId, long maxId) {
+        int from = lowerBound(sortedIds, minId);
+        int to = upperBound(sortedIds, maxId);
+        if (from >= to) {
+            return new long[0];
+        }
+        if (from == 0 && to == sortedIds.length) {
+            return sortedIds;
+        }
+        return Arrays.copyOfRange(sortedIds, from, to);
+    }
+
+    /** Return the index of the first element >= target. */
+    private static int lowerBound(long[] arr, long target) {
+        int lo = 0;
+        int hi = arr.length;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (arr[mid] < target) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
+    }
+
+    /** Return the index of the first element > target. */
+    private static int upperBound(long[] arr, long target) {
+        int lo = 0;
+        int hi = arr.length;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (arr[mid] <= target) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return lo;
     }
 
     private float convertDistanceToScore(float distance) {

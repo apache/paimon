@@ -20,6 +20,7 @@ package org.apache.paimon.lumina.index;
 
 import org.aliyun.lumina.LuminaBuilder;
 import org.aliyun.lumina.LuminaFileInput;
+import org.aliyun.lumina.LuminaFileOutput;
 import org.aliyun.lumina.LuminaSearcher;
 import org.aliyun.lumina.MetricType;
 
@@ -113,6 +114,13 @@ public class LuminaIndex implements Closeable {
         ensureOpen();
         ensureBuilder();
         builder.dump(path);
+    }
+
+    /** Dump (serialize) the built index to a streaming file output. */
+    public void dumpToStream(LuminaFileOutput fileOutput) {
+        ensureOpen();
+        ensureBuilder();
+        builder.dumpToStream(fileOutput);
     }
 
     /** Search for k nearest neighbors. */
