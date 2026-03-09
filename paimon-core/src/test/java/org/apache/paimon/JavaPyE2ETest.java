@@ -154,6 +154,7 @@ public class JavaPyE2ETest {
                             .column("value", DataTypes.DOUBLE())
                             .column("ts", DataTypes.TIMESTAMP())
                             .column("ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+                            .column("t", DataTypes.TIME())
                             .column(
                                     "metadata",
                                     DataTypes.ROW(
@@ -185,7 +186,7 @@ public class JavaPyE2ETest {
 
                 write.write(
                         createRow7Cols(
-                                1, "Apple", "Fruit", 1.5, 1000000L, 2000000L, "store1", 1001L,
+                                1, "Apple", "Fruit", 1.5, 1000000L, 2000000L, 1000, "store1", 1001L,
                                 "Beijing", "China"));
                 write.write(
                         createRow7Cols(
@@ -195,6 +196,7 @@ public class JavaPyE2ETest {
                                 0.8,
                                 1000001L,
                                 2000001L,
+                                2000,
                                 "store1",
                                 1002L,
                                 "Shanghai",
@@ -207,6 +209,7 @@ public class JavaPyE2ETest {
                                 0.6,
                                 1000002L,
                                 2000002L,
+                                3000,
                                 "store2",
                                 1003L,
                                 "Tokyo",
@@ -219,17 +222,18 @@ public class JavaPyE2ETest {
                                 1.2,
                                 1000003L,
                                 2000003L,
+                                4000,
                                 "store2",
                                 1004L,
                                 "Seoul",
                                 "Korea"));
                 write.write(
                         createRow7Cols(
-                                5, "Chicken", "Meat", 5.0, 1000004L, 2000004L, "store3", 1005L,
-                                "NewYork", "USA"));
+                                5, "Chicken", "Meat", 5.0, 1000004L, 2000004L, 5000, "store3",
+                                1005L, "NewYork", "USA"));
                 write.write(
                         createRow7Cols(
-                                6, "Beef", "Meat", 8.0, 1000005L, 2000005L, "store3", 1006L,
+                                6, "Beef", "Meat", 8.0, 1000005L, 2000005L, 6000, "store3", 1006L,
                                 "London", "UK"));
 
                 commit.commit(0, write.prepareCommit(true, 0));
@@ -242,12 +246,12 @@ public class JavaPyE2ETest {
                     getResult(read, splits, row -> rowToStringWithStruct(row, table.rowType()));
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, (store1, 1001, (Beijing, China))]",
-                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, (store1, 1002, (Shanghai, China))]",
-                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, (store2, 1003, (Tokyo, Japan))]",
-                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
-                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
-                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, 1000, (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, 2000, (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, 3000, (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, 4000, (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, 5000, (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, (store3, 1006, (London, UK))]");
         }
     }
 
@@ -401,17 +405,18 @@ public class JavaPyE2ETest {
             assertThat(table.rowType().getFieldTypes().get(4)).isEqualTo(DataTypes.TIMESTAMP());
             assertThat(table.rowType().getFieldTypes().get(5))
                     .isEqualTo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
-            assertThat(table.rowType().getFieldTypes().get(6)).isInstanceOf(RowType.class);
-            RowType metadataType = (RowType) table.rowType().getFieldTypes().get(6);
+            assertThat(table.rowType().getFieldTypes().get(6)).isEqualTo(DataTypes.TIME());
+            assertThat(table.rowType().getFieldTypes().get(7)).isInstanceOf(RowType.class);
+            RowType metadataType = (RowType) table.rowType().getFieldTypes().get(7);
             assertThat(metadataType.getFieldTypes().get(2)).isInstanceOf(RowType.class);
             assertThat(res)
                     .containsExactlyInAnyOrder(
-                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, (store1, 1001, (Beijing, China))]",
-                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, (store1, 1002, (Shanghai, China))]",
-                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, (store2, 1003, (Tokyo, Japan))]",
-                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, (store2, 1004, (Seoul, Korea))]",
-                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, (store3, 1005, (NewYork, USA))]",
-                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, (store3, 1006, (London, UK))]");
+                            "+I[1, Apple, Fruit, 1.5, 1970-01-01T00:16:40, 1970-01-01T00:33:20, 1000, (store1, 1001, (Beijing, China))]",
+                            "+I[2, Banana, Fruit, 0.8, 1970-01-01T00:16:40.001, 1970-01-01T00:33:20.001, 2000, (store1, 1002, (Shanghai, China))]",
+                            "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, 3000, (store2, 1003, (Tokyo, Japan))]",
+                            "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, 4000, (store2, 1004, (Seoul, Korea))]",
+                            "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, 5000, (store3, 1005, (NewYork, USA))]",
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, (store3, 1006, (London, UK))]");
 
             PredicateBuilder predicateBuilder = new PredicateBuilder(table.rowType());
             int[] ids = {1, 2, 3, 4, 5, 6};
@@ -704,6 +709,7 @@ public class JavaPyE2ETest {
             double value,
             long ts,
             long tsLtz,
+            int timeMillis,
             String metadataSource,
             long metadataCreatedAt,
             String city,
@@ -720,6 +726,7 @@ public class JavaPyE2ETest {
                 value,
                 org.apache.paimon.data.Timestamp.fromEpochMillis(ts),
                 org.apache.paimon.data.Timestamp.fromEpochMillis(tsLtz),
+                timeMillis,
                 metadataRow);
     }
 

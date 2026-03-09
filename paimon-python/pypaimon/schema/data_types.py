@@ -520,19 +520,7 @@ class PyarrowFieldParser:
             elif type_name == 'DATE':
                 return pyarrow.date32()
             if type_name.startswith('TIME'):
-                if type_name == 'TIME':
-                    return pyarrow.time64('us')  # default to 6
-                match = re.fullmatch(r'TIME\((\d+)\)', type_name)
-                if match:
-                    precision = int(match.group(1))
-                    if precision == 0:
-                        return pyarrow.time32('s')
-                    if 1 <= precision <= 3:
-                        return pyarrow.time32('ms')
-                    if 4 <= precision <= 6:
-                        return pyarrow.time64('us')
-                    if 7 <= precision <= 9:
-                        return pyarrow.time64('ns')
+                return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
         elif isinstance(data_type, MapType):
@@ -601,8 +589,7 @@ class PyarrowFieldParser:
         elif types.is_date32(pa_type):
             type_name = 'DATE'
         elif types.is_time(pa_type):
-            precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
-            type_name = f'TIME({precision_mapping[pa_type.unit]})'
+            type_name = 'TIME(0)'
         elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
             element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
@@ -677,6 +664,8 @@ class PyarrowFieldParser:
             }
         elif pyarrow.types.is_date(field_type):
             return {"type": "int", "logicalType": "date"}
+        elif pyarrow.types.is_time(field_type):
+            return {"type": "int", "logicalType": "time-millis"}
         elif pyarrow.types.is_timestamp(field_type):
             unit = field_type.unit
             if field_type.tz is None:
