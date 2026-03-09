@@ -219,7 +219,8 @@ class FileIO(ABC):
         for i, field in enumerate(data.schema):
             col = data.column(i)
             if pyarrow.types.is_time(field.type):
-                if not pyarrow.types.is_time32(field.type):
+                if not pyarrow.types.is_time32(field.type) \
+                        or field.type != pyarrow.time32('ms'):
                     raise ValueError(
                         "Column '{}' has type {} which cannot be safely cast to int32 "
                         "for ORC writing. Use time32('ms') instead."
