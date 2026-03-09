@@ -61,12 +61,15 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private final LuminaVectorIndexOptions options;
     private final int sizePerIndex;
     private final int dim;
-    private final DataType fieldType;
 
     private long count = 0; // monotonically increasing global row ID across all index files
     private long currentIndexMinId = Long.MAX_VALUE;
     private long currentIndexMaxId = Long.MIN_VALUE;
-    private final List<VectorEntry> pendingBatch;
+    private ByteBuffer pendingVectors;
+    private ByteBuffer pendingIds;
+    private FloatBuffer pendingFloatView;
+    private LongBuffer pendingLongView;
+    private int pendingCount = 0;
     private final List<ResultEntry> results;
 
     public LuminaVectorGlobalIndexWriter(
@@ -74,11 +77,17 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             DataType fieldType,
             LuminaVectorIndexOptions options) {
         this.fileWriter = fileWriter;
-        this.fieldType = fieldType;
         this.options = options;
-        this.sizePerIndex = options.sizePerIndex();
         this.dim = options.dimension();
-        this.pendingBatch = new ArrayList<>();
+        int configuredSize = options.sizePerIndex();
+        long buildMemoryLimit = options.buildMemoryLimit();
+        int maxByDim =
+                (int) Math.min(configuredSize, buildMemoryLimit / ((long) dim * Float.BYTES));
+        this.sizePerIndex = Math.max(maxByDim, 1);
+        this.pendingVectors = LuminaIndex.allocateVectorBuffer(sizePerIndex, dim);
+        this.pendingIds = LuminaIndex.allocateIdBuffer(sizePerIndex);
+        this.pendingFloatView = pendingVectors.asFloatBuffer();
+        this.pendingLongView = pendingIds.asLongBuffer();
         this.results = new ArrayList<>();
 
         validateFieldType(fieldType);
@@ -113,11 +122,16 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         }
         currentIndexMinId = Math.min(currentIndexMinId, count);
         currentIndexMaxId = Math.max(currentIndexMaxId, count);
-        pendingBatch.add(new VectorEntry(count, vector));
+        int offset = pendingCount * dim;
+        for (int i = 0; i < dim; i++) {
+            pendingFloatView.put(offset + i, vector[i]);
+        }
+        pendingLongView.put(pendingCount, count);
+        pendingCount++;
         count++;
 
         try {
-            if (pendingBatch.size() >= sizePerIndex) {
+            if (pendingCount >= sizePerIndex) {
                 buildAndFlushIndex();
             }
         } catch (IOException e) {
@@ -128,7 +142,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     @Override
     public List<ResultEntry> finish() {
         try {
-            if (!pendingBatch.isEmpty()) {
+            if (pendingCount > 0) {
                 buildAndFlushIndex();
             }
             return results;
@@ -142,11 +156,11 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
      * all vectors in a single batch, dump, and close.
      */
     private void buildAndFlushIndex() throws IOException {
-        if (pendingBatch.isEmpty()) {
+        if (pendingCount == 0) {
             return;
         }
 
-        int n = pendingBatch.size();
+        int n = pendingCount;
         LuminaIndex index = createIndex();
 
         try {
@@ -157,36 +171,16 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             ByteBuffer trainingBuffer = LuminaIndex.allocateVectorBuffer(trainingSize, dim);
             FloatBuffer trainingFloatView = trainingBuffer.asFloatBuffer();
             for (int i = 0; i < trainingSize; i++) {
-                float[] vector = pendingBatch.get(sampleIndices[i]).vector;
+                int srcOffset = sampleIndices[i] * dim;
                 for (int j = 0; j < dim; j++) {
-                    trainingFloatView.put(i * dim + j, vector[j]);
+                    trainingFloatView.put(i * dim + j, pendingFloatView.get(srcOffset + j));
                 }
             }
             index.pretrain(trainingBuffer, trainingSize);
-            // Release training buffer early (~256MB for dim=128, trainingSize=500K)
             trainingBuffer = null;
             trainingFloatView = null;
 
-            ByteBuffer vectorBuffer = LuminaIndex.allocateVectorBuffer(n, dim);
-            ByteBuffer idBuffer = LuminaIndex.allocateIdBuffer(n);
-            FloatBuffer floatView = vectorBuffer.asFloatBuffer();
-            LongBuffer longView = idBuffer.asLongBuffer();
-
-            for (int i = 0; i < n; i++) {
-                VectorEntry entry = pendingBatch.get(i);
-                float[] vector = entry.vector;
-                for (int j = 0; j < dim; j++) {
-                    floatView.put(i * dim + j, vector[j]);
-                }
-                longView.put(i, entry.id);
-            }
-
-            index.insertBatch(vectorBuffer, idBuffer, n);
-            // Release vector/id buffers early (~1GB for dim=128, sizePerIndex=2M)
-            vectorBuffer = null;
-            idBuffer = null;
-            floatView = null;
-            longView = null;
+            index.insertBatch(pendingVectors, pendingIds, n);
 
             File tempFile =
                     Files.createTempFile("paimon-lumina-build-" + UUID.randomUUID(), ".lmi")
@@ -222,7 +216,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             index.close();
         }
 
-        pendingBatch.clear();
+        pendingCount = 0;
         currentIndexMinId = Long.MAX_VALUE;
         currentIndexMaxId = Long.MIN_VALUE;
     }
@@ -289,16 +283,10 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
     @Override
     public void close() {
-        pendingBatch.clear();
-    }
-
-    private static class VectorEntry {
-        final long id;
-        final float[] vector;
-
-        VectorEntry(long id, float[] vector) {
-            this.id = id;
-            this.vector = vector;
-        }
+        pendingVectors = null;
+        pendingIds = null;
+        pendingFloatView = null;
+        pendingLongView = null;
+        pendingCount = 0;
     }
 }

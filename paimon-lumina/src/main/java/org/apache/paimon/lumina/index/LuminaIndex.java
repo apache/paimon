@@ -19,11 +19,11 @@
 package org.apache.paimon.lumina.index;
 
 import org.aliyun.lumina.LuminaBuilder;
+import org.aliyun.lumina.LuminaFileInput;
 import org.aliyun.lumina.LuminaSearcher;
 import org.aliyun.lumina.MetricType;
 
 import java.io.Closeable;
-import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.LinkedHashMap;
@@ -65,17 +65,21 @@ public class LuminaIndex implements Closeable {
         return index;
     }
 
-    /** Open an existing index from a file for searching. */
-    public static LuminaIndex fromFile(
-            File file,
+    /**
+     * Open an existing index from a streaming file input for searching.
+     *
+     * <p>The native searcher reads on-demand from the provided input. The caller must keep the
+     * underlying stream open until this index is closed.
+     */
+    public static LuminaIndex fromStream(
+            LuminaFileInput fileInput,
+            long fileSize,
             int dimension,
             LuminaVectorMetric metric,
             LuminaIndexType indexType,
             Map<String, String> extraOptions) {
         LuminaIndex index = new LuminaIndex(dimension, metric, indexType);
 
-        // Searcher only accepts index.dimension, index.type, and diskann.search.* per Lumina API.
-        // Filter out builder-only options like encoding.type and distance.metric.
         Map<String, String> searcherOpts = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : extraOptions.entrySet()) {
             String key = entry.getKey();
@@ -86,7 +90,7 @@ public class LuminaIndex implements Closeable {
         index.searcher =
                 LuminaSearcher.create(
                         indexType.getLuminaName(), dimension, toMetricType(metric), searcherOpts);
-        index.searcher.open(file);
+        index.searcher.open(fileInput, fileSize);
         return index;
     }
 

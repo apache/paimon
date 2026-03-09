@@ -31,10 +31,9 @@ import org.apache.paimon.types.FloatType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import java.io.File;
-import java.io.FileOutputStream;
+import org.aliyun.lumina.LuminaFileInput;
+
 import java.io.IOException;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -44,7 +43,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
-import java.util.UUID;
 
 /**
  * Vector global index reader using Lumina.
@@ -56,7 +54,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
     private final LuminaIndex[] indices;
     private final LuminaIndexMeta[] indexMetas;
-    private final List<File> localIndexFiles;
+    private final List<SeekableInputStream> openStreams;
     private final List<GlobalIndexIOMeta> ioMetas;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
@@ -75,7 +73,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         this.options = options;
         this.indices = new LuminaIndex[ioMetas.size()];
         this.indexMetas = new LuminaIndexMeta[ioMetas.size()];
-        this.localIndexFiles = Collections.synchronizedList(new ArrayList<>());
+        this.openStreams = Collections.synchronizedList(new ArrayList<>());
     }
 
     @Override
@@ -285,44 +283,58 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
     private void loadIndexAt(int position) throws IOException {
         GlobalIndexIOMeta ioMeta = ioMetas.get(position);
+        SeekableInputStream in = fileReader.getInputStream(ioMeta);
         LuminaIndex index = null;
-        try (SeekableInputStream in = fileReader.getInputStream(ioMeta)) {
-            index = loadIndex(in, position);
+        try {
+            index = loadIndex(in, position, ioMeta.fileSize());
+            openStreams.add(in);
             indices[position] = index;
         } catch (Exception e) {
             IOUtils.closeQuietly(index);
+            IOUtils.closeQuietly(in);
             throw e;
         }
     }
 
-    private LuminaIndex loadIndex(SeekableInputStream in, int position) throws IOException {
-        File rawIndexFile =
-                Files.createTempFile("paimon-lumina-" + UUID.randomUUID(), ".lmi").toFile();
-        localIndexFiles.add(rawIndexFile);
-
-        try (FileOutputStream fos = new FileOutputStream(rawIndexFile)) {
-            byte[] buffer = new byte[32768];
-            int bytesRead;
-            while ((bytesRead = in.read(buffer)) != -1) {
-                fos.write(buffer, 0, bytesRead);
-            }
-        }
-
+    private LuminaIndex loadIndex(SeekableInputStream in, int position, long fileSize)
+            throws IOException {
         LuminaIndexMeta meta = indexMetas[position];
         LuminaVectorMetric metric = LuminaVectorMetric.fromValue(meta.metricValue());
         LuminaIndexType indexType = meta.indexType();
 
-        // Searcher only accepts index.dimension and index.type per Lumina API.
-        // Do not pass builder-only options like encoding.type.
-        Map<String, String> extraOptions = new LinkedHashMap<>();
+        LuminaFileInput fileInput =
+                new LuminaFileInput() {
+                    @Override
+                    public int read(byte[] b, int off, int len) throws IOException {
+                        return in.read(b, off, len);
+                    }
 
-        return LuminaIndex.fromFile(rawIndexFile, meta.dim(), metric, indexType, extraOptions);
+                    @Override
+                    public void seek(long position) throws IOException {
+                        in.seek(position);
+                    }
+
+                    @Override
+                    public long getPos() throws IOException {
+                        return in.getPos();
+                    }
+
+                    @Override
+                    public void close() throws IOException {
+                        // Do not close: stream lifecycle is managed by the Reader.
+                    }
+                };
+
+        Map<String, String> extraOptions = new LinkedHashMap<>();
+        return LuminaIndex.fromStream(
+                fileInput, fileSize, meta.dim(), metric, indexType, extraOptions);
     }
 
     @Override
     public void close() throws IOException {
         Throwable firstException = null;
 
+        // Close all indices first (releases native FileReader → JNI global refs).
         for (int i = 0; i < indices.length; i++) {
             LuminaIndex index = indices[i];
             if (index == null) {
@@ -340,10 +352,11 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             indices[i] = null;
         }
 
-        for (File localFile : localIndexFiles) {
+        // Then close underlying streams.
+        for (SeekableInputStream stream : openStreams) {
             try {
-                if (localFile != null && localFile.exists()) {
-                    localFile.delete();
+                if (stream != null) {
+                    stream.close();
                 }
             } catch (Throwable t) {
                 if (firstException == null) {
@@ -353,7 +366,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 }
             }
         }
-        localIndexFiles.clear();
+        openStreams.clear();
 
         if (firstException != null) {
             if (firstException instanceof IOException) {

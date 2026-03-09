@@ -112,6 +112,15 @@ public class LuminaVectorIndexOptions {
                     .noDefaultValue()
                     .withDescription("Number of threads used for DiskANN index building.");
 
+    public static final ConfigOption<Long> VECTOR_BUILD_MEMORY_LIMIT =
+            ConfigOptions.key("vector.build-memory-limit")
+                    .longType()
+                    .defaultValue(2L * 1024 * 1024 * 1024)
+                    .withDescription(
+                            "Maximum bytes of vector data buffered in memory per index during building. "
+                                    + "When the configured sizePerIndex would exceed this limit for a given "
+                                    + "dimension, it is automatically reduced.");
+
     private final int dimension;
     private final LuminaVectorMetric metric;
     private final LuminaIndexType indexType;
@@ -125,6 +134,7 @@ public class LuminaVectorIndexOptions {
     private final Integer diskannEfConstruction;
     private final Integer diskannNeighborCount;
     private final Integer diskannBuildThreadCount;
+    private final long buildMemoryLimit;
 
     public LuminaVectorIndexOptions(Options options) {
         this.dimension = options.get(VECTOR_DIM);
@@ -149,6 +159,7 @@ public class LuminaVectorIndexOptions {
         this.diskannEfConstruction = options.getOptional(DISKANN_EF_CONSTRUCTION).orElse(null);
         this.diskannNeighborCount = options.getOptional(DISKANN_NEIGHBOR_COUNT).orElse(null);
         this.diskannBuildThreadCount = options.getOptional(DISKANN_BUILD_THREAD_COUNT).orElse(null);
+        this.buildMemoryLimit = options.get(VECTOR_BUILD_MEMORY_LIMIT);
     }
 
     public int dimension() {
@@ -201,5 +212,9 @@ public class LuminaVectorIndexOptions {
 
     public Integer diskannBuildThreadCount() {
         return diskannBuildThreadCount;
+    }
+
+    public long buildMemoryLimit() {
+        return buildMemoryLimit;
     }
 }
