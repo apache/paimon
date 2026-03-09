@@ -299,8 +299,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
           "PARTITION (dt=20240102)")
 
       checkAnswer(
-        spark.sql(
-          "SELECT COUNT(*) FROM `T_Mixed_Batch$snapshots` WHERE commit_kind = 'OVERWRITE'"),
+        spark.sql("SELECT COUNT(*) FROM `T_Mixed_Batch$snapshots` WHERE commit_kind = 'OVERWRITE'"),
         Row(1L) :: Nil
       )
 
