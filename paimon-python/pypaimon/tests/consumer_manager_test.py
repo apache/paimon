@@ -21,7 +21,6 @@ import tempfile
 import time
 import unittest
 from datetime import datetime
-from pathlib import Path
 
 from pypaimon.consumer.consumer import Consumer
 from pypaimon.consumer.consumer_manager import ConsumerManager
@@ -46,7 +45,6 @@ class ConsumerManagerTest(unittest.TestCase):
 
     def test_retry(self):
         """Test retry mechanism for corrupted consumer file."""
-        import json
         # Create corrupted consumer file
         consumer_dir = os.path.join(self.temp_dir, "consumer")
         os.makedirs(consumer_dir, exist_ok=True)
