@@ -122,6 +122,65 @@ def cmd_table_get(args):
     print(JSON.to_json(schema, indent=2))
 
 
+def cmd_table_snapshot(args):
+    """
+    Execute the 'table snapshot' command.
+    
+    Gets and displays the latest snapshot of a Paimon table in JSON format.
+    
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+    from pypaimon.table.file_store_table import FileStoreTable
+    
+    # Load catalog configuration
+    config_path = args.config
+    config = load_catalog_config(config_path)
+    
+    # Create catalog
+    catalog = create_catalog(config)
+    
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+    
+    database_name, table_name = parts
+    
+    # Get table
+    try:
+        table = catalog.get_table(f"{database_name}.{table_name}")
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Check if table is FileStoreTable
+    if not isinstance(table, FileStoreTable):
+        print(f"Error: Table '{table_identifier}' is not a FileStoreTable. "
+              f"Snapshot operation is not supported for this table type.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Get latest snapshot
+    try:
+        snapshot_manager = table.snapshot_manager()
+        snapshot = snapshot_manager.get_latest_snapshot()
+        
+        if snapshot is None:
+            print(f"Error: No snapshot found for table '{table_identifier}'.", file=sys.stderr)
+            sys.exit(1)
+        
+        # Output snapshot as JSON
+        print(JSON.to_json(snapshot, indent=2))
+        
+    except Exception as e:
+        print(f"Error: Failed to get snapshot: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def cmd_table_create(args):
     """
     Execute the 'table create' command.
@@ -484,6 +543,14 @@ def add_table_subcommands(table_parser):
         help='Table identifier in format: database.table'
     )
     get_parser.set_defaults(func=cmd_table_get)
+    
+    # table snapshot command
+    snapshot_parser = table_subparsers.add_parser('snapshot', help='Get the latest snapshot of a table')
+    snapshot_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    snapshot_parser.set_defaults(func=cmd_table_snapshot)
     
     # table create command
     create_parser = table_subparsers.add_parser('create', help='Create a new table')
