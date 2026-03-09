@@ -18,6 +18,10 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.functions.FunctionContext;
+import org.apache.flink.table.functions.TableFunction;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -30,24 +34,17 @@ import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Preconditions;
-
-import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
-
-import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.functions.FunctionContext;
-import org.apache.flink.table.functions.TableFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -72,6 +69,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
@@ -106,7 +104,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     // threshold for triggering full table reload when snapshots are pending
     private transient Integer refreshFullThreshold;
 
-    // async partition refresh fields
+    // whether to refresh dynamic partition asynchronously
+    private transient boolean partitionRefreshAsync;
+
+    // async partition refresh fields (only used when partitionRefreshAsync is true)
     private transient ExecutorService partitionRefreshExecutor;
     private transient volatile Future<?> partitionRefreshFuture;
     private transient AtomicReference<LookupTable> pendingLookupTable;
@@ -198,6 +199,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 options.getOptional(LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL)
                         .orElse(options.get(CONTINUOUS_DISCOVERY_INTERVAL));
         this.refreshFullThreshold = options.get(LOOKUP_REFRESH_FULL_LOAD_THRESHOLD);
+        this.partitionRefreshAsync = options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC);
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
@@ -224,14 +226,13 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         lookupTable.open();
 
         // initialize async partition refresh fields
-        this.pendingLookupTable = new AtomicReference<>(null);
-        this.pendingPath = new AtomicReference<>(null);
-        this.pendingPartitions = new AtomicReference<>(null);
-        this.partitionRefreshException = new AtomicReference<>(null);
-        this.partitionRefreshFuture = null;
-        this.activePartitions =
-                partitionLoader != null ? partitionLoader.partitions() : Collections.emptyList();
-        if (partitionLoader != null) {
+        if (partitionRefreshAsync && partitionLoader != null) {
+            this.pendingLookupTable = new AtomicReference<>(null);
+            this.pendingPath = new AtomicReference<>(null);
+            this.pendingPartitions = new AtomicReference<>(null);
+            this.partitionRefreshException = new AtomicReference<>(null);
+            this.partitionRefreshFuture = null;
+            this.activePartitions = partitionLoader.partitions();
             this.partitionRefreshExecutor =
                     Executors.newSingleThreadExecutor(
                             r -> {
@@ -325,15 +326,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 return lookupInternal(key);
             }
 
-            // use the partitions that match the current lookupTable, not
-            // partitionLoader.partitions() which may already point to new partitions
-            // during async refresh
-            if (activePartitions.isEmpty()) {
+            // when async refresh is enabled, use activePartitions which tracks the
+            // partitions that match the current lookupTable; otherwise use
+            // partitionLoader.partitions() directly since sync refresh keeps them consistent
+            List<BinaryRow> currentPartitions =
+                    partitionRefreshAsync ? activePartitions : partitionLoader.partitions();
+            if (currentPartitions.isEmpty()) {
                 return Collections.emptyList();
             }
 
             List<RowData> rows = new ArrayList<>();
-            for (BinaryRow partition : activePartitions) {
+            for (BinaryRow partition : currentPartitions) {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
             return rows;
@@ -376,7 +379,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @VisibleForTesting
     void tryRefresh() throws Exception {
         // 0. check if async partition refresh has completed, and switch if so
-        checkAsyncPartitionRefreshCompletion();
+        if (partitionRefreshAsync) {
+            checkAsyncPartitionRefreshCompletion();
+        }
 
         // 1. check if this time is in black list
         if (refreshBlacklist != null && !refreshBlacklist.canRefresh()) {
@@ -393,7 +398,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
 
             if (partitionChanged) {
-                startAsyncPartitionRefresh(partitions);
+                if (partitionRefreshAsync) {
+                    startAsyncPartitionRefresh(partitions);
+                } else {
+                    syncPartitionRefresh(partitions);
+                }
                 nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
                 return;
             }
@@ -417,6 +426,20 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
             nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
         }
+    }
+
+    /**
+     * Synchronously refresh the lookup table for new partitions. This blocks queries until the new
+     * partition data is fully loaded.
+     */
+    private void syncPartitionRefresh(List<BinaryRow> newPartitions) throws Exception {
+        LOG.info(
+                "Synchronously refreshing partition for table {}, new partitions detected.",
+                table.name());
+        lookupTable.close();
+        lookupTable.specifyPartitions(newPartitions, partitionLoader.createSpecificPartFilter());
+        lookupTable.open();
+        LOG.info("Synchronous partition refresh completed for table {}.", table.name());
     }
 
     /**

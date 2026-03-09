@@ -1253,10 +1253,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testAsyncPartitionRefreshServesOldDataDuringSwitch(LookupCacheMode mode)
-            throws Exception {
-        // This test verifies that during async partition refresh (max_pt() change),
-        // queries continue to return old partition data until the new partition is fully loaded.
+    public void testSyncPartitionRefresh(LookupCacheMode mode) throws Exception {
+        // This test verifies synchronous partition refresh (default mode):
+        // when max_pt() changes, the lookup table is refreshed synchronously,
+        // so queries immediately return new partition data after refresh.
         sql(
                 "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED)"
                         + "PARTITIONED BY (`pt`) WITH ("
@@ -1280,22 +1280,67 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         List<Row> result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200));
 
-        // insert data into a new partition '2', which will trigger async partition refresh
+        // insert data into a new partition '2', which will trigger sync partition refresh
         sql("INSERT INTO PARTITIONED_DIM VALUES ('2', 1, 1000), ('2', 2, 2000)");
-        Thread.sleep(1000); // wait for async refresh
-        // after async refresh completes, should get new partition '2' data
-        sql("INSERT INTO T VALUES (1), (2)");
-        iterator.collect(2);
-        Thread.sleep(1000);
-
+        Thread.sleep(2000); // wait for partition refresh interval to trigger
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1000), Row.of(2, 2000));
 
         // insert another new partition '3' and verify switch again
         sql("INSERT INTO PARTITIONED_DIM VALUES ('3', 1, 10000), ('3', 2, 20000)");
-        Thread.sleep(1000); // wait for async refresh
+        Thread.sleep(2000); // wait for partition refresh interval to trigger
+        sql("INSERT INTO T VALUES (1), (2)");
+        result = iterator.collect(2);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 10000), Row.of(2, 20000));
 
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testAsyncPartitionRefresh(LookupCacheMode mode) throws Exception {
+        // This test verifies asynchronous partition refresh:
+        // when max_pt() changes, the lookup table is refreshed in a background thread,
+        // old partition data continues serving queries until the new partition is fully loaded.
+        sql(
+                "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED)"
+                        + "PARTITIONED BY (`pt`) WITH ("
+                        + "'bucket' = '1', "
+                        + "'lookup.dynamic-partition' = 'max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
+                        + "'lookup.dynamic-partition.refresh.async' = 'true', "
+                        + "'lookup.cache' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                mode);
+
+        // insert data into partition '1'
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('1', 1, 100), ('1', 2, 200)");
+
+        String query =
+                "SELECT T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM "
+                        + "for system_time as of T.proctime AS D ON T.i = D.k";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        // verify initial lookup returns partition '1' data
+        sql("INSERT INTO T VALUES (1), (2)");
+        List<Row> result = iterator.collect(2);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200));
+
+        // insert data into a new partition '2', which will trigger async partition refresh
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('2', 1, 1000), ('2', 2, 2000)");
+        Thread.sleep(1000); // wait for async refresh to complete
+        // trigger a lookup to check async completion and switch to new partition
+        sql("INSERT INTO T VALUES (1), (2)");
+        iterator.collect(2);
+        Thread.sleep(1000);
+        sql("INSERT INTO T VALUES (1), (2)");
+        result = iterator.collect(2);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1000), Row.of(2, 2000));
+
+        // insert another new partition '3' and verify switch again
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('3', 1, 10000), ('3', 2, 20000)");
+        Thread.sleep(1000); // wait for async refresh to complete
         sql("INSERT INTO T VALUES (1), (2)");
         iterator.collect(2);
         Thread.sleep(1000);

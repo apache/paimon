@@ -276,6 +276,17 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription("Whether to refresh lookup table in an async thread.");
 
+    public static final ConfigOption<Boolean> LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC =
+            ConfigOptions.key("lookup.dynamic-partition.refresh.async")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to refresh dynamic partition lookup table asynchronously. "
+                                    + "When enabled, partition changes will be loaded in a background thread "
+                                    + "while the old partition data continues serving queries. "
+                                    + "When disabled (default), partition refresh is synchronous and blocks queries "
+                                    + "until the new partition data is fully loaded.");
+
     public static final ConfigOption<Integer> LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT =
             ConfigOptions.key("lookup.refresh.async.pending-snapshot-count")
                     .intType()
