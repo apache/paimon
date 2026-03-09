@@ -766,6 +766,23 @@ public interface Catalog extends AutoCloseable {
     }
 
     /**
+     * Reset consumer for table.
+     *
+     * @param identifier path of the table
+     * @param consumerId consumer id
+     * @param nextSnapshotId next snapshot id. If null, the consumer will be deleted.
+     * @throws TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default void resetConsumer(
+            Identifier identifier, String consumerId, @Nullable Long nextSnapshotId)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException(
+                "This catalog does not support reset consumer");
+    }
+
+    /**
      * rollback table by the given {@link Identifier} and instant.
      *
      * @param identifier path of the table

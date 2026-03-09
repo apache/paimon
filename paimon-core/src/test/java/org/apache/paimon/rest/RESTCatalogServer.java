@@ -62,6 +62,7 @@ import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -395,6 +396,11 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.CONSUMERS.equals(resources[3]);
+                        boolean isResetConsumer =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.CONSUMERS.equals(resources[3])
+                                        && "reset".equals(resources[4]);
                         boolean isLoadSnapshot =
                                 resources.length == 5
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -503,6 +509,8 @@ public class RESTCatalogServer {
                             return listSnapshots(identifier);
                         } else if (isListConsumers) {
                             return listConsumers(identifier);
+                        } else if (isResetConsumer) {
+                            return resetConsumer(identifier, restAuthParameter.data());
                         } else if (isLoadSnapshot) {
                             return loadSnapshot(identifier, resources[4]);
                         } else if (isTableAuth) {
@@ -805,6 +813,21 @@ public class RESTCatalogServer {
                         .collect(Collectors.toList());
         ListConsumersResponse response = new ListConsumersResponse(consumerEntries, null);
         return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+    }
+
+    private MockResponse resetConsumer(Identifier identifier, String data) throws Exception {
+        ResetConsumerRequest request = RESTApi.fromJson(data, ResetConsumerRequest.class);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        ConsumerManager consumerManager =
+                new ConsumerManager(table.fileIO(), table.location(), "main");
+        if (request.nextSnapshotId() != null) {
+            table.snapshotManager().snapshot(request.nextSnapshotId());
+            consumerManager.resetConsumer(
+                    request.consumerId(), new org.apache.paimon.consumer.Consumer(request.nextSnapshotId()));
+        } else {
+            consumerManager.deleteConsumer(request.consumerId());
+        }
+        return new MockResponse().setResponseCode(200);
     }
 
     private MockResponse loadSnapshot(Identifier identifier, String version) throws Exception {
