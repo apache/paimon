@@ -62,7 +62,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -101,6 +105,18 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient long nextRefreshTime;
     // threshold for triggering full table reload when snapshots are pending
     private transient Integer refreshFullThreshold;
+
+    // async partition refresh fields
+    private transient ExecutorService partitionRefreshExecutor;
+    private transient volatile Future<?> partitionRefreshFuture;
+    private transient AtomicReference<LookupTable> pendingLookupTable;
+    private transient AtomicReference<File> pendingPath;
+    private transient AtomicReference<List<BinaryRow>> pendingPartitions;
+    private transient AtomicReference<Exception> partitionRefreshException;
+    // the partitions that the current lookupTable was loaded with;
+    // during async refresh, partitionLoader.partitions() may already point to new partitions
+    // while lookupTable still serves old data, so we must use this field for lookup queries
+    private transient volatile List<BinaryRow> activePartitions;
 
     protected FunctionContext functionContext;
 
@@ -190,43 +206,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 projectFields,
                 joinKeys);
 
-        LOG.info("Creating lookup table for {}.", table.name());
-        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
-                && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
-            if (isRemoteServiceAvailable(table)) {
-                this.lookupTable =
-                        PrimaryKeyPartialLookupTable.createRemoteTable(table, projection, joinKeys);
-                LOG.info(
-                        "Remote service is available. Created PrimaryKeyPartialLookupTable with remote service.");
-            } else {
-                try {
-                    this.lookupTable =
-                            PrimaryKeyPartialLookupTable.createLocalTable(
-                                    table, projection, path, joinKeys, getRequireCachedBucketIds());
-                    LOG.info(
-                            "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
-                } catch (UnsupportedOperationException e) {
-                    LOG.info(
-                            "Remote service isn't available. Cannot create PrimaryKeyPartialLookupTable with LocalQueryExecutor "
-                                    + "because {}. Will create FullCacheLookupTable.",
-                            e.getMessage());
-                }
-            }
-        }
-
-        if (lookupTable == null) {
-            FullCacheLookupTable.Context context =
-                    new FullCacheLookupTable.Context(
-                            table,
-                            projection,
-                            predicate,
-                            createProjectedPredicate(projection),
-                            path,
-                            joinKeys,
-                            getRequireCachedBucketIds());
-            this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
-            LOG.info("Created {}.", lookupTable.getClass().getSimpleName());
-        }
+        this.lookupTable = createLookupTable(path, projection);
 
         if (partitionLoader != null) {
             partitionLoader.open();
@@ -242,6 +222,79 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             lookupTable.specifyCacheRowFilter(cacheRowFilter);
         }
         lookupTable.open();
+
+        // initialize async partition refresh fields
+        this.pendingLookupTable = new AtomicReference<>(null);
+        this.pendingPath = new AtomicReference<>(null);
+        this.pendingPartitions = new AtomicReference<>(null);
+        this.partitionRefreshException = new AtomicReference<>(null);
+        this.partitionRefreshFuture = null;
+        this.activePartitions =
+                partitionLoader != null ? partitionLoader.partitions() : Collections.emptyList();
+        if (partitionLoader != null) {
+            this.partitionRefreshExecutor =
+                    Executors.newSingleThreadExecutor(
+                            r -> {
+                                Thread thread = new Thread(r);
+                                thread.setName(
+                                        Thread.currentThread().getName() + "-partition-refresh");
+                                thread.setDaemon(true);
+                                return thread;
+                            });
+        }
+    }
+
+    /**
+     * Create a new {@link LookupTable} instance. This method is used both during initial open and
+     * during async partition refresh to create a new LookupTable with a separate temp directory.
+     */
+    private LookupTable createLookupTable(File tablePath, int[] projection) {
+        Options options = Options.fromMap(table.options());
+        LookupTable newLookupTable = null;
+
+        LOG.info("Creating lookup table for {}.", table.name());
+        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
+                && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
+            if (isRemoteServiceAvailable(table)) {
+                newLookupTable =
+                        PrimaryKeyPartialLookupTable.createRemoteTable(table, projection, joinKeys);
+                LOG.info(
+                        "Remote service is available. Created PrimaryKeyPartialLookupTable with remote service.");
+            } else {
+                try {
+                    newLookupTable =
+                            PrimaryKeyPartialLookupTable.createLocalTable(
+                                    table,
+                                    projection,
+                                    tablePath,
+                                    joinKeys,
+                                    getRequireCachedBucketIds());
+                    LOG.info(
+                            "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
+                } catch (UnsupportedOperationException e) {
+                    LOG.info(
+                            "Remote service isn't available. Cannot create PrimaryKeyPartialLookupTable with LocalQueryExecutor "
+                                    + "because {}. Will create FullCacheLookupTable.",
+                            e.getMessage());
+                }
+            }
+        }
+
+        if (newLookupTable == null) {
+            FullCacheLookupTable.Context context =
+                    new FullCacheLookupTable.Context(
+                            table,
+                            projection,
+                            predicate,
+                            createProjectedPredicate(projection),
+                            tablePath,
+                            joinKeys,
+                            getRequireCachedBucketIds());
+            newLookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
+            LOG.info("Created {}.", newLookupTable.getClass().getSimpleName());
+        }
+
+        return newLookupTable;
     }
 
     @Nullable
@@ -272,12 +325,15 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 return lookupInternal(key);
             }
 
-            if (partitionLoader.partitions().isEmpty()) {
+            // use the partitions that match the current lookupTable, not
+            // partitionLoader.partitions() which may already point to new partitions
+            // during async refresh
+            if (activePartitions.isEmpty()) {
                 return Collections.emptyList();
             }
 
             List<RowData> rows = new ArrayList<>();
-            for (BinaryRow partition : partitionLoader.partitions()) {
+            for (BinaryRow partition : activePartitions) {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
             return rows;
@@ -319,6 +375,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     @VisibleForTesting
     void tryRefresh() throws Exception {
+        // 0. check if async partition refresh has completed, and switch if so
+        checkAsyncPartitionRefreshCompletion();
+
         // 1. check if this time is in black list
         if (refreshBlacklist != null && !refreshBlacklist.canRefresh()) {
             return;
@@ -334,13 +393,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
 
             if (partitionChanged) {
-                // reopen with latest partition
-                lookupTable.specifyPartitions(
-                        partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
-                lookupTable.close();
-                lookupTable.open();
+                startAsyncPartitionRefresh(partitions);
                 nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
-                // no need to refresh the lookup table because it is reopened
                 return;
             }
         }
@@ -362,6 +416,114 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
 
             nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
+        }
+    }
+
+    /**
+     * Start an async task to create and load a new {@link LookupTable} for the new partitions. The
+     * current lookup table continues serving queries until the new one is fully loaded.
+     */
+    private void startAsyncPartitionRefresh(List<BinaryRow> newPartitions) {
+        // if there is already an async refresh in progress, skip this one
+        if (partitionRefreshFuture != null && !partitionRefreshFuture.isDone()) {
+            LOG.info(
+                    "Async partition refresh is already in progress for table {}, "
+                            + "skipping new partition change.",
+                    table.name());
+            return;
+        }
+
+        List<String> fieldNames = table.rowType().getFieldNames();
+        int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
+
+        LOG.info(
+                "Starting async partition refresh for table {}, new partitions detected.",
+                table.name());
+
+        partitionRefreshFuture =
+                partitionRefreshExecutor.submit(
+                        () -> {
+                            File newPath = null;
+                            try {
+                                newPath =
+                                        new File(
+                                                path.getParent(),
+                                                "lookup-partition-refresh-" + UUID.randomUUID());
+                                if (!newPath.mkdirs()) {
+                                    throw new RuntimeException("Failed to create dir: " + newPath);
+                                }
+                                LookupTable newTable = createLookupTable(newPath, projection);
+                                newTable.specifyPartitions(
+                                        newPartitions, partitionLoader.createSpecificPartFilter());
+                                if (cacheRowFilter != null) {
+                                    newTable.specifyCacheRowFilter(cacheRowFilter);
+                                }
+                                newTable.open();
+
+                                pendingLookupTable.set(newTable);
+                                pendingPath.set(newPath);
+                                pendingPartitions.set(newPartitions);
+                                LOG.info(
+                                        "Async partition refresh completed for table {}.",
+                                        table.name());
+                            } catch (Exception e) {
+                                LOG.error(
+                                        "Async partition refresh failed for table {}.",
+                                        table.name(),
+                                        e);
+                                partitionRefreshException.set(e);
+                                // clean up the partially created lookup table
+                                if (newPath != null) {
+                                    FileIOUtils.deleteDirectoryQuietly(newPath);
+                                }
+                            }
+                        });
+    }
+
+    /**
+     * Check if the async partition refresh has completed. If so, atomically switch to the new
+     * lookup table and close the old one.
+     */
+    private void checkAsyncPartitionRefreshCompletion() throws Exception {
+        // propagate any exception from the async refresh thread
+        Exception asyncException = partitionRefreshException.getAndSet(null);
+        if (asyncException != null) {
+            LOG.warn(
+                    "Async partition refresh had failed for table {}, "
+                            + "will retry on next partition change. Continuing with old partitions.",
+                    table.name());
+        }
+
+        LookupTable newTable = pendingLookupTable.getAndSet(null);
+        if (newTable == null) {
+            return;
+        }
+
+        File newPath = pendingPath.getAndSet(null);
+        List<BinaryRow> newPartitions = pendingPartitions.getAndSet(null);
+
+        // switch: close old lookup table and replace with the new one
+        LookupTable oldTable = this.lookupTable;
+        File oldPath = this.path;
+
+        this.lookupTable = newTable;
+        if (newPath != null) {
+            this.path = newPath;
+        }
+        if (newPartitions != null) {
+            this.activePartitions = newPartitions;
+        }
+
+        LOG.info("Switched to new lookup table for table {} with new partitions.", table.name());
+
+        // close old table and clean up old temp directory
+        try {
+            oldTable.close();
+        } catch (IOException e) {
+            LOG.warn("Failed to close old lookup table for table {}.", table.name(), e);
+        }
+        if (!oldPath.equals(this.path)) {
+            FileIOUtils.deleteDirectoryQuietly(oldPath);
         }
     }
 
@@ -415,6 +577,26 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     @Override
     public void close() throws IOException {
+        // shut down async partition refresh executor
+        if (partitionRefreshExecutor != null) {
+            partitionRefreshExecutor.shutdownNow();
+            partitionRefreshExecutor = null;
+        }
+
+        // clean up any pending lookup table that was not yet switched
+        if (pendingLookupTable != null) {
+            LookupTable pending = pendingLookupTable.getAndSet(null);
+            if (pending != null) {
+                pending.close();
+            }
+        }
+        if (pendingPath != null) {
+            File pending = pendingPath.getAndSet(null);
+            if (pending != null) {
+                FileIOUtils.deleteDirectoryQuietly(pending);
+            }
+        }
+
         if (lookupTable != null) {
             lookupTable.close();
             lookupTable = null;
