@@ -294,12 +294,13 @@ public class SchemaManager implements Serializable {
                                         .defaultValue()
                                         .toString()));
 
-        boolean addColumnBeforePartition =
-                Boolean.parseBoolean(
-                        oldOptions.getOrDefault(
-                                CoreOptions.ADD_COLUMN_BEFORE_PARTITION.key(),
-                                CoreOptions.ADD_COLUMN_BEFORE_PARTITION.defaultValue().toString()));
-        List<String> partitionKeys = oldTableSchema.partitionKeys();
+        //        boolean addColumnBeforePartition =
+        //                Boolean.parseBoolean(
+        //                        oldOptions.getOrDefault(
+        //                                CoreOptions.ADD_COLUMN_BEFORE_PARTITION.key(),
+        //
+        // CoreOptions.ADD_COLUMN_BEFORE_PARTITION.defaultValue().toString()));
+        //        List<String> partitionKeys = oldTableSchema.partitionKeys();
 
         List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
         AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
@@ -376,17 +377,20 @@ public class SchemaManager implements Serializable {
                                 throw new UnsupportedOperationException(
                                         "Unsupported move type: " + move.type());
                             }
-                        } else if (addColumnBeforePartition
-                                && !partitionKeys.isEmpty()
-                                && addColumn.fieldNames().length == 1) {
-                            int insertIndex = newFields.size();
-                            for (int i = 0; i < newFields.size(); i++) {
-                                if (partitionKeys.contains(newFields.get(i).name())) {
-                                    insertIndex = i;
-                                    break;
-                                }
-                            }
-                            newFields.add(insertIndex, dataField);
+                            //                        } else if (addColumnBeforePartition
+                            //                                && !partitionKeys.isEmpty()
+                            //                                && addColumn.fieldNames().length == 1)
+                            // {
+                            //                            int insertIndex = newFields.size();
+                            //                            for (int i = 0; i < newFields.size(); i++)
+                            // {
+                            //                                if
+                            // (partitionKeys.contains(newFields.get(i).name())) {
+                            //                                    insertIndex = i;
+                            //                                    break;
+                            //                                }
+                            //                            }
+                            //                            newFields.add(insertIndex, dataField);
                         } else {
                             newFields.add(dataField);
                         }
