@@ -219,6 +219,12 @@ class FileIO(ABC):
         for i, field in enumerate(data.schema):
             col = data.column(i)
             if pyarrow.types.is_time(field.type):
+                if not pyarrow.types.is_time32(field.type):
+                    raise ValueError(
+                        "Column '{}' has type {} which cannot be safely cast to int32 "
+                        "for ORC writing. Use time32('ms') instead."
+                        .format(field.name, field.type)
+                    )
                 col = col.cast(pyarrow.int32())
             columns.append(col)
         orc_schema = pyarrow.schema([
