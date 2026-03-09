@@ -172,6 +172,34 @@ class CliTableTest(unittest.TestCase):
                 self.assertIn('age', field_names)
                 self.assertIn('city', field_names)
 
+    def test_cli_table_snapshot_basic(self):
+        """Test basic table snapshot via CLI."""
+        # Simulate CLI command: paimon -c <config> table snapshot test_db.users
+        with patch('sys.argv', ['paimon', '-c', self.config_file, 'table', 'snapshot', 'test_db.users']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+                
+                output = mock_stdout.getvalue()
+                
+                # Verify output is valid JSON
+                import json
+                snapshot_json = json.loads(output)
+                
+                # Verify snapshot structure
+                self.assertIn('id', snapshot_json)
+                self.assertIn('schemaId', snapshot_json)
+                self.assertIn('commitKind', snapshot_json)
+                self.assertIn('timeMillis', snapshot_json)
+                self.assertIn('totalRecordCount', snapshot_json)
+                self.assertIn('deltaRecordCount', snapshot_json)
+                
+                # Verify snapshot has valid data
+                self.assertGreater(snapshot_json['id'], 0)
+                self.assertGreater(snapshot_json['totalRecordCount'], 0)
+
     def test_cli_table_create_with_json_schema(self):
         """Test table create with JSON schema file."""
         import json

@@ -136,6 +136,36 @@ Output:
 
 **Note:** The output JSON can be saved to a file and used directly with the `table create` command to recreate the table structure.
 
+### Table Snapshot
+
+Get and display the latest snapshot information of a Paimon table in JSON format. The snapshot contains metadata about the current state of the table.
+
+```shell
+paimon table snapshot mydb.users
+```
+
+Output:
+```json
+{
+  "version": 3,
+  "id": 5,
+  "schemaId": 1,
+  "baseManifestList": "manifest-list-5-base-...",
+  "deltaManifestList": "manifest-list-5-delta-...",
+  "changelogManifestList": null,
+  "totalRecordCount": 1000,
+  "deltaRecordCount": 100,
+  "changelogRecordCount": null,
+  "commitUser": "user-123",
+  "commitIdentifier": 1709123456789,
+  "commitKind": "APPEND",
+  "timeMillis": 1709123456789,
+  "watermark": null,
+  "statistics": null,
+  "nextRowId": null
+}
+```
+
 ### Table Create
 
 Create a new Paimon table with a schema defined in a JSON file. The schema JSON format is the same as the output from
