@@ -838,7 +838,7 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
 
   test("Paimon MergeInto: concurrent two merge") {
     for (dvEnabled <- Seq("true", "false")) {
-      withTable("s", "t") {
+      withTable("s", s"t_$dvEnabled") {
         sql("CREATE TABLE s (id INT, b INT, c INT)")
         sql(
           "INSERT INTO s VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
