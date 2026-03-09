@@ -21,8 +21,6 @@ from io import BytesIO
 from typing import List
 
 import fastavro
-from cachetools import LRUCache, cachedmethod
-
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
@@ -36,7 +34,7 @@ from pypaimon.table.row.generic_row import (GenericRowDeserializer,
 class ManifestFileManager:
     """Writer for manifest files in Avro format using unified FileIO."""
 
-    def __init__(self, table, cache_max_size: int = 100):
+    def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
@@ -46,8 +44,6 @@ class ManifestFileManager:
         self.partition_keys_fields = self.table.partition_keys_fields
         self.primary_keys_fields = self.table.primary_keys_fields
         self.trimmed_primary_keys_fields = self.table.trimmed_primary_keys_fields
-
-        self._cache: LRUCache = LRUCache(maxsize=max(cache_max_size, 0))
 
     def read_entries_parallel(self, manifest_files: List[ManifestFileMeta], manifest_entry_filter=None,
                               drop_stats=True, max_workers=8) -> List[ManifestEntry]:
@@ -89,7 +85,6 @@ class ManifestFileManager:
                 result.append(entry)
         return result
 
-    @cachedmethod(lambda self: self._cache)
     def _read_from_storage(self, manifest_file_name: str) -> List[ManifestEntry]:
         """Read manifest entries from storage (no filtering, with stats)."""
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"

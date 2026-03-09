@@ -20,8 +20,6 @@ from io import BytesIO
 from typing import List, Optional
 
 import fastavro
-from cachetools import LRUCache, cachedmethod
-
 from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -33,15 +31,13 @@ from pypaimon.table.row.generic_row import GenericRowSerializer
 class ManifestListManager:
     """Manager for manifest list files in Avro format using unified FileIO."""
 
-    def __init__(self, table, cache_max_size: int = 50):
+    def __init__(self, table):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         manifest_path = table.table_path.rstrip('/')
         self.manifest_path = f"{manifest_path}/manifest"
         self.file_io = self.table.file_io
-
-        self._cache: LRUCache = LRUCache(maxsize=max(cache_max_size, 0))
 
     def read_all(self, snapshot: Optional[Snapshot]) -> List[ManifestFileMeta]:
         if snapshot is None:
@@ -69,7 +65,6 @@ class ManifestListManager:
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         return self._read_from_storage(manifest_list_name)
 
-    @cachedmethod(lambda self: self._cache)
     def _read_from_storage(self, manifest_list_name: str) -> List[ManifestFileMeta]:
         """Read manifest list from storage."""
         manifest_files = []
