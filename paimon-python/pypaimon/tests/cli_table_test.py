@@ -128,6 +128,27 @@ class CliTableTest(unittest.TestCase):
                 # Should have header + 2 data rows
                 self.assertLessEqual(len(lines), 4)  # header + 2 data rows + possible empty lines
 
+    def test_cli_table_read_with_select(self):
+        """Test table read with column selection via CLI."""
+        # Simulate CLI command: paimon table read test_db.users --select id,name
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--select', 'id,name']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+                
+                output = mock_stdout.getvalue()
+                
+                # Verify output contains selected columns
+                self.assertIn('id', output.lower())
+                self.assertIn('name', output.lower())
+                # Verify selected data is present
+                self.assertIn('Alice', output)
+                self.assertIn('Bob', output)
+
     def test_cli_with_custom_config_path(self):
         """Test CLI with custom configuration file path."""
         # Create a different config file

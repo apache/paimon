@@ -63,6 +63,13 @@ def cmd_table_read(args):
     # Build read pipeline
     read_builder = table.new_read_builder()
     
+    # Apply projection (select columns) if specified
+    select_columns = args.select
+    if select_columns:
+        # Parse column names (comma-separated)
+        columns = [col.strip() for col in select_columns.split(',')]
+        read_builder = read_builder.with_projection(columns)
+    
     # Apply limit if specified
     limit = args.limit
     if limit:
@@ -527,6 +534,12 @@ def add_table_subcommands(table_parser):
     read_parser.add_argument(
         'table',
         help='Table identifier in format: database.table'
+    )
+    read_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Select specific columns to read (comma-separated, e.g., "id,name,age")'
     )
     read_parser.add_argument(
         '--limit', '-l',
