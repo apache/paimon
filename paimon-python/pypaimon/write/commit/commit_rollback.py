@@ -20,7 +20,11 @@
 Commit rollback to rollback 'COMPACT' commits for resolving conflicts.
 """
 
+import logging
+
 from pypaimon.table.instant import Instant
+
+logger = logging.getLogger(__name__)
 
 
 class CommitRollback:
@@ -51,11 +55,15 @@ class CommitRollback:
         Returns:
             True if rollback succeeded, False otherwise.
         """
+        logger.warning("Try rollback...")
         if latest_snapshot.commit_kind == "COMPACT":
             latest_id = latest_snapshot.id
             try:
                 self._table_rollback.rollback_to(
                     Instant.snapshot(latest_id - 1), latest_id)
+                logger.warning(
+                    "Successfully rolled back COMPACT snapshot %d to %d",
+                    latest_id, latest_id - 1)
                 return True
             except Exception:
                 pass
