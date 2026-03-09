@@ -273,6 +273,18 @@ public class ResourcePaths {
                 CONSUMERS);
     }
 
+    public String resetConsumer(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                CONSUMERS,
+                "reset");
+    }
+
     public String tag(String databaseName, String objectName, String tagName) {
         return SLASH.join(
                 V1,

@@ -1363,6 +1363,86 @@ paths:
           $ref: '#/components/responses/TagNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/consumers:
+    get:
+      tags:
+        - table
+      summary: List consumers
+      operationId: listConsumers
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: maxResults
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: pageToken
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListConsumersResponse'
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/consumers/reset:
+    post:
+      tags:
+        - table
+      summary: Reset consumer
+      operationId: resetConsumer
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetConsumerRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/views:
     get:
       tags:
@@ -3305,6 +3385,38 @@ components:
           format: int64
         updatedBy:
           type: string
+    ConsumerInfo:
+      type: object
+      properties:
+        consumerId:
+          type: string
+          description: The consumer identifier
+        nextSnapshot:
+          type: integer
+          format: int64
+          description: The next snapshot id of the consumer
+    ListConsumersResponse:
+      type: object
+      properties:
+        consumers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConsumerInfo'
+        nextPageToken:
+          type: string
+          description: Token for the next page of results
+    ResetConsumerRequest:
+      type: object
+      properties:
+        consumerId:
+          type: string
+          description: The consumer identifier to be reset or deleted
+        nextSnapshotId:
+          type: integer
+          format: int64
+          description: The new next snapshot id of the consumer. If not provided, the consumer will be deleted
+      required:
+        - consumerId
     ViewSchema:
       type: object
       properties:

@@ -2631,6 +2631,71 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testResetConsumer() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "reset_consumer_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        // Create some snapshots
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+
+        // Create consumers
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
+
+        // Verify initial state
+        List<ConsumerInfo> consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+
+        // Test reset consumer with new snapshot id
+        catalog.resetConsumer(identifier, "consumer1", 3L);
+
+        // Verify consumer1 has been reset
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+        assertThat(consumers)
+                .filteredOn(c -> c.getConsumerId().equals("consumer1"))
+                .extracting(ConsumerInfo::getNextSnapshot)
+                .containsExactly(3L);
+
+        // Test reset consumer with null snapshot id (delete consumer)
+        catalog.resetConsumer(identifier, "consumer2", null);
+
+        // Verify consumer2 has been deleted
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(1);
+        assertThat(consumers).extracting(ConsumerInfo::getConsumerId).containsExactly("consumer1");
+    }
+
+    @Test
     public void testObjectTable() throws Exception {
         // create object table
         catalog.createDatabase("test_db", false);
