@@ -133,10 +133,10 @@ class PyArrowFileIO(FileIO):
 
         if self._pyarrow_gte_7:
             client_kwargs['force_virtual_addressing'] = True
-            client_kwargs['endpoint_override'] = self.properties.get(OssOptions.OSS_ENDPOINT)
+            client_kwargs['endpoint_override'] = "oss-cn-hangzhou.aliyuncs.com"
         else:
             client_kwargs['endpoint_override'] = (self._oss_bucket + "." +
-                                                  self.properties.get(OssOptions.OSS_ENDPOINT))
+                                                  "oss-cn-hangzhou.aliyuncs.com")
 
         retry_config = self._create_s3_retry_config()
         client_kwargs.update(retry_config)
