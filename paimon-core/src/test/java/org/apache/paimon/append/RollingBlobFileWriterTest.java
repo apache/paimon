@@ -31,6 +31,7 @@ import org.apache.paimon.io.BundleRecords;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -43,7 +44,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -91,6 +91,7 @@ public class RollingBlobFileWriterTest {
         seqNumCounter = new LongCounter();
 
         // Initialize the writer
+        CoreOptions options = new CoreOptions(new Options());
         writer =
                 new RollingBlobFileWriter(
                         fileIO,
@@ -102,13 +103,11 @@ public class RollingBlobFileWriterTest {
                         pathFactory,
                         () -> seqNumCounter,
                         COMPRESSION,
-                        new StatsCollectorFactories(new CoreOptions(new Options())),
+                        new StatsCollectorFactories(options),
                         new FileIndexOptions(),
                         FileSource.APPEND,
-                        false, // asyncFileWrite
                         false, // statsDenseStore
-                        null,
-                        Collections.emptySet());
+                        BlobFileContext.create(SCHEMA, options));
     }
 
     @Test
@@ -206,10 +205,8 @@ public class RollingBlobFileWriterTest {
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
-                        false, // asyncFileWrite
                         false, // statsDenseStore
-                        null,
-                        Collections.emptySet());
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
 
         // Create large blob data that will exceed the blob target file size
         byte[] largeBlobData = new byte[3 * 1024 * 1024]; // 3 MB blob data
@@ -284,10 +281,8 @@ public class RollingBlobFileWriterTest {
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
-                        false, // asyncFileWrite
                         false, // statsDenseStore
-                        null,
-                        Collections.emptySet());
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -364,10 +359,8 @@ public class RollingBlobFileWriterTest {
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
-                        false, // asyncFileWrite
                         false, // statsDenseStore
-                        null,
-                        Collections.emptySet());
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
 
         // Create blob data that will trigger rolling
         byte[] blobData = new byte[1024 * 1024]; // 1 MB blob data
@@ -582,10 +575,8 @@ public class RollingBlobFileWriterTest {
                         new StatsCollectorFactories(new CoreOptions(new Options())),
                         new FileIndexOptions(),
                         FileSource.APPEND,
-                        false, // asyncFileWrite
                         false, // statsDenseStore
-                        null,
-                        Collections.emptySet());
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
 
         // Write data
         for (int i = 0; i < 3; i++) {

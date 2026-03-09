@@ -101,7 +101,7 @@ only support running Incremental Clustering in batch mode.
 
 To run a Incremental Clustering job, follow these instructions. 
 
-You don’t need to specify any clustering-related parameters when running Incremental Clustering,
+You don't need to specify any clustering-related parameters when running Incremental Clustering,
 these options are already defined as table options. If you need to change clustering settings, please update the corresponding table options.
 
 {{< tabs "incremental-clustering" >}}

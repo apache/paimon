@@ -209,6 +209,23 @@ public class CoreOptions implements Serializable {
                                     + ExternalPathStrategy.SPECIFIC_FS
                                     + ", should be the prefix scheme of the external path, now supported are s3 and oss.");
 
+    public static final ConfigOption<String> DATA_FILE_EXTERNAL_PATHS_WEIGHTS =
+            key("data-file.external-paths.weights")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The weights for external paths when "
+                                    + DATA_FILE_EXTERNAL_PATHS_STRATEGY.key()
+                                    + " is set to "
+                                    + ExternalPathStrategy.WEIGHTED
+                                    + ". "
+                                    + "Format: 'weight1,weight2,...' "
+                                    + "with weights corresponding to paths in "
+                                    + DATA_FILE_EXTERNAL_PATHS.key()
+                                    + " by order. "
+                                    + "Example: '10,5,15' means first path has weight 10, second 5, third 15. "
+                                    + "Weights must be positive integers.");
+
     public static final ConfigOption<Boolean> COMPACTION_FORCE_REWRITE_ALL_FILES =
             key("compaction.force-rewrite-all-files")
                     .booleanType()
@@ -1103,7 +1120,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "The expiration interval of a partition. A partition will be expired if"
-                                    + " it‘s lifetime is over this value. Partition time is extracted from"
+                                    + " it's lifetime is over this value. Partition time is extracted from"
                                     + " the partition value.");
 
     public static final ConfigOption<Duration> PARTITION_EXPIRATION_CHECK_INTERVAL =
@@ -2071,6 +2088,13 @@ public class CoreOptions implements Serializable {
                             "The duration after which a partition without new updates is considered a historical partition. "
                                     + "Historical partitions will be automatically fully clustered during the cluster operation.");
 
+    public static final ConfigOption<Boolean> CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE =
+            key("clustering.incremental.optimize-write")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether enable perform clustering before write phase when incremental clustering is enabled.");
+
     @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -2174,6 +2198,29 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "Write blob field using blob descriptor rather than blob bytes.");
+
+    @Immutable
+    public static final ConfigOption<String> BLOB_EXTERNAL_STORAGE_PATH =
+            key("blob-external-storage-path")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The external storage path where raw BLOB data from fields configured "
+                                    + "by 'blob-external-storage-field' is written at write time. "
+                                    + "Orphan file cleanup is not applied to this path.");
+
+    @Immutable
+    public static final ConfigOption<String> BLOB_EXTERNAL_STORAGE_FIELD =
+            key("blob-external-storage-field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated BLOB field names (must be a subset of '"
+                                    + BLOB_DESCRIPTOR_FIELD.key()
+                                    + "') whose raw data will be written to external storage at "
+                                    + "write time. The external storage path is configured via '"
+                                    + BLOB_EXTERNAL_STORAGE_PATH.key()
+                                    + "'. Orphan file cleanup is not applied to that path.");
 
     public static final ConfigOption<Boolean> COMMIT_DISCARD_DUPLICATE_FILES =
             key("commit.discard-duplicate-files")
@@ -2738,7 +2785,40 @@ public class CoreOptions implements Serializable {
      * <p>If this option is not set, all blob fields are stored in '.blob' files by default.
      */
     public Set<String> blobDescriptorField() {
-        return options.getOptional(BLOB_DESCRIPTOR_FIELD)
+        return parseCommaSeparatedSet(BLOB_DESCRIPTOR_FIELD);
+    }
+
+    /**
+     * Resolve blob fields whose data should be written to external storage at write time. These
+     * fields must be a subset of {@link #blobDescriptorField()}.
+     */
+    public Set<String> blobExternalStorageField() {
+        return parseCommaSeparatedSet(BLOB_EXTERNAL_STORAGE_FIELD);
+    }
+
+    /**
+     * Returns the set of BLOB fields that support partial updates (e.g. via MERGE INTO).
+     *
+     * <p>Currently, only descriptor-based BLOB fields (configured via {@link
+     * #BLOB_DESCRIPTOR_FIELD}) are updatable. Raw-data BLOB fields are not updatable because the
+     * update cost is too high. Fields configured by {@link #BLOB_EXTERNAL_STORAGE_FIELD} are a
+     * subset of descriptor fields and therefore are also updatable.
+     */
+    public Set<String> updatableBlobFields() {
+        return blobDescriptorField();
+    }
+
+    /**
+     * Return the external storage path for descriptor BLOB fields that write raw data outside the
+     * table location. Returns null if not configured.
+     */
+    @Nullable
+    public String blobExternalStoragePath() {
+        return options.get(BLOB_EXTERNAL_STORAGE_PATH);
+    }
+
+    private Set<String> parseCommaSeparatedSet(ConfigOption<String> option) {
+        return options.getOptional(option)
                 .map(
                         s ->
                                 Arrays.stream(s.split(","))
@@ -3115,6 +3195,21 @@ public class CoreOptions implements Serializable {
         return options.get(DATA_FILE_EXTERNAL_PATHS_SPECIFIC_FS);
     }
 
+    @Nullable
+    public int[] externalPathWeights() {
+        String weightsStr = options.get(DATA_FILE_EXTERNAL_PATHS_WEIGHTS);
+        if (weightsStr == null) {
+            return null;
+        }
+        String[] parts = weightsStr.split(",");
+        int[] weights = new int[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            weights[i] = Integer.parseInt(parts[i].trim());
+            checkArgument(weights[i] > 0, "Weight must be positive, got: %s", weights[i]);
+        }
+        return weights;
+    }
+
     public Boolean forceRewriteAllFiles() {
         return options.get(COMPACTION_FORCE_REWRITE_ALL_FILES);
     }
@@ -3400,6 +3495,10 @@ public class CoreOptions implements Serializable {
 
     public boolean clusteringIncrementalEnabled() {
         return options.get(CLUSTERING_INCREMENTAL);
+    }
+
+    public boolean clusteringIncrementalOptimizeWrite() {
+        return options.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE);
     }
 
     public boolean bucketClusterEnabled() {
@@ -4021,7 +4120,11 @@ public class CoreOptions implements Serializable {
 
         ENTROPY_INJECT(
                 "entropy-inject",
-                "When writing a new file, a path is chosen based on the hash value of the file's content.");
+                "When writing a new file, a path is chosen based on the hash value of the file's content."),
+
+        WEIGHTED(
+                "weight-robin",
+                "When writing a new file, a path is chosen based on configured weights.");
 
         private final String value;
 

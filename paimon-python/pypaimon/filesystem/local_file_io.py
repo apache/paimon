@@ -318,6 +318,8 @@ class LocalFileIO(FileIO):
             if parent and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
             
+            data = self._cast_time_columns_for_orc(data)
+            
             with open(file_path, 'wb') as f:
                 if sys.version_info[:2] == (3, 6):
                     orc.write_table(data, f, **kwargs)

@@ -28,6 +28,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.consumer.ConsumerInfo;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -1642,6 +1644,40 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListPartitionsByNamesExceedsLimit() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_by_names_limit_db";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        // Create a list with more than 1000 partition specs
+        List<Map<String, String>> tooManySpecs = new ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            tooManySpecs.add(singletonMap("dt", String.format("202501%04d", i)));
+        }
+
+        // Should throw IllegalArgumentException
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listPartitionsByNames(identifier, tooManySpecs));
+    }
+
+    @Test
     void testPartitionExpire() throws Exception {
         // create table
         Identifier identifier = Identifier.create("test_db", "test_partition_expire");
@@ -2549,6 +2585,114 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                         table.snapshot(12),
                         table.snapshot(13),
                         table.snapshot(14));
+    }
+
+    @Test
+    void testListConsumers() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "consumers_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        // Create some snapshots
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+
+        // Create consumers
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
+
+        // Test listConsumersPaged
+        assertThat(catalog.listConsumersPaged(identifier, null, null).getElements().size())
+                .isEqualTo(2);
+
+        // Test with RESTApi directly
+        RESTApi api = ((RESTCatalog) catalog).api();
+        List<ConsumerInfo> consumers =
+                PagedList.listAllFromPagedApi(
+                        token -> api.listConsumersPaged(identifier, null, token));
+        assertThat(consumers)
+                .extracting(ConsumerInfo::getConsumerId)
+                .containsExactlyInAnyOrder("consumer1", "consumer2");
+        assertThat(consumers)
+                .extracting(ConsumerInfo::getNextSnapshot)
+                .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    @Test
+    void testResetConsumer() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "reset_consumer_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        // Create some snapshots
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+
+        // Create consumers
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
+
+        // Verify initial state
+        List<ConsumerInfo> consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+
+        // Test reset consumer with new snapshot id
+        catalog.resetConsumer(identifier, "consumer1", 3L);
+
+        // Verify consumer1 has been reset
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+        assertThat(consumers)
+                .filteredOn(c -> c.getConsumerId().equals("consumer1"))
+                .extracting(ConsumerInfo::getNextSnapshot)
+                .containsExactly(3L);
+
+        // Test reset consumer with null snapshot id (delete consumer)
+        catalog.resetConsumer(identifier, "consumer2", null);
+
+        // Verify consumer2 has been deleted
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(1);
+        assertThat(consumers).extracting(ConsumerInfo::getConsumerId).containsExactly("consumer1");
     }
 
     @Test

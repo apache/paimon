@@ -48,6 +48,17 @@ class FileSystemCatalog(Catalog):
         self.catalog_options = catalog_options
         self.file_io = FileIO.get(self.warehouse, self.catalog_options)
 
+    def list_databases(self) -> list:
+        statuses = self.file_io.list_status(self.warehouse)
+        database_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and name.endswith(Catalog.DB_SUFFIX):
+                database_names.append(name[:-len(Catalog.DB_SUFFIX)])
+        return sorted(database_names)
+
     def get_database(self, name: str) -> Database:
         if self.file_io.exists(self.get_database_path(name)):
             return Database(name, {})
@@ -64,6 +75,48 @@ class FileSystemCatalog(Catalog):
                 raise ValueError("Cannot specify location for a database when using fileSystem catalog.")
             path = self.get_database_path(name)
             self.file_io.mkdirs(path)
+
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        try:
+            self.get_database(name)
+        except DatabaseNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+
+        db_path = self.get_database_path(name)
+
+        if cascade:
+            for table_name in self.list_tables(name):
+                table_path = f"{db_path}/{table_name}"
+                self.file_io.delete(table_path, True)
+
+        # Check if database still has tables
+        remaining_tables = self.list_tables(name)
+        if remaining_tables and not cascade:
+            raise ValueError(
+                f"Database {name} is not empty. "
+                f"Use cascade=True to drop all tables first."
+            )
+
+        self.file_io.delete(db_path, True)
+
+    def list_tables(self, database_name: str) -> list:
+        try:
+            self.get_database(database_name)
+        except DatabaseNotExistException:
+            raise
+
+        db_path = self.get_database_path(database_name)
+        statuses = self.file_io.list_status(db_path)
+        table_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and not name.startswith("."):
+                table_names.append(name)
+        return sorted(table_names)
 
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
@@ -139,6 +192,48 @@ class FileSystemCatalog(Catalog):
             schema_manager.commit_changes(changes)
         except Exception as e:
             raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
+
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+
+        # Verify source table exists
+        try:
+            self.get_table(source_identifier)
+        except TableNotExistException:
+            raise
+
+        # Verify target database exists
+        self.get_database(target_identifier.get_database_name())
+
+        # Verify target table does not exist
+        try:
+            self.get_table(target_identifier)
+            raise TableAlreadyExistException(target_identifier)
+        except TableNotExistException:
+            pass
+
+        source_path = self.get_table_path(source_identifier)
+        target_path = self.get_table_path(target_identifier)
+        self.file_io.rename(source_path, target_path)
+
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        
+        # Check if table exists
+        try:
+            self.get_table(identifier)
+        except TableNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+        
+        # Delete the table directory
+        table_path = self.get_table_path(identifier)
+        self.file_io.delete(table_path, True)
 
     def commit_snapshot(
             self,

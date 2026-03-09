@@ -665,6 +665,29 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: on clause has filter expression") {
+    withTable("source", "target") {
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      createTable("source", "a INT, b INT, c STRING", Seq("a"))
+
+      sql("INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c11'), (5, 500, 'c55')")
+      sql("INSERT INTO target VALUES (1, 100, 'cc'), (2, 20, 'cc')")
+
+      sql("""
+            |MERGE INTO target tgt
+            |USING (
+            |  SELECT a, b
+            |  FROM source
+            |  WHERE c = 'c11'
+            |) AS src
+            |ON tgt.a = src.a AND tgt.b = src.b AND tgt.c = 'cc'
+            |WHEN MATCHED THEN DELETE
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT * FROM target ORDER BY a, b"), Row(2, 20, "cc") :: Nil)
+    }
+  }
+
   test(s"Paimon MergeInto: merge into with varchar") {
     withTable("source", "target") {
       createTable("source", "a INT, b VARCHAR(32)", Seq("a"))
@@ -772,37 +795,38 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
         sql("INSERT INTO s VALUES (1, 1, 1)")
 
         sql(
-          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
-        sql("INSERT INTO t VALUES (1, 1, 1)")
+          s"CREATE TABLE t_$dvEnabled (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql(s"INSERT INTO t_$dvEnabled VALUES (1, 1, 1)")
 
         val mergeInto = Future {
           for (_ <- 1 to 10) {
             try {
-              sql("""
-                    |MERGE INTO t
-                    |USING s
-                    |ON t.id = s.id
-                    |WHEN MATCHED THEN
-                    |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                    |""".stripMargin)
+              sql(s"""
+                     |MERGE INTO t_$dvEnabled t
+                     |USING s
+                     |ON t.id = s.id
+                     |WHEN MATCHED THEN
+                     |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
+                     |""".stripMargin)
             } catch {
               case a: Throwable =>
                 assert(
                   a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
                     "Missing file"))
             }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
+            checkAnswer(sql(s"SELECT count(*) FROM t_$dvEnabled"), Seq(Row(1)))
           }
         }
 
         val compact = Future {
           for (_ <- 1 to 10) {
             try {
-              sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+              sql(
+                s"CALL sys.compact(table => 't_$dvEnabled', order_strategy => 'order', order_by => 'id')")
             } catch {
               case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
             }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
+            checkAnswer(sql(s"SELECT count(*) FROM t_$dvEnabled"), Seq(Row(1)))
           }
         }
 
@@ -820,15 +844,15 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
           "INSERT INTO s VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
 
         sql(
-          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+          s"CREATE TABLE t_$dvEnabled (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
         sql(
-          "INSERT INTO t VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
+          s"INSERT INTO t_$dvEnabled VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
 
         def doMergeInto(): Unit = {
           for (i <- 1 to 9) {
             try {
               sql(s"""
-                     |MERGE INTO t
+                     |MERGE INTO t_$dvEnabled t
                      |USING (SELECT * FROM s WHERE id = $i)
                      |ON t.id = s.id
                      |WHEN MATCHED THEN
@@ -840,7 +864,7 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
                   a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
                     "Missing file"))
             }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(9)))
+            checkAnswer(sql(s"SELECT count(*) FROM t_$dvEnabled"), Seq(Row(9)))
           }
         }
 

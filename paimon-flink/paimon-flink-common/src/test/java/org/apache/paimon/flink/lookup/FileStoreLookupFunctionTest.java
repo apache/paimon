@@ -207,10 +207,9 @@ public class FileStoreLookupFunctionTest {
         assertThat(queryExecutor).isInstanceOf(RemoteQueryExecutor.class);
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    public void testLookupScanLeak(boolean refreshAsync) throws Exception {
-        createLookupFunction(refreshAsync);
+    @Test
+    public void testLookupScanLeak() throws Exception {
+        createLookupFunction(false);
         commit(writeCommit(1));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(

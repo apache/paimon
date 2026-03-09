@@ -43,6 +43,16 @@ table.delete_tag("tag2")  # delete tag2
 
 If snapshot_id unset, snapshot_id defaults to the latest.
 
+## Rename Tag
+
+You can rename a tag to a new name.
+
+```python
+
+table = catalog.get_table('database_name.table_name')
+table.rename_tag("old_tag", "new_tag")  # rename old_tag to new_tag
+```
+
 ## Read Tag
 You can read data from a specific tag.
 ```python

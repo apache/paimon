@@ -88,7 +88,7 @@ class BlobFormatWriter:
         self.position += len(data)
         return crc32
 
-    def reach_target_size(self, suggested_check: bool, target_size: int) -> bool:
+    def reach_target_size(self, target_size: int) -> bool:
         return self.position >= target_size
 
     def close(self) -> None:

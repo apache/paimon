@@ -73,6 +73,16 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, AtomicType):
+            return False
+        return self.type == other.type and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.type, self.nullable))
+
     def to_dict(self) -> str:
         if not self.nullable:
             return self.type + " NOT NULL"
@@ -94,6 +104,16 @@ class ArrayType(DataType):
     def __init__(self, nullable: bool, element_type: DataType):
         super().__init__(nullable)
         self.element = element_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, ArrayType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -118,6 +138,16 @@ class MultisetType(DataType):
     def __init__(self, nullable: bool, element_type: DataType):
         super().__init__(nullable)
         self.element = element_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MultisetType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -149,6 +179,18 @@ class MapType(DataType):
         super().__init__(nullable)
         self.key = key_type
         self.value = value_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MapType):
+            return False
+        return (self.key == other.key
+                and self.value == other.value
+                and self.nullable == other.nullable)
+
+    def __hash__(self):
+        return hash((self.key, self.value, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -199,6 +241,21 @@ class DataField:
     def from_dict(cls, data: Dict[str, Any]) -> "DataField":
         return DataTypeParser.parse_data_field(data)
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, DataField):
+            return False
+        return (self.id == other.id
+                and self.name == other.name
+                and self.type == other.type
+                and self.description == other.description
+                and self.default_value == other.default_value)
+
+    def __hash__(self):
+        return hash((self.id, self.name, self.type,
+                     self.description, self.default_value))
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             self.FIELD_ID: self.id,
@@ -222,6 +279,16 @@ class RowType(DataType):
     def __init__(self, nullable: bool, fields: List[DataField]):
         super().__init__(nullable)
         self.fields = fields or []
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, RowType):
+            return False
+        return self.fields == other.fields and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((tuple(self.fields), self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -453,19 +520,7 @@ class PyarrowFieldParser:
             elif type_name == 'DATE':
                 return pyarrow.date32()
             if type_name.startswith('TIME'):
-                if type_name == 'TIME':
-                    return pyarrow.time64('us')  # default to 6
-                match = re.fullmatch(r'TIME\((\d+)\)', type_name)
-                if match:
-                    precision = int(match.group(1))
-                    if precision == 0:
-                        return pyarrow.time32('s')
-                    if 1 <= precision <= 3:
-                        return pyarrow.time32('ms')
-                    if 4 <= precision <= 6:
-                        return pyarrow.time64('us')
-                    if 7 <= precision <= 9:
-                        return pyarrow.time64('ns')
+                return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
         elif isinstance(data_type, MapType):
@@ -534,8 +589,7 @@ class PyarrowFieldParser:
         elif types.is_date32(pa_type):
             type_name = 'DATE'
         elif types.is_time(pa_type):
-            precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
-            type_name = f'TIME({precision_mapping[pa_type.unit]})'
+            type_name = 'TIME(0)'
         elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
             element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
@@ -587,7 +641,7 @@ class PyarrowFieldParser:
                      parent_name: str = "record") -> Union[str, Dict[str, Any]]:
         if pyarrow.types.is_integer(field_type):
             if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
-               (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
+                    (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
                 return "int"
             else:
                 return "long"
@@ -610,6 +664,8 @@ class PyarrowFieldParser:
             }
         elif pyarrow.types.is_date(field_type):
             return {"type": "int", "logicalType": "date"}
+        elif pyarrow.types.is_time(field_type):
+            return {"type": "int", "logicalType": "time-millis"}
         elif pyarrow.types.is_timestamp(field_type):
             unit = field_type.unit
             if field_type.tz is None:

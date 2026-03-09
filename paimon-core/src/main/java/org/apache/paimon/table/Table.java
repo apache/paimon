@@ -165,6 +165,25 @@ public interface Table extends Serializable {
     @Experimental
     void createBranch(String branchName, String tagName);
 
+    /**
+     * Create an empty branch with option to ignore if the branch already exists.
+     *
+     * @param branchName the branch name
+     * @param ignoreIfExists if true, do nothing when branch already exists
+     */
+    @Experimental
+    void createBranch(String branchName, boolean ignoreIfExists);
+
+    /**
+     * Create a branch from given tag with option to ignore if the branch already exists.
+     *
+     * @param branchName the branch name
+     * @param tagName the tag name to create branch from
+     * @param ignoreIfExists if true, do nothing when branch already exists
+     */
+    @Experimental
+    void createBranch(String branchName, String tagName, boolean ignoreIfExists);
+
     /** Delete a branch by branchName. */
     @Experimental
     void deleteBranch(String branchName);

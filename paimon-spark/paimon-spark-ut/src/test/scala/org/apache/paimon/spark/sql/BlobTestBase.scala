@@ -224,6 +224,96 @@ class BlobTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Blob: merge-into rejects updating raw-data BLOB column") {
+    withTable("s", "t") {
+      sql("CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+        "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', 'blob-field'='picture')")
+      sql("INSERT INTO t VALUES (1, 'name1', X'48656C6C6F')")
+
+      sql("CREATE TABLE s (id INT, picture BINARY)")
+      sql("INSERT INTO s VALUES (1, X'4E4557')")
+
+      val e = intercept[UnsupportedOperationException] {
+        sql("""
+              |MERGE INTO t
+              |USING s
+              |ON t.id = s.id
+              |WHEN MATCHED THEN UPDATE SET t.picture = s.picture
+              |""".stripMargin)
+      }
+      assert(e.getMessage.contains("raw-data BLOB"))
+    }
+  }
+
+  test("Blob: merge-into updates non-blob column on descriptor blob table") {
+    withTable("s", "t") {
+      sql(
+        "CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+          "('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          "'blob-field'='picture', 'blob-descriptor-field'='picture')")
+
+      // Insert with a descriptor pointing to a real file
+      val blobData = new Array[Byte](256)
+      RANDOM.nextBytes(blobData)
+      val fileIO = new LocalFileIO()
+      val uri = "file://" + tempDBDir.getCanonicalPath + "/external_desc_blob"
+      val out = fileIO.newOutputStream(new Path(uri), true)
+      try { out.write(blobData) }
+      finally { out.close() }
+      val desc = new BlobDescriptor(uri, 0, blobData.length)
+      sql(s"INSERT INTO t VALUES (1, 'name1', X'${bytesToHex(desc.serialize())}')")
+      sql(s"INSERT INTO t VALUES (2, 'name2', X'${bytesToHex(desc.serialize())}')")
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+
+      // Update only the 'name' column — should succeed for descriptor-based blob table
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "updated_name1"), Row(2, "name2"))
+      )
+    }
+  }
+
+  test("Blob: merge-into updates descriptor blob column with external storage end-to-end") {
+    withTable("s", "t") {
+      val externalStoragePath = tempDBDir.getCanonicalPath + "/external-storage-blob-merge-path"
+      sql(
+        s"CREATE TABLE t (id INT, name STRING, picture BINARY) TBLPROPERTIES " +
+          s"('row-tracking.enabled'='true', 'data-evolution.enabled'='true', " +
+          s"'blob-field'='picture', 'blob-descriptor-field'='picture', " +
+          s"'blob-external-storage-field'='picture', " +
+          s"'blob-external-storage-path'='$externalStoragePath')")
+
+      // Insert initial row (writes raw data to external storage and stores descriptor bytes)
+      sql("INSERT INTO t VALUES (1, 'name1', X'48656C6C6F')")
+      sql("INSERT INTO t VALUES (2, 'name2', X'5945')")
+
+      sql("CREATE TABLE s (id INT, name STRING)")
+      sql("INSERT INTO s VALUES (1, 'updated_name1')")
+
+      // Update the 'name' column via MERGE INTO
+      sql("""
+            |MERGE INTO t
+            |USING s
+            |ON t.id = s.id
+            |WHEN MATCHED THEN UPDATE SET t.name = s.name
+            |""".stripMargin)
+
+      checkAnswer(
+        sql("SELECT id, name FROM t ORDER BY id"),
+        Seq(Row(1, "updated_name1"), Row(2, "name2"))
+      )
+    }
+  }
+
   private val HEX_ARRAY = "0123456789ABCDEF".toCharArray
 
   def bytesToHex(bytes: Array[Byte]): String = {

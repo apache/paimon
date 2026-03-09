@@ -77,6 +77,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.CoreOptions.TYPE;
@@ -1543,6 +1544,65 @@ public abstract class CatalogTestBase {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101"));
+    }
+
+    @Test
+    public void testListPartitionsByNames() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_by_names_db";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20240102"),
+                        singletonMap("dt", "20260101"));
+
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        // Test listing partitions by names
+        List<Map<String, String>> specsToQuery =
+                Arrays.asList(singletonMap("dt", "20250101"), singletonMap("dt", "20250102"));
+        List<Partition> partitions = catalog.listPartitionsByNames(identifier, specsToQuery);
+
+        assertThat(partitions.stream().map(Partition::spec).collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(specsToQuery);
+
+        // Test with non-existent partition spec
+        List<Map<String, String>> nonExistentSpecs =
+                Arrays.asList(singletonMap("dt", "20990101"), singletonMap("dt", "20990102"));
+        List<Partition> emptyPartitions =
+                catalog.listPartitionsByNames(identifier, nonExistentSpecs);
+        assertEquals(0, emptyPartitions.size());
+
+        // Test with empty partition specs
+        List<Partition> emptyResult =
+                catalog.listPartitionsByNames(identifier, Collections.emptyList());
+        assertEquals(0, emptyResult.size());
     }
 
     protected boolean supportsAlterDatabase() {
