@@ -19,6 +19,7 @@
 package org.apache.paimon.lumina.index;
 
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
@@ -26,22 +27,19 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
 
+import org.aliyun.lumina.LuminaFileOutput;
+
 import java.io.Closeable;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.LongBuffer;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.UUID;
 
 /**
  * Vector global index writer using Lumina.
@@ -153,7 +151,7 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
     /**
      * Build a complete DiskANN index from the current pending batch: create index, pretrain, insert
-     * all vectors in a single batch, dump to temp file, copy to output, and close.
+     * all vectors in a single batch, dump directly to the output stream, and close.
      */
     private void buildAndFlushIndex() throws IOException {
         if (pendingCount == 0) {
@@ -180,36 +178,21 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
             index.insertBatch(pendingVectors, pendingIds, n);
 
-            File tempFile =
-                    Files.createTempFile("paimon-lumina-build-" + UUID.randomUUID(), ".lmi")
-                            .toFile();
-            try {
-                index.dump(tempFile.getAbsolutePath());
-
-                String fileName =
-                        fileWriter.newFileName(LuminaVectorGlobalIndexerFactory.IDENTIFIER);
-                try (OutputStream out = fileWriter.newOutputStream(fileName);
-                        InputStream fis = new FileInputStream(tempFile)) {
-                    byte[] buffer = new byte[262144];
-                    int bytesRead;
-                    while ((bytesRead = fis.read(buffer)) != -1) {
-                        out.write(buffer, 0, bytesRead);
-                    }
-                    out.flush();
-                }
-
-                LuminaIndexMeta meta =
-                        new LuminaIndexMeta(
-                                dim,
-                                options.metric().getValue(),
-                                options.indexType().name(),
-                                n,
-                                currentIndexMinId,
-                                currentIndexMaxId);
-                results.add(new ResultEntry(fileName, n, meta.serialize()));
-            } finally {
-                tempFile.delete();
+            String fileName = fileWriter.newFileName(LuminaVectorGlobalIndexerFactory.IDENTIFIER);
+            try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
+                index.dump(new OutputStreamFileOutput(out));
+                out.flush();
             }
+
+            LuminaIndexMeta meta =
+                    new LuminaIndexMeta(
+                            dim,
+                            options.metric().getValue(),
+                            options.indexType().name(),
+                            n,
+                            currentIndexMinId,
+                            currentIndexMaxId);
+            results.add(new ResultEntry(fileName, n, meta.serialize()));
         } finally {
             index.close();
         }
@@ -286,5 +269,34 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         pendingFloatView = null;
         pendingLongView = null;
         pendingCount = 0;
+    }
+
+    /** Adapts a {@link PositionOutputStream} to the {@link LuminaFileOutput} JNI callback API. */
+    private static class OutputStreamFileOutput implements LuminaFileOutput {
+        private final OutputStream out;
+
+        OutputStreamFileOutput(OutputStream out) {
+            this.out = out;
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) throws IOException {
+            out.write(b, off, len);
+        }
+
+        @Override
+        public void flush() throws IOException {
+            out.flush();
+        }
+
+        @Override
+        public long getPos() {
+            return -1;
+        }
+
+        @Override
+        public void close() {
+            // Lifecycle managed by the caller's try-with-resources.
+        }
     }
 }
