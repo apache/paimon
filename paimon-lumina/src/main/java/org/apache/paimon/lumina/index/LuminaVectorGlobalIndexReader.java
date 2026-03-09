@@ -179,7 +179,12 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 float[] distances = new float[effectiveK];
                 long[] labels = new long[effectiveK];
                 index.searchWithFilter(
-                        queryVector, 1, effectiveK, distances, labels, scopedIds,
+                        queryVector,
+                        1,
+                        effectiveK,
+                        distances,
+                        labels,
+                        scopedIds,
                         filterSearchOptions);
                 collectResults(distances, labels, effectiveK, limit, result);
             } else {
@@ -200,7 +205,10 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     private void collectResults(
-            float[] distances, long[] labels, int count, int limit,
+            float[] distances,
+            long[] labels,
+            int count,
+            int limit,
             PriorityQueue<ScoredRow> result) {
         for (int i = 0; i < count; i++) {
             long rowId = labels[i];
