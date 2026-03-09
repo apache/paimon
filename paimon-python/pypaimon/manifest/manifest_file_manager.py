@@ -16,19 +16,21 @@
 # limitations under the License.
 ################################################################################
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from io import BytesIO
 from typing import List
 
 import fastavro
+
+from datetime import datetime
+
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import (MANIFEST_ENTRY_SCHEMA,
                                                      ManifestEntry)
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
 from pypaimon.manifest.schema.simple_stats import SimpleStats
-from pypaimon.table.row.binary_row import BinaryRow
 from pypaimon.table.row.generic_row import (GenericRowDeserializer,
                                             GenericRowSerializer)
+from pypaimon.table.row.binary_row import BinaryRow
 
 
 class ManifestFileManager:
@@ -51,6 +53,17 @@ class ManifestFileManager:
         def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
             return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats)
 
+        def _entry_identifier(e: ManifestEntry) -> tuple:
+            return (
+                tuple(e.partition.values),
+                e.bucket,
+                e.file.level,
+                e.file.file_name,
+                tuple(e.file.extra_files) if e.file.extra_files else (),
+                e.file.embedded_index,
+                e.file.external_path,
+            )
+
         deleted_entry_keys = set()
         added_entries = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -60,33 +73,15 @@ class ManifestFileManager:
                     if entry.kind == 0:  # ADD
                         added_entries.append(entry)
                     else:  # DELETE
-                        deleted_entry_keys.add(entry.identifier())
+                        deleted_entry_keys.add(_entry_identifier(entry))
 
         final_entries = [
             entry for entry in added_entries
-            if entry.identifier() not in deleted_entry_keys
+            if _entry_identifier(entry) not in deleted_entry_keys
         ]
         return final_entries
 
     def read(self, manifest_file_name: str, manifest_entry_filter=None, drop_stats=True) -> List[ManifestEntry]:
-        entries = self._read_from_storage(manifest_file_name)
-        return self._apply_post_read(entries, manifest_entry_filter, drop_stats)
-
-    def _apply_post_read(self, entries: List[ManifestEntry], manifest_entry_filter,
-                         drop_stats: bool) -> List[ManifestEntry]:
-        """Apply filtering and stats dropping to entries."""
-        result = []
-        for entry in entries:
-            if manifest_entry_filter is not None and not manifest_entry_filter(entry):
-                continue
-            if drop_stats:
-                result.append(entry.copy_without_stats())
-            else:
-                result.append(entry)
-        return result
-
-    def _read_from_storage(self, manifest_file_name: str) -> List[ManifestEntry]:
-        """Read manifest entries from storage (no filtering, with stats)."""
         manifest_file_path = f"{self.manifest_path}/{manifest_file_name}"
 
         entries = []
@@ -157,6 +152,10 @@ class ManifestFileManager:
                 total_buckets=record['_TOTAL_BUCKETS'],
                 file=file_meta
             )
+            if manifest_entry_filter is not None and not manifest_entry_filter(entry):
+                continue
+            if drop_stats:
+                entry = entry.copy_without_stats()
             entries.append(entry)
         return entries
 

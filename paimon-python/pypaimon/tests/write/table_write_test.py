@@ -78,8 +78,8 @@ class TableWriteTest(unittest.TestCase):
 
         # snapshot
         snapshot_json: str = table.snapshot_manager().get_latest_snapshot_json()
-        self.assertEqual(True, snapshot_json.__contains__("baseManifestList"))
-        self.assertEqual(False, snapshot_json.__contains__("nextRowId"))
+        self.assertEquals(True, snapshot_json.__contains__("baseManifestList"))
+        self.assertEquals(False, snapshot_json.__contains__("nextRowId"))
 
     def test_multi_prepare_commit_ao(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])

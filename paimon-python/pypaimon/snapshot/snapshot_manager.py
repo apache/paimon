@@ -172,7 +172,15 @@ class SnapshotManager:
         return final_snapshot
 
     def get_snapshot_by_id(self, snapshot_id: int) -> Optional[Snapshot]:
-        """Get a snapshot by its ID."""
+        """
+        Get a snapshot by its ID.
+
+        Args:
+            snapshot_id: The snapshot ID
+
+        Returns:
+            The snapshot with the specified ID, or None if not found
+        """
         snapshot_file = self.get_snapshot_path(snapshot_id)
         if not self.file_io.exists(snapshot_file):
             return None
