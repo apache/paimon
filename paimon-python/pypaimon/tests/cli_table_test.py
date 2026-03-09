@@ -149,6 +149,42 @@ class CliTableTest(unittest.TestCase):
                 self.assertIn('Alice', output)
                 self.assertIn('Bob', output)
 
+    def test_cli_table_read_with_invalid_select(self):
+        """Test table read with invalid column selection via CLI."""
+        # Simulate CLI command: paimon table read test_db.users --select invalid_column
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--select', 'invalid_column']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+                
+                error_output = mock_stderr.getvalue()
+                
+                # Verify error message contains information about invalid column
+                self.assertIn("Column(s) ['invalid_column'] do not exist in table", error_output)
+
+    def test_cli_table_read_with_multiple_invalid_select(self):
+        """Test table read with multiple invalid columns selection via CLI."""
+        # Simulate CLI command: paimon table read test_db.users --select invalid_col1,invalid_col2
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--select', 'invalid_col1,invalid_col2']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+                
+                error_output = mock_stderr.getvalue()
+                
+                # Verify error message contains information about all invalid columns
+                self.assertIn('invalid_col1', error_output)
+                self.assertIn('invalid_col2', error_output)
+                self.assertIn('do not exist', error_output)
+
     def test_cli_with_custom_config_path(self):
         """Test CLI with custom configuration file path."""
         # Create a different config file

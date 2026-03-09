@@ -68,8 +68,17 @@ def cmd_table_read(args):
     if select_columns:
         # Parse column names (comma-separated)
         columns = [col.strip() for col in select_columns.split(',')]
+        
+        # Validate that all columns exist in the table schema
+        available_fields = set(field.name for field in table.table_schema.fields)
+        invalid_columns = [col for col in columns if col not in available_fields]
+        
+        if invalid_columns:
+            print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.", file=sys.stderr)
+            sys.exit(1)
+        
         read_builder = read_builder.with_projection(columns)
-    
+
     # Apply limit if specified
     limit = args.limit
     if limit:
