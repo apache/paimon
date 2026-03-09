@@ -25,6 +25,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileTestDataGenerator;
 import org.apache.paimon.utils.InstantiationUtil;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -37,6 +39,22 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ChainSplit}. */
 public class ChainSplitTest {
+    private DataSplit newDataSplit(
+            boolean rawConvertible,
+            List<DataFileMeta> dataFiles,
+            List<DeletionFile> deletionFiles) {
+        DataSplit.Builder builder = DataSplit.builder();
+        builder.withSnapshot(1)
+                .withPartition(BinaryRow.EMPTY_ROW)
+                .withBucket(1)
+                .withBucketPath("my path")
+                .rawConvertible(rawConvertible)
+                .withDataFiles(dataFiles);
+        if (deletionFiles != null) {
+            builder.withDataDeletionFiles(deletionFiles);
+        }
+        return builder.build();
+    }
 
     @Test
     public void testChainSplitSerde() throws IOException, ClassNotFoundException {
@@ -48,6 +66,7 @@ public class ChainSplitTest {
         for (int i = 0; i < 3; i++) {
             dataFiles.add(gen.next().meta);
         }
+        DataSplit dataSplit = newDataSplit(true, dataFiles, null);
         Map<String, String> fileBucketPathMapping = new HashMap<>();
         Map<String, String> fileBranchMapping = new HashMap<>();
         for (DataFileMeta dataFile : dataFiles) {
@@ -56,7 +75,10 @@ public class ChainSplitTest {
         }
         ChainSplit split =
                 new ChainSplit(
-                        logicalPartition, dataFiles, fileBucketPathMapping, fileBranchMapping);
+                        logicalPartition,
+                        Lists.newArrayList(dataSplit),
+                        fileBucketPathMapping,
+                        fileBranchMapping);
         byte[] bytes = InstantiationUtil.serializeObject(split);
         ChainSplit newSplit =
                 InstantiationUtil.deserializeObject(bytes, ChainSplit.class.getClassLoader());

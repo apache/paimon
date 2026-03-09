@@ -60,6 +60,18 @@ This section introduce all available spark procedures about paimon.
       </td>
     </tr>
     <tr>
+      <td>compact_chain_table</td>
+      <td>
+         To compact chain table by merging snapshot and delta branches into the snapshot branch. Arguments:
+            <li>table: The target chain table identifier. Cannot be empty.</li>
+            <li>partition: Partition specification format (e.g., 'dt="20250810",hour="22"'). Cannot be empty.</li>
+            <li>overwrite: Whether to overwrite if the partition already exists in the snapshot branch. Default is false. Optional.</li>
+      </td>
+      <td>
+         CALL sys.compact_chain_table(table => 'default.T', partition => 'dt="20250810",hour="22"')<br/><br/>
+      </td>
+    </tr>
+    <tr>
       <td>expire_snapshots</td>
       <td>
          To expire snapshots. Argument:

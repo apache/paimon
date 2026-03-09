@@ -87,7 +87,6 @@ Notice that:
 - Chain table is only supported for primary key table, which means you should define `bucket` and `bucket-key` for the table.
 - Chain table should ensure that the schema of each branch is consistent.
 - Only spark support now, flink will be supported later.
-- Chain compact is not supported for now, and it will be supported later.
 
 After creating a chain table, you can read and write data in the following ways.
 
@@ -146,3 +145,30 @@ you will get the following result:
 | 2 |   1|   1 |               
 +---+----+-----+ 
 ```
+
+- Chain Table Compaction: Merge data from snapshot and delta branches into the snapshot branch.
+This is useful for periodically compacting incremental data into full snapshots.
+You can use the `compact_chain_table` procedure to merge a specific partition:
+
+```sql
+CALL sys.compact_chain_table(table => 'default.t', partition => 'date="20250811"');
+```
+
+After compaction, the data in the snapshot branch will contain the merged result from both snapshot
+and delta branches, and subsequent queries will benefit from direct snapshot access without
+merge-on-read overhead.
+
+```sql
+select t1, t2, t3 from `default`.`t$branch_snapshot` where date = '20250811';
+```
+
+you will get the following result:
+```text
++---+----+-----+ 
+| t1|  t2|   t3| 
++---+----+-----+ 
+| 1 |   1|   1 | 
+| 2 |   1|   1 |
++---+----+-----+ 
+```
+
