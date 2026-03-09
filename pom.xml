@@ -93,7 +93,7 @@ under the License.
         <scala.version>${scala212.version}</scala.version>
         <codegen.scala.version>${scala212.version}</codegen.scala.version>
         <snappy.version>1.1.8.4</snappy.version>
-        <airlift.version>0.27</airlift.version>
+        <airlift.version>2.0.3</airlift.version>
         <lz4.version>1.8.1</lz4.version>
         <slf4j.version>1.7.32</slf4j.version>
         <log4j.version>2.25.3</log4j.version>
