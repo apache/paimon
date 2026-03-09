@@ -40,6 +40,10 @@ class Catalog(ABC):
     OWNER_PROP = "owner"
 
     @abstractmethod
+    def list_databases(self) -> List[str]:
+        """List all database names in the catalog."""
+
+    @abstractmethod
     def get_database(self, name: str) -> 'Database':
         """Get paimon database identified by the given name."""
 

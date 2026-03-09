@@ -114,6 +114,13 @@ def main():
     from pypaimon.cli.cli_db import add_db_subcommands
     add_db_subcommands(db_parser)
 
+    # Catalog commands
+    catalog_parser = subparsers.add_parser('catalog', help='Catalog operations')
+
+    # Import and add catalog subcommands
+    from pypaimon.cli.cli_catalog import add_catalog_subcommands
+    add_catalog_subcommands(catalog_parser)
+
     args = parser.parse_args()
     
     if args.command is None:

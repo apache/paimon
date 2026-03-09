@@ -445,3 +445,20 @@ orders
 products
 users
 ```
+
+## Catalog Commands
+
+### Catalog List DBs
+
+List all databases in the catalog.
+
+```shell
+paimon catalog list-dbs
+```
+
+Output:
+```
+default
+mydb
+analytics
+```
