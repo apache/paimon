@@ -89,8 +89,8 @@ class BlobFileWriter:
             return None
         return BlobDescriptor.deserialize(raw)
 
-    def reach_target_size(self, suggested_check: bool, target_size: int) -> bool:
-        return self.writer.reach_target_size(suggested_check, target_size)
+    def reach_target_size(self, target_size: int) -> bool:
+        return self.writer.reach_target_size(target_size)
 
     def close(self) -> int:
         if self.closed:

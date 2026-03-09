@@ -28,8 +28,6 @@ from pypaimon.write.writer.blob_file_writer import BlobFileWriter
 
 logger = logging.getLogger(__name__)
 
-CHECK_ROLLING_RECORD_CNT = 1000
-
 
 class BlobWriter(AppendOnlyDataWriter):
 
@@ -67,7 +65,7 @@ class BlobWriter(AppendOnlyDataWriter):
             self._write_row_to_file(row_data)
             self.record_count += 1
 
-            if self.rolling_file(False):
+            if self.rolling_file():
                 self.close_current_writer()
 
         self.pending_data = None
@@ -92,12 +90,11 @@ class BlobWriter(AppendOnlyDataWriter):
         self.current_file_path = file_path
         self.current_writer = BlobFileWriter(self.file_io, file_path)
 
-    def rolling_file(self, force_check: bool = False) -> bool:
+    def rolling_file(self) -> bool:
         if self.current_writer is None:
             return False
 
-        should_check = force_check or (self.record_count % CHECK_ROLLING_RECORD_CNT == 0)
-        return self.current_writer.reach_target_size(should_check, self.blob_target_file_size)
+        return self.current_writer.reach_target_size(self.blob_target_file_size)
 
     def close_current_writer(self):
         """Close current writer and create metadata."""
