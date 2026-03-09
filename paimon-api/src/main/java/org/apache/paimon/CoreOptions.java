@@ -2035,6 +2035,16 @@ public class CoreOptions implements Serializable {
                             "If true, it disables explicit type casting. For ex: it disables converting LONG type to INT type. "
                                     + "Users can enable this option to disable explicit type casting");
 
+    public static final ConfigOption<Boolean> ADD_COLUMN_BEFORE_PARTITION =
+            ConfigOptions.key("add-column-before-partition")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, when adding a new column without specifying a position, "
+                                    + "the column will be placed before the first partition column "
+                                    + "instead of at the end of the schema. "
+                                    + "This only takes effect for partitioned tables.");
+
     public static final ConfigOption<Long> COMMIT_STRICT_MODE_LAST_SAFE_SNAPSHOT =
             ConfigOptions.key("commit.strict-mode.last-safe-snapshot")
                     .longType()
