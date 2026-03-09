@@ -1709,7 +1709,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         // Add first column
         sql("ALTER TABLE T_PART_MULTI ADD col1 INT");
         // Add second column
-        sql("ALTER TABLE T_PART_MULTI ADD col2 DOUBLE");
+        sql("ALTER TABLE T_PART_MULTI ADD ( col2 INT, col3 DOUBLE )");
 
         List<Row> result = sql("SHOW CREATE TABLE T_PART_MULTI");
         // Both new columns should be before partition columns dt and hh
@@ -1718,7 +1718,8 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "`user_id` BIGINT,\n"
                                 + "  `item_id` BIGINT,\n"
                                 + "  `col1` INT,\n"
-                                + "  `col2` DOUBLE,\n"
+                                + "  `col2` INT,\n"
+                                + "  `col3` DOUBLE,\n"
                                 + "  `dt` VARCHAR(2147483647),\n"
                                 + "  `hh` VARCHAR(2147483647)");
     }
