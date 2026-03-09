@@ -439,6 +439,7 @@ public class CatalogUtils {
                 .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)
                 .location(location)
+                .options(options)
                 .comment(schema.comment())
                 .build();
     }
