@@ -16,14 +16,15 @@
 # limitations under the License.
 ################################################################################
 import sys
-from datetime import timedelta
 from enum import Enum
 from typing import Dict, Optional
 
+from datetime import timedelta
+
 from pypaimon.common.memory_size import MemorySize
 from pypaimon.common.options import Options
-from pypaimon.common.options.config_option import ConfigOption
 from pypaimon.common.options.config_options import ConfigOptions
+from pypaimon.common.options.config_option import ConfigOption
 
 
 class ExternalPathStrategy(str, Enum):
@@ -103,25 +104,6 @@ class CoreOptions:
             "By default, if there is a primary key, the primary key will be used; "
             "if there is no primary key, the full row will be used. "
             "In this case, the sink parallelism must be set to the bucket number."
-        )
-    )
-
-    DYNAMIC_BUCKET_TARGET_ROW_NUM: ConfigOption[int] = (
-        ConfigOptions.key("dynamic-bucket.target-row-num")
-        .int_type()
-        .default_value(2000000)
-        .with_description(
-            "In dynamic bucket mode (bucket=-1), target row number per bucket; "
-            "when exceeded, a new bucket is created (aligned with Java SimpleHashBucketAssigner)."
-        )
-    )
-
-    DYNAMIC_BUCKET_MAX_BUCKETS: ConfigOption[int] = (
-        ConfigOptions.key("dynamic-bucket.max-buckets")
-        .int_type()
-        .default_value(-1)
-        .with_description(
-            "In dynamic bucket mode, max buckets per partition. -1 means unlimited."
         )
     )
 
@@ -279,7 +261,6 @@ class CoreOptions:
         .with_description("Specify the merge engine for table with primary key. "
                           "Options: deduplicate, partial-update, aggregation, first-row.")
     )
-
     # Commit options
     COMMIT_USER_PREFIX: ConfigOption[str] = (
         ConfigOptions.key("commit.user-prefix")
@@ -407,12 +388,6 @@ class CoreOptions:
 
     def bucket_key(self, default=None):
         return self.options.get(CoreOptions.BUCKET_KEY, default)
-
-    def dynamic_bucket_target_row_num(self, default=None):
-        return self.options.get(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, default)
-
-    def dynamic_bucket_max_buckets(self, default=None):
-        return self.options.get(CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS, default)
 
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
