@@ -1723,4 +1723,57 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `dt` VARCHAR(2147483647),\n"
                                 + "  `hh` VARCHAR(2147483647)");
     }
+
+    @Test
+    public void testAddColumnBeforePartitionOnPrimaryKeyTable() {
+        sql(
+                "CREATE TABLE T_PK_PART (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh) WITH (\n"
+                        + "    'add-column-before-partition' = 'true'\n"
+                        + ")");
+
+        sql("INSERT INTO T_PK_PART VALUES(1, 100, 'buy', '2024-01-01', '10')");
+
+        // Add single column
+        sql("ALTER TABLE T_PK_PART ADD score DOUBLE");
+
+        List<Row> result = sql("SHOW CREATE TABLE T_PK_PART");
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT NOT NULL,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `behavior` VARCHAR(2147483647),\n"
+                                + "  `score` DOUBLE,\n"
+                                + "  `dt` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `hh` VARCHAR(2147483647) NOT NULL");
+
+        // Add multiple columns
+        sql("ALTER TABLE T_PK_PART ADD ( col1 INT, col2 DOUBLE )");
+
+        result = sql("SHOW CREATE TABLE T_PK_PART");
+        assertThat(result.toString())
+                .contains(
+                        "`user_id` BIGINT NOT NULL,\n"
+                                + "  `item_id` BIGINT,\n"
+                                + "  `behavior` VARCHAR(2147483647),\n"
+                                + "  `score` DOUBLE,\n"
+                                + "  `col1` INT,\n"
+                                + "  `col2` DOUBLE,\n"
+                                + "  `dt` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `hh` VARCHAR(2147483647) NOT NULL");
+
+        // Verify data read/write still works
+        sql("INSERT INTO T_PK_PART VALUES(2, 200, 'sell', 99.5, 10, 3.14, '2024-01-02', '11')");
+        result = sql("SELECT * FROM T_PK_PART");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1L, 100L, "buy", null, null, null, "2024-01-01", "10"),
+                        Row.of(2L, 200L, "sell", 99.5, 10, 3.14, "2024-01-02", "11"));
+    }
 }
