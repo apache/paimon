@@ -74,10 +74,28 @@ paimon [OPTIONS] COMMAND [ARGS]...
 
 ### Table Read
 
-Read data from a Paimon table and display it in a formatted table.
+Read data from a Paimon table and display it in a tabular format.
 
 ```shell
 paimon table read mydb.users
+```
+
+**Options:**
+
+- `--select, -s`: Select specific columns to read (comma-separated)
+- `--limit, -l`: Maximum number of results to display (default: 100)
+
+**Examples:**
+
+```shell
+# Read with limit
+paimon table read mydb.users -l 50
+
+# Read specific columns
+paimon table read mydb.users -s id,name,age
+
+# Combine select and limit
+paimon table read mydb.users -s id,name -l 50
 ```
 
 Output:
@@ -88,19 +106,6 @@ Output:
   3 Charlie   35 Guangzhou
   4   David   28  Shenzhen
   5     Eve   32  Hangzhou
-```
-
-Use the `-l` or `--limit` option (default 100) to limit the number of rows displayed:
-
-```shell
-paimon table read mydb.users -l 2
-```
-
-Output:
-```
- id  name  age     city
-  1 Alice   25  Beijing
-  2   Bob   30 Shanghai
 ```
 
 ### Table Get
