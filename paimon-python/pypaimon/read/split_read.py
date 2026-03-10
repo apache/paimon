@@ -550,17 +550,20 @@ class DataEvolutionSplitRead(SplitRead):
         # Split field bunches
         fields_files = self._split_field_bunches(need_merge_files)
 
-        # Validate row counts and first row IDs
+        # Validate row counts and first row IDs (skip when row ranges are pushed down)
         row_count = fields_files[0].row_count()
         first_row_id = fields_files[0].files()[0].first_row_id
 
-        for bunch in fields_files:
-            if bunch.row_count() != row_count:
-                raise ValueError("All files in a field merge split should have the same row count.")
-            if bunch.files()[0].first_row_id != first_row_id:
-                raise ValueError(
-                    "All files in a field merge split should have the same first row id and could not be null."
-                )
+        if self.row_ranges is None:
+            for bunch in fields_files:
+                if bunch.row_count() != row_count:
+                    raise ValueError(
+                        "All files in a field merge split should have the same row count.")
+                if bunch.files()[0].first_row_id != first_row_id:
+                    raise ValueError(
+                        "All files in a field merge split should have the same "
+                        "first row id and could not be null."
+                    )
 
         # Create the union reader
         all_read_fields = self.read_fields
@@ -646,12 +649,13 @@ class DataEvolutionSplitRead(SplitRead):
         fields_files = []
         blob_bunch_map = {}
         row_count = -1
+        row_id_push_down = self.row_ranges is not None
 
         for file in need_merge_files:
             if DataFileMeta.is_blob_file(file.file_name):
                 field_id = self._get_field_id_from_write_cols(file)
                 if field_id not in blob_bunch_map:
-                    blob_bunch_map[field_id] = BlobBunch(row_count)
+                    blob_bunch_map[field_id] = BlobBunch(row_count, row_id_push_down)
                 blob_bunch_map[field_id].add(file)
             else:
                 # Normal file, just add it to the current merge split
