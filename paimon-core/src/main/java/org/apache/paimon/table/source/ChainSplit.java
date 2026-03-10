@@ -183,6 +183,6 @@ public class ChainSplit implements Split {
         }
 
         return new ChainSplit(
-                logicalPartition, dataFiles, fileBucketPathMapping, fileBranchMapping);
+                logicalPartition, dataFiles, fileBranchMapping, fileBucketPathMapping);
     }
 }
