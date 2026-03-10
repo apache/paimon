@@ -49,7 +49,6 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -61,14 +60,11 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.calcRowRange;
+import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
 
 /** The {@link BTreeIndexTopoBuilder} for BTree index in Flink. */
@@ -130,54 +126,25 @@ public class BTreeIndexTopoBuilder {
                 if (rangeSplits.isEmpty()) {
                     continue;
                 }
-                int parallelism = Math.max((int) (range.count() / recordsPerRange), 1);
-                parallelism = Math.min(parallelism, maxParallelism);
-
-                DataStream<DataSplit> sourceStream =
-                        env.fromData(
-                                        new JavaTypeInfo<>(DataSplit.class),
-                                        rangeSplits.toArray(new DataSplit[0]))
-                                .name("Global Index Source " + " range=" + range)
-                                .setParallelism(1);
-
-                DataStream<RowData> rowDataStream =
-                        sourceStream
-                                .transform(
-                                        "Read Data " + range,
-                                        InternalTypeInfo.of(
-                                                LogicalTypeConversion.toLogicalType(readType)),
-                                        new ReadDataOperator(readBuilder))
-                                .setParallelism(parallelism);
-
-                TableSortInfo sortInfo =
-                        new TableSortInfo.Builder()
-                                .setSortColumns(sortColumns)
-                                .setSortStrategy(CoreOptions.OrderType.ORDER)
-                                .setSinkParallelism(parallelism)
-                                .setLocalSampleSize(
-                                        parallelism * coreOptions.getLocalSampleMagnification())
-                                .setGlobalSampleSize(parallelism * 1000)
-                                .setRangeNumber(parallelism * 10)
-                                .build();
-
-                TableSorter sorter =
-                        TableSorter.getSorter(env, rowDataStream, coreOptions, readType, sortInfo);
-                DataStream<RowData> sortedStream = sorter.sort();
 
                 DataStream<Committable> commitMessages =
-                        sortedStream
-                                .transform(
-                                        "write-btree-index " + range,
-                                        new CommittableTypeInfo(),
-                                        new WriteIndexOperator(
-                                                range,
-                                                partitionFieldSize,
-                                                binaryRowSerializer.serializeToBytes(partition),
-                                                indexBuilder,
-                                                indexFieldPos,
-                                                rowIdPos,
-                                                indexFieldType))
-                                .setParallelism(parallelism);
+                        executeForPartitionRange(
+                                env,
+                                range,
+                                rangeSplits,
+                                readBuilder,
+                                indexBuilder,
+                                partitionFieldSize,
+                                binaryRowSerializer.serializeToBytes(partition),
+                                indexFieldPos,
+                                rowIdPos,
+                                indexFieldType,
+                                sortColumns,
+                                coreOptions,
+                                readType,
+                                recordsPerRange,
+                                maxParallelism);
+
                 allCommitMessages =
                         allCommitMessages == null
                                 ? commitMessages
@@ -191,56 +158,67 @@ public class BTreeIndexTopoBuilder {
         env.execute("Create btree global index for table: " + table.name());
     }
 
-    private static Map<BinaryRow, Map<Range, List<DataSplit>>> groupSplitsByRange(
-            List<DataSplit> splits) {
-        Map<BinaryRow, List<Pair<Range, DataSplit>>> partitionSplitRanges = new HashMap<>();
-        for (DataSplit split : splits) {
-            Range splitRange = calcRowRange(split);
-            if (splitRange == null) {
-                continue;
-            }
-            BinaryRow partition = split.partition();
-            partitionSplitRanges
-                    .computeIfAbsent(partition, p -> new ArrayList<>())
-                    .add(Pair.of(splitRange, split));
-        }
+    private static DataStream<Committable> executeForPartitionRange(
+            StreamExecutionEnvironment env,
+            Range range,
+            List<DataSplit> rangeSplits,
+            ReadBuilder readBuilder,
+            BTreeGlobalIndexBuilder indexBuilder,
+            int partitionFieldSize,
+            byte[] partition,
+            int indexFieldPos,
+            int rowIdPos,
+            DataType indexFieldType,
+            List<String> sortColumns,
+            CoreOptions coreOptions,
+            RowType readType,
+            long recordsPerRange,
+            int maxParallelism) {
+        int parallelism = Math.max((int) (range.count() / recordsPerRange), 1);
+        parallelism = Math.min(parallelism, maxParallelism);
 
-        Map<BinaryRow, Map<Range, List<DataSplit>>> result = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<Pair<Range, DataSplit>>> partitionEntry :
-                partitionSplitRanges.entrySet()) {
-            List<Pair<Range, DataSplit>> splitRanges = partitionEntry.getValue();
-            splitRanges.sort(
-                    Comparator.comparingLong((Pair<Range, DataSplit> e) -> e.getKey().from)
-                            .thenComparingLong(e -> e.getKey().to));
+        DataStream<DataSplit> sourceStream =
+                env.fromData(
+                                new JavaTypeInfo<>(DataSplit.class),
+                                rangeSplits.toArray(new DataSplit[0]))
+                        .name("Global Index Source " + " range=" + range)
+                        .setParallelism(1);
 
-            Map<Range, List<DataSplit>> partitionRanges = new LinkedHashMap<>();
-            Range current = null;
-            List<DataSplit> currentSplits = new ArrayList<>();
-            for (Map.Entry<Range, DataSplit> entry : splitRanges) {
-                Range splitRange = entry.getKey();
-                if (current == null) {
-                    current = splitRange;
-                    currentSplits.add(entry.getValue());
-                    continue;
-                }
-                Range merged = Range.union(current, splitRange);
-                if (merged != null) {
-                    current = merged;
-                    currentSplits.add(entry.getValue());
-                } else {
-                    partitionRanges.put(current, currentSplits);
-                    current = splitRange;
-                    currentSplits = new ArrayList<>();
-                    currentSplits.add(entry.getValue());
-                }
-            }
-            if (current != null) {
-                partitionRanges.put(current, currentSplits);
-            }
-            result.put(partitionEntry.getKey(), partitionRanges);
-        }
+        DataStream<RowData> rowDataStream =
+                sourceStream
+                        .transform(
+                                "Read Data " + range,
+                                InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(readType)),
+                                new ReadDataOperator(readBuilder))
+                        .setParallelism(parallelism);
 
-        return result;
+        TableSortInfo sortInfo =
+                new TableSortInfo.Builder()
+                        .setSortColumns(sortColumns)
+                        .setSortStrategy(CoreOptions.OrderType.ORDER)
+                        .setSinkParallelism(parallelism)
+                        .setLocalSampleSize(parallelism * coreOptions.getLocalSampleMagnification())
+                        .setGlobalSampleSize(parallelism * 1000)
+                        .setRangeNumber(parallelism * 10)
+                        .build();
+
+        TableSorter sorter =
+                TableSorter.getSorter(env, rowDataStream, coreOptions, readType, sortInfo);
+        DataStream<RowData> sortedStream = sorter.sort();
+
+        return sortedStream
+                .transform(
+                        "write-btree-index " + range,
+                        new CommittableTypeInfo(),
+                        new WriteIndexOperator(
+                                range,
+                                partitionFieldSize,
+                                partition,
+                                indexBuilder,
+                                indexFieldPos,
+                                rowIdPos,
+                                indexFieldType))
+                .setParallelism(parallelism);
     }
 
     private static void commit(FileStoreTable table, DataStream<Committable> written) {

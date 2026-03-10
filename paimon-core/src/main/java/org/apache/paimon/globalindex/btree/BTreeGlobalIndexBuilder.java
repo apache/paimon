@@ -47,6 +47,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIteratorAdapter;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
@@ -57,8 +58,12 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
@@ -264,8 +269,59 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return result;
     }
 
-    private static List<DataSplit> splitByContiguousRowRange(DataSplit split) {
+    public static Map<BinaryRow, Map<Range, List<DataSplit>>> groupSplitsByRange(
+            List<DataSplit> splits) {
+        Map<BinaryRow, List<Pair<Range, DataSplit>>> partitionSplitRanges = new HashMap<>();
+        for (DataSplit split : splits) {
+            Range splitRange = calcRowRange(split);
+            if (splitRange == null) {
+                continue;
+            }
+            BinaryRow partition = split.partition();
+            partitionSplitRanges
+                    .computeIfAbsent(partition, p -> new ArrayList<>())
+                    .add(Pair.of(splitRange, split));
+        }
 
+        Map<BinaryRow, Map<Range, List<DataSplit>>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<Pair<Range, DataSplit>>> partitionEntry :
+                partitionSplitRanges.entrySet()) {
+            List<Pair<Range, DataSplit>> splitRanges = partitionEntry.getValue();
+            splitRanges.sort(
+                    Comparator.comparingLong((Pair<Range, DataSplit> e) -> e.getKey().from)
+                            .thenComparingLong(e -> e.getKey().to));
+
+            Map<Range, List<DataSplit>> partitionRanges = new LinkedHashMap<>();
+            Range current = null;
+            List<DataSplit> currentSplits = new ArrayList<>();
+            for (Map.Entry<Range, DataSplit> entry : splitRanges) {
+                Range splitRange = entry.getKey();
+                if (current == null) {
+                    current = splitRange;
+                    currentSplits.add(entry.getValue());
+                    continue;
+                }
+                Range merged = Range.union(current, splitRange);
+                if (merged != null) {
+                    current = merged;
+                    currentSplits.add(entry.getValue());
+                } else {
+                    partitionRanges.put(current, currentSplits);
+                    current = splitRange;
+                    currentSplits = new ArrayList<>();
+                    currentSplits.add(entry.getValue());
+                }
+            }
+            if (current != null) {
+                partitionRanges.put(current, currentSplits);
+            }
+            result.put(partitionEntry.getKey(), partitionRanges);
+        }
+
+        return result;
+    }
+
+    private static List<DataSplit> splitByContiguousRowRange(DataSplit split) {
         List<DataFileMeta> input = split.dataFiles();
         RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> ranges = rangeHelper.mergeOverlappingRanges(input);

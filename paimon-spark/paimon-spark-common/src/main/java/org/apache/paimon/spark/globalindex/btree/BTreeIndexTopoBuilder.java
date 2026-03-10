@@ -35,7 +35,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InstantiationUtil;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 
 import org.apache.spark.api.java.JavaRDD;
@@ -51,14 +50,11 @@ import org.apache.spark.sql.functions;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.calcRowRange;
+import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
 
 /** The {@link GlobalIndexTopologyBuilder} for BTree index. */
@@ -161,58 +157,6 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             }
         }
         return allMessages;
-    }
-
-    private static Map<BinaryRow, Map<Range, List<DataSplit>>> groupSplitsByRange(
-            List<DataSplit> splits) {
-        Map<BinaryRow, List<Pair<Range, DataSplit>>> partitionSplitRanges = new HashMap<>();
-        for (DataSplit split : splits) {
-            Range splitRange = calcRowRange(split);
-            if (splitRange == null) {
-                continue;
-            }
-            BinaryRow partition = split.partition();
-            partitionSplitRanges
-                    .computeIfAbsent(partition, p -> new ArrayList<>())
-                    .add(Pair.of(splitRange, split));
-        }
-
-        Map<BinaryRow, Map<Range, List<DataSplit>>> result = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<Pair<Range, DataSplit>>> partitionEntry :
-                partitionSplitRanges.entrySet()) {
-            List<Pair<Range, DataSplit>> splitRanges = partitionEntry.getValue();
-            splitRanges.sort(
-                    Comparator.comparingLong((Pair<Range, DataSplit> e) -> e.getKey().from)
-                            .thenComparingLong(e -> e.getKey().to));
-
-            Map<Range, List<DataSplit>> partitionRanges = new LinkedHashMap<>();
-            Range current = null;
-            List<DataSplit> currentSplits = new ArrayList<>();
-            for (Map.Entry<Range, DataSplit> entry : splitRanges) {
-                Range splitRange = entry.getKey();
-                if (current == null) {
-                    current = splitRange;
-                    currentSplits.add(entry.getValue());
-                    continue;
-                }
-                Range merged = Range.union(current, splitRange);
-                if (merged != null) {
-                    current = merged;
-                    currentSplits.add(entry.getValue());
-                } else {
-                    partitionRanges.put(current, currentSplits);
-                    current = splitRange;
-                    currentSplits = new ArrayList<>();
-                    currentSplits.add(entry.getValue());
-                }
-            }
-            if (current != null) {
-                partitionRanges.put(current, currentSplits);
-            }
-            result.put(partitionEntry.getKey(), partitionRanges);
-        }
-
-        return result;
     }
 
     private static Iterator<byte[]> buildBTreeIndex(
