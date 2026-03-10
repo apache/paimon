@@ -99,14 +99,18 @@ def parse_where_clause(where_string: str, fields: List[DataField]) -> Optional[P
     return predicate
 
 
-def _build_field_type_map(fields: List[DataField]) -> Dict[str, str]:
-    """Build a mapping from field name to its base type string."""
+def _build_field_type_map(fields: List[DataField]) -> Dict[str, Optional[str]]:
+    """Build a mapping from field name to its base type string.
+
+    Only AtomicType fields are supported for WHERE filtering.
+    Non-atomic types (ARRAY, MAP, ROW, etc.) are mapped to None.
+    """
     result = {}
     for field in fields:
         if isinstance(field.type, AtomicType):
             result[field.name] = field.type.type.upper()
         else:
-            result[field.name] = str(field.type).upper()
+            result[field.name] = None
     return result
 
 
@@ -214,7 +218,20 @@ def _parse_primary(
     if not tokens:
         raise ValueError(f"Unexpected end after field name '{field_name}'")
 
-    field_type = type_map.get(field_name, 'STRING')
+    if field_name not in type_map:
+        raise ValueError(
+            f"Unknown field '{field_name}'. "
+            f"Available fields: {sorted(type_map.keys())}"
+        )
+
+    field_type = type_map[field_name]
+    if field_type is None:
+        raise ValueError(
+            f"Field '{field_name}' has a non-atomic type (e.g., ARRAY, MAP, ROW) "
+            f"which is not supported in WHERE clauses. "
+            f"Only atomic type fields (INT, STRING, DOUBLE, etc.) can be used for filtering."
+        )
+
     operator_token = tokens[0].upper()
 
     # IS NULL / IS NOT NULL

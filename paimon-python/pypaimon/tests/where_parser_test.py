@@ -18,7 +18,7 @@
 import unittest
 
 from pypaimon.cli.where_parser import parse_where_clause, _tokenize, _cast_literal
-from pypaimon.schema.data_types import AtomicType, DataField
+from pypaimon.schema.data_types import ArrayType, AtomicType, DataField
 
 
 class WhereParserTokenizeTest(unittest.TestCase):
@@ -383,6 +383,21 @@ class WhereParserParseTest(unittest.TestCase):
     def test_error_is_without_null(self):
         with self.assertRaises(ValueError):
             parse_where_clause("age IS SOMETHING", self.fields)
+
+    def test_error_unknown_field(self):
+        with self.assertRaises(ValueError) as context:
+            parse_where_clause("nonexistent = 1", self.fields)
+        self.assertIn("Unknown field", str(context.exception))
+        self.assertIn("nonexistent", str(context.exception))
+
+    def test_error_non_atomic_type_field(self):
+        fields_with_array = self.fields + [
+            DataField(6, 'tags', ArrayType(True, AtomicType('STRING'))),
+        ]
+        with self.assertRaises(ValueError) as context:
+            parse_where_clause("tags = 'foo'", fields_with_array)
+        self.assertIn("non-atomic type", str(context.exception))
+        self.assertIn("tags", str(context.exception))
 
 
 if __name__ == '__main__':
