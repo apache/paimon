@@ -137,7 +137,7 @@ public class BTreeIndexTopoBuilder {
                         env.fromData(
                                         new JavaTypeInfo<>(DataSplit.class),
                                         rangeSplits.toArray(new DataSplit[0]))
-                                .name("Global Index Source part=" + partition + " range=" + range)
+                                .name("Global Index Source " + " range=" + range)
                                 .setParallelism(1);
 
                 DataStream<RowData> rowDataStream =
