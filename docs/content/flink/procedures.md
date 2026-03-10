@@ -26,7 +26,7 @@ under the License.
 
 # Procedures
 
-Flink 1.18 and later versions support [Call Statements](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/call/),
+Flink 1.18 and later versions support [Call Statements](https://nightlies.apache.org/flink/flink-docs-master/docs/sql/reference/utility/call/),
 which make it easier to manipulate data and metadata of Paimon table by writing SQLs instead of submitting Flink jobs.
 
 In 1.18, the procedure only supports passing arguments by position. You must pass all arguments in order, and if you
@@ -382,15 +382,15 @@ All available procedures are listed below.
       <td>CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
-          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5')<br/><br/>
-          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => '5', mode => 'local')
+          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5)<br/><br/>
+          CALL sys.remove_orphan_files(`table` => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => false, parallelism => 5, mode => 'local')
       </td>
    </tr>
    <tr>
       <td>remove_unexisting_files</td>
       <td>
          -- Use named argument<br/>
-         CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier', dry_run => 'dryRun', parallelism => 'parallelism') <br/><br/>
+         CALL [catalog.]sys.remove_unexisting_files(`table` => 'identifier', dry_run => 'dryRun', parallelism => parallelism) <br/><br/>
          -- Use indexed argument<br/>
          CALL [catalog.]sys.remove_unexisting_files('identifier')<br/>
          CALL [catalog.]sys.remove_unexisting_files('identifier', 'dryRun', 'parallelism')
@@ -703,7 +703,7 @@ All available procedures are listed below.
       <td>
          To expire partitions. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
+            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
@@ -760,21 +760,14 @@ All available procedures are listed below.
    <tr>
       <td>create_branch</td>
       <td>
-         -- Use named argument<br/>
          CALL [catalog.]sys.create_branch(`table` => 'identifier', branch => 'branchName', tag => 'tagName')<br/><br/>
-         -- Use indexed argument<br/>
-         -- based on the specified tag <br/>
-         CALL [catalog.]sys.create_branch('identifier', 'branchName', 'tagName')<br/>
-         -- based on the specified branch's tag <br/>
-         CALL [catalog.]sys.create_branch('branch_table', 'branchName', 'tagName')<br/>
-         -- create empty branch <br/>
-         CALL [catalog.]sys.create_branch('identifier', 'branchName')
       </td>
       <td>
          To create a branch based on given tag, or just create empty branch. Arguments:
             <li>table: the target table identifier or branch identifier. Cannot be empty.</li>
-            <li>branchName: name of the new branch.</li>
-            <li>tagName: name of the tag which the new branch is based on.</li>
+            <li>branch: name of the new branch.</li>
+            <li>tag: name of the tag which the new branch is based on.</li>
+            <li>ignoreIfExists: ignore if branch exists, default is false.</li>
       </td>
       <td>
          CALL sys.create_branch(`table` => 'default.T', branch => 'branch1', tag => 'tag1')<br/>
@@ -835,7 +828,7 @@ All available procedures are listed below.
    <tr>
       <td>rescale</td>
       <td>
-         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => 'scan_parallelism', `sink_parallelism` => 'sink_parallelism')
+         CALL [catalog.]sys.rescale(`table` => 'identifier', `bucket_num` => bucket_num, `partition` => 'partition', `scan_parallelism` => scan_parallelism, `sink_parallelism` => sink_parallelism)
       </td>
       <td>
          Rescale one partition of a table. Arguments:

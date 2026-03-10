@@ -74,7 +74,7 @@ public class FlinkCalciteClasses {
         }
     }
 
-    public FlinkCalciteClasses() throws ClassNotFoundException {
+    public FlinkCalciteClasses() throws ClassNotFoundException, NoSuchFieldException {
         sqlNodeListDelegate = new SqlNodeListDelegate();
         sqlLiteralDelegate = new SqlLiteralDelegate();
         sqlBasicCallDelegate = new SqlBasicCallDelegate();
@@ -232,8 +232,11 @@ public class FlinkCalciteClasses {
         static final String CLASS_NAME = "org.apache.calcite.sql.SqlBasicCall";
         private final Class<?> clazz;
 
+        private final Class<?> sqlParserPosClass;
+
         public SqlBasicCallDelegate() throws ClassNotFoundException {
             this.clazz = loadCalciteClass(CLASS_NAME);
+            this.sqlParserPosClass = loadCalciteClass("org.apache.calcite.sql.parser.SqlParserPos");
         }
 
         public Object getOperator(Object basicCall) throws Exception {
@@ -243,6 +246,32 @@ public class FlinkCalciteClasses {
         public List<?> getOperandList(Object basicCall) throws Exception {
             return (List<?>)
                     invokeMethod(clazz, basicCall, "getOperandList", new Class[0], new Object[0]);
+        }
+
+        public boolean instanceOfSqlBasicCall(Object sqlNode) throws Exception {
+            return clazz.isAssignableFrom(sqlNode.getClass());
+        }
+
+        public Object getParserPosition(Object basicCall) throws Exception {
+            return invokeMethod(clazz, basicCall, "getParserPosition", new Class[0], new Object[0]);
+        }
+
+        public Object getFunctionQuantifier(Object basicCall) throws Exception {
+            return invokeMethod(
+                    clazz, basicCall, "getFunctionQuantifier", new Class[0], new Object[0]);
+        }
+
+        public Object create(
+                Object operator, List<?> operands, Object parserPos, Object functionQuantifier)
+                throws Exception {
+            java.lang.reflect.Constructor<?> constructor =
+                    clazz.getConstructor(
+                            loadCalciteClass(SqlOperatorDelegate.SQL_OPERATOR),
+                            List.class,
+                            sqlParserPosClass,
+                            loadCalciteClass("org.apache.calcite.sql.SqlLiteral"));
+            constructor.setAccessible(true);
+            return constructor.newInstance(operator, operands, parserPos, functionQuantifier);
         }
     }
 
@@ -288,13 +317,28 @@ public class FlinkCalciteClasses {
     public static class SqlIdentifierDelegate {
         private static final String SQL_IDENTIFIER = "org.apache.calcite.sql.SqlIdentifier";
         private final Class<?> identifierClazz;
+        private final Field namesField;
 
-        public SqlIdentifierDelegate() throws ClassNotFoundException {
+        public SqlIdentifierDelegate() throws ClassNotFoundException, NoSuchFieldException {
             this.identifierClazz = loadCalciteClass(SQL_IDENTIFIER);
+            this.namesField = identifierClazz.getField("names");
         }
 
         public boolean instanceOfSqlIdentifier(Object sqlNode) throws Exception {
             return identifierClazz.isAssignableFrom(sqlNode.getClass());
+        }
+
+        public List<String> getNames(Object sqlIdentifier) throws IllegalAccessException {
+            return (List<String>) namesField.get(sqlIdentifier);
+        }
+
+        public Object setName(Object sqlIdentifier, int i, String name) throws Exception {
+            return invokeMethod(
+                    identifierClazz,
+                    sqlIdentifier,
+                    "setName",
+                    new Class[] {int.class, String.class},
+                    new Object[] {i, name});
         }
     }
 

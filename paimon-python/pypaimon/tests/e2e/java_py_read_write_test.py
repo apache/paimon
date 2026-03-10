@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import datetime
 import os
 import sys
 import unittest
@@ -59,7 +60,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ('category', pa.string()),
             ('value', pa.float64()),
             ('ts', pa.timestamp('us')),
-            ('ts_ltz', pa.timestamp('us', tz='UTC'))
+            ('ts_ltz', pa.timestamp('us', tz='UTC')),
+            ('t', pa.time32('ms'))
         ])
 
         schema = Schema.from_pyarrow_schema(
@@ -78,7 +80,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
             'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
             'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
-            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
+            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+            't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
+                  datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)]
         })
         # Write initial data
         write_builder = table.new_batch_write_builder()
@@ -129,6 +133,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 ('value', pa.float64()),
                 ('ts', pa.timestamp('us')),
                 ('ts_ltz', pa.timestamp('us', tz='UTC')),
+                ('t', pa.time32('ms')),
                 ('metadata', pa.struct([
                     pa.field('source', pa.string()),
                     pa.field('created_at', pa.int64()),
@@ -179,6 +184,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
                 'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
                 'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+                't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
+                      datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)],
                 'metadata': [
                     {'source': 'store1', 'created_at': 1001, 'location': {'city': 'Beijing', 'country': 'China'}},
                     {'source': 'store1', 'created_at': 1002, 'location': {'city': 'Shanghai', 'country': 'China'}},
@@ -200,13 +207,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        initial_result = table_read.to_pandas(table_scan.plan().splits())
-        print(f"Format: {file_format}, Result:\n{initial_result}")
-        self.assertEqual(len(initial_result), 6)
-        # Data order may vary due to partitioning/bucketing, so compare as sets
-        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
-        actual_names = set(initial_result['name'].tolist())
-        self.assertEqual(actual_names, expected_names)
+        result = table_read.to_pandas(table_scan.plan().splits())
+        print(f"Format: {file_format}, Result:\n{result}")
+        self.assertEqual(initial_data.to_dict(), result.to_dict())
 
         from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
         expected_bucket_first_row = 2
@@ -236,9 +239,10 @@ class JavaPyReadWriteTest(unittest.TestCase):
         if file_format != "lance":
             self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
             self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
+            self.assertEqual(table.fields[6].type.type, "TIME(0)")
             from pypaimon.schema.data_types import RowType
-            self.assertIsInstance(table.fields[6].type, RowType)
-            metadata_fields = table.fields[6].type.fields
+            self.assertIsInstance(table.fields[7].type, RowType)
+            metadata_fields = table.fields[7].type.fields
             self.assertEqual(len(metadata_fields), 3)
             self.assertEqual(metadata_fields[0].name, 'source')
             self.assertEqual(metadata_fields[1].name, 'created_at')

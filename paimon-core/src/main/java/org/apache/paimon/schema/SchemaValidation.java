@@ -31,25 +31,26 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -76,6 +77,7 @@ import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.types.BlobType.fieldsNotInBlobFile;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
@@ -156,7 +158,11 @@ public class SchemaValidation {
 
         FileFormat fileFormat =
                 FileFormat.fromIdentifier(options.formatType(), new Options(schema.options()));
-        fileFormat.validateDataFields(BlobType.splitBlob(new RowType(schema.fields())).getLeft());
+        RowType tableRowType = new RowType(schema.fields());
+        Set<String> blobDescriptorFields = validateBlobDescriptorFields(tableRowType, options);
+        validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
+        fileFormat.validateDataFields(
+                new RowType(fieldsNotInBlobFile(tableRowType, blobDescriptorFields)));
 
         // Check column names in schema
         schema.fieldNames()
@@ -604,18 +610,70 @@ public class SchemaValidation {
                     "Data evolution config must disabled with clustering.incremental");
         }
 
-        Pair<RowType, RowType> normalAndBlobType = BlobType.splitBlob(schema.logicalRowType());
-        List<String> blobNames = normalAndBlobType.getRight().getFieldNames();
+        List<DataField> fields = schema.fields();
+        List<String> blobNames =
+                fields.stream()
+                        .filter(field -> field.type().is(DataTypeRoot.BLOB))
+                        .map(DataField::name)
+                        .collect(Collectors.toList());
         if (!blobNames.isEmpty()) {
             checkArgument(
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with BLOB type column.");
             checkArgument(
-                    normalAndBlobType.getLeft().getFieldCount() > 0,
+                    fields.size() > blobNames.size(),
                     "Table with BLOB type column must have other normal columns.");
             checkArgument(
-                    !schema.partitionKeys().contains(blobNames.get(0)),
+                    blobNames.stream().noneMatch(schema.partitionKeys()::contains),
                     "The BLOB type column can not be part of partition keys.");
+        }
+    }
+
+    private static Set<String> validateBlobDescriptorFields(RowType rowType, CoreOptions options) {
+        Set<String> blobFieldNames =
+                rowType.getFields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> configured = options.blobDescriptorField();
+        for (String field : configured) {
+            checkArgument(
+                    blobFieldNames.contains(field),
+                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    field,
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        }
+        return configured;
+    }
+
+    private static void validateBlobExternalStorageFields(
+            RowType rowType, CoreOptions options, Set<String> blobDescriptorFields) {
+        Set<String> blobFieldNames =
+                rowType.getFields().stream()
+                        .filter(field -> field.type().getTypeRoot() == DataTypeRoot.BLOB)
+                        .map(DataField::name)
+                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> configured = options.blobExternalStorageField();
+        for (String field : configured) {
+            checkArgument(
+                    blobFieldNames.contains(field),
+                    "Field '%s' in '%s' must be a BLOB field in table schema.",
+                    field,
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
+            checkArgument(
+                    blobDescriptorFields.contains(field),
+                    "Field '%s' in '%s' must also be in '%s'.",
+                    field,
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key(),
+                    CoreOptions.BLOB_DESCRIPTOR_FIELD.key());
+        }
+        if (!configured.isEmpty()) {
+            String externalStoragePath = options.blobExternalStoragePath();
+            checkArgument(
+                    externalStoragePath != null && !externalStoragePath.isEmpty(),
+                    "'%s' must be set when '%s' is configured.",
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_PATH.key(),
+                    CoreOptions.BLOB_EXTERNAL_STORAGE_FIELD.key());
         }
     }
 
@@ -664,6 +722,9 @@ public class SchemaValidation {
                     changelogProducer == ChangelogProducer.NONE
                             || changelogProducer == ChangelogProducer.INPUT,
                     "Changelog producer must be none or input for chain table.");
+            Preconditions.checkArgument(
+                    !options.deletionVectorsEnabled(),
+                    "Chain table do not support enable deletion vector");
             Preconditions.checkArgument(
                     options.partitionTimestampPattern() != null,
                     "Partition timestamp pattern is required for chain table.");

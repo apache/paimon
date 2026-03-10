@@ -17,7 +17,7 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 
@@ -27,6 +27,7 @@ class CommitMessage:
     partition: Tuple
     bucket: int
     new_files: List[DataFileMeta]
+    check_from_snapshot: Optional[int] = -1
 
     def is_empty(self):
         return not self.new_files

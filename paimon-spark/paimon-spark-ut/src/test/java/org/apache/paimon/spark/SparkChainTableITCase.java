@@ -143,7 +143,7 @@ public class SparkChainTableITCase {
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250811') values (2, 2, '1-1' ),(4, 1, '1' );");
         spark.sql(
-                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250812') values (3, 2, '1-1' ),(4, 2, '1-1' );");
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250812') values (3, 2, '1-1' ),(4, 2, '1-1' ),(7, 1, 'd7' );");
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250813') values (5, 1, '1' ),(6, 1, '1' );");
         spark.sql(
@@ -202,6 +202,48 @@ public class SparkChainTableITCase {
                         "[3,1,1,20250811]",
                         "[4,1,1,20250811]");
 
+        /** Chain read with filter */
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250811' and t1 = 1")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,1-1,20250811]");
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250811' and t1 = 4")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[4,1,1,20250811]");
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250811' and t1 = 7")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .isEmpty();
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt in ('20250811', '20250812') and t1 = 1")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,1-1,20250811]", "[1,2,1-1,20250812]");
+
+        /** Snapshot read with filter */
+        assertThat(
+                        spark.sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250812' and t1 = 7")
+                                .collectAsList())
+                .isEmpty();
+
         /** Multi partition Read */
         assertThat(
                         spark
@@ -246,7 +288,8 @@ public class SparkChainTableITCase {
                         "[2,2,1-1,20250811]",
                         "[4,1,1,20250811]",
                         "[3,2,1-1,20250812]",
-                        "[4,2,1-1,20250812]");
+                        "[4,2,1-1,20250812]",
+                        "[7,1,d7,20250812]");
 
         /** Hybrid read */
         assertThat(
@@ -401,6 +444,16 @@ public class SparkChainTableITCase {
                         "[2,2,1-1,20250810,23]",
                         "[3,1,1,20250810,23]",
                         "[4,1,1,20250810,23]");
+
+        /** Chain read with non-partition filter */
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250810' and hour = '23' and t1 = 1")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,1-1,20250810,23]");
 
         /** Multi partition Read */
         assertThat(
@@ -752,6 +805,41 @@ public class SparkChainTableITCase {
         /** Drop table */
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test_drop_partition`;");
 
+        spark.close();
+    }
+
+    @Test
+    public void testChainTableCacheInvalidation(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+        spark.sql(
+                "CREATE TABLE chain_test_t ("
+                        + "    `t1` string ,"
+                        + "    `t2` string ,"
+                        + "    `t3` string"
+                        + ") PARTITIONED BY (`date` string)"
+                        + "TBLPROPERTIES ("
+                        + "   'chain-table.enabled' = 'true'"
+                        + "  ,'primary-key' = 'date,t1'"
+                        + "  ,'sequence.field' = 't2'"
+                        + "  ,'bucket-key' = 't1'"
+                        + "  ,'bucket' = '1'"
+                        + "  ,'partition.timestamp-pattern' = '$date'"
+                        + "  ,'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches(spark, "chain_test_t");
+        spark.sql(
+                "insert overwrite `chain_test_t$branch_delta` partition (date = '20260224') values ('1', '1', '1');");
+        assertThat(
+                        spark.sql("SELECT * FROM `chain_test_t`").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,1,1,20260224]");
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test_t`;");
         spark.close();
     }
 }

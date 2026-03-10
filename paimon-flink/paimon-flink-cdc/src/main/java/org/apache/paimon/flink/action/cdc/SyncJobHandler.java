@@ -207,9 +207,10 @@ public class SyncJobHandler {
                 return new PostgresRecordParser(
                         cdcSourceConfig, computedColumns, typeMapping, metadataConverters);
             case KAFKA:
+                return provideDataFormat()
+                        .createParser(typeMapping, computedColumns, metadataConverters);
             case PULSAR:
-                DataFormat dataFormat = provideDataFormat();
-                return dataFormat.createParser(typeMapping, computedColumns);
+                return provideDataFormat().createParser(typeMapping, computedColumns);
             case MONGODB:
                 return new MongoDBRecordParser(computedColumns, cdcSourceConfig);
             default:

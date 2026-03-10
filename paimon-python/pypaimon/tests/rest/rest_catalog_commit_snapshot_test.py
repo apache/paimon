@@ -22,6 +22,9 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
+import pyarrow as pa
+
+from pypaimon import Schema
 from pypaimon.api.api_response import CommitTableResponse
 from pypaimon.common.options import Options
 from pypaimon.api.rest_exception import NoSuchResourceException
@@ -31,6 +34,7 @@ from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 
 class TestRESTCatalogCommitSnapshot(unittest.TestCase):
@@ -290,6 +294,48 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
         finally:
             server.shutdown()
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestRESTCommit(RESTBaseTest):
+
+    def test_commit_succeeded_on_server_but_client_fails(self):
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        opts = {
+            'bucket': '1',
+            'file.format': 'parquet',
+            'commit.max-retries': '0',
+            'commit.timeout': '1000',
+        }
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, partition_keys=['id'], options=opts)
+        self.rest_catalog.create_table('default.test_abort_bug', schema, False)
+        table = self.rest_catalog.get_table('default.test_abort_bug')
+
+        tw = table.new_batch_write_builder().new_write()
+        tc = table.new_batch_write_builder().new_commit()
+        data = pa.Table.from_pydict(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c']}, schema=pa_schema)
+        tw.write_arrow(data)
+        cm = tw.prepare_commit()
+
+        real_commit = tc.file_store_commit.snapshot_commit.commit
+
+        def commit_then_raise(sn, br, st):
+            real_commit(sn, br, st)
+            raise RuntimeError("simulated")
+
+        with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):
+            with self.assertRaises(RuntimeError):
+                tc.commit(cm)
+        tw.close()
+        tc.close()
+
+        # We no longer abort on failure. Data was committed on server.
+        rb = table.new_read_builder()
+        actual = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(actual.column('name').to_pylist(), ['a', 'b', 'c'])
 
 
 if __name__ == '__main__':

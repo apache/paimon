@@ -18,15 +18,10 @@
 
 package org.apache.paimon.metastore;
 
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.tag.TagPreview;
 
-import java.util.List;
 import java.util.Optional;
 
 /** A {@link CommitCallback} to add partitions to metastore for tag preview. */
@@ -41,13 +36,10 @@ public class TagPreviewCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(
-            List<SimpleFileEntry> baseFiles,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+    public void call(Context context) {
         long currentMillis = System.currentTimeMillis();
-        Optional<String> tagOptional = tagPreview.extractTag(currentMillis, snapshot.watermark());
+        Optional<String> tagOptional =
+                tagPreview.extractTag(currentMillis, context.snapshot.watermark());
         tagOptional.ifPresent(tagCallback::notifyCreation);
     }
 

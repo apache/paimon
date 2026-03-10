@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.BooleanColumnVector;
@@ -40,6 +41,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.PaimonShreddingUtils;
@@ -65,6 +67,7 @@ import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
@@ -708,6 +711,93 @@ public class ArrowFieldWriters {
             }
             offset += array.size();
             listVector.endValue(rowIndex, array.size());
+        }
+    }
+
+    /** Writer for VECTOR. */
+    public static class VectorWriter extends ArrowFieldWriter {
+
+        private final ArrowFieldWriter elementWriter;
+
+        private final int length;
+
+        public VectorWriter(
+                FieldVector fieldVector,
+                int length,
+                ArrowFieldWriter elementWriter,
+                boolean isNullable) {
+            super(fieldVector, isNullable);
+            this.length = length;
+            this.elementWriter = elementWriter;
+        }
+
+        @Override
+        public void reset() {
+            super.reset();
+            elementWriter.reset();
+        }
+
+        @Override
+        protected void doWrite(
+                ColumnVector columnVector,
+                @Nullable int[] pickedInColumn,
+                int startIndex,
+                int batchRows) {
+            VecColumnVector vecColumnVector = (VecColumnVector) columnVector;
+
+            if (pickedInColumn == null) {
+                elementWriter.write(
+                        vecColumnVector.getColumnVector(),
+                        null,
+                        startIndex * length,
+                        batchRows * length);
+            } else {
+                int[] childPickedInColumn = new int[batchRows * length];
+                for (int i = 0; i < batchRows; ++i) {
+                    int pickedIndexInChild = pickedInColumn[startIndex + i] * length;
+                    for (int j = 0; j < length; ++j) {
+                        childPickedInColumn[i * length + j] = pickedIndexInChild + j;
+                    }
+                }
+                elementWriter.write(
+                        vecColumnVector.getColumnVector(),
+                        childPickedInColumn,
+                        0,
+                        batchRows * length);
+            }
+
+            // set FixedSizeListVector
+            FixedSizeListVector listVector = (FixedSizeListVector) fieldVector;
+            for (int i = 0; i < batchRows; i++) {
+                int row = getRowNumber(startIndex, i, pickedInColumn);
+                if (vecColumnVector.isNullAt(row)) {
+                    listVector.setNull(i);
+                } else {
+                    listVector.startNewValue(i);
+                }
+            }
+        }
+
+        @Override
+        protected void doWrite(int rowIndex, DataGetters getters, int pos) {
+            InternalVector vector = getters.getVector(pos);
+            if (vector.size() != length) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The size of vector %s is not equal to the length %s",
+                                vector.size(), length));
+            }
+            FixedSizeListVector listVector = (FixedSizeListVector) fieldVector;
+            listVector.setNotNull(rowIndex);
+            final int rowBase = rowIndex * length;
+            for (int vectorIndex = 0; vectorIndex < length; ++vectorIndex) {
+                elementWriter.write(rowBase + vectorIndex, vector, vectorIndex);
+            }
+            // Ensure child value count is large enough.
+            listVector
+                    .getDataVector()
+                    .setValueCount(
+                            Math.max(listVector.getDataVector().getValueCount(), rowBase + length));
         }
     }
 

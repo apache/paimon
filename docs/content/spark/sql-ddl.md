@@ -219,7 +219,7 @@ CREATE TABLE my_table (
 ```
 
 Furthermore, if there is already data stored in the specified location, you can create the table without explicitly specifying the fields, partitions and props or other information. 
-In this case, the new table will inherit them all from the existing table’s metadata. 
+In this case, the new table will inherit them all from the existing table's metadata.
 
 However, if you manually specify them, you need to ensure that they are consistent with those of the existing table (props can be a subset). Therefore, it is strongly recommended not to specify them.
 

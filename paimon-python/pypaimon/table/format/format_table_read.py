@@ -50,8 +50,9 @@ def _read_file_to_arrow(
 ) -> pyarrow.Table:
     path = split.data_path()
     csv_read_options = None
-    if fmt == Format.CSV and hasattr(pyarrow, "csv"):
-        csv_read_options = pyarrow.csv.ReadOptions(block_size=1 << 20)
+    if fmt == Format.CSV:
+        import pyarrow.csv as csv
+        csv_read_options = csv.ReadOptions(block_size=1 << 20)
     try:
         with file_io.new_input_stream(path) as stream:
             chunks = []
@@ -71,25 +72,25 @@ def _read_file_to_arrow(
 
     if fmt == Format.PARQUET:
         import io
+        import pyarrow.parquet as pq
         data = (
             bytes(data) if not isinstance(data, bytes) else data
         )
         if len(data) < 4 or data[:4] != b"PAR1":
             return pyarrow.table({})
         try:
-            tbl = pyarrow.parquet.read_table(io.BytesIO(data))
+            tbl = pq.read_table(io.BytesIO(data))
         except pyarrow.ArrowInvalid:
             return pyarrow.table({})
     elif fmt == Format.CSV:
-        if hasattr(pyarrow, "csv"):
-            tbl = pyarrow.csv.read_csv(
+        import pyarrow.csv as csv
+        try:
+            tbl = csv.read_csv(
                 pyarrow.BufferReader(data),
                 read_options=csv_read_options,
             )
-        else:
-            import io
-            df = pandas.read_csv(io.BytesIO(data))
-            tbl = pyarrow.Table.from_pandas(df)
+        except Exception:
+            return pyarrow.table({})
     elif fmt == Format.JSON:
         import json
         text = data.decode("utf-8") if isinstance(data, bytes) else data
@@ -103,17 +104,12 @@ def _read_file_to_arrow(
         tbl = pyarrow.Table.from_pylist(records)
     elif fmt == Format.ORC:
         import io
+        import pyarrow.orc as orc
         data = bytes(data) if not isinstance(data, bytes) else data
-        if hasattr(pyarrow, "orc"):
-            try:
-                tbl = pyarrow.orc.read_table(io.BytesIO(data))
-            except Exception:
-                return pyarrow.table({})
-        else:
-            raise ValueError(
-                "Format table read for ORC requires PyArrow with ORC support "
-                "(pyarrow.orc)"
-            )
+        try:
+            tbl = orc.read_table(io.BytesIO(data))
+        except Exception:
+            return pyarrow.table({})
     elif fmt == Format.TEXT:
         text = data.decode("utf-8") if isinstance(data, bytes) else data
         lines = (

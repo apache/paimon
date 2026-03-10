@@ -20,7 +20,6 @@ from io import BytesIO
 from typing import List, Optional
 
 import fastavro
-
 from pypaimon.manifest.schema.manifest_file_meta import (
     MANIFEST_FILE_META_SCHEMA, ManifestFileMeta)
 from pypaimon.manifest.schema.simple_stats import SimpleStats
@@ -50,10 +49,24 @@ class ManifestListManager:
         manifest_files.extend(delta_manifests)
         return manifest_files
 
+    def read_base(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read only the base manifest list for the given snapshot."""
+        return self.read(snapshot.base_manifest_list)
+
     def read_delta(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
         return self.read(snapshot.delta_manifest_list)
 
+    def read_changelog(self, snapshot: Snapshot) -> List[ManifestFileMeta]:
+        """Read changelog manifest files from snapshot, or empty list if none."""
+        if snapshot.changelog_manifest_list is None:
+            return []
+        return self.read(snapshot.changelog_manifest_list)
+
     def read(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        return self._read_from_storage(manifest_list_name)
+
+    def _read_from_storage(self, manifest_list_name: str) -> List[ManifestFileMeta]:
+        """Read manifest list from storage."""
         manifest_files = []
 
         manifest_list_path = f"{self.manifest_path}/{manifest_list_name}"
@@ -81,8 +94,8 @@ class ManifestListManager:
                 num_deleted_files=record['_NUM_DELETED_FILES'],
                 partition_stats=partition_stats,
                 schema_id=record['_SCHEMA_ID'],
-                min_row_id=record['_MIN_ROW_ID'],
-                max_row_id=record['_MAX_ROW_ID'],
+                min_row_id=record.get('_MIN_ROW_ID'),
+                max_row_id=record.get('_MAX_ROW_ID'),
             )
             manifest_files.append(manifest_file_meta)
 

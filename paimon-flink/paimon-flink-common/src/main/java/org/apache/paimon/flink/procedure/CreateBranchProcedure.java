@@ -33,7 +33,10 @@ import org.apache.flink.table.procedure.ProcedureContext;
  * Create branch procedure for given tag. Usage:
  *
  * <pre><code>
+ *  CALL sys.create_branch('tableId', 'branchName')
  *  CALL sys.create_branch('tableId', 'branchName', 'tagName')
+ *  CALL sys.create_branch('tableId', 'branchName', true)
+ *  CALL sys.create_branch('tableId', 'branchName', 'tagName', true)
  * </code></pre>
  */
 public class CreateBranchProcedure extends ProcedureBase {
@@ -49,16 +52,71 @@ public class CreateBranchProcedure extends ProcedureBase {
             argument = {
                 @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "branch", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "tag", type = @DataTypeHint("STRING"), isOptional = true),
+                @ArgumentHint(
+                        name = "ignoreIfExists",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true)
+            })
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String branchName,
+            String tagName,
+            Boolean ignoreIfExists)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, branchName, tagName, ignoreIfExists);
+    }
+
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "branch", type = @DataTypeHint("STRING")),
+                @ArgumentHint(
+                        name = "ignoreIfExists",
+                        type = @DataTypeHint("BOOLEAN"),
+                        isOptional = true)
+            })
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String branchName,
+            Boolean ignoreIfExists)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, branchName, null, ignoreIfExists);
+    }
+
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "branch", type = @DataTypeHint("STRING")),
                 @ArgumentHint(name = "tag", type = @DataTypeHint("STRING"), isOptional = true)
             })
     public String[] call(
             ProcedureContext procedureContext, String tableId, String branchName, String tagName)
             throws Catalog.TableNotExistException {
+        return innerCall(tableId, branchName, tagName, false);
+    }
+
+    @ProcedureHint(
+            argument = {
+                @ArgumentHint(name = "table", type = @DataTypeHint("STRING")),
+                @ArgumentHint(name = "branch", type = @DataTypeHint("STRING"))
+            })
+    public String[] call(ProcedureContext procedureContext, String tableId, String branchName)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, branchName, null, false);
+    }
+
+    private String[] innerCall(
+            String tableId, String branchName, String tagName, Boolean ignoreIfExists)
+            throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
+        boolean ignore = ignoreIfExists != null && ignoreIfExists;
         if (!StringUtils.isBlank(tagName)) {
-            table.createBranch(branchName, tagName);
+            table.createBranch(branchName, tagName, ignore);
         } else {
-            table.createBranch(branchName);
+            table.createBranch(branchName, ignore);
         }
         return new String[] {"Success"};
     }

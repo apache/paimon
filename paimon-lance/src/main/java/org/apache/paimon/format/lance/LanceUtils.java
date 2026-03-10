@@ -22,9 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
-import org.apache.paimon.jindo.JindoFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.oss.OSSFileIO;
 import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.utils.Pair;
 
@@ -116,13 +114,25 @@ public class LanceUtils {
 
         Options originOptions;
         if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
-            originOptions = ((OSSFileIO) fileIO).hadoopOptions();
+            try {
+                originOptions = (Options) ossFileIOKlass.getMethod("hadoopOptions").invoke(fileIO);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to invoke hadoopOptions on OSSFileIO", e);
+            }
         } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
-            originOptions = ((JindoFileIO) fileIO).hadoopOptions(path, isRead ? "read" : "write");
+            try {
+                originOptions =
+                        (Options)
+                                jindoFileIOKlass
+                                        .getMethod("hadoopOptions", Path.class, String.class)
+                                        .invoke(fileIO, path, isRead ? "read" : "write");
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to invoke hadoopOptions on JindoFileIO", e);
+            }
         } else if (pluginFileIOKlass != null && pluginFileIOKlass.isInstance(fileIO)) {
             originOptions = ((PluginFileIO) fileIO).options();
         } else if (hadoopFileIOKlass != null && hadoopFileIOKlass.isInstance(fileIO)) {
-            originOptions = new Options(((HadoopFileIO) fileIO).hadoopConf());
+            originOptions = ((HadoopFileIO) fileIO).hadoopOptions();
         } else {
             originOptions = new Options();
         }

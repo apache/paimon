@@ -190,8 +190,8 @@ class RESTTokenFileIO(FileIO):
     def write_lance(self, path: str, data, **kwargs):
         return self.file_io().write_lance(path, data, **kwargs)
 
-    def write_blob(self, path: str, data, blob_as_descriptor: bool, **kwargs):
-        return self.file_io().write_blob(path, data, blob_as_descriptor, **kwargs)
+    def write_blob(self, path: str, data, **kwargs):
+        return self.file_io().write_blob(path, data, **kwargs)
 
     @property
     def uri_reader_factory(self):

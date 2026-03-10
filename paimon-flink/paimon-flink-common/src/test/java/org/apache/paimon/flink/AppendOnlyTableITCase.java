@@ -34,7 +34,10 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -223,6 +226,49 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"), Row.of(4, "DDD"));
+    }
+
+    @Test
+    public void testReadWriteWithExternalPathWeightRobinStrategy() throws IOException {
+        String externalPaths =
+                TraceableFileIO.SCHEME
+                        + "://"
+                        + tempExternalPath1.toString()
+                        + ","
+                        + LocalFileIOLoader.SCHEME
+                        + "://"
+                        + tempExternalPath2.toString();
+        batchSql(
+                "ALTER TABLE append_table SET ("
+                        + "'data-file.external-paths' = '"
+                        + externalPaths
+                        + "', "
+                        + "'data-file.external-paths.strategy' = 'weight-robin', "
+                        + "'data-file.external-paths.weights' = '1,3', "
+                        + "'write-only' = 'true'"
+                        + ")");
+
+        int fileNum = 50;
+        for (int i = 1; i <= fileNum; i++) {
+            batchSql("INSERT INTO append_table VALUES (" + i + ", 'AAA')");
+        }
+
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(fileNum);
+
+        // Verify file distribution based on weights
+        long filesInPath1 =
+                Files.list(Paths.get(tempExternalPath1.toString() + "/bucket-0")).count();
+        long filesInPath2 =
+                Files.list(Paths.get(tempExternalPath2.toString() + "/bucket-0")).count();
+        long totalFiles = filesInPath1 + filesInPath2;
+
+        // Since the file sample size is small in IT case, we only verify that higher-weighted path
+        // has more files
+        assertThat(filesInPath1).isGreaterThan(0);
+        assertThat(filesInPath2).isGreaterThan(0);
+        assertThat(filesInPath2).isGreaterThan(filesInPath1);
+        assertThat(totalFiles).isEqualTo(fileNum);
     }
 
     @Test

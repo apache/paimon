@@ -25,12 +25,10 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.privilege.NoPrivilegeException;
-import org.apache.paimon.s3.MinioTestContainer;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -72,7 +70,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -98,15 +95,9 @@ public abstract class HiveCatalogITCaseBase {
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
 
-    @Minio private static MinioTestContainer minioTestContainer;
-
     private void before(boolean locationInProperties) throws Exception {
         this.locationInProperties = locationInProperties;
-        if (locationInProperties) {
-            path = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
-        } else {
-            path = folder.newFolder().toURI().toString();
-        }
+        path = folder.newFolder().toURI().toString();
         registerHiveCatalog("my_hive", new HashMap<>());
 
         tEnv.executeSql("USE CATALOG my_hive").await();
@@ -130,9 +121,6 @@ public abstract class HiveCatalogITCaseBase {
         catalogProperties.put("lock.enabled", "true");
         catalogProperties.put("location-in-properties", String.valueOf(locationInProperties));
         catalogProperties.put("warehouse", path);
-        if (locationInProperties) {
-            catalogProperties.putAll(minioTestContainer.getS3ConfigOptions());
-        }
 
         Options catalogOptions = new Options(catalogProperties);
         CatalogContext catalogContext = CatalogContext.create(catalogOptions);
@@ -193,23 +181,20 @@ public abstract class HiveCatalogITCaseBase {
                     };
 
     @Test
-    public void testDbLocation() {
-        String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+    public void testDbLocation() throws Exception {
+        String dbLocation = folder.newFolder().toURI().toString();
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Map<String, String> properties = new HashMap<>();
         properties.put("location", dbLocation);
 
-        assertThatThrownBy(() -> catalog.createDatabase("location_test_db", false, properties))
-                .hasMessageContaining(
-                        "Could not find a file io implementation for scheme 's3' in the classpath.");
+        catalog.createDatabase("location_test_db", false, properties);
     }
 
     @Test
     @LocationInProperties
-    public void testDbLocationWithMetastoreLocationInProperties()
-            throws Catalog.DatabaseAlreadyExistException, Catalog.DatabaseNotExistException {
-        String dbLocation = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+    public void testDbLocationWithMetastoreLocationInProperties() throws Exception {
+        String dbLocation = folder.newFolder().toURI().toString();
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Map<String, String> properties = new HashMap<>();

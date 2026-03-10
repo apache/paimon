@@ -16,7 +16,7 @@
 #  under the License.
 
 import threading
-import pyarrow
+import pyarrow.fs as pafs
 from pathlib import Path
 from pyarrow._fs import LocalFileSystem
 
@@ -29,15 +29,15 @@ class PaimonLocalFileSystem(LocalFileSystem):
         try:
             with PaimonLocalFileSystem.rename_lock:
                 dst_file_info = self.get_file_info([dst])[0]
-                if dst_file_info.type != pyarrow.fs.FileType.NotFound:
-                    if dst_file_info.type == pyarrow.fs.FileType.File:
+                if dst_file_info.type != pafs.FileType.NotFound:
+                    if dst_file_info.type == pafs.FileType.File:
                         return False
                     # Make it compatible with HadoopFileIO: if dst is an existing directory,
                     # dst=dst/srcFileName
                     src_name = Path(src).name
                     dst = str(Path(dst) / src_name)
                     final_dst_info = self.get_file_info([dst])[0]
-                    if final_dst_info.type != pyarrow.fs.FileType.NotFound:
+                    if final_dst_info.type != pafs.FileType.NotFound:
                         return False
                 
                 # Perform atomic move

@@ -266,6 +266,16 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        wrapped.createBranch(branchName, ignoreIfExists);
+    }
+
+    @Override
+    public void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        wrapped.createBranch(branchName, tagName, ignoreIfExists);
+    }
+
+    @Override
     public void deleteBranch(String branchName) {
         wrapped.deleteBranch(branchName);
     }

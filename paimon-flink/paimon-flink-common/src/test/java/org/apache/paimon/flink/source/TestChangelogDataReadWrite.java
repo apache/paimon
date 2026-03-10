@@ -113,6 +113,7 @@ public class TestChangelogDataReadWrite {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
+                        null,
                         false,
                         null);
         this.snapshotManager = newSnapshotManager(LocalFileIO.create(), new Path(root));
@@ -141,6 +142,7 @@ public class TestChangelogDataReadWrite {
                                 pathFactory,
                                 EXTRACTOR,
                                 options));
+
         RawFileSplitRead rawFileRead =
                 new RawFileSplitRead(
                         LocalFileIO.create(),
@@ -149,8 +151,7 @@ public class TestChangelogDataReadWrite {
                         VALUE_TYPE,
                         FileFormatDiscover.of(options),
                         pathFactory,
-                        options.fileIndexReadEnabled(),
-                        false);
+                        options);
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
     }
 

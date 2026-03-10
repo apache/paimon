@@ -77,7 +77,7 @@ This section introduce all available spark procedures about paimon.
       <td>
          To expire partitions. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
-            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it‘s lifetime is over this value. Partition time is extracted from the partition value.</li>
+            <li>expiration_time: the expiration interval of a partition. A partition will be expired if it's lifetime is over this value. Partition time is extracted from the partition value.</li>
             <li>timestamp_formatter: the formatter to format timestamp from string.</li>
             <li>timestamp_pattern: the pattern to get a timestamp from partitions.</li>
             <li>expire_strategy: specifies the expiration strategy for partition expiration, possible values: 'values-time' or 'update-time' , 'values-time' as default.</li>
@@ -259,8 +259,8 @@ This section introduce all available spark procedures about paimon.
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(table => 'default.*', older_than => '2023-10-31 12:00:00')<br/><br/>
           CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true)<br/><br/>
-          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => '5')<br/><br/>
-          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => '5', mode => 'local')
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => 5)<br/><br/>
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00', dry_run => true, parallelism => 5, mode => 'local')
       </td>
     </tr>
     <tr>
@@ -298,6 +298,7 @@ This section introduce all available spark procedures about paimon.
             <li>table: the target table identifier or branch identifier. Cannot be empty.</li>
             <li>branch: name of the branch to be merged.</li>
             <li>tag: name of the new tag. Cannot be empty.</li>
+            <li>ignoreIfExists: ignore if branch exists, default is false.</li>
       </td>
       <td>
           CALL sys.create_branch(table => 'test_db.T', branch => 'test_branch')<br/><br/>

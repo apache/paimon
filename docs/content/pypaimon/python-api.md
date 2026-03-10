@@ -258,7 +258,7 @@ predicate_5 = predicate_builder.and_predicates([predicate3, predicate4])
 read_builder = read_builder.with_filter(predicate_5)
 ```
 
-See [Predicate]({{< ref "python-api#predicate" >}}) for all supported filters and building methods.
+See [Predicate]({{< ref "python-api#predicate" >}}) for all supported filters and building methods. Filter by `_ROW_ID`: see [Data Evolution]({{< ref "pypaimon/data-evolution#filter-by-_row_id" >}}).
 
 You can also pushdown projection by `ReadBuilder`:
 
@@ -521,6 +521,36 @@ Key points about shard read:
 - **Parallel Processing**: Each shard can be processed independently for better performance
 - **Consistency**: Combining all shards should produce the complete table data
 
+## Rollback
+
+Paimon supports rolling back a table to a previous snapshot or tag. This is useful for undoing unwanted changes or
+restoring the table to a known good state.
+
+### Rollback to Snapshot
+
+You can rollback a table to a specific snapshot by its ID:
+
+```python
+table = catalog.get_table('database_name.table_name')
+
+# Rollback to snapshot 3
+table.rollback_to(3)  # snapshot id
+```
+
+### Rollback to Tag
+
+You can also rollback a table to a previously created tag:
+
+```python
+table = catalog.get_table('database_name.table_name')
+
+# Rollback to tag 'v3'
+table.rollback_to('v3')  # tag name
+```
+
+The `rollback_to` method accepts either an `int` (snapshot ID) or a `str` (tag name) and automatically dispatches
+to the appropriate rollback logic.
+
 ## Data Types
 
 | Python Native Type  | PyArrow Type                                     | Paimon Type                       |
@@ -566,28 +596,31 @@ Key points about shard read:
 The following shows the supported features of Python Paimon compared to Java Paimon:
 
 **Catalog Level**
-  - FileSystemCatalog
-  - RestCatalog
+
+- FileSystemCatalog
+- RestCatalog
 
 **Table Level**
-  - Append Tables
+
+- Append Tables
     - `bucket = -1` (unaware)
     - `bucket > 0` (fixed)
-  - Primary Key Tables
-      - only support deduplicate
-      - `bucket = -2` (postpone)
-      - `bucket > 0` (fixed)
-      - read with deletion vectors enabled 
-  - Format Tables
-      - PARQUET
-      - CSV
-      - JSON
-      - ORC
-      - TEXT
-  - Read/Write Operations
-      - Batch read and write for append tables and primary key tables
-      - Predicate filtering
-      - Overwrite semantics
-      - Incremental reading of Delta data
-      - Reading and writing blob data
-      - `with_shard` feature
+- Primary Key Tables
+    - only support deduplicate
+    - `bucket = -2` (postpone)
+    - `bucket > 0` (fixed)
+    - read with deletion vectors enabled
+- Format Tables
+    - PARQUET
+    - CSV
+    - JSON
+    - ORC
+    - TEXT
+- Read/Write Operations
+    - Batch read and write for append tables and primary key tables
+    - Predicate filtering
+    - Overwrite semantics
+    - Incremental reading of Delta data
+    - Reading and writing blob data
+    - `with_shard` feature
+    - Rollback feature

@@ -344,6 +344,27 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
     }
   }
 
+  test("incremental query by tag with LIMIT") {
+    sql("use paimon")
+    withTable("t") {
+      spark.sql("""
+                  |CREATE TABLE t (a INT, b INT, c STRING)
+                  |USING paimon
+                  |TBLPROPERTIES ('primary-key'='a,b', 'bucket' = '2')
+                  |PARTITIONED BY (a)
+                  |""".stripMargin)
+      spark.sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '2')")
+      sql("CALL sys.create_tag('t', 'tag1')")
+      spark.sql("INSERT INTO t VALUES (1, 3, '3'), (2, 4, '4')")
+      sql("CALL sys.create_tag('t', 'tag2')")
+
+      checkAnswer(
+        spark.sql(
+          "SELECT * FROM paimon_incremental_query('t', 'tag1', 'tag2') ORDER BY a, b LIMIT 5"),
+        Seq(Row(1, 3, "3"), Row(2, 4, "4")))
+    }
+  }
+
   private def incrementalDF(tableIdent: String, start: Int, end: Int): DataFrame = {
     spark.read
       .format("paimon")

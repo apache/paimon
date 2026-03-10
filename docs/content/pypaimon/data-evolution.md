@@ -45,8 +45,6 @@ its corresponding `first_row_id`, then groups rows with the same `first_row_id` 
 
 **Requirements for `_ROW_ID` updates**
 
-- **All rows required**: the input table must contain **exactly the full table row count** (one row per existing row).
-- **Row id coverage**: after sorting by `_ROW_ID`, it must be **0..N-1** (no duplicates, no gaps).
 - **Update columns only**: include `_ROW_ID` plus the columns you want to update (partial schema is OK).
 
 ```python
@@ -96,6 +94,16 @@ table_commit.close()
 # content should be:
 #   'f0': [5, 6],
 #   'f1': [-1001, 1002]
+```
+
+## Filter by _ROW_ID
+
+Requires the same [Prerequisites](#prerequisites) (row-tracking and data-evolution enabled). On such tables you can filter by `_ROW_ID` to prune files at scan time. Supported: `equal('_ROW_ID', id)`, `is_in('_ROW_ID', [id1, ...])`, `between('_ROW_ID', low, high)`.
+
+```python
+pb = table.new_read_builder().new_predicate_builder()
+rb = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 0))
+result = rb.new_read().to_arrow(rb.new_scan().plan().splits())
 ```
 
 ## Update Columns By Shards

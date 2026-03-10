@@ -376,7 +376,14 @@ public abstract class OrphanFilesClean implements Serializable {
 
         List<Path> result = new ArrayList<>();
         for (Path partitionPath : partitionPaths) {
-            result.addAll(listFileDirs(partitionPath, level - 1));
+            List<Path> sub = listFileDirs(partitionPath, level - 1);
+            if (sub.isEmpty()) {
+                // Empty partition (no bucket subdirs), include for empty-dir cleanup
+                LOG.info("Found empty partition directory for cleanup: {}", partitionPath);
+                result.add(partitionPath);
+            } else {
+                result.addAll(sub);
+            }
         }
         return result;
     }

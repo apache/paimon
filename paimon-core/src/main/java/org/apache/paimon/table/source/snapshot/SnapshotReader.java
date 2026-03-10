@@ -40,6 +40,7 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -113,6 +114,8 @@ public interface SnapshotReader {
     SnapshotReader withMetricRegistry(MetricRegistry registry);
 
     SnapshotReader withRowRanges(List<Range> rowRanges);
+
+    SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex);
 
     SnapshotReader withReadType(RowType readType);
 

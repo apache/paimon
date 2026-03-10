@@ -115,10 +115,10 @@ public class PredicateBuilderTest {
                 .isEqualTo(
                         Arrays.asList(
                                 child1,
-                                builder.isNull(3),
-                                builder.isNull(4),
+                                child3,
                                 builder.isNull(5),
-                                child3));
+                                builder.isNull(4),
+                                builder.isNull(3)));
     }
 
     @Test

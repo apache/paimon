@@ -107,6 +107,25 @@ class CoreOptions:
         )
     )
 
+    DYNAMIC_BUCKET_TARGET_ROW_NUM: ConfigOption[int] = (
+        ConfigOptions.key("dynamic-bucket.target-row-num")
+        .int_type()
+        .default_value(2000000)
+        .with_description(
+            "In dynamic bucket mode (bucket=-1), target row number per bucket; "
+            "when exceeded, a new bucket is created (aligned with Java SimpleHashBucketAssigner)."
+        )
+    )
+
+    DYNAMIC_BUCKET_MAX_BUCKETS: ConfigOption[int] = (
+        ConfigOptions.key("dynamic-bucket.max-buckets")
+        .int_type()
+        .default_value(-1)
+        .with_description(
+            "In dynamic bucket mode, max buckets per partition. -1 means unlimited."
+        )
+    )
+
     SCAN_MANIFEST_PARALLELISM: ConfigOption[int] = (
         ConfigOptions.key("scan.manifest.parallelism")
         .int_type()
@@ -177,7 +196,17 @@ class CoreOptions:
         ConfigOptions.key("blob-as-descriptor")
         .boolean_type()
         .default_value(False)
-        .with_description("Whether to use blob as descriptor.")
+        .with_description("Whether to return blob values as serialized BlobDescriptor bytes when reading.")
+    )
+
+    BLOB_DESCRIPTOR_FIELD: ConfigOption[str] = (
+        ConfigOptions.key("blob-descriptor-field")
+        .string_type()
+        .no_default_value()
+        .with_description(
+            "Comma-separated BLOB field names that should be stored as serialized BlobDescriptor bytes "
+            "inline in normal data files."
+        )
     )
 
     TARGET_FILE_SIZE: ConfigOption[MemorySize] = (
@@ -212,6 +241,13 @@ class CoreOptions:
         .string_type()
         .no_default_value()
         .with_description("The timestamp range for incremental reading.")
+    )
+
+    SCAN_TAG_NAME: ConfigOption[str] = (
+        ConfigOptions.key("scan.tag-name")
+        .string_type()
+        .no_default_value()
+        .with_description("Optional tag name used in case of 'from-snapshot' scan mode.")
     )
 
     SOURCE_SPLIT_TARGET_SIZE: ConfigOption[MemorySize] = (
@@ -333,84 +369,6 @@ class CoreOptions:
         )
     )
 
-    # FAISS Vector Index options
-    VECTOR_DIM: ConfigOption[int] = (
-        ConfigOptions.key("vector.dim")
-        .int_type()
-        .default_value(128)
-        .with_description("The dimension of the vector.")
-    )
-
-    VECTOR_METRIC: ConfigOption[str] = (
-        ConfigOptions.key("vector.metric")
-        .string_type()
-        .default_value("L2")
-        .with_description("The similarity metric for vector search (L2, INNER_PRODUCT).")
-    )
-
-    VECTOR_INDEX_TYPE: ConfigOption[str] = (
-        ConfigOptions.key("vector.index-type")
-        .string_type()
-        .default_value("IVF_SQ8")
-        .with_description("The type of FAISS index (FLAT, HNSW, IVF, IVF_PQ, IVF_SQ8).")
-    )
-
-    VECTOR_M: ConfigOption[int] = (
-        ConfigOptions.key("vector.m")
-        .int_type()
-        .default_value(32)
-        .with_description("Maximum connections per element in HNSW index.")
-    )
-
-    VECTOR_EF_CONSTRUCTION: ConfigOption[int] = (
-        ConfigOptions.key("vector.ef-construction")
-        .int_type()
-        .default_value(40)
-        .with_description("Size of dynamic candidate list during HNSW construction.")
-    )
-
-    VECTOR_EF_SEARCH: ConfigOption[int] = (
-        ConfigOptions.key("vector.ef-search")
-        .int_type()
-        .default_value(16)
-        .with_description("Size of dynamic candidate list during HNSW search.")
-    )
-
-    VECTOR_NLIST: ConfigOption[int] = (
-        ConfigOptions.key("vector.nlist")
-        .int_type()
-        .default_value(100)
-        .with_description("Number of inverted lists (clusters) for IVF index.")
-    )
-
-    VECTOR_NPROBE: ConfigOption[int] = (
-        ConfigOptions.key("vector.nprobe")
-        .int_type()
-        .default_value(64)
-        .with_description("Number of clusters to visit during IVF search.")
-    )
-
-    VECTOR_SIZE_PER_INDEX: ConfigOption[int] = (
-        ConfigOptions.key("vector.size-per-index")
-        .int_type()
-        .default_value(2000000)
-        .with_description("Size of vectors stored in each vector index file.")
-    )
-
-    VECTOR_SEARCH_FACTOR: ConfigOption[int] = (
-        ConfigOptions.key("vector.search-factor")
-        .int_type()
-        .default_value(10)
-        .with_description("Multiplier for search limit when filtering is applied.")
-    )
-
-    VECTOR_NORMALIZE: ConfigOption[bool] = (
-        ConfigOptions.key("vector.normalize")
-        .boolean_type()
-        .default_value(False)
-        .with_description("Whether to L2 normalize vectors for cosine similarity.")
-    )
-
     READ_BATCH_SIZE: ConfigOption[int] = (
         ConfigOptions.key("read.batch-size")
         .int_type()
@@ -450,6 +408,12 @@ class CoreOptions:
     def bucket_key(self, default=None):
         return self.options.get(CoreOptions.BUCKET_KEY, default)
 
+    def dynamic_bucket_target_row_num(self, default=None):
+        return self.options.get(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, default)
+
+    def dynamic_bucket_max_buckets(self, default=None):
+        return self.options.get(CoreOptions.DYNAMIC_BUCKET_MAX_BUCKETS, default)
+
     def scan_manifest_parallelism(self, default=None):
         return self.options.get(CoreOptions.SCAN_MANIFEST_PARALLELISM, default)
 
@@ -476,6 +440,16 @@ class CoreOptions:
 
     def blob_as_descriptor(self, default=None):
         return self.options.get(CoreOptions.BLOB_AS_DESCRIPTOR, default)
+
+    def blob_descriptor_fields(self, default=None):
+        value = self.options.get(CoreOptions.BLOB_DESCRIPTOR_FIELD, default)
+        if value is None:
+            return set()
+        if isinstance(value, str):
+            return {field.strip() for field in value.split(",") if field.strip()}
+        if isinstance(value, (list, set, tuple)):
+            return {str(field).strip() for field in value if str(field).strip()}
+        return set()
 
     def target_file_size(self, has_primary_key, default=None):
         return self.options.get(CoreOptions.TARGET_FILE_SIZE,
@@ -504,6 +478,9 @@ class CoreOptions:
 
     def incremental_between_timestamp(self, default=None):
         return self.options.get(CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP, default)
+
+    def scan_tag_name(self, default=None):
+        return self.options.get(CoreOptions.SCAN_TAG_NAME, default)
 
     def source_split_target_size(self, default=None):
         return self.options.get(CoreOptions.SOURCE_SPLIT_TARGET_SIZE, default).get_bytes()
@@ -560,39 +537,6 @@ class CoreOptions:
 
     def global_index_thread_num(self) -> Optional[int]:
         return self.options.get(CoreOptions.GLOBAL_INDEX_THREAD_NUM)
-
-    def vector_dim(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_DIM, default)
-
-    def vector_metric(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_METRIC, default)
-
-    def vector_index_type(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_INDEX_TYPE, default)
-
-    def vector_m(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_M, default)
-
-    def vector_ef_construction(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_EF_CONSTRUCTION, default)
-
-    def vector_ef_search(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_EF_SEARCH, default)
-
-    def vector_nlist(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_NLIST, default)
-
-    def vector_nprobe(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_NPROBE, default)
-
-    def vector_size_per_index(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_SIZE_PER_INDEX, default)
-
-    def vector_search_factor(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_SEARCH_FACTOR, default)
-
-    def vector_normalize(self, default=None):
-        return self.options.get(CoreOptions.VECTOR_NORMALIZE, default)
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)

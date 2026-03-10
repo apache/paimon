@@ -20,12 +20,13 @@ import os
 import shutil
 import threading
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
 import pyarrow
-import pyarrow.fs
+import pyarrow.fs as pafs
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
@@ -117,11 +118,12 @@ class LocalFileIO(FileIO):
                 stat_info = file_path.stat()
                 self.path = str(file_path.absolute())
                 self.original_path = original_path
+                self.base_name = os.path.basename(original_path)
                 self.size = stat_info.st_size if file_path.is_file() else None
                 self.type = (
-                    pyarrow.fs.FileType.Directory if file_path.is_dir()
-                    else pyarrow.fs.FileType.File if file_path.is_file()
-                    else pyarrow.fs.FileType.NotFound
+                    pafs.FileType.Directory if file_path.is_dir()
+                    else pafs.FileType.File if file_path.is_file()
+                    else pafs.FileType.NotFound
                 )
                 self.mtime = stat_info.st_mtime
         
@@ -316,6 +318,8 @@ class LocalFileIO(FileIO):
             if parent and not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
             
+            data = self._cast_time_columns_for_orc(data)
+            
             with open(file_path, 'wb') as f:
                 if sys.version_info[:2] == (3, 6):
                     orc.write_table(data, f, **kwargs)
@@ -337,7 +341,13 @@ class LocalFileIO(FileIO):
         def record_generator():
             num_rows = len(list(records_dict.values())[0])
             for i in range(num_rows):
-                yield {col: records_dict[col][i] for col in records_dict.keys()}
+                record = {}
+                for col in records_dict.keys():
+                    value = records_dict[col][i]
+                    if isinstance(value, datetime) and value.tzinfo is None:
+                        value = value.replace(tzinfo=timezone.utc)
+                    record[col] = value
+                yield record
         
         records = record_generator()
         
@@ -386,7 +396,7 @@ class LocalFileIO(FileIO):
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write Lance file {path}: {e}") from e
     
-    def write_blob(self, path: str, data: pyarrow.Table, blob_as_descriptor: bool, **kwargs):
+    def write_blob(self, path: str, data: pyarrow.Table, **kwargs):
         try:
             if data.num_columns != 1:
                 raise RuntimeError(f"Blob format only supports a single column, got {data.num_columns} columns")
@@ -416,18 +426,24 @@ class LocalFileIO(FileIO):
                 for i in range(num_rows):
                     col_data = records_dict[field_name][i]
                     if hasattr(fields[0].type, 'type') and fields[0].type.type == "BLOB":
-                        if blob_as_descriptor:
-                            blob_descriptor = BlobDescriptor.deserialize(col_data)
-                            uri_reader = self.uri_reader_factory.create(blob_descriptor.uri)
-                            blob_data = Blob.from_descriptor(uri_reader, blob_descriptor)
-                        elif isinstance(col_data, bytes):
-                            blob_data = BlobData(col_data)
+                        if hasattr(col_data, 'as_py'):
+                            col_data = col_data.as_py()
+                        if isinstance(col_data, str):
+                            col_data = col_data.encode('utf-8')
+                        if isinstance(col_data, bytearray):
+                            col_data = bytes(col_data)
+
+                        if isinstance(col_data, bytes):
+                            if BlobDescriptor.is_blob_descriptor(col_data):
+                                descriptor = BlobDescriptor.deserialize(col_data)
+                                uri_reader = self.uri_reader_factory.create(descriptor.uri)
+                                blob_data = Blob.from_descriptor(uri_reader, descriptor)
+                            else:
+                                blob_data = BlobData(col_data)
                         else:
-                            if hasattr(col_data, 'as_py'):
-                                col_data = col_data.as_py()
-                            if isinstance(col_data, str):
-                                col_data = col_data.encode('utf-8')
-                            blob_data = BlobData(col_data)
+                            raise RuntimeError(
+                                "Blob field value must be bytes/blob or serialized BlobDescriptor bytes."
+                            )
                         row_values = [blob_data]
                     else:
                         row_values = [col_data]

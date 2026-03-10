@@ -18,6 +18,9 @@
 
 package org.apache.paimon.codegen;
 
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -99,6 +102,21 @@ class CodeGenUtilsTest {
                 newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true),
                 newRecordComparator(
                         Arrays.asList(STRING(), INT(), DOUBLE()), new int[] {0, 1, 2}, true));
+    }
+
+    @Test
+    public void testRecordComparatorOrderCacheMiss() {
+        RecordComparator ascending =
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, true);
+        RecordComparator descending =
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}, false);
+
+        InternalRow row1 = GenericRow.of(BinaryString.fromString("a"), 1);
+        InternalRow row2 = GenericRow.of(BinaryString.fromString("b"), 1);
+
+        assertThat(ascending.compare(row1, row2)).isLessThan(0);
+        assertThat(descending.compare(row1, row2)).isGreaterThan(0);
+        assertThat(ascending.getClass()).isNotEqualTo(descending.getClass());
     }
 
     @Test

@@ -127,6 +127,11 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        return wrapped.listTableDetails(databaseName);
+    }
+
+    @Override
     public PagedList<Identifier> listTablesPagedGlobally(
             String databaseNamePattern,
             String tableNamePattern,
@@ -221,6 +226,13 @@ public abstract class DelegateCatalog implements Catalog {
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
         wrapped.createBranch(identifier, branch, fromTag);
+    }
+
+    @Override
+    public void createBranch(
+            Identifier identifier, String branch, @Nullable String fromTag, boolean ignoreIfExists)
+            throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
+        wrapped.createBranch(identifier, branch, fromTag, ignoreIfExists);
     }
 
     @Override
@@ -416,6 +428,13 @@ public abstract class DelegateCatalog implements Catalog {
             String partitionNamePattern)
             throws TableNotExistException {
         return wrapped.listPartitionsPaged(identifier, maxResults, pageToken, partitionNamePattern);
+    }
+
+    @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        return wrapped.listPartitionsByNames(identifier, partitions);
     }
 
     @Override

@@ -193,6 +193,13 @@ public abstract class AbstractCatalog implements Catalog {
         return new PagedList<>(listPartitions(identifier), null);
     }
 
+    @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        return CatalogUtils.listPartitionsFromFileSystem(getTable(identifier), partitions);
+    }
+
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
 
     @Override
@@ -328,6 +335,19 @@ public abstract class AbstractCatalog implements Catalog {
                         .filter(Objects::nonNull)
                         .collect(Collectors.toList()),
                 pagedTableNames.getNextPageToken());
+    }
+
+    @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        List<Table> result = new ArrayList<>();
+        for (String tableName : listTables(databaseName)) {
+            try {
+                result.add(getTable(Identifier.create(databaseName, tableName)));
+            } catch (TableNotExistException e) {
+                // ignore
+            }
+        }
+        return result;
     }
 
     @Override

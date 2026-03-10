@@ -16,6 +16,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 import glob
+import datetime
 import os
 import shutil
 
@@ -24,6 +25,7 @@ import unittest
 
 from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
+from parameterized import parameterized
 
 
 class TableWriteTest(unittest.TestCase):
@@ -354,3 +356,63 @@ class TableWriteTest(unittest.TestCase):
         for file_name in data_files:
             self.assertRegex(file_name, expected_pattern,
                              f"File name '{file_name}' does not match expected prefix format")
+
+    def test_dynamic_bucket_write(self):
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            primary_keys=['user_id', 'dt'],
+            options={'bucket': '-1'}
+        )
+        self.catalog.create_table(
+            'default.test_dynamic_bucket', schema, False)
+        table = self.catalog.get_table(
+            'default.test_dynamic_bucket')
+        write_builder = table.new_batch_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(self.expected)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits)
+        sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
+        self.assertEqual(
+            self.expected.sort_by(sort_keys),
+            actual.sort_by(sort_keys),
+        )
+
+    @parameterized.expand([('parquet',), ('orc',), ('avro',)])
+    def test_write_time_type(self, file_format):
+        time_schema = pa.schema([
+            ('id', pa.int32()),
+            ('t', pa.time32('ms'))
+        ])
+        expected = pa.Table.from_pydict({
+            'id': [1, 2, 3],
+            't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3)]
+        }, schema=time_schema)
+
+        table_name = 'default.test_write_time_' + file_format
+        schema = Schema.from_pyarrow_schema(time_schema, options={'file.format': file_format})
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
+
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        table_write.write_arrow(expected)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_read.to_arrow(splits)
+        self.assertEqual(expected, actual)

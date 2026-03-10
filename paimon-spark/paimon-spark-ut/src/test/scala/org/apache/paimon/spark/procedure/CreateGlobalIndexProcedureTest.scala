@@ -180,10 +180,12 @@ class CreateGlobalIndexProcedureTest extends PaimonSparkTestBase with StreamTest
       table.store().newGlobalIndexScanBuilder().shardList()
       assert(btreeEntries.nonEmpty)
 
-      // 1. assert total row count and file count
+      // 1. assert total row count, file count and row range
       val totalRowCount = btreeEntries.map(_.rowCount()).sum
       assert(btreeEntries.size == 100)
       assert(totalRowCount == 100000L)
+      assert(btreeEntries.head.globalIndexMeta().rowRangeStart() == 0L)
+      assert(btreeEntries.head.globalIndexMeta().rowRangeEnd() == 99999L)
 
       // 2. assert global index meta not null
       btreeEntries.foreach(e => assert(e.globalIndexMeta() != null))
