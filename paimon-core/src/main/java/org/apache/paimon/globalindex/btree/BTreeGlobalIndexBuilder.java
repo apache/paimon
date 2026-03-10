@@ -168,7 +168,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         Iterator<InternalRow> iterator =
                 new MutableObjectIteratorAdapter<>(
                         buffer.sortedIterator(), new BinaryRow(readRowType.getFieldCount()));
-        List<CommitMessage> result = buildForSinglePartition(rowRange, partition, iterator, 0, 1);
+        List<CommitMessage> result = buildForSinglePartition(rowRange, partition, iterator);
         buffer.clear();
 
         return result;
