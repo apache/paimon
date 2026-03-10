@@ -18,22 +18,48 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
+import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
+import org.apache.paimon.globalindex.ResultEntry;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.ParameterUtils;
+import org.apache.paimon.utils.Range;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
+import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
+import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
+import static org.apache.paimon.io.DataIncrement.indexIncrement;
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -102,8 +128,115 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                 "BTree global index created successfully for table: " + table.name()
             };
         } else {
-            throw new UnsupportedOperationException(
-                    "Unsupported index type: " + indexType + ". Supported types: btree, bitmap");
+            buildGenericIndex(table, indexColumn, indexType, partitionPredicate, userOptions);
+            return new String[] {
+                indexType + " global index created successfully for table: " + table.name()
+            };
+        }
+    }
+
+    /**
+     * Builds a global index using the generic SPI-based GlobalIndexer mechanism. This supports any
+     * index type registered via {@link org.apache.paimon.globalindex.GlobalIndexerFactory} (e.g.
+     * lumina-vector-ann, bitmap).
+     */
+    private void buildGenericIndex(
+            FileStoreTable table,
+            String indexColumn,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
+        RowType rowType = table.rowType();
+        DataField indexField = rowType.getField(indexColumn);
+        RowType projectedRowType = rowType.project(Collections.singletonList(indexColumn));
+        RowType readRowType = SpecialFields.rowTypeWithRowId(projectedRowType);
+
+        // Merge table options with user options (user options take precedence)
+        Options mergedOptions = new Options(table.options(), userOptions.toMap());
+
+        // Scan manifest entries to determine row ranges
+        List<ManifestEntry> entries =
+                table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
+
+        // Group by partition
+        Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
+                entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
+
+        long rowsPerShard =
+                mergedOptions
+                        .getOptional(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
+                        .orElse(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD.defaultValue());
+
+        List<CommitMessage> allCommitMessages = new ArrayList<>();
+
+        for (Map.Entry<BinaryRow, List<ManifestEntry>> partEntry : entriesByPartition.entrySet()) {
+            BinaryRow partition = partEntry.getKey();
+            List<ManifestEntry> partEntries = partEntry.getValue();
+
+            // Compute the row range for this partition
+            long minRowId = Long.MAX_VALUE;
+            long maxRowId = Long.MIN_VALUE;
+            List<org.apache.paimon.io.DataFileMeta> dataFiles = new ArrayList<>();
+            for (ManifestEntry entry : partEntries) {
+                org.apache.paimon.io.DataFileMeta file = entry.file();
+                if (file.firstRowId() == null) {
+                    continue;
+                }
+                Range fileRange = file.nonNullRowIdRange();
+                minRowId = Math.min(minRowId, fileRange.from);
+                maxRowId = Math.max(maxRowId, fileRange.to);
+                dataFiles.add(file);
+            }
+            if (dataFiles.isEmpty()) {
+                continue;
+            }
+
+            dataFiles.sort(
+                    Comparator.comparingLong(org.apache.paimon.io.DataFileMeta::nonNullFirstRowId));
+            Range partitionRange = new Range(minRowId, maxRowId);
+
+            // Build a DataSplit covering all files in this partition
+            DataSplit dataSplit =
+                    DataSplit.builder()
+                            .withPartition(partition)
+                            .withBucket(0)
+                            .withDataFiles(dataFiles)
+                            .withBucketPath(
+                                    table.store().pathFactory().bucketPath(partition, 0).toString())
+                            .rawConvertible(false)
+                            .build();
+
+            // Read data and write index
+            ReadBuilder readBuilder = table.newReadBuilder().withReadType(readRowType);
+            GlobalIndexSingletonWriter indexWriter =
+                    (GlobalIndexSingletonWriter)
+                            createIndexWriter(table, indexType, indexField, mergedOptions);
+
+            InternalRow.FieldGetter getter =
+                    InternalRow.createFieldGetter(
+                            indexField.type(), readRowType.getFieldIndex(indexField.name()));
+
+            try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(dataSplit);
+                    CloseableIterator<InternalRow> iter = reader.toCloseableIterator()) {
+                while (iter.hasNext()) {
+                    InternalRow row = iter.next();
+                    indexWriter.write(getter.getFieldOrNull(row));
+                }
+            }
+
+            List<ResultEntry> resultEntries = indexWriter.finish();
+            List<IndexFileMeta> indexFileMetas =
+                    toIndexFileMetas(
+                            table, partitionRange, indexField.id(), indexType, resultEntries);
+            allCommitMessages.add(
+                    new CommitMessageImpl(
+                            partition, 0, null, indexIncrement(indexFileMetas), emptyIncrement()));
+        }
+
+        // Commit all index files
+        try (TableCommitImpl commit = table.newCommit("global-index-create-" + UUID.randomUUID())) {
+            commit.commit(allCommitMessages);
         }
     }
 
