@@ -36,7 +36,6 @@ import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StatsCollectorFactories;
 import org.apache.paimon.utils.VectorStoreUtils;
@@ -52,10 +51,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.BlobType.fieldsInBlobFile;
-import static org.apache.paimon.types.BlobType.fieldsNotInBlobFile;
 
 /**
  * A rolling file writer that handles both normal data and blob data. This writer creates separate
@@ -114,11 +114,10 @@ public class DataEvolutionRollingFileWriter
             FileIO fileIO,
             long schemaId,
             FileFormat fileFormat,
-            FileFormat vectorStoreFileFormat,
-            List<String> vectorStoreFieldNames,
+            FileFormat vectorFileFormat,
             long targetFileSize,
             long blobTargetFileSize,
-            long vectorStoreTargetFileSize,
+            long vectorTargetFileSize,
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             Supplier<LongCounter> seqNumCounterSupplier,
@@ -140,20 +139,22 @@ public class DataEvolutionRollingFileWriter
         boolean asyncFileWrite = false;
 
         // Split into normal, blob, and vector-store parts
-        List<DataField> fieldsInNormalFile, fieldsInBlobFile, fieldsInVectorFile;
+        List<DataField> fieldsInBlobFile =
+                (context == null)
+                        ? Collections.emptyList()
+                        : fieldsInBlobFile(writeSchema, context.blobDescriptorFields());
+        List<DataField> fieldsInVectorFile =
+                VectorStoreUtils.fieldsInVectorFile(writeSchema, fileFormat, vectorFileFormat);
+        List<DataField> fieldsInNormalFile = new ArrayList<>();
         {
-            fieldsInBlobFile = fieldsInBlobFile(writeSchema, context.blobDescriptorFields());
-            List<DataField> fieldsNotInBlobFile =
-                    fieldsNotInBlobFile(writeSchema, context.blobDescriptorFields());
-            if (VectorStoreUtils.isDifferentFormat(vectorStoreFileFormat, fileFormat)) {
-                Pair<RowType, RowType> typeWithVectorStore =
-                        VectorStoreUtils.splitVectorStore(
-                                fieldsNotInBlobFile, vectorStoreFieldNames);
-                fieldsInNormalFile = typeWithVectorStore.getLeft().getFields();
-                fieldsInVectorFile = typeWithVectorStore.getRight().getFields();
-            } else {
-                fieldsInNormalFile = fieldsNotInBlobFile;
-                fieldsInVectorFile = Collections.emptyList();
+            Set<String> fieldsNotInNormalFile =
+                    fieldsInBlobFile.stream().map(DataField::name).collect(Collectors.toSet());
+            fieldsNotInNormalFile.addAll(
+                    fieldsInVectorFile.stream().map(DataField::name).collect(Collectors.toSet()));
+            for (DataField field : writeSchema.getFields()) {
+                if (!fieldsNotInNormalFile.contains(field.name())) {
+                    fieldsInNormalFile.add(field);
+                }
             }
         }
 
@@ -195,7 +196,7 @@ public class DataEvolutionRollingFileWriter
         }
 
         // Initialize writer for descriptor fields backed by external storage if needed.
-        if (!context.blobExternalStorageFields().isEmpty()) {
+        if ((context != null) && !context.blobExternalStorageFields().isEmpty()) {
             this.externalStorageBlobWriter =
                     new ExternalStorageBlobWriter(
                             fileIO,
@@ -215,22 +216,24 @@ public class DataEvolutionRollingFileWriter
 
         // Initialize vector-store writer
         if (!fieldsInVectorFile.isEmpty()) {
+            List<String> vectorFieldNames =
+                    fieldsInVectorFile.stream().map(DataField::name).collect(Collectors.toList());
             this.vectorStoreWriterFactory =
                     () ->
                             createVectorStoreWriter(
                                     fileIO,
                                     schemaId,
-                                    vectorStoreFileFormat,
+                                    vectorFileFormat,
                                     fieldsInVectorFile,
                                     writeSchema,
                                     pathFactory,
                                     seqNumCounterSupplier,
                                     fileCompression,
-                                    statsCollectorFactories.statsCollectors(vectorStoreFieldNames),
+                                    statsCollectorFactories.statsCollectors(vectorFieldNames),
                                     fileSource,
                                     asyncFileWrite,
                                     statsDenseStore,
-                                    vectorStoreTargetFileSize);
+                                    vectorTargetFileSize);
         } else {
             this.vectorStoreWriterFactory = null;
         }
@@ -286,7 +289,7 @@ public class DataEvolutionRollingFileWriter
             createVectorStoreWriter(
                     FileIO fileIO,
                     long schemaId,
-                    FileFormat vectorStoreFileFormat,
+                    FileFormat vectorFileFormat,
                     List<DataField> fieldsInVectorStore,
                     RowType writeSchema,
                     DataFilePathFactory pathFactory,
@@ -302,14 +305,14 @@ public class DataEvolutionRollingFileWriter
         int[] vectorStoreProjection = writeSchema.projectIndexes(vectorStoreColumnNames);
 
         DataFilePathFactory vectorStorePathFactory =
-                pathFactory.vectorStorePathFactory(vectorStoreFileFormat.getFormatIdentifier());
+                pathFactory.vectorStorePathFactory(vectorFileFormat.getFormatIdentifier());
         return new ProjectedFileWriter<>(
                 new RollingFileWriterImpl<>(
                         () ->
                                 new RowDataFileWriter(
                                         fileIO,
                                         RollingFileWriter.createFileWriterContext(
-                                                vectorStoreFileFormat,
+                                                vectorFileFormat,
                                                 vectorStoreRowType,
                                                 statsCollectors,
                                                 fileCompression),

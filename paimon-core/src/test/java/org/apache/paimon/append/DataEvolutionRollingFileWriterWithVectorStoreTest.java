@@ -32,6 +32,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
+import org.apache.paimon.operation.BlobFileContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -55,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link DataEvolutionRollingFileWriter} with vector-store. */
 public class DataEvolutionRollingFileWriterWithVectorStoreTest {
 
-    private static final int VECTOR_DIM = 10;
+    private static final int VECTOR_DIM = 12;
     private static final RowType SCHEMA =
             RowType.builder()
                     .field("f0", DataTypes.INT())
@@ -100,7 +101,6 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         FileFormat.fromIdentifier("json", new Options()),
-                        Arrays.asList("f3", "f4"),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         VECTOR_TARGET_FILE_SIZE,
@@ -112,7 +112,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false,
-                        null);
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
     }
 
     @Test
@@ -141,7 +141,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
     }
 
     @Test
-    public void testVectorStoreTargetFileSize() throws Exception {
+    public void testVectorTargetFileSize() throws Exception {
         // 100k vector-store data would create 1 normal, 1 blob, and 3 vector-store files
         int rowNum = 100 * 1000;
         writer.write(makeRows(rowNum, 1).iterator());
@@ -180,13 +180,13 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
         writer.close();
         List<DataFileMeta> results = writer.result();
 
-        // Get uuid from vector-store files. The pattern is data-{uuid}-{count}.vector-store.json
+        // Get uuid from vector-store files. The pattern is data-{uuid}-{count}.vector.json
         DataFileMeta oneVectorStoreFile =
                 results.stream()
                         .filter(file -> VectorStoreUtils.isVectorStoreFile(file.fileName()))
                         .findAny()
                         .get();
-        String uuidAndCnt = oneVectorStoreFile.fileName().split(".vector-store.")[0];
+        String uuidAndCnt = oneVectorStoreFile.fileName().split(".vector.")[0];
         String prefix = uuidAndCnt.substring(0, uuidAndCnt.lastIndexOf('-') + 1); // data-{uuid}-
 
         // Verify all files use the same UUID and have sequential counters
@@ -217,84 +217,11 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
             if (BlobFileFormat.isBlobFile(file.fileName())) {
                 assertThat(file.writeCols()).isEqualTo(Collections.singletonList("f2"));
             } else if (VectorStoreUtils.isVectorStoreFile(file.fileName())) {
-                assertThat(file.writeCols()).isEqualTo(Arrays.asList("f3", "f4"));
-                // Json does not implement createStatsExtractor so we skip it here.
-                // assertThat(file.valueStats().minValues().getInt(1)).isGreaterThan(0);
+                assertThat(file.writeCols()).isEqualTo(Arrays.asList("f3"));
             } else {
-                assertThat(file.writeCols()).isEqualTo(Arrays.asList("f0", "f1"));
+                assertThat(file.writeCols()).isEqualTo(Arrays.asList("f0", "f1", "f4"));
                 assertThat(file.valueStats().minValues().getInt(0)).isEqualTo(0);
                 assertThat(file.valueStats().maxValues().getInt(0)).isEqualTo(rowNum - 1);
-            }
-        }
-
-        // Verify total record count
-        assertThat(writer.recordCount()).isEqualTo(rowNum);
-    }
-
-    @Test
-    void testVectorStoreStatsVectorStorePart() throws Exception {
-        // This time we set parquet as vector-store file format.
-        RowType schema =
-                RowType.builder()
-                        .field("f0", DataTypes.VECTOR(VECTOR_DIM, DataTypes.FLOAT()))
-                        .field("f1", DataTypes.INT())
-                        .field("f2", DataTypes.BLOB())
-                        .field("f3", DataTypes.INT())
-                        .field("f4", DataTypes.STRING())
-                        .build();
-        writer =
-                new DataEvolutionRollingFileWriter(
-                        LocalFileIO.create(),
-                        SCHEMA_ID,
-                        FileFormat.fromIdentifier("json", new Options()),
-                        FileFormat.fromIdentifier("parquet", new Options()),
-                        Arrays.asList("f3", "f4"),
-                        TARGET_FILE_SIZE,
-                        TARGET_FILE_SIZE,
-                        VECTOR_TARGET_FILE_SIZE,
-                        schema,
-                        pathFactory,
-                        () -> seqNumCounter,
-                        COMPRESSION,
-                        new StatsCollectorFactories(new CoreOptions(new Options())),
-                        new FileIndexOptions(),
-                        FileSource.APPEND,
-                        false,
-                        null);
-
-        // Write multiple rows
-        int rowNum = RANDOM.nextInt(64) + 1;
-        List<InternalRow> rows = makeRows(rowNum, 10);
-        for (InternalRow row : rows) {
-            writer.write(
-                    GenericRow.of(
-                            row.getVector(3),
-                            row.getInt(4),
-                            row.getBlob(2),
-                            row.getInt(0),
-                            row.getString(1)));
-        }
-        writer.close();
-        List<DataFileMeta> metasResult = writer.result();
-
-        // Check row count
-        for (DataFileMeta file : metasResult) {
-            assertThat(file.rowCount()).isEqualTo(rowNum);
-            assertThat(file.deleteRowCount().get()).isEqualTo(0); // There is no deleted rows
-        }
-
-        // Check statistics
-        for (DataFileMeta file : metasResult) {
-            if (BlobFileFormat.isBlobFile(file.fileName())) {
-                assertThat(file.writeCols()).isEqualTo(Collections.singletonList("f2"));
-            } else if (VectorStoreUtils.isVectorStoreFile(file.fileName())) {
-                assertThat(file.writeCols()).isEqualTo(Arrays.asList("f3", "f4"));
-                assertThat(file.valueStats().minValues().getInt(0)).isEqualTo(0);
-                assertThat(file.valueStats().maxValues().getInt(0)).isEqualTo(rowNum - 1);
-            } else {
-                assertThat(file.writeCols()).isEqualTo(Arrays.asList("f0", "f1"));
-                // Json does not implement createStatsExtractor so we skip it here.
-                // assertThat(file.valueStats().minValues().getInt(1)).isGreaterThan(0);
             }
         }
 
@@ -317,7 +244,6 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         FileFormat.fromIdentifier("json", new Options()),
-                        Arrays.asList("f2", "f3"),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         VECTOR_TARGET_FILE_SIZE,
@@ -372,7 +298,6 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("json", new Options()),
                         FileFormat.fromIdentifier("json", new Options()),
-                        Arrays.asList("f3", "f4"),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         VECTOR_TARGET_FILE_SIZE,
@@ -384,7 +309,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         new FileIndexOptions(),
                         FileSource.APPEND,
                         false,
-                        null);
+                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
 
         // This time we use large blob files
         int rowNum = 10;

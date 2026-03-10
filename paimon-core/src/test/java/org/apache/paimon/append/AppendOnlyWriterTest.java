@@ -23,6 +23,7 @@ import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.BlobData;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -577,33 +578,28 @@ public class AppendOnlyWriterTest {
         writer.close();
     }
 
-    @Test
+    /* @Test // TODO this can be enabled after avro supports vector
     public void testVectorStoreSameFormatUsesRowDataWriter() throws Exception {
+        RowType vectorStoreSchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {
+                                    new IntType(),
+                                    new VarCharType(),
+                                    DataTypes.VECTOR(3, DataTypes.FLOAT())
+                                },
+                                new String[] {"id", "name", "embed"})
+                        .build();
         FileFormat format = FileFormat.fromIdentifier(AVRO, new Options());
-        AppendOnlyWriter writer =
-                createVectorStoreWriter(1024 * 1024L, format, Collections.singletonList("name"));
-        writer.write(row(1, "AAA", PART));
+        AppendOnlyWriter writer = createVectorStoreWriter(1024 * 1024L, format, vectorStoreSchema);
+        writer.write(rowWithVectors(1, "AAA", new float[] {1.0f, 2.0f, 3.0f}));
         CommitIncrement increment = writer.prepareCommit(true);
         writer.close();
 
         assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
         DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
-        assertThat(meta.fileName()).doesNotContain(".vector-store");
-    }
-
-    @Test
-    public void testAllVectorStoreColumnsUseVectorStorePath() throws Exception {
-        FileFormat format = FileFormat.fromIdentifier(AVRO, new Options());
-        AppendOnlyWriter writer =
-                createVectorStoreWriter(1024 * 1024L, format, Arrays.asList("id", "name", "dt"));
-        writer.write(row(1, "AAA", PART));
-        CommitIncrement increment = writer.prepareCommit(true);
-        writer.close();
-
-        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
-        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
-        assertThat(meta.fileName()).contains(".vector-store");
-    }
+        assertThat(meta.fileName()).doesNotContain(".vector");
+    } */
 
     private SimpleColStats initStats(Integer min, Integer max, long nullCount) {
         return new SimpleColStats(min, max, nullCount);
@@ -616,6 +612,16 @@ public class AppendOnlyWriterTest {
 
     private InternalRow row(int id, String name, String dt) {
         return GenericRow.of(id, BinaryString.fromString(name), BinaryString.fromString(dt));
+    }
+
+    private InternalRow rowWithVectors(int id, String name, float[]... vectors) {
+        GenericRow row = new GenericRow(vectors.length + 2);
+        row.setField(0, id);
+        row.setField(1, BinaryString.fromString(name));
+        for (int i = 0; i < vectors.length; ++i) {
+            row.setField(i + 2, BinaryVector.fromPrimitiveArray(vectors[i]));
+        }
+        return row;
     }
 
     private DataFilePathFactory createPathFactory() {
@@ -700,7 +706,7 @@ public class AppendOnlyWriterTest {
         return createWriterBase(
                 targetFileSize,
                 null,
-                Collections.emptyList(),
+                AppendOnlyWriterTest.SCHEMA,
                 forceCompact,
                 useWriteBuffer,
                 spillable,
@@ -716,16 +722,14 @@ public class AppendOnlyWriterTest {
     }
 
     private AppendOnlyWriter createVectorStoreWriter(
-            long targetFileSize,
-            FileFormat vectorStoreFileFormat,
-            List<String> vectorStoreFieldNames) {
+            long targetFileSize, FileFormat vectorFileFormat, RowType writeSchema) {
         Map<String, String> options = new HashMap<>();
         options.put("metadata.stats-mode", "truncate(16)");
         options.put(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
         return createWriterBase(
                         targetFileSize,
-                        vectorStoreFileFormat,
-                        vectorStoreFieldNames,
+                        vectorFileFormat,
+                        writeSchema,
                         false,
                         true,
                         false,
@@ -738,8 +742,8 @@ public class AppendOnlyWriterTest {
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriterBase(
             long targetFileSize,
-            FileFormat vectorStoreFileFormat,
-            List<String> vectorStoreFieldNames,
+            FileFormat vectorFileFormat,
+            RowType writeSchema,
             boolean forceCompact,
             boolean useWriteBuffer,
             boolean spillable,
@@ -768,12 +772,11 @@ public class AppendOnlyWriterTest {
                         hasIoManager ? IOManager.create(tempDir.toString()) : null,
                         SCHEMA_ID,
                         fileFormat,
-                        vectorStoreFileFormat,
-                        vectorStoreFieldNames,
+                        vectorFileFormat,
                         targetFileSize,
                         targetFileSize,
                         targetFileSize,
-                        AppendOnlyWriterTest.SCHEMA,
+                        writeSchema,
                         null,
                         getMaxSequenceNumber(toCompact),
                         compactManager,
@@ -791,7 +794,7 @@ public class AppendOnlyWriterTest {
                         true,
                         false,
                         options.dataEvolutionEnabled(),
-                        BlobFileContext.create(AppendOnlyWriterTest.SCHEMA, options));
+                        BlobFileContext.create(writeSchema, options));
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

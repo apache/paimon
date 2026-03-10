@@ -37,7 +37,7 @@ import static java.util.Collections.singletonList;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.DATA_EVOLUTION_ENABLED;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
-import static org.apache.paimon.CoreOptions.VECTOR_FIELDS;
+import static org.apache.paimon.CoreOptions.VECTOR_FIELD;
 import static org.apache.paimon.CoreOptions.VECTOR_FILE_FORMAT;
 import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -212,7 +212,7 @@ class SchemaValidationTest {
         options.put(DATA_EVOLUTION_ENABLED.key(), "true");
         options.put(CoreOptions.FILE_FORMAT.key(), "avro");
         options.put(VECTOR_FILE_FORMAT.key(), "json");
-        options.put(VECTOR_FIELDS.key(), "f99");
+        options.put(VECTOR_FIELD.key(), "f99");
 
         List<DataField> fields =
                 Arrays.asList(
@@ -229,23 +229,23 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 options,
                                                 "")))
-                .hasMessage("Some of the columns specified as vector-store are unknown.");
+                .hasMessage("Some of the columns specified as vector-field are unknown.");
     }
 
     @Test
-    public void testVectorStoreContainsBlobColumn() {
+    public void testVectorStoreContainsNonVectorColumn() {
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), String.valueOf(-1));
         options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         options.put(DATA_EVOLUTION_ENABLED.key(), "true");
         options.put(CoreOptions.FILE_FORMAT.key(), "avro");
         options.put(VECTOR_FILE_FORMAT.key(), "json");
-        options.put(VECTOR_FIELDS.key(), "blob");
+        options.put(VECTOR_FIELD.key(), "f1");
 
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "blob", DataTypes.BLOB()));
+                        new DataField(1, "f1", DataTypes.FLOAT()));
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
@@ -257,7 +257,8 @@ class SchemaValidationTest {
                                                 emptyList(),
                                                 options,
                                                 "")))
-                .hasMessage("The vector-store columns can not be blob type.");
+                .hasMessage(
+                        "Field name[f1] is configured as vector-field so the type must be vector, but it is FLOAT");
     }
 
     @Test
@@ -268,12 +269,12 @@ class SchemaValidationTest {
         options.put(DATA_EVOLUTION_ENABLED.key(), "true");
         options.put(CoreOptions.FILE_FORMAT.key(), "avro");
         options.put(VECTOR_FILE_FORMAT.key(), "json");
-        options.put(VECTOR_FIELDS.key(), "f1");
+        options.put(VECTOR_FIELD.key(), "f1");
 
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "f1", DataTypes.STRING()));
+                        new DataField(1, "f1", DataTypes.VECTOR(6, DataTypes.FLOAT())));
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(
@@ -289,44 +290,16 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testVectorStoreRequireNormalColumns() {
-        Map<String, String> options = new HashMap<>();
-        options.put(BUCKET.key(), String.valueOf(-1));
-        options.put(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
-        options.put(DATA_EVOLUTION_ENABLED.key(), "true");
-        options.put(CoreOptions.FILE_FORMAT.key(), "avro");
-        options.put(VECTOR_FILE_FORMAT.key(), "json");
-        options.put(VECTOR_FIELDS.key(), "f0,f1");
-
-        List<DataField> fields =
-                Arrays.asList(
-                        new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "f1", DataTypes.STRING()));
-        assertThatThrownBy(
-                        () ->
-                                validateTableSchema(
-                                        new TableSchema(
-                                                1,
-                                                fields,
-                                                10,
-                                                emptyList(),
-                                                emptyList(),
-                                                options,
-                                                "")))
-                .hasMessage("Table with vector-store must have other normal columns.");
-    }
-
-    @Test
     public void testVectorStoreRequiresDataEvolutionEnabled() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.FILE_FORMAT.key(), "avro");
         options.put(VECTOR_FILE_FORMAT.key(), "json");
-        options.put(VECTOR_FIELDS.key(), "f1");
+        options.put(VECTOR_FIELD.key(), "f1");
 
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
-                        new DataField(1, "f1", DataTypes.STRING()));
+                        new DataField(1, "f1", DataTypes.VECTOR(6, DataTypes.FLOAT())));
         assertThatThrownBy(
                         () ->
                                 validateTableSchema(

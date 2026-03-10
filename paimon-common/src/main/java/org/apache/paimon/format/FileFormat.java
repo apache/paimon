@@ -107,15 +107,12 @@ public abstract class FileFormat {
         return FileFormat.fromIdentifier(options.fileFormatString(), options.toConfiguration());
     }
 
-    public static FileFormat vectorStoreFileFormat(CoreOptions options) {
-        if (options.vectorStoreFieldNames().isEmpty()) {
-            return null;
-        }
-        String vectorStoreFileFormat = options.vectorStoreFileFormatString();
-        if (vectorStoreFileFormat == null) {
+    public static FileFormat vectorFileFormat(CoreOptions options) {
+        String vectorFileFormat = options.vectorFileFormatString();
+        if (vectorFileFormat == null) {
             return fileFormat(options);
         }
-        return FileFormat.fromIdentifier(vectorStoreFileFormat, options.toConfiguration());
+        return FileFormat.fromIdentifier(vectorFileFormat, options.toConfiguration());
     }
 
     public static FileFormat manifestFormat(CoreOptions options) {

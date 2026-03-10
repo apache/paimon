@@ -20,9 +20,11 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Utils for vector-store table. */
@@ -35,27 +37,23 @@ public class VectorStoreUtils {
     }
 
     public static boolean isVectorStoreFile(String fileName) {
-        return fileName.contains(".vector-store.");
+        return fileName.contains(".vector.");
     }
 
-    public static Pair<RowType, RowType> splitVectorStore(
-            RowType rowType, List<String> vectorStoreFieldNames) {
-        return splitVectorStore(rowType.getFields(), vectorStoreFieldNames);
-    }
-
-    public static Pair<RowType, RowType> splitVectorStore(
-            List<DataField> allFields, List<String> vectorStoreFieldNames) {
-        List<DataField> normalFields = new ArrayList<>();
-        List<DataField> vectorStoreFields = new ArrayList<>();
-
-        for (DataField field : allFields) {
-            if (vectorStoreFieldNames.contains(field.name())) {
-                vectorStoreFields.add(field);
-            } else {
-                normalFields.add(field);
-            }
+    public static List<DataField> fieldsInVectorFile(
+            RowType rowType, FileFormat normalFormat, FileFormat vectorStoreFormat) {
+        if (!isDifferentFormat(vectorStoreFormat, normalFormat)) {
+            return Collections.emptyList();
         }
-
-        return Pair.of(new RowType(normalFields), new RowType(vectorStoreFields));
+        List<DataField> result = new ArrayList<>();
+        rowType.getFields()
+                .forEach(
+                        field -> {
+                            DataTypeRoot type = field.type().getTypeRoot();
+                            if (type == DataTypeRoot.VECTOR) {
+                                result.add(field);
+                            }
+                        });
+        return result;
     }
 }
