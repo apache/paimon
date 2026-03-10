@@ -83,6 +83,7 @@ paimon table read mydb.users
 **Options:**
 
 - `--select, -s`: Select specific columns to read (comma-separated)
+- `--where, -w`: Filter condition in SQL-like syntax
 - `--limit, -l`: Maximum number of results to display (default: 100)
 
 **Examples:**
@@ -94,9 +95,52 @@ paimon table read mydb.users -l 50
 # Read specific columns
 paimon table read mydb.users -s id,name,age
 
-# Combine select and limit
-paimon table read mydb.users -s id,name -l 50
+# Filter with WHERE clause
+paimon table read mydb.users --where "age > 18"
+
+# Combine select, where, and limit
+paimon table read mydb.users -s id,name -w "age >= 20 AND city = 'Beijing'" -l 50
 ```
+
+**WHERE Operators**
+
+The `--where` option supports SQL-like filter expressions:
+
+| Operator | Example |
+|---|---|
+| `=`, `!=`, `<>` | `name = 'Alice'` |
+| `<`, `<=`, `>`, `>=` | `age > 18` |
+| `IS NULL`, `IS NOT NULL` | `deleted_at IS NULL` |
+| `IN (...)`, `NOT IN (...)` | `status IN ('active', 'pending')` |
+| `BETWEEN ... AND ...` | `age BETWEEN 20 AND 30` |
+| `LIKE` | `name LIKE 'A%'` |
+
+Multiple conditions can be combined with `AND` and `OR` (AND has higher precedence). Parentheses are supported for grouping:
+
+```shell
+# AND condition
+paimon table read mydb.users -w "age >= 20 AND age <= 30"
+
+# OR condition
+paimon table read mydb.users -w "city = 'Beijing' OR city = 'Shanghai'"
+
+# Parenthesized grouping
+paimon table read mydb.users -w "(age > 18 OR name = 'Bob') AND city = 'Beijing'"
+
+# IN list
+paimon table read mydb.users -w "city IN ('Beijing', 'Shanghai', 'Hangzhou')"
+
+# BETWEEN
+paimon table read mydb.users -w "age BETWEEN 25 AND 35"
+
+# LIKE pattern
+paimon table read mydb.users -w "name LIKE 'A%'"
+
+# IS NULL / IS NOT NULL
+paimon table read mydb.users -w "email IS NOT NULL"
+```
+
+Literal values are automatically cast to the appropriate Python type based on the table schema (e.g., `INT` fields cast to `int`, `DOUBLE` to `float`).
 
 Output:
 ```

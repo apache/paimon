@@ -79,6 +79,18 @@ def cmd_table_read(args):
         
         read_builder = read_builder.with_projection(columns)
 
+    # Apply where filter if specified
+    where_clause = args.where
+    if where_clause:
+        from pypaimon.cli.where_parser import parse_where_clause
+        try:
+            predicate = parse_where_clause(where_clause, table.table_schema.fields)
+            if predicate:
+                read_builder = read_builder.with_filter(predicate)
+        except ValueError as e:
+            print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
+            sys.exit(1)
+
     # Apply limit if specified
     limit = args.limit
     if limit:
@@ -549,6 +561,13 @@ def add_table_subcommands(table_parser):
         type=str,
         default=None,
         help='Select specific columns to read (comma-separated, e.g., "id,name,age")'
+    )
+    read_parser.add_argument(
+        '--where', '-w',
+        type=str,
+        default=None,
+        help=('Filter condition in SQL-like syntax '
+              '(e.g., "age > 18", "name = \'Alice\' AND status IN (\'active\', \'pending\')")')
     )
     read_parser.add_argument(
         '--limit', '-l',
