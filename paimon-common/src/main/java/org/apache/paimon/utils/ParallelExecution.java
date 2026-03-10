@@ -111,6 +111,16 @@ public class ParallelExecution<T, E> implements Closeable {
 
     private void asyncRead(
             Supplier<Pair<RecordReader<T>, E>> readerSupplier, Serializer<T> serializer) {
+        try {
+            asyncReadImpl(readerSupplier, serializer);
+        } catch (Throwable e) {
+            this.exception.set(e);
+        }
+    }
+
+    private void asyncReadImpl(
+            Supplier<Pair<RecordReader<T>, E>> readerSupplier, Serializer<T> serializer)
+            throws Exception {
         Pair<RecordReader<T>, E> pair = readerSupplier.get();
         try (CloseableIterator<T> iterator = pair.getLeft().toCloseableIterator()) {
             int count = 0;
@@ -148,8 +158,6 @@ public class ParallelExecution<T, E> implements Closeable {
             }
 
             latch.countDown();
-        } catch (Throwable e) {
-            this.exception.set(e);
         }
     }
 

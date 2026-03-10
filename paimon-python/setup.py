@@ -50,6 +50,11 @@ setup(
     packages=PACKAGES,
     include_package_data=True,
     install_requires=install_requires,
+    entry_points={
+        'console_scripts': [
+            'paimon=pypaimon.cli:main',
+        ],
+    },
     extras_require={
         'ray': [
             'ray>=2.10,<3; python_version>="3.7"',
@@ -57,9 +62,13 @@ setup(
         'torch': [
             'torch',
         ],
-        'all': [
-            'ray>=2.10,<3; python_version>="3.7"',
-            'torch'
+        'oss': [
+            'ossfs>=2021.8; python_version<"3.8"',
+            'ossfs>=2023; python_version>="3.8"'
+        ],
+        'lance': [
+            'pylance>=0.20,<1; python_version>="3.9"',
+            'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"'
         ],
     },
     description="Apache Paimon Python API",

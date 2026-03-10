@@ -26,24 +26,27 @@ import java.util.Map;
 public class CreateBranchAction extends TableActionBase implements LocalAction {
     private final String branchName;
     private final String tagName;
+    private final boolean ignoreIfExists;
 
     public CreateBranchAction(
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
             String branchName,
-            String tagName) {
+            String tagName,
+            boolean ignoreIfExists) {
         super(databaseName, tableName, catalogConfig);
         this.branchName = branchName;
         this.tagName = tagName;
+        this.ignoreIfExists = ignoreIfExists;
     }
 
     @Override
     public void executeLocally() {
         if (!StringUtils.isBlank(tagName)) {
-            table.createBranch(branchName, tagName);
+            table.createBranch(branchName, tagName, ignoreIfExists);
         } else {
-            table.createBranch(branchName);
+            table.createBranch(branchName, ignoreIfExists);
         }
     }
 }

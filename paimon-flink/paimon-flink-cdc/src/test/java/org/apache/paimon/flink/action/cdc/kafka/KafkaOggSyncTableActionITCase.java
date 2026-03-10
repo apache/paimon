@@ -82,6 +82,12 @@ public class KafkaOggSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
     @Test
     @Timeout(60)
+    public void testMetadataColumn() throws Exception {
+        testMetadataColumn(OGG);
+    }
+
+    @Test
+    @Timeout(60)
     public void testCDCOperations() throws Exception {
         testCDCOperations(OGG);
     }

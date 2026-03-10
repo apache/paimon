@@ -385,6 +385,16 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void createBranch(String branchName, boolean ignoreIfExists) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    default void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void deleteBranch(String branchName) {
         throw new UnsupportedOperationException();
     }

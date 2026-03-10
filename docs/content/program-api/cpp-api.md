@@ -35,7 +35,7 @@ format with maximum efficiency.
 
 [Paimon C++](https://github.com/alibaba/paimon-cpp.git) is currently governed under Alibaba open source
 community. You can checkout the [document](https://alibaba.github.io/paimon-cpp/getting_started.html)
-for more details about envinroment settings.
+for more details about environment settings.
 
 ```sh
 git clone https://github.com/alibaba/paimon-cpp.git

@@ -58,7 +58,7 @@ By specifying `'changelog-producer' = 'input'`, Paimon writers rely on their inp
 
 ## Lookup
 
-If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you
+If your input can't produce a complete changelog but you still want to get rid of the costly normalized operator, you
 may consider using the `'lookup'` changelog producer.
 
 By specifying `'changelog-producer' = 'lookup'`, Paimon will generate changelog through `'lookup'` during compaction (You can also enable [Async Compaction]({{< ref "primary-key-table/compaction#asynchronous-compaction" >}})). By default, lookup compaction is performed before committing written data unless disabled by `write-only` property.

@@ -178,7 +178,7 @@ class ReaderBasicTest(unittest.TestCase):
             ('f10', pa.decimal128(10, 2)),
             ('f11', pa.timestamp('ms')),
             ('f12', pa.date32()),
-            ('f13', pa.time64('us')),
+            ('f13', pa.time32('ms')),
         ])
         stats_enabled = random.random() < 0.5
         options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
@@ -640,9 +640,9 @@ class ReaderBasicTest(unittest.TestCase):
             DataField(10, "f10", AtomicType('BYTES'), 'desc'),
             DataField(11, "f11", AtomicType('DATE'), 'desc'),
             DataField(12, "f12", AtomicType('TIME(0)'), 'desc'),
-            DataField(13, "f13", AtomicType('TIME(3)'), 'desc'),
-            DataField(14, "f14", AtomicType('TIME(6)'), 'desc'),
-            DataField(15, "f15", AtomicType('TIME(9)'), 'desc'),
+            DataField(13, "f13", AtomicType('TIME(0)'), 'desc'),
+            DataField(14, "f14", AtomicType('TIME(0)'), 'desc'),
+            DataField(15, "f15", AtomicType('TIME(0)'), 'desc'),
             DataField(16, "f16", AtomicType('TIMESTAMP(0)'), 'desc'),
             DataField(17, "f17", AtomicType('TIMESTAMP(3)'), 'desc'),
             DataField(18, "f18", AtomicType('TIMESTAMP(6)'), 'desc'),

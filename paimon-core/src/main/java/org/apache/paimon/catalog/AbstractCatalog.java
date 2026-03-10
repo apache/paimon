@@ -193,6 +193,13 @@ public abstract class AbstractCatalog implements Catalog {
         return new PagedList<>(listPartitions(identifier), null);
     }
 
+    @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        return CatalogUtils.listPartitionsFromFileSystem(getTable(identifier), partitions);
+    }
+
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
 
     @Override

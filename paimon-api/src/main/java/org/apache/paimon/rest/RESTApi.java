@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -45,9 +46,11 @@ import org.apache.paimon.rest.requests.CreateTableRequest;
 import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -63,6 +66,7 @@ import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
+import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
@@ -106,6 +110,7 @@ import static org.apache.paimon.rest.RESTFunctionValidator.checkFunctionName;
 import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * REST API for REST Catalog.
@@ -593,6 +598,57 @@ public class RESTApi {
     }
 
     /**
+     * Get paged consumers list of the table.
+     *
+     * @param identifier path of the table to list consumers
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the consumers with provided page size(@param maxResults) in this table and
+     *     next page token.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        ListConsumersResponse response =
+                client.get(
+                        resourcePaths.consumers(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListConsumersResponse.class,
+                        restAuthFunction);
+        List<ConsumerInfo> consumers = response.getConsumers();
+        if (consumers == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(consumers, response.getNextPageToken());
+    }
+
+    /**
+     * Reset consumer for table.
+     *
+     * @param identifier database name and table name.
+     * @param consumerId consumer id
+     * @param nextSnapshotId next snapshot id. If null, the consumer will be deleted.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void resetConsumer(
+            Identifier identifier, String consumerId, @Nullable Long nextSnapshotId) {
+        ResetConsumerRequest request = new ResetConsumerRequest(consumerId, nextSnapshotId);
+        client.post(
+                resourcePaths.resetConsumer(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
+    }
+
+    /**
      * Commit snapshot for table.
      *
      * @param identifier database name and table name.
@@ -820,6 +876,38 @@ public class RESTApi {
             return new PagedList<>(emptyList(), null);
         }
         return new PagedList<>(partitions, response.getNextPageToken());
+    }
+
+    /**
+     * List partitions by partition names for table.
+     *
+     * @param identifier database name and table name.
+     * @param partitionSpecs partition specs to be queried
+     * @return a list of partitions matching the given partition specs
+     * @throws IllegalArgumentException if the number of partition specs exceeds 1000
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitionSpecs) {
+        checkArgument(
+                partitionSpecs.size() <= 1000,
+                "The number of partition specs must not exceed 1000, but got %s",
+                partitionSpecs.size());
+        ListPartitionsByNamesRequest request = new ListPartitionsByNamesRequest(partitionSpecs);
+        ListPartitionsResponse response =
+                client.post(
+                        resourcePaths.listPartitionsByNames(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        request,
+                        ListPartitionsResponse.class,
+                        restAuthFunction);
+        List<Partition> partitions = response.getPartitions();
+        if (partitions == null) {
+            return emptyList();
+        }
+        return partitions;
     }
 
     /**

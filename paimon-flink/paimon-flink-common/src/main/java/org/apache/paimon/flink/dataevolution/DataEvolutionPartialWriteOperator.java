@@ -35,7 +35,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.CommitIncrement;
@@ -72,7 +71,6 @@ public class DataEvolutionPartialWriteOperator
 
     // dataType
     private final RowType dataType;
-    private final InternalRow.FieldGetter[] fieldGetters;
     private final int rowIdIndex;
 
     // data type excludes of _ROW_ID field.
@@ -101,11 +99,6 @@ public class DataEvolutionPartialWriteOperator
         this.dataType =
                 SpecialFields.rowTypeWithRowId(table.rowType()).project(dataType.getFieldNames());
         this.rowIdIndex = this.dataType.getFieldIndex(SpecialFields.ROW_ID.name());
-        this.fieldGetters = new InternalRow.FieldGetter[dataType.getFieldCount()];
-        List<DataField> fields = this.dataType.getFields();
-        for (int i = 0; i < fields.size(); i++) {
-            this.fieldGetters[i] = InternalRow.createFieldGetter(fields.get(i).type(), i);
-        }
     }
 
     @Override

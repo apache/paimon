@@ -206,6 +206,35 @@ class FileIO(ABC):
                       zstd_level: int = 1, **kwargs):
         raise NotImplementedError("write_parquet must be implemented by FileIO subclasses")
 
+    @staticmethod
+    def _cast_time_columns_for_orc(data):
+        """Cast time32 columns to int32 before writing ORC.
+
+        PyArrow's ORC writer does not support time types.
+        """
+        has_time = any(pyarrow.types.is_time(f.type) for f in data.schema)
+        if not has_time:
+            return data
+        columns = []
+        for i, field in enumerate(data.schema):
+            col = data.column(i)
+            if pyarrow.types.is_time(field.type):
+                if not pyarrow.types.is_time32(field.type) \
+                        or field.type != pyarrow.time32('ms'):
+                    raise ValueError(
+                        "Column '{}' has type {} which cannot be safely cast to int32 "
+                        "for ORC writing. Use time32('ms') instead."
+                        .format(field.name, field.type)
+                    )
+                col = col.cast(pyarrow.int32())
+            columns.append(col)
+        orc_schema = pyarrow.schema([
+            pyarrow.field(f.name, pyarrow.int32(), f.nullable) if pyarrow.types.is_time(f.type)
+            else f
+            for f in data.schema
+        ])
+        return pyarrow.table(columns, schema=orc_schema)
+
     def write_orc(self, path: str, data, compression: str = 'zstd',
                   zstd_level: int = 1, **kwargs):
         raise NotImplementedError("write_orc must be implemented by FileIO subclasses")

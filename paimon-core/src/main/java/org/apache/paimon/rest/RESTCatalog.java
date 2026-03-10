@@ -31,6 +31,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.TableMetadata;
 import org.apache.paimon.catalog.TableQueryAuthResult;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.ResolvingFileIO;
@@ -359,6 +360,32 @@ public class RESTCatalog implements Catalog {
     }
 
     @Override
+    public PagedList<ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken)
+            throws TableNotExistException {
+        try {
+            return api.listConsumersPaged(identifier, maxResults, pageToken);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
+    public void resetConsumer(
+            Identifier identifier, String consumerId, @Nullable Long nextSnapshotId)
+            throws TableNotExistException {
+        try {
+            api.resetConsumer(identifier, consumerId, nextSnapshotId);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
+    @Override
     public boolean supportsListObjectsPaged() {
         return true;
     }
@@ -643,6 +670,21 @@ public class RESTCatalog implements Catalog {
         } catch (NotImplementedException e) {
             // not a metastore partitioned table
             return new PagedList<>(listPartitionsFromFileSystem(getTable(identifier)), null);
+        }
+    }
+
+    @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        try {
+            return api.listPartitionsByNames(identifier, partitions);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        } catch (NotImplementedException e) {
+            return listPartitionsFromFileSystem(getTable(identifier), partitions);
         }
     }
 

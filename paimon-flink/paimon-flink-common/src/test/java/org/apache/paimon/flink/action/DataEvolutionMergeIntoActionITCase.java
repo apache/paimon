@@ -20,6 +20,8 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Assertions;
@@ -36,7 +38,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
@@ -48,7 +50,11 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertInto;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** ITCase for {@link DataEvolutionMergeIntoAction}. */
 public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
@@ -146,7 +152,7 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
             DataEvolutionMergeIntoActionBuilder builder =
                     builder(warehouse, targetDb, "T")
                             .withMergeCondition("T.id=S.id")
-                            .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
+                            .withMatchedUpdateSet("T.value=S.`value`,T.name=S.name")
                             .withSourceTable("S")
                             .withSinkParallelism(2);
 
@@ -418,30 +424,191 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
                 expected);
     }
 
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testRowIdColumnContainedInSource(boolean inDefault, String invoker)
+            throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 2, "new_name1", 100.1),
+                        changelogRow("+I", 3, "name3", 0.3),
+                        changelogRow("+I", 4, "name4", 0.4),
+                        changelogRow("+I", 8, "new_name7", null),
+                        changelogRow("+I", 9, "name9", 0.9),
+                        changelogRow("+I", 12, "new_name11", 101.1),
+                        changelogRow("+I", 16, null, 101.1),
+                        changelogRow("+I", 19, "new_name18", 101.8));
+
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("T._ROW_ID=S.id")
+                            .withMatchedUpdateSet("T.name=S.name,T.value=S.`value`")
+                            .withSourceTable("S")
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T._ROW_ID=S.id', 'name=S.name,value=S.`value`', 2)",
+                            targetDb);
+
+            executeSQL(procedureStatement, false, true);
+        }
+
+        testBatchRead(
+                "SELECT id, name, `value` FROM T$row_tracking where _ROW_ID in (1, 2, 3, 7, 8, 11, 15, 18)",
+                expected);
+    }
+
     @Test
-    public void testRewriteMergeCondition() throws Exception {
-        Map<String, String> config = new HashMap<>();
-        config.put("warehouse", warehouse);
-        DataEvolutionMergeIntoAction action =
-                new DataEvolutionMergeIntoAction(database, "T", config);
+    public void testUpdateAction() throws Exception {
 
-        String mergeCondition = "T.id=S.id";
-        assertEquals("`RT`.id=S.id", action.rewriteMergeCondition(mergeCondition));
+        // create index on 01-22 partition
+        executeSQL(
+                "CALL sys.create_global_index(`table` => 'default.T', index_column => 'id', index_type => 'btree')",
+                false,
+                true);
 
-        mergeCondition = "`T`.id=S.id";
-        assertEquals("`RT`.id=S.id", action.rewriteMergeCondition(mergeCondition));
+        assertTrue(indexFileExists("T"));
 
-        mergeCondition = "t.id = s.id AND T.pt = s.pt";
+        // 1. update indexed columns should throw an error by default
+        assertThatThrownBy(
+                        () ->
+                                executeSQL(
+                                        String.format(
+                                                "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T._ROW_ID=S.id', 'name=S.name,id=1', 2)",
+                                                database),
+                                        false,
+                                        true))
+                .rootCause()
+                .hasMessageContaining(
+                        "MergeInto: update columns contain globally indexed columns, not supported now.");
+
+        insertInto(
+                "T",
+                "(31, 'name31', 3.1, '01-23')",
+                "(32, 'name32', 3.2, '01-23')",
+                "(33, 'name33', 3.3, '01-23')",
+                "(34, 'name34', 3.4, '01-23')",
+                "(35, 'name35', 3.5, '01-23')",
+                "(36, 'name36', 3.6, '01-23')",
+                "(37, 'name37', 3.7, '01-23')",
+                "(38, 'name38', 3.8, '01-23')",
+                "(39, 'name39', 3.9, '01-23')",
+                "(40, 'name30', 3.0, '01-23')");
+
+        insertInto("S", "(35, 'new_name25', 125.1)");
+
+        // 2. updating unindexed partitions is not affected
+        assertDoesNotThrow(
+                () ->
+                        executeSQL(
+                                String.format(
+                                        "CALL sys.data_evolution_merge_into('%s.T', 'TempT', "
+                                                + "'CREATE TEMPORARY VIEW SS AS SELECT id, name, `value` FROM S WHERE id > 20',"
+                                                + " 'SS', 'TempT.id=SS.id', 'id=SS.id,value=SS.`value`', 2)",
+                                        database),
+                                false,
+                                true));
+
+        // 3. alter table's UpdateAction option to DROP_INDEX
+        executeSQL(
+                "ALTER TABLE T SET ('global-index.column-update-action' = 'DROP_PARTITION_INDEX')",
+                false,
+                true);
+
+        assertDoesNotThrow(
+                () ->
+                        executeSQL(
+                                String.format(
+                                        "CALL sys.data_evolution_merge_into('%s.T', '', '', 'S', 'T._ROW_ID=S.id', 'name=S.name,id=1', 2)",
+                                        database),
+                                false,
+                                true));
+
+        assertFalse(indexFileExists("T"));
+    }
+
+    private boolean indexFileExists(String tableName) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        List<IndexManifestEntry> entries = table.store().newIndexFileHandler().scan("btree");
+
+        return !entries.isEmpty();
+    }
+
+    @Test
+    public void mergeConditionParserTest() throws Exception {
+        // 1. test rewrite table names
+        // basic rewrite
+        String mergeCondition = "T.id = S.id";
+        DataEvolutionMergeIntoAction.MergeConditionParser parser = createParser(mergeCondition);
+        assertEquals("`RT`.`id` = `S`.`id`", parser.rewriteSqlNode("T", "RT").toString());
+
+        // should recognize quotes
+        mergeCondition = "T.id = s.id AND T.pt = s.pt";
+        parser = createParser(mergeCondition);
         assertEquals(
-                "`RT`.id = s.id AND `RT`.pt = s.pt", action.rewriteMergeCondition(mergeCondition));
+                "`RT`.`id` = `s`.`id` AND `RT`.`pt` = `s`.`pt`",
+                parser.rewriteSqlNode("T", "RT").toString());
 
-        mergeCondition = "TT.id = 1 AND T.id = 2";
-        assertEquals("TT.id = 1 AND `RT`.id = 2", action.rewriteMergeCondition(mergeCondition));
-
-        mergeCondition = "TT.id = 'T.id' AND T.id = \"T.id\"";
+        // should not rewrite column names
+        mergeCondition = "`T`.id = `T1`.`T` and T.`T.T` = S.a";
+        parser = createParser(mergeCondition);
         assertEquals(
-                "TT.id = 'T.id' AND `RT`.id = \"T.id\"",
-                action.rewriteMergeCondition(mergeCondition));
+                "`RT`.`id` = `T1`.`T` AND `RT`.`T.T` = `S`.`a`",
+                parser.rewriteSqlNode("T", "RT").toString());
+
+        // should not rewrite literals
+        mergeCondition = "T.id = S.id AND S.str_col = 'T.id' AND T.`value` = 1";
+        parser = createParser(mergeCondition);
+        assertEquals(
+                "`RT`.`id` = `S`.`id` AND `S`.`str_col` = 'T.id' AND `RT`.`value` = 1",
+                parser.rewriteSqlNode("T", "RT").toString());
+
+        // 2. test extract row id condition
+        Optional<String> rowIdColumn;
+
+        mergeCondition = "T._ROW_ID = S.id";
+        parser = createParser(mergeCondition);
+        rowIdColumn = parser.extractRowIdFieldFromSource("T");
+        assertTrue(rowIdColumn.isPresent());
+        assertEquals("id", rowIdColumn.get());
+
+        mergeCondition = "S.id = T._ROW_ID";
+        parser = createParser(mergeCondition);
+        rowIdColumn = parser.extractRowIdFieldFromSource("T");
+        assertTrue(rowIdColumn.isPresent());
+        assertEquals("id", rowIdColumn.get());
+
+        // target table not matches
+        mergeCondition = "S.id = T._ROW_ID";
+        parser = createParser(mergeCondition);
+        rowIdColumn = parser.extractRowIdFieldFromSource("S");
+        assertFalse(rowIdColumn.isPresent());
+
+        // for simplicity, compounded condition is not considered now.
+        mergeCondition = "S.id = T._ROW_ID AND T.id = 1";
+        parser = createParser(mergeCondition);
+        rowIdColumn = parser.extractRowIdFieldFromSource("T");
+        assertFalse(rowIdColumn.isPresent());
+    }
+
+    private DataEvolutionMergeIntoAction.MergeConditionParser createParser(String mergeCondition)
+            throws Exception {
+        return new DataEvolutionMergeIntoAction.MergeConditionParser(mergeCondition);
     }
 
     @Test

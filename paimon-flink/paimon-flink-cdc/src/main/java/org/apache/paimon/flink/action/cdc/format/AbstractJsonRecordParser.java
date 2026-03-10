@@ -68,6 +68,7 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
     }
 
     protected void setRoot(CdcSourceRecord record) {
+        super.setRoot(record); // Store current record for metadata access
         root = (JsonNode) record.getValue();
     }
 
@@ -104,6 +105,8 @@ public abstract class AbstractJsonRecordParser extends AbstractRecordParser {
                                             return Objects.toString(entry.getValue());
                                         }));
         evalComputedColumns(rowData, schemaBuilder);
+        evalMetadataColumns(rowData, schemaBuilder);
+
         return rowData;
     }
 
