@@ -54,7 +54,14 @@ import org.apache.paimon.types.VarCharType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.catalyst.expressions.Expression;
+import org.apache.spark.sql.catalyst.expressions.HiveHash;
+import org.apache.spark.sql.catalyst.expressions.Literal;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -64,6 +71,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -71,6 +80,8 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+
+import scala.collection.JavaConverters;
 
 /** Tests for Spark bucket functions. */
 public class BucketFunctionTest {
@@ -244,6 +255,69 @@ public class BucketFunctionTest {
     }
 
     @Test
+    public void testHiveBucketFunctionMatchesSparkHiveHash() {
+        RowType hiveBucketRowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, BOOLEAN_COL, new BooleanType()),
+                                new DataField(1, BYTE_COL, new TinyIntType()),
+                                new DataField(2, SHORT_COL, new SmallIntType()),
+                                new DataField(3, INTEGER_COL, new IntType()),
+                                new DataField(4, LONG_COL, new BigIntType()),
+                                new DataField(5, FLOAT_COL, new FloatType()),
+                                new DataField(6, DOUBLE_COL, new DoubleType()),
+                                new DataField(
+                                        7, STRING_COL, new VarCharType(VarCharType.MAX_LENGTH)),
+                                new DataField(
+                                        8,
+                                        DECIMAL_COL,
+                                        new DecimalType(DECIMAL_PRECISION, DECIMAL_SCALE)),
+                                new DataField(
+                                        9,
+                                        COMPACTED_DECIMAL_COL,
+                                        new DecimalType(
+                                                COMPACTED_DECIMAL_PRECISION,
+                                                COMPACTED_DECIMAL_SCALE)),
+                                new DataField(
+                                        10,
+                                        BINARY_COL,
+                                        new VarBinaryType(VarBinaryType.MAX_LENGTH))));
+        StructType schema =
+                org.apache.paimon.spark.SparkTypeUtils.fromPaimonRowType(hiveBucketRowType);
+        String[] bucketColumns = hiveBucketRowType.getFieldNames().toArray(new String[0]);
+        List<Row> rows =
+                Arrays.asList(
+                        RowFactory.create(
+                                true,
+                                (byte) 1,
+                                (short) 2,
+                                3,
+                                4L,
+                                1.5f,
+                                2.5d,
+                                "hello",
+                                new BigDecimal("12.340000000000000000"),
+                                new BigDecimal("56.789000000"),
+                                "spark-hive".getBytes(StandardCharsets.UTF_8)),
+                        RowFactory.create(
+                                null, null, null, null, null, null, null, null, null, null, null));
+
+        List<Row> result =
+                spark.createDataFrame(rows, schema)
+                        .selectExpr(
+                                "*",
+                                String.format(
+                                        "paimon.sys.hive_bucket(%s, %s) as actual_bucket",
+                                        NUM_BUCKETS, String.join(", ", bucketColumns)))
+                        .collectAsList();
+
+        for (Row row : result) {
+            Assertions.assertThat((int) row.getAs("actual_bucket"))
+                    .isEqualTo(sparkHiveBucket(row, schema, bucketColumns));
+        }
+    }
+
+    @Test
     public void testBooleanType() {
         validateSparkBucketFunction(BOOLEAN_COL);
     }
@@ -334,5 +408,21 @@ public class BucketFunctionTest {
                                 TABLE_NAME))
                 .collectAsList()
                 .forEach(row -> Assertions.assertThat(row.getInt(2)).isNotEqualTo(row.get(1)));
+    }
+
+    private static int sparkHiveBucket(Row row, StructType schema, String... bucketColumns) {
+        List<Expression> expressions = new ArrayList<>();
+        for (String bucketColumn : bucketColumns) {
+            int index = schema.fieldIndex(bucketColumn);
+            StructField field = schema.fields()[index];
+            expressions.add(
+                    Literal.create(row.isNullAt(index) ? null : row.get(index), field.dataType()));
+        }
+
+        int hash =
+                (Integer)
+                        new HiveHash(JavaConverters.asScalaBuffer(expressions).toSeq())
+                                .eval((org.apache.spark.sql.catalyst.InternalRow) null);
+        return (hash & Integer.MAX_VALUE) % NUM_BUCKETS;
     }
 }
