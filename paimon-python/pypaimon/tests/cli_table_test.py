@@ -932,6 +932,138 @@ class CliTableTest(unittest.TestCase):
         after_id_idx = field_names.index('after_id_col')
         self.assertEqual(after_id_idx, id_idx + 1)
 
+    def test_cli_table_read_with_where_equal(self):
+        """Test table read with --where equal filter via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--where', "name = 'Alice'"]):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Alice', output)
+                self.assertNotIn('Bob', output)
+                self.assertNotIn('Charlie', output)
+
+    def test_cli_table_read_with_where_greater_than(self):
+        """Test table read with --where greater-than filter via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '-w', 'age > 30']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # age > 30: Charlie(35), Eve(32)
+                self.assertIn('Charlie', output)
+                self.assertIn('Eve', output)
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Bob', output)
+
+    def test_cli_table_read_with_where_and(self):
+        """Test table read with --where AND condition via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--where', 'age >= 28 AND age <= 32']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # age >= 28 AND age <= 32: Bob(30), David(28), Eve(32)
+                self.assertIn('Bob', output)
+                self.assertIn('David', output)
+                self.assertIn('Eve', output)
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Charlie', output)
+
+    def test_cli_table_read_with_where_in(self):
+        """Test table read with --where IN filter via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--where', "city IN ('Beijing', 'Shanghai')"]):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Alice', output)
+                self.assertIn('Bob', output)
+                self.assertNotIn('Charlie', output)
+
+    def test_cli_table_read_with_where_and_select(self):
+        """Test table read with both --where and --select via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--select', 'name,age',
+                    '--where', 'age > 30']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('Charlie', output)
+                self.assertIn('Eve', output)
+                self.assertNotIn('Alice', output)
+
+    def test_cli_table_read_where_field_not_in_select(self):
+        """Test that where filter works even when the filtered field is not in select."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--select', 'name,city',
+                    '--where', 'age > 30']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # age > 30: Charlie(35,Guangzhou), Eve(32,Hangzhou)
+                # Filter should work even though 'age' is not in select
+                self.assertIn('Charlie', output)
+                self.assertIn('Eve', output)
+                self.assertIn('Guangzhou', output)
+                self.assertIn('Hangzhou', output)
+                # Excluded rows should not appear
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Bob', output)
+                self.assertNotIn('David', output)
+                # The 'age' column should NOT appear in output (it was only needed for filtering)
+                self.assertNotIn(' 35', output)
+                self.assertNotIn(' 32', output)
+                self.assertNotIn(' 25', output)
+
+    def test_cli_table_read_with_invalid_where(self):
+        """Test table read with invalid --where clause via CLI."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--where', 'age INVALID 30']):
+            with patch('sys.stderr', new_callable=StringIO) as mock_stderr:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                error_output = mock_stderr.getvalue()
+                self.assertIn('Error', error_output)
+
     def test_cli_table_rename_basic(self):
         """Test basic table rename via CLI."""
         import json

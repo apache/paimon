@@ -63,21 +63,46 @@ def cmd_table_read(args):
     # Build read pipeline
     read_builder = table.new_read_builder()
     
-    # Apply projection (select columns) if specified
+    available_fields = set(field.name for field in table.table_schema.fields)
+
+    # Parse select and where options
     select_columns = args.select
+    where_clause = args.where
+    user_columns = None
+    extra_where_columns = []
+
     if select_columns:
         # Parse column names (comma-separated)
-        columns = [col.strip() for col in select_columns.split(',')]
-        
+        user_columns = [col.strip() for col in select_columns.split(',')]
+
         # Validate that all columns exist in the table schema
-        available_fields = set(field.name for field in table.table_schema.fields)
-        invalid_columns = [col for col in columns if col not in available_fields]
-        
+        invalid_columns = [col for col in user_columns if col not in available_fields]
         if invalid_columns:
             print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.", file=sys.stderr)
             sys.exit(1)
-        
-        read_builder = read_builder.with_projection(columns)
+
+    # When both select and where are specified, ensure where-referenced fields
+    # are included in the projection so the filter can work correctly.
+    if user_columns and where_clause:
+        from pypaimon.cli.where_parser import extract_fields_from_where
+        where_fields = extract_fields_from_where(where_clause, available_fields)
+        user_column_set = set(user_columns)
+        extra_where_columns = [f for f in where_fields if f not in user_column_set]
+        projection_columns = user_columns + extra_where_columns
+        read_builder = read_builder.with_projection(projection_columns)
+    elif user_columns:
+        read_builder = read_builder.with_projection(user_columns)
+
+    # Apply where filter if specified
+    if where_clause:
+        from pypaimon.cli.where_parser import parse_where_clause
+        try:
+            predicate = parse_where_clause(where_clause, table.table_schema.fields)
+            if predicate:
+                read_builder = read_builder.with_filter(predicate)
+        except ValueError as e:
+            print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # Apply limit if specified
     limit = args.limit
@@ -95,6 +120,11 @@ def cmd_table_read(args):
     df = read.to_pandas(splits)
     if limit and len(df) > limit:
         df = df.head(limit)
+
+    # Drop extra columns that were added only for where-clause filtering
+    if extra_where_columns:
+        df = df.drop(columns=extra_where_columns, errors='ignore')
+
     print(df.to_string(index=False))
 
 
@@ -549,6 +579,13 @@ def add_table_subcommands(table_parser):
         type=str,
         default=None,
         help='Select specific columns to read (comma-separated, e.g., "id,name,age")'
+    )
+    read_parser.add_argument(
+        '--where', '-w',
+        type=str,
+        default=None,
+        help=('Filter condition in SQL-like syntax '
+              '(e.g., "age > 18", "name = \'Alice\' AND status IN (\'active\', \'pending\')")')
     )
     read_parser.add_argument(
         '--limit', '-l',
