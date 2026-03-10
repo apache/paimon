@@ -18,92 +18,83 @@
 
 package org.apache.paimon.lumina.index;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-/** Metadata for a Lumina vector index file. */
+/**
+ * Metadata for a Lumina vector index file.
+ *
+ * <p>Serialized as a flat JSON {@code Map<String, String>} whose keys are lumina native option keys
+ * (with the {@code lumina.} prefix stripped). This matches paimon-cpp's metadata format exactly, so
+ * that indexes built by either paimon-cpp or paimon-lumina can be read by both implementations.
+ *
+ * <p>Standard keys include:
+ *
+ * <ul>
+ *   <li>{@code index.dimension} &ndash; vector dimension
+ *   <li>{@code index.type} &ndash; index algorithm (e.g. "diskann")
+ *   <li>{@code distance.metric} &ndash; distance metric (e.g. "l2", "cosine", "inner_product")
+ *   <li>{@code encoding.type} &ndash; vector encoding (e.g. "rawf32", "pq", "sq8")
+ * </ul>
+ */
 public class LuminaIndexMeta implements Serializable {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 3L;
 
-    private static final int VERSION = 1;
+    private static final String KEY_DIMENSION =
+            LuminaVectorIndexOptions.toLuminaKey(LuminaVectorIndexOptions.DIMENSION);
+    private static final String KEY_DISTANCE_METRIC =
+            LuminaVectorIndexOptions.toLuminaKey(LuminaVectorIndexOptions.DISTANCE_METRIC);
 
-    private final int dim;
-    private final int metricValue;
-    private final String indexTypeName;
-    private final long numVectors;
-    private final long minId;
-    private final long maxId;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    public LuminaIndexMeta(
-            int dim,
-            int metricValue,
-            String indexTypeName,
-            long numVectors,
-            long minId,
-            long maxId) {
-        this.dim = dim;
-        this.metricValue = metricValue;
-        this.indexTypeName = indexTypeName;
-        this.numVectors = numVectors;
-        this.minId = minId;
-        this.maxId = maxId;
+    private static final TypeReference<LinkedHashMap<String, String>> MAP_TYPE_REF =
+            new TypeReference<LinkedHashMap<String, String>>() {};
+
+    private final Map<String, String> options;
+
+    public LuminaIndexMeta(Map<String, String> options) {
+        this.options = new LinkedHashMap<>(options);
+    }
+
+    /** Returns the full options map. */
+    public Map<String, String> options() {
+        return options;
     }
 
     public int dim() {
-        return dim;
+        return Integer.parseInt(options.get(KEY_DIMENSION));
     }
 
-    public int metricValue() {
-        return metricValue;
+    public String distanceMetric() {
+        return options.get(KEY_DISTANCE_METRIC);
     }
 
-    public LuminaIndexType indexType() {
-        try {
-            return LuminaIndexType.fromString(indexTypeName);
-        } catch (IllegalArgumentException e) {
-            return LuminaIndexType.UNKNOWN;
-        }
+    public LuminaVectorMetric metric() {
+        return LuminaVectorMetric.fromLuminaName(distanceMetric());
     }
 
-    public long minId() {
-        return minId;
-    }
-
-    public long maxId() {
-        return maxId;
-    }
-
+    /** Serializes this metadata as a UTF-8 encoded JSON string (flat key-value map). */
     public byte[] serialize() throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        DataOutputStream out = new DataOutputStream(baos);
-        out.writeInt(VERSION);
-        out.writeInt(dim);
-        out.writeInt(metricValue);
-        out.writeUTF(indexTypeName);
-        out.writeLong(numVectors);
-        out.writeLong(minId);
-        out.writeLong(maxId);
-        out.flush();
-        return baos.toByteArray();
+        return OBJECT_MAPPER.writeValueAsBytes(options);
     }
 
+    /** Deserializes metadata from a UTF-8 encoded JSON byte array. */
     public static LuminaIndexMeta deserialize(byte[] data) throws IOException {
-        DataInputStream in = new DataInputStream(new ByteArrayInputStream(data));
-        int version = in.readInt();
-        if (version != VERSION) {
-            throw new IOException("Unsupported Lumina index meta version: " + version);
+        Map<String, String> map = OBJECT_MAPPER.readValue(data, MAP_TYPE_REF);
+        if (!map.containsKey(KEY_DIMENSION)) {
+            throw new IOException(
+                    "Missing required key in Lumina index metadata: " + KEY_DIMENSION);
         }
-        int dim = in.readInt();
-        int metricValue = in.readInt();
-        String indexTypeName = in.readUTF();
-        long numVectors = in.readLong();
-        long minId = in.readLong();
-        long maxId = in.readLong();
-        return new LuminaIndexMeta(dim, metricValue, indexTypeName, numVectors, minId, maxId);
+        if (!map.containsKey(KEY_DISTANCE_METRIC)) {
+            throw new IOException(
+                    "Missing required key in Lumina index metadata: " + KEY_DISTANCE_METRIC);
+        }
+        return new LuminaIndexMeta(map);
     }
 }

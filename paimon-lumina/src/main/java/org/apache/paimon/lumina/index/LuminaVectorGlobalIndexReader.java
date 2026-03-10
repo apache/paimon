@@ -34,72 +34,49 @@ import org.apache.paimon.utils.RoaringNavigableMap64;
 import org.aliyun.lumina.LuminaFileInput;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
  * Vector global index reader using Lumina.
  *
- * <p>This reader loads Lumina indices from global index files and performs vector similarity
- * search.
+ * <p>Each shard has exactly one Lumina index file. This reader loads the single index and performs
+ * vector similarity search.
  */
 public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
-    private final LuminaIndex[] indices;
-    private final LuminaIndexMeta[] indexMetas;
-    private final List<SeekableInputStream> openStreams;
-    private final List<GlobalIndexIOMeta> ioMetas;
+    private final GlobalIndexIOMeta ioMeta;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
     private final LuminaVectorIndexOptions options;
-    private volatile boolean metasLoaded = false;
-    private volatile boolean indicesLoaded = false;
+
+    private volatile LuminaIndexMeta indexMeta;
+    private volatile LuminaIndex index;
+    private SeekableInputStream openStream;
 
     public LuminaVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
             List<GlobalIndexIOMeta> ioMetas,
             DataType fieldType,
             LuminaVectorIndexOptions options) {
+        checkArgument(ioMetas.size() == 1, "Expected exactly one index file per shard");
         this.fileReader = fileReader;
-        this.ioMetas = ioMetas;
+        this.ioMeta = ioMetas.get(0);
         this.fieldType = fieldType;
         this.options = options;
-        this.indices = new LuminaIndex[ioMetas.size()];
-        this.indexMetas = new LuminaIndexMeta[ioMetas.size()];
-        this.openStreams = Collections.synchronizedList(new ArrayList<>());
     }
 
     @Override
     public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         try {
-            ensureLoadMetas();
-
-            RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
-
-            if (includeRowIds != null) {
-                List<Integer> matchingIndices = new ArrayList<>();
-                for (int i = 0; i < indexMetas.length; i++) {
-                    LuminaIndexMeta meta = indexMetas[i];
-                    if (includeRowIds.containsRange(meta.minId(), meta.maxId())) {
-                        matchingIndices.add(i);
-                    }
-                }
-                if (matchingIndices.isEmpty()) {
-                    return Optional.empty();
-                }
-                ensureLoadIndices(matchingIndices);
-            } else {
-                ensureLoadAllIndices();
-            }
-
+            ensureLoaded();
             return Optional.ofNullable(search(vectorSearch));
         } catch (IOException e) {
             throw new RuntimeException(
@@ -111,172 +88,85 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     private GlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
-        validateVectorType(vectorSearch.vector());
+        validateSearchVector(vectorSearch.vector());
         float[] queryVector = ((float[]) vectorSearch.vector()).clone();
-        if (options.normalize()) {
-            LuminaVectorUtils.normalizeL2(queryVector);
-        }
         int limit = vectorSearch.limit();
+        LuminaVectorMetric indexMetric = indexMeta.metric();
 
-        PriorityQueue<ScoredRow> result =
-                new PriorityQueue<>(Comparator.comparingDouble(sr -> sr.score));
+        int effectiveK = (int) Math.min(limit, index.size());
+        if (effectiveK <= 0) {
+            return null;
+        }
 
         RoaringNavigableMap64 includeRowIds = vectorSearch.includeRowIds();
+        float[] distances;
+        long[] labels;
 
-        // Extract sorted filter IDs once; per-index scoping happens inside the loop.
-        long[] allFilterIds = null;
         if (includeRowIds != null) {
-            long cardinality = includeRowIds.getLongCardinality();
-            if (cardinality <= 0) {
-                return new LuminaScoredGlobalIndexResult(
-                        new RoaringNavigableMap64(), new HashMap<>());
+            long[] scopedIds = new long[(int) includeRowIds.getLongCardinality()];
+            Iterator<Long> iter = includeRowIds.iterator();
+            for (int i = 0; i < scopedIds.length; i++) {
+                scopedIds[i] = iter.next();
             }
-            if (cardinality > Integer.MAX_VALUE) {
-                throw new RuntimeException(
-                        "Filter bitmap cardinality ("
-                                + cardinality
-                                + ") exceeds maximum supported size for native pre-filtering");
+            if (scopedIds.length == 0) {
+                return null;
             }
-            allFilterIds = new long[(int) cardinality];
-            int idx = 0;
-            for (long id : includeRowIds) {
-                allFilterIds[idx++] = id;
-            }
-        }
-
-        Map<String, String> filterSearchOptions = null;
-        Map<String, String> plainSearchOptions = null;
-        if (allFilterIds != null) {
-            filterSearchOptions = new LinkedHashMap<>();
-            int listSize = Math.max(limit * options.searchFactor(), options.searchListSize());
-            filterSearchOptions.put("diskann.search.list_size", String.valueOf(listSize));
-            filterSearchOptions.put("search.thread_safe_filter", "true");
+            effectiveK = Math.min(effectiveK, scopedIds.length);
+            distances = new float[effectiveK];
+            labels = new long[effectiveK];
+            Map<String, String> searchOptions = options.toLuminaOptions();
+            searchOptions.putAll(indexMeta.options());
+            searchOptions.put("search.thread_safe_filter", "true");
+            index.searchWithFilter(
+                    queryVector, 1, effectiveK, distances, labels, scopedIds, searchOptions);
         } else {
-            plainSearchOptions = new LinkedHashMap<>();
-            int listSize = Math.max(limit, options.searchListSize());
-            plainSearchOptions.put("diskann.search.list_size", String.valueOf(listSize));
+            distances = new float[effectiveK];
+            labels = new long[effectiveK];
+            Map<String, String> searchOptions = options.toLuminaOptions();
+            searchOptions.putAll(indexMeta.options());
+            index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
         }
 
-        for (int i = 0; i < indices.length; i++) {
-            LuminaIndex index = indices[i];
-            if (index == null) {
-                continue;
-            }
-
-            int effectiveK = (int) Math.min(limit, index.size());
-            if (effectiveK <= 0) {
-                continue;
-            }
-
-            if (allFilterIds != null) {
-                LuminaIndexMeta meta = indexMetas[i];
-                long[] scopedIds = scopeFilterIds(allFilterIds, meta.minId(), meta.maxId());
-                if (scopedIds.length == 0) {
-                    continue;
-                }
-                effectiveK = (int) Math.min(effectiveK, scopedIds.length);
-
-                float[] distances = new float[effectiveK];
-                long[] labels = new long[effectiveK];
-                index.searchWithFilter(
-                        queryVector,
-                        1,
-                        effectiveK,
-                        distances,
-                        labels,
-                        scopedIds,
-                        filterSearchOptions);
-                collectResults(distances, labels, effectiveK, limit, result);
-            } else {
-                float[] distances = new float[effectiveK];
-                long[] labels = new long[effectiveK];
-                index.search(queryVector, 1, effectiveK, distances, labels, plainSearchOptions);
-                collectResults(distances, labels, effectiveK, limit, result);
-            }
-        }
+        // Min-heap: smallest score at head, so we can evict the weakest candidate efficiently.
+        PriorityQueue<ScoredRow> topK =
+                new PriorityQueue<>(limit + 1, Comparator.comparingDouble(s -> s.score));
+        collectResults(distances, labels, effectiveK, limit, topK, indexMetric);
 
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
-        HashMap<Long, Float> id2scores = new HashMap<>(result.size());
-        for (ScoredRow scoredRow : result) {
-            id2scores.put(scoredRow.rowId, scoredRow.score);
-            roaringBitmap64.add(scoredRow.rowId);
+        HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
+        for (ScoredRow row : topK) {
+            roaringBitmap64.add(row.rowId);
+            id2scores.put(row.rowId, row.score);
         }
         return new LuminaScoredGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
-    private void collectResults(
+    private static void collectResults(
             float[] distances,
             long[] labels,
             int count,
             int limit,
-            PriorityQueue<ScoredRow> result) {
+            PriorityQueue<ScoredRow> topK,
+            LuminaVectorMetric metric) {
         for (int i = 0; i < count; i++) {
             long rowId = labels[i];
             if (rowId < 0) {
                 continue;
             }
-            float score = convertDistanceToScore(distances[i]);
-            if (result.size() < limit) {
-                result.offer(new ScoredRow(rowId, score));
-            } else if (result.peek() != null && score > result.peek().score) {
-                result.poll();
-                result.offer(new ScoredRow(rowId, score));
+            float score = convertDistanceToScore(distances[i], metric);
+            if (topK.size() < limit) {
+                topK.offer(new ScoredRow(rowId, score));
+            } else if (score > topK.peek().score) {
+                topK.poll();
+                topK.offer(new ScoredRow(rowId, score));
             }
         }
     }
 
-    /**
-     * Extract the subset of {@code sortedIds} that falls within [{@code minId}, {@code maxId}]
-     * using binary search. The input array must be sorted in ascending order (guaranteed by roaring
-     * bitmap iteration order).
-     */
-    private static long[] scopeFilterIds(long[] sortedIds, long minId, long maxId) {
-        int from = lowerBound(sortedIds, minId);
-        int to = upperBound(sortedIds, maxId);
-        if (from >= to) {
-            return new long[0];
-        }
-        if (from == 0 && to == sortedIds.length) {
-            return sortedIds;
-        }
-        return Arrays.copyOfRange(sortedIds, from, to);
-    }
-
-    /** Return the index of the first element >= target. */
-    private static int lowerBound(long[] arr, long target) {
-        int lo = 0;
-        int hi = arr.length;
-        while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (arr[mid] < target) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        return lo;
-    }
-
-    /** Return the index of the first element > target. */
-    private static int upperBound(long[] arr, long target) {
-        int lo = 0;
-        int hi = arr.length;
-        while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (arr[mid] <= target) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        return lo;
-    }
-
-    private float convertDistanceToScore(float distance) {
-        if (options.metric() == LuminaVectorMetric.L2) {
+    private static float convertDistanceToScore(float distance, LuminaVectorMetric metric) {
+        if (metric == LuminaVectorMetric.L2) {
             return 1.0f / (1.0f + distance);
-        } else if (options.metric() == LuminaVectorMetric.COSINE) {
-            // Cosine distance is in [0, 2]; convert to similarity in [-1, 1]
+        } else if (metric == LuminaVectorMetric.COSINE) {
             return 1.0f - distance;
         } else {
             // Inner product is already a similarity
@@ -284,7 +174,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private void validateVectorType(Object vector) {
+    private void validateSearchVector(Object vector) {
         if (!(vector instanceof float[])) {
             throw new IllegalArgumentException(
                     "Expected float[] vector but got: " + vector.getClass());
@@ -294,121 +184,58 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             throw new IllegalArgumentException(
                     "Lumina currently only supports float arrays, but field type is: " + fieldType);
         }
+        int queryDim = ((float[]) vector).length;
+        if (queryDim != indexMeta.dim()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Query vector dimension mismatch: index expects %d, but got %d",
+                            indexMeta.dim(), queryDim));
+        }
     }
 
-    private void ensureLoadMetas() throws IOException {
-        if (!metasLoaded) {
+    private void ensureLoaded() throws IOException {
+        if (index == null) {
             synchronized (this) {
-                if (!metasLoaded) {
-                    for (int i = 0; i < ioMetas.size(); i++) {
-                        byte[] metaBytes = ioMetas.get(i).metadata();
-                        indexMetas[i] = LuminaIndexMeta.deserialize(metaBytes);
+                if (index == null) {
+                    indexMeta = LuminaIndexMeta.deserialize(ioMeta.metadata());
+                    SeekableInputStream in = fileReader.getInputStream(ioMeta);
+                    try {
+                        LuminaFileInput fileInput = new InputStreamFileInput(in);
+                        Map<String, String> searcherOptions = options.toLuminaOptions();
+                        searcherOptions.putAll(indexMeta.options());
+                        index =
+                                LuminaIndex.fromStream(
+                                        fileInput,
+                                        ioMeta.fileSize(),
+                                        indexMeta.dim(),
+                                        indexMeta.metric(),
+                                        searcherOptions);
+                        openStream = in;
+                    } catch (Exception e) {
+                        IOUtils.closeQuietly(in);
+                        throw e;
                     }
-                    metasLoaded = true;
                 }
             }
         }
-    }
-
-    private void ensureLoadAllIndices() throws IOException {
-        if (!indicesLoaded) {
-            synchronized (this) {
-                if (!indicesLoaded) {
-                    for (int i = 0; i < ioMetas.size(); i++) {
-                        if (indices[i] == null) {
-                            loadIndexAt(i);
-                        }
-                    }
-                    indicesLoaded = true;
-                }
-            }
-        }
-    }
-
-    private void ensureLoadIndices(List<Integer> positions) throws IOException {
-        synchronized (this) {
-            for (int pos : positions) {
-                if (indices[pos] == null) {
-                    loadIndexAt(pos);
-                }
-            }
-            // Check if all indices are now loaded.
-            if (!indicesLoaded) {
-                boolean allLoaded = true;
-                for (LuminaIndex idx : indices) {
-                    if (idx == null) {
-                        allLoaded = false;
-                        break;
-                    }
-                }
-                if (allLoaded) {
-                    indicesLoaded = true;
-                }
-            }
-        }
-    }
-
-    private void loadIndexAt(int position) throws IOException {
-        GlobalIndexIOMeta ioMeta = ioMetas.get(position);
-        SeekableInputStream in = fileReader.getInputStream(ioMeta);
-        LuminaIndex index = null;
-        try {
-            index = loadIndex(in, position, ioMeta.fileSize());
-            openStreams.add(in);
-            indices[position] = index;
-        } catch (Exception e) {
-            IOUtils.closeQuietly(index);
-            IOUtils.closeQuietly(in);
-            throw e;
-        }
-    }
-
-    private LuminaIndex loadIndex(SeekableInputStream in, int position, long fileSize)
-            throws IOException {
-        LuminaIndexMeta meta = indexMetas[position];
-        LuminaVectorMetric metric = LuminaVectorMetric.fromValue(meta.metricValue());
-        LuminaIndexType indexType = meta.indexType();
-
-        LuminaFileInput fileInput =
-                new LuminaFileInput() {
-                    @Override
-                    public int read(byte[] b, int off, int len) throws IOException {
-                        return in.read(b, off, len);
-                    }
-
-                    @Override
-                    public void seek(long position) throws IOException {
-                        in.seek(position);
-                    }
-
-                    @Override
-                    public long getPos() throws IOException {
-                        return in.getPos();
-                    }
-
-                    @Override
-                    public void close() throws IOException {
-                        // Do not close: stream lifecycle is managed by the Reader.
-                    }
-                };
-
-        Map<String, String> extraOptions = new LinkedHashMap<>();
-        return LuminaIndex.fromStream(
-                fileInput, fileSize, meta.dim(), metric, indexType, extraOptions);
     }
 
     @Override
     public void close() throws IOException {
         Throwable firstException = null;
 
-        // Close all indices first (releases native FileReader → JNI global refs).
-        for (int i = 0; i < indices.length; i++) {
-            LuminaIndex index = indices[i];
-            if (index == null) {
-                continue;
-            }
+        if (index != null) {
             try {
                 index.close();
+            } catch (Throwable t) {
+                firstException = t;
+            }
+            index = null;
+        }
+
+        if (openStream != null) {
+            try {
+                openStream.close();
             } catch (Throwable t) {
                 if (firstException == null) {
                     firstException = t;
@@ -416,33 +243,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                     firstException.addSuppressed(t);
                 }
             }
-            indices[i] = null;
-        }
-
-        // Then close underlying streams.
-        List<SeekableInputStream> streamsSnapshot;
-        synchronized (openStreams) {
-            if (openStreams.isEmpty()) {
-                streamsSnapshot = null;
-            } else {
-                streamsSnapshot = new ArrayList<>(openStreams);
-                openStreams.clear();
-            }
-        }
-        if (streamsSnapshot != null) {
-            for (SeekableInputStream stream : streamsSnapshot) {
-                try {
-                    if (stream != null) {
-                        stream.close();
-                    }
-                } catch (Throwable t) {
-                    if (firstException == null) {
-                        firstException = t;
-                    } else {
-                        firstException.addSuppressed(t);
-                    }
-                }
-            }
+            openStream = null;
         }
 
         if (firstException != null) {
@@ -454,16 +255,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 throw new RuntimeException(
                         "Failed to close Lumina vector global index reader", firstException);
             }
-        }
-    }
-
-    private static class ScoredRow {
-        final long rowId;
-        final float score;
-
-        ScoredRow(long rowId, float score) {
-            this.rowId = rowId;
-            this.score = score;
         }
     }
 
@@ -537,5 +328,51 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     @Override
     public Optional<GlobalIndexResult> visitNotIn(FieldRef fieldRef, List<Object> literals) {
         return Optional.empty();
+    }
+
+    /**
+     * Adapts a {@link SeekableInputStream} to the {@link LuminaFileInput} JNI callback API.
+     *
+     * <p>This mirrors the C++ {@code LuminaFileReader} adapter that bridges Paimon's {@code
+     * InputStream} to Lumina's {@code FileReader} interface. The stream lifecycle is managed by the
+     * enclosing reader, not by this adapter.
+     */
+    static class InputStreamFileInput implements LuminaFileInput {
+        private final SeekableInputStream in;
+
+        InputStreamFileInput(SeekableInputStream in) {
+            this.in = in;
+        }
+
+        @Override
+        public int read(byte[] b, int off, int len) throws IOException {
+            return in.read(b, off, len);
+        }
+
+        @Override
+        public void seek(long position) throws IOException {
+            in.seek(position);
+        }
+
+        @Override
+        public long getPos() throws IOException {
+            return in.getPos();
+        }
+
+        @Override
+        public void close() {
+            // Stream lifecycle is managed by the enclosing Reader.
+        }
+    }
+
+    /** A row ID paired with its similarity score, used in the top-k min-heap. */
+    private static class ScoredRow {
+        final long rowId;
+        final float score;
+
+        ScoredRow(long rowId, float score) {
+            this.rowId = rowId;
+            this.score = score;
+        }
     }
 }

@@ -42,27 +42,28 @@ public class LuminaIndex implements Closeable {
     private LuminaSearcher searcher;
     private final int dimension;
     private final LuminaVectorMetric metric;
-    private final LuminaIndexType indexType;
     private volatile boolean closed = false;
 
-    private LuminaIndex(int dimension, LuminaVectorMetric metric, LuminaIndexType indexType) {
+    /** All lumina options (prefix-stripped), stored for building search options at query time. */
+    private Map<String, String> allOptions;
+
+    private LuminaIndex(int dimension, LuminaVectorMetric metric) {
         this.dimension = dimension;
         this.metric = metric;
-        this.indexType = indexType;
     }
 
     /** Create a new index for building. */
     public static LuminaIndex createForBuild(
-            int dimension,
-            LuminaVectorMetric metric,
-            LuminaIndexType indexType,
-            Map<String, String> extraOptions) {
-        LuminaIndex index = new LuminaIndex(dimension, metric, indexType);
+            int dimension, LuminaVectorMetric metric, Map<String, String> extraOptions) {
+        LuminaIndex index = new LuminaIndex(dimension, metric);
 
         Map<String, String> opts = new LinkedHashMap<>(extraOptions);
         index.builder =
                 LuminaBuilder.create(
-                        indexType.getLuminaName(), dimension, toMetricType(metric), opts);
+                        LuminaVectorIndexOptions.INDEX_TYPE.defaultValue(),
+                        dimension,
+                        toMetricType(metric),
+                        opts);
         return index;
     }
 
@@ -77,21 +78,16 @@ public class LuminaIndex implements Closeable {
             long fileSize,
             int dimension,
             LuminaVectorMetric metric,
-            LuminaIndexType indexType,
             Map<String, String> extraOptions) {
-        LuminaIndex index = new LuminaIndex(dimension, metric, indexType);
-
-        Map<String, String> searcherOpts = new LinkedHashMap<>();
-        for (Map.Entry<String, String> entry : extraOptions.entrySet()) {
-            String key = entry.getKey();
-            if (key.startsWith("diskann.search.")) {
-                searcherOpts.put(key, entry.getValue());
-            }
-        }
+        LuminaIndex index = new LuminaIndex(dimension, metric);
         index.searcher =
                 LuminaSearcher.create(
-                        indexType.getLuminaName(), dimension, toMetricType(metric), searcherOpts);
+                        LuminaVectorIndexOptions.INDEX_TYPE.defaultValue(),
+                        dimension,
+                        toMetricType(metric),
+                        extraOptions);
         index.searcher.open(fileInput, fileSize);
+        index.allOptions = extraOptions;
         return index;
     }
 
@@ -126,7 +122,7 @@ public class LuminaIndex implements Closeable {
             Map<String, String> searchOptions) {
         ensureOpen();
         ensureSearcher();
-        searcher.search(n, queryVectors, k, distances, labels, searchOptions);
+        searcher.search(n, queryVectors, k, distances, labels, filterSearchOptions(searchOptions));
     }
 
     /** Search for k nearest neighbors with native pre-filtering on vector IDs. */
@@ -140,7 +136,14 @@ public class LuminaIndex implements Closeable {
             Map<String, String> searchOptions) {
         ensureOpen();
         ensureSearcher();
-        searcher.searchWithFilter(n, queryVectors, k, distances, labels, filterIds, searchOptions);
+        searcher.searchWithFilter(
+                n,
+                queryVectors,
+                k,
+                distances,
+                labels,
+                filterIds,
+                filterSearchOptions(searchOptions));
     }
 
     /** Get the number of vectors (searcher mode). */
@@ -158,17 +161,37 @@ public class LuminaIndex implements Closeable {
         return metric;
     }
 
-    public LuminaIndexType indexType() {
-        return indexType;
-    }
-
     public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {
-        return ByteBuffer.allocateDirect(numVectors * dimension * Float.BYTES)
-                .order(ByteOrder.nativeOrder());
+        long size = (long) numVectors * dimension * Float.BYTES;
+        if (size > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Vector buffer size exceeds Integer.MAX_VALUE: %d * %d * %d = %d",
+                            numVectors, dimension, Float.BYTES, size));
+        }
+        return ByteBuffer.allocateDirect((int) size).order(ByteOrder.nativeOrder());
     }
 
     public static ByteBuffer allocateIdBuffer(int numIds) {
         return ByteBuffer.allocateDirect(numIds * Long.BYTES).order(ByteOrder.nativeOrder());
+    }
+
+    /**
+     * Filters an options map to only include keys valid for Lumina SearchOptions. This mirrors
+     * paimon-cpp's {@code NormalizeSearchOptions} which extracts only search-relevant keys.
+     *
+     * <p>Valid search option prefixes: {@code search.*} (core search options) and {@code
+     * diskann.search.*} (DiskANN-specific search options).
+     */
+    private static Map<String, String> filterSearchOptions(Map<String, String> options) {
+        Map<String, String> searchOpts = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : options.entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith("search.") || key.startsWith("diskann.search.")) {
+                searchOpts.put(key, entry.getValue());
+            }
+        }
+        return searchOpts;
     }
 
     private void ensureOpen() {
@@ -198,7 +221,7 @@ public class LuminaIndex implements Closeable {
             case INNER_PRODUCT:
                 return MetricType.INNER_PRODUCT;
             default:
-                throw new IllegalArgumentException("Unknown metric: " + metric);
+                throw new IllegalArgumentException(String.format("Unknown metric: %s", metric));
         }
     }
 

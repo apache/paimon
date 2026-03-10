@@ -97,15 +97,14 @@ public class LuminaVectorGlobalIndexScanTest {
         fileIO = new LocalFileIO();
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
 
-        String similarityMetric = "L2";
+        String similarityMetric = "l2";
         Schema schema =
                 Schema.newBuilder()
                         .column("id", DataTypes.INT())
                         .column(vectorFieldName, new ArrayType(DataTypes.FLOAT()))
                         .option(CoreOptions.BUCKET.key(), "-1")
-                        .option("vector.dim", "2")
-                        .option("vector.metric", similarityMetric)
-                        .option("vector.index-type", "DISKANN")
+                        .option("lumina.index.dimension", "2")
+                        .option("lumina.distance.metric", similarityMetric)
                         .option("data-evolution.enabled", "true")
                         .option("row-tracking.enabled", "true")
                         .build();
@@ -156,9 +155,8 @@ public class LuminaVectorGlobalIndexScanTest {
                         .column("id", DataTypes.INT())
                         .column(vectorFieldName, new ArrayType(DataTypes.FLOAT()))
                         .option(CoreOptions.BUCKET.key(), "-1")
-                        .option("vector.dim", "2")
-                        .option("vector.metric", "INNER_PRODUCT")
-                        .option("vector.index-type", "DISKANN")
+                        .option("lumina.index.dimension", "2")
+                        .option("lumina.distance.metric", "inner_product")
                         .option("data-evolution.enabled", "true")
                         .option("row-tracking.enabled", "true")
                         .build();

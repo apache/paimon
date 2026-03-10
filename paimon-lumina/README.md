@@ -31,6 +31,5 @@ Alibaba Storage Service Team. It is accessed via JNI through the `lumina-jni` ar
 | `vector.size-per-index` | int | 2,000,000 | Max vectors per index file |
 | `vector.training-size` | int | 500,000 | Vectors used for pretraining |
 | `vector.search-factor` | int | 10 | Multiplier for search limit when filtering |
-| `vector.normalize` | boolean | false | L2-normalize vectors before indexing/searching |
 | `vector.diskann.search-list-size` | int | 100 | DiskANN search list size |
 | `vector.pretrain-sample-ratio` | double | 1.0 | Pretrain sample ratio |

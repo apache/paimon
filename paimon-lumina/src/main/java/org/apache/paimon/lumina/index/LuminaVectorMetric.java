@@ -22,25 +22,32 @@ package org.apache.paimon.lumina.index;
 public enum LuminaVectorMetric {
 
     /** L2 (Euclidean) distance metric. Lower values indicate more similar vectors. */
-    L2(0),
+    L2(0, "l2"),
 
     /** Cosine distance metric. Lower values indicate more similar vectors. */
-    COSINE(1),
+    COSINE(1, "cosine"),
 
     /**
      * Inner product (dot product) metric. Higher values indicate more similar vectors. For
      * normalized vectors, this is equivalent to cosine similarity.
      */
-    INNER_PRODUCT(2);
+    INNER_PRODUCT(2, "inner_product");
 
     private final int value;
+    private final String luminaName;
 
-    LuminaVectorMetric(int value) {
+    LuminaVectorMetric(int value, String luminaName) {
         this.value = value;
+        this.luminaName = luminaName;
     }
 
     public int getValue() {
         return value;
+    }
+
+    /** Returns the Lumina native distance metric name (e.g. "l2", "cosine", "inner_product"). */
+    public String getLuminaName() {
+        return luminaName;
     }
 
     public static LuminaVectorMetric fromString(String name) {
@@ -53,6 +60,17 @@ public enum LuminaVectorMetric {
                 return metric;
             }
         }
-        throw new IllegalArgumentException("Unknown metric value: " + value);
+        throw new IllegalArgumentException(String.format("Unknown metric value: %s", value));
+    }
+
+    /** Resolves a Lumina native metric name (e.g. "l2") to the corresponding enum constant. */
+    public static LuminaVectorMetric fromLuminaName(String luminaName) {
+        for (LuminaVectorMetric metric : values()) {
+            if (metric.luminaName.equals(luminaName)) {
+                return metric;
+            }
+        }
+        throw new IllegalArgumentException(
+                String.format("Unknown lumina metric name: %s", luminaName));
     }
 }

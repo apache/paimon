@@ -22,144 +22,120 @@ import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
-/** Options for Lumina vector index. */
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Options for the Lumina vector index.
+ *
+ * <p>All option keys use the {@code lumina.} prefix so that both paimon-cpp and paimon-lumina share
+ * the same table properties. For example:
+ *
+ * <pre>
+ *   lumina.index.dimension = 1024
+ *   lumina.distance.metric = inner_product
+ *   lumina.encoding.type   = pq
+ *   lumina.diskann.build.ef_construction = 128
+ *   lumina.diskann.search.list_size = 100
+ * </pre>
+ *
+ * <p>Use {@link #toLuminaOptions()} to obtain a {@code Map<String, String>} with the {@code
+ * lumina.} prefix stripped, suitable for passing directly to the native Lumina API. This mirrors
+ * paimon-cpp's {@code FetchOptionsWithPrefix("lumina.", options)}.
+ */
 public class LuminaVectorIndexOptions {
 
-    public static final ConfigOption<Integer> VECTOR_DIM =
-            ConfigOptions.key("vector.dim")
+    /** The common prefix for all Lumina options. */
+    public static final String LUMINA_PREFIX = "lumina.";
+
+    public static final ConfigOption<Integer> DIMENSION =
+            ConfigOptions.key("lumina.index.dimension")
                     .intType()
                     .defaultValue(128)
-                    .withDescription("The dimension of the vector");
+                    .withDescription("The dimension of the vector.");
 
-    public static final ConfigOption<LuminaVectorMetric> VECTOR_METRIC =
-            ConfigOptions.key("vector.metric")
-                    .enumType(LuminaVectorMetric.class)
-                    .defaultValue(LuminaVectorMetric.L2)
-                    .withDescription(
-                            "The distance metric for vector search (L2, COSINE, INNER_PRODUCT)");
-
-    public static final ConfigOption<LuminaIndexType> VECTOR_INDEX_TYPE =
-            ConfigOptions.key("vector.index-type")
-                    .enumType(LuminaIndexType.class)
-                    .defaultValue(LuminaIndexType.DISKANN)
-                    .withDescription("The type of Lumina index (DISKANN)");
-
-    public static final ConfigOption<String> VECTOR_ENCODING_TYPE =
-            ConfigOptions.key("vector.encoding-type")
+    public static final ConfigOption<String> INDEX_TYPE =
+            ConfigOptions.key("lumina.index.type")
                     .stringType()
-                    .defaultValue("rawf32")
-                    .withDescription("The encoding type for vectors (rawf32, sq8, pq)");
+                    .defaultValue("diskann")
+                    .withDescription("The index type for vector search diskann.");
 
-    public static final ConfigOption<Integer> VECTOR_SIZE_PER_INDEX =
-            ConfigOptions.key("vector.size-per-index")
-                    .intType()
-                    .defaultValue(2_000_000)
-                    .withDescription("The number of vectors stored in each index file");
-
-    public static final ConfigOption<Integer> VECTOR_TRAINING_SIZE =
-            ConfigOptions.key("vector.training-size")
-                    .intType()
-                    .defaultValue(500_000)
+    public static final ConfigOption<String> DISTANCE_METRIC =
+            ConfigOptions.key("lumina.distance.metric")
+                    .stringType()
+                    .defaultValue("l2")
                     .withDescription(
-                            "The number of vectors to use for pretraining DiskANN indices");
+                            "The distance metric for vector search (l2, cosine, inner_product).");
 
-    public static final ConfigOption<Integer> VECTOR_SEARCH_FACTOR =
-            ConfigOptions.key("vector.search-factor")
-                    .intType()
-                    .defaultValue(10)
-                    .withDescription(
-                            "The multiplier for the search limit when filtering is applied");
-
-    public static final ConfigOption<Boolean> VECTOR_NORMALIZE =
-            ConfigOptions.key("vector.normalize")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to L2 normalize vectors before indexing and searching");
-
-    public static final ConfigOption<Integer> VECTOR_DISKANN_SEARCH_LIST_SIZE =
-            ConfigOptions.key("vector.diskann.search-list-size")
-                    .intType()
-                    .defaultValue(100)
-                    .withDescription("The search list size for DiskANN search (list_size)");
+    public static final ConfigOption<String> ENCODING_TYPE =
+            ConfigOptions.key("lumina.encoding.type")
+                    .stringType()
+                    .defaultValue("pq")
+                    .withDescription("The encoding type for vectors (rawf32, sq8, pq).");
 
     public static final ConfigOption<Double> PRETRAIN_SAMPLE_RATIO =
-            ConfigOptions.key("vector.pretrain-sample-ratio")
+            ConfigOptions.key("lumina.pretrain.sample_ratio")
                     .doubleType()
-                    .defaultValue(1.0)
-                    .withDescription(
-                            "The sample ratio for pretraining (Lumina's pretrain.sample_ratio)");
+                    .defaultValue(0.2)
+                    .withDescription("The sample ratio for pretraining.");
 
-    public static final ConfigOption<Integer> DISKANN_EF_CONSTRUCTION =
-            ConfigOptions.key("vector.diskann.ef-construction")
+    public static final ConfigOption<Integer> DISKANN_BUILD_EF_CONSTRUCTION =
+            ConfigOptions.key("lumina.diskann.build.ef_construction")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(1024)
                     .withDescription(
-                            "DiskANN build ef_construction parameter. "
-                                    + "Controls the size of the dynamic candidate list during graph construction.");
+                            "Controls the size of the dynamic candidate list during graph construction.");
 
-    public static final ConfigOption<Integer> DISKANN_NEIGHBOR_COUNT =
-            ConfigOptions.key("vector.diskann.neighbor-count")
+    public static final ConfigOption<Integer> DISKANN_BUILD_NEIGHBOR_COUNT =
+            ConfigOptions.key("lumina.diskann.build.neighbor_count")
                     .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "DiskANN build neighbor count. "
-                                    + "Maximum number of neighbors per node in the graph.");
+                    .defaultValue(64)
+                    .withDescription("Maximum number of neighbors per node in the graph.");
 
     public static final ConfigOption<Integer> DISKANN_BUILD_THREAD_COUNT =
-            ConfigOptions.key("vector.diskann.build-thread-count")
+            ConfigOptions.key("lumina.diskann.build.thread_count")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(64)
                     .withDescription("Number of threads used for DiskANN index building.");
 
-    public static final ConfigOption<Long> VECTOR_BUILD_MEMORY_LIMIT =
-            ConfigOptions.key("vector.build-memory-limit")
-                    .longType()
-                    .defaultValue(2L * 1024 * 1024 * 1024)
-                    .withDescription(
-                            "Maximum bytes of vector data buffered in memory per index during building. "
-                                    + "When the configured sizePerIndex would exceed this limit for a given "
-                                    + "dimension, it is automatically reduced.");
+    public static final ConfigOption<Integer> DISKANN_SEARCH_LIST_SIZE =
+            ConfigOptions.key("lumina.diskann.search.list_size")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription("The search list size for DiskANN search.");
+
+    public static final ConfigOption<Integer> DISKANN_SEARCH_BEAM_WIDTH =
+            ConfigOptions.key("lumina.diskann.search.beam_width")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription("The beam width for DiskANN search.");
+
+    public static final ConfigOption<Integer> SEARCH_PARALLEL_NUMBER =
+            ConfigOptions.key("lumina.search.parallel_number")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription("The parallel number for search.");
 
     private final int dimension;
     private final LuminaVectorMetric metric;
-    private final LuminaIndexType indexType;
-    private final String encodingType;
-    private final int sizePerIndex;
-    private final int trainingSize;
-    private final int searchFactor;
-    private final int searchListSize;
-    private final boolean normalize;
-    private final double pretrainSampleRatio;
-    private final Integer diskannEfConstruction;
-    private final Integer diskannNeighborCount;
-    private final Integer diskannBuildThreadCount;
-    private final long buildMemoryLimit;
+    private final Map<String, String> luminaOptions;
 
     public LuminaVectorIndexOptions(Options options) {
-        this.dimension = options.get(VECTOR_DIM);
-        this.metric = options.get(VECTOR_METRIC);
-        this.indexType = options.get(VECTOR_INDEX_TYPE);
-        this.encodingType = options.get(VECTOR_ENCODING_TYPE);
+        this.dimension = validatePositive(options.get(DIMENSION), DIMENSION.key());
+        this.metric = parseMetric(options.get(DISTANCE_METRIC));
+        validateEncodingMetricCombination(options.get(ENCODING_TYPE), this.metric);
+        this.luminaOptions = buildLuminaOptions(options);
+    }
 
-        int sizePerIndexValue = options.get(VECTOR_SIZE_PER_INDEX);
-        if (sizePerIndexValue <= 0) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid value for '%s': %d. Must be a positive integer.",
-                            VECTOR_SIZE_PER_INDEX.key(), sizePerIndexValue));
-        }
-        this.sizePerIndex = sizePerIndexValue;
-
-        this.trainingSize = options.get(VECTOR_TRAINING_SIZE);
-        this.searchFactor = options.get(VECTOR_SEARCH_FACTOR);
-        this.searchListSize = options.get(VECTOR_DISKANN_SEARCH_LIST_SIZE);
-        this.normalize = options.get(VECTOR_NORMALIZE);
-        this.pretrainSampleRatio = options.get(PRETRAIN_SAMPLE_RATIO);
-        this.diskannEfConstruction = options.getOptional(DISKANN_EF_CONSTRUCTION).orElse(null);
-        this.diskannNeighborCount = options.getOptional(DISKANN_NEIGHBOR_COUNT).orElse(null);
-        this.diskannBuildThreadCount = options.getOptional(DISKANN_BUILD_THREAD_COUNT).orElse(null);
-        this.buildMemoryLimit = options.get(VECTOR_BUILD_MEMORY_LIMIT);
+    /**
+     * Returns all {@code lumina.*} options with the prefix stripped, producing native Lumina keys.
+     * For example, {@code lumina.diskann.build.ef_construction} becomes {@code
+     * diskann.build.ef_construction}.
+     */
+    public Map<String, String> toLuminaOptions() {
+        return new LinkedHashMap<>(luminaOptions);
     }
 
     public int dimension() {
@@ -170,51 +146,86 @@ public class LuminaVectorIndexOptions {
         return metric;
     }
 
-    public LuminaIndexType indexType() {
-        return indexType;
+    /**
+     * Converts a {@link ConfigOption} key (e.g. {@code lumina.index.dimension}) to the native
+     * Lumina key (e.g. {@code index.dimension}) by stripping the {@link #LUMINA_PREFIX}.
+     */
+    public static String toLuminaKey(ConfigOption<?> option) {
+        String key = option.key();
+        if (key.startsWith(LUMINA_PREFIX)) {
+            return key.substring(LUMINA_PREFIX.length());
+        }
+        return key;
     }
 
-    public String encodingType() {
-        return encodingType;
+    /** All ConfigOptions with defaults that should always appear in lumina options. */
+    @SuppressWarnings("rawtypes")
+    private static final List<ConfigOption> ALL_OPTIONS =
+            Arrays.asList(
+                    DIMENSION,
+                    INDEX_TYPE,
+                    DISTANCE_METRIC,
+                    ENCODING_TYPE,
+                    PRETRAIN_SAMPLE_RATIO,
+                    DISKANN_BUILD_EF_CONSTRUCTION,
+                    DISKANN_BUILD_NEIGHBOR_COUNT,
+                    DISKANN_BUILD_THREAD_COUNT,
+                    DISKANN_SEARCH_LIST_SIZE,
+                    DISKANN_SEARCH_BEAM_WIDTH,
+                    SEARCH_PARALLEL_NUMBER);
+
+    /**
+     * Builds native Lumina options by first populating all known ConfigOptions (with defaults) and
+     * then overlaying any user-specified {@code lumina.*} options. This ensures that required keys
+     * like {@code index.type} are always present in the metadata, matching paimon-cpp behavior.
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> buildLuminaOptions(Options options) {
+        Map<String, String> result = new LinkedHashMap<>();
+        // Populate all known options with their resolved values (user-set or default).
+        for (ConfigOption<?> opt : ALL_OPTIONS) {
+            Object value = options.get(opt);
+            if (value != null) {
+                result.put(toLuminaKey(opt), String.valueOf(value));
+            }
+        }
+        // Overlay any extra user-specified lumina.* options not in ALL_OPTIONS.
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith(LUMINA_PREFIX)) {
+                result.putIfAbsent(key.substring(LUMINA_PREFIX.length()), entry.getValue());
+            }
+        }
+        return result;
     }
 
-    public int sizePerIndex() {
-        return sizePerIndex;
+    /**
+     * Parses the distance metric string, accepting both lumina native names (l2, cosine,
+     * inner_product) and enum names (L2, COSINE, INNER_PRODUCT).
+     */
+    private static LuminaVectorMetric parseMetric(String value) {
+        try {
+            return LuminaVectorMetric.fromLuminaName(value);
+        } catch (IllegalArgumentException e) {
+            return LuminaVectorMetric.fromString(value);
+        }
     }
 
-    public int trainingSize() {
-        return trainingSize;
+    private static void validateEncodingMetricCombination(
+            String encoding, LuminaVectorMetric metric) {
+        if ("pq".equalsIgnoreCase(encoding) && metric == LuminaVectorMetric.COSINE) {
+            throw new IllegalArgumentException(
+                    "Lumina does not support PQ encoding with cosine metric. "
+                            + "Please use 'rawf32' or 'sq8' encoding, or switch to 'l2' or 'inner_product' metric.");
+        }
     }
 
-    public int searchFactor() {
-        return searchFactor;
-    }
-
-    public int searchListSize() {
-        return searchListSize;
-    }
-
-    public boolean normalize() {
-        return normalize;
-    }
-
-    public double pretrainSampleRatio() {
-        return pretrainSampleRatio;
-    }
-
-    public Integer diskannEfConstruction() {
-        return diskannEfConstruction;
-    }
-
-    public Integer diskannNeighborCount() {
-        return diskannNeighborCount;
-    }
-
-    public Integer diskannBuildThreadCount() {
-        return diskannBuildThreadCount;
-    }
-
-    public long buildMemoryLimit() {
-        return buildMemoryLimit;
+    private static int validatePositive(int value, String key) {
+        if (value <= 0) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid value for '%s': %d. Must be a positive integer.", key, value));
+        }
+        return value;
     }
 }

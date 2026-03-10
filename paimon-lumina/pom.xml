@@ -43,12 +43,19 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-common</artifactId>
             <version>${project.version}</version>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
             <groupId>org.aliyun.lumina</groupId>
             <artifactId>lumina-jni</artifactId>
             <version>0.1.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-jackson-2</artifactId>
+            <version>${paimon.shade.jackson.version}-${paimon.shade.version}</version>
         </dependency>
 
         <!-- test dependencies -->

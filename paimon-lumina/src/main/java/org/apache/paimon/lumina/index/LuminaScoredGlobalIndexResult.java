@@ -38,7 +38,16 @@ public class LuminaScoredGlobalIndexResult implements ScoredGlobalIndexResult {
 
     @Override
     public ScoreGetter scoreGetter() {
-        return id2scores::get;
+        return rowId -> {
+            Float score = id2scores.get(rowId);
+            if (score == null) {
+                throw new IllegalArgumentException(
+                        "No score found for rowId: "
+                                + rowId
+                                + ". Only rowIds present in results() are valid.");
+            }
+            return score;
+        };
     }
 
     @Override
