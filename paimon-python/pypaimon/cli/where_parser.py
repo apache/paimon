@@ -235,14 +235,28 @@ def _parse_primary(
         else:
             raise ValueError(f"Expected 'NULL' or 'NOT NULL' after 'IS' for field '{field_name}'")
 
-    # NOT IN
+    # NOT IN / NOT BETWEEN
     if operator_token == 'NOT':
         tokens = tokens[1:]  # consume 'NOT'
-        if not tokens or tokens[0].upper() != 'IN':
-            raise ValueError(f"Expected 'IN' after 'NOT' for field '{field_name}'")
-        tokens = tokens[1:]  # consume 'IN'
-        values, tokens = _parse_in_list(tokens, field_type)
-        return builder.is_not_in(field_name, values), tokens
+        if not tokens:
+            raise ValueError(f"Expected 'IN' or 'BETWEEN' after 'NOT' for field '{field_name}'")
+        next_keyword = tokens[0].upper()
+        if next_keyword == 'IN':
+            tokens = tokens[1:]  # consume 'IN'
+            values, tokens = _parse_in_list(tokens, field_type)
+            return builder.is_not_in(field_name, values), tokens
+        elif next_keyword == 'BETWEEN':
+            tokens = tokens[1:]  # consume 'BETWEEN'
+            lower_str, tokens = _consume_literal(tokens)
+            lower_value = _cast_literal(lower_str, field_type)
+            if not tokens or tokens[0].upper() != 'AND':
+                raise ValueError(f"Expected 'AND' in NOT BETWEEN expression for field '{field_name}'")
+            tokens = tokens[1:]  # consume 'AND'
+            upper_str, tokens = _consume_literal(tokens)
+            upper_value = _cast_literal(upper_str, field_type)
+            return builder.not_between(field_name, lower_value, upper_value), tokens
+        else:
+            raise ValueError(f"Expected 'IN' or 'BETWEEN' after 'NOT' for field '{field_name}'")
 
     # IN (...)
     if operator_token == 'IN':
@@ -261,18 +275,6 @@ def _parse_primary(
         upper_str, tokens = _consume_literal(tokens)
         upper_value = _cast_literal(upper_str, field_type)
         return builder.between(field_name, lower_value, upper_value), tokens
-
-    # NOT BETWEEN ... AND ...
-    if operator_token == 'NOT' and len(tokens) > 1 and tokens[1].upper() == 'BETWEEN':
-        tokens = tokens[2:]  # consume 'NOT BETWEEN'
-        lower_str, tokens = _consume_literal(tokens)
-        lower_value = _cast_literal(lower_str, field_type)
-        if not tokens or tokens[0].upper() != 'AND':
-            raise ValueError(f"Expected 'AND' in NOT BETWEEN expression for field '{field_name}'")
-        tokens = tokens[1:]  # consume 'AND'
-        upper_str, tokens = _consume_literal(tokens)
-        upper_value = _cast_literal(upper_str, field_type)
-        return builder.not_between(field_name, lower_value, upper_value), tokens
 
     # LIKE 'pattern'
     if operator_token == 'LIKE':

@@ -220,6 +220,43 @@ class WhereParserParseTest(unittest.TestCase):
         self.assertAlmostEqual(predicate.literals[0], 60.0)
         self.assertAlmostEqual(predicate.literals[1], 100.0)
 
+    def test_not_between(self):
+        predicate = parse_where_clause("age NOT BETWEEN 20 AND 30", self.fields)
+        self.assertIsNotNone(predicate)
+        self.assertEqual(predicate.method, 'notBetween')
+        self.assertEqual(predicate.field, 'age')
+        self.assertEqual(predicate.literals, [20, 30])
+
+    def test_not_between_float(self):
+        predicate = parse_where_clause("score NOT BETWEEN 60.0 AND 100.0", self.fields)
+        self.assertIsNotNone(predicate)
+        self.assertEqual(predicate.method, 'notBetween')
+        self.assertEqual(predicate.field, 'score')
+        self.assertAlmostEqual(predicate.literals[0], 60.0)
+        self.assertAlmostEqual(predicate.literals[1], 100.0)
+
+    def test_not_between_case_insensitive(self):
+        predicate = parse_where_clause("age not between 20 and 30", self.fields)
+        self.assertIsNotNone(predicate)
+        self.assertEqual(predicate.method, 'notBetween')
+        self.assertEqual(predicate.literals, [20, 30])
+
+    def test_not_between_with_and_connector(self):
+        predicate = parse_where_clause(
+            "age NOT BETWEEN 20 AND 30 AND name = 'Alice'", self.fields
+        )
+        self.assertIsNotNone(predicate)
+        self.assertEqual(predicate.method, 'and')
+        self.assertEqual(predicate.literals[0].method, 'notBetween')
+        self.assertEqual(predicate.literals[0].field, 'age')
+        self.assertEqual(predicate.literals[0].literals, [20, 30])
+        self.assertEqual(predicate.literals[1].method, 'equal')
+        self.assertEqual(predicate.literals[1].field, 'name')
+
+    def test_error_not_between_missing_and(self):
+        with self.assertRaises(ValueError):
+            parse_where_clause("age NOT BETWEEN 20 30", self.fields)
+
     def test_like(self):
         predicate = parse_where_clause("name LIKE 'A%'", self.fields)
         self.assertIsNotNone(predicate)
