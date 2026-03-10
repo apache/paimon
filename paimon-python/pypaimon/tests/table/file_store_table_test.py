@@ -25,6 +25,7 @@ from pypaimon import CatalogFactory, Schema
 from pypaimon.common.options.core_options import CoreOptions
 
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.consumer.consumer import Consumer
 
 
 class FileStoreTableTest(unittest.TestCase):
@@ -82,3 +83,20 @@ class FileStoreTableTest(unittest.TestCase):
             self.table.copy(new_options)
 
         self.assertIn("Cannot change bucket number", str(context.exception))
+
+    def test_consumer_manager(self):
+        """Test consumer_manager member."""
+        # Access consumer_manager as attribute
+        manager = self.table.consumer_manager
+
+        # Verify consumer manager is created
+        self.assertIsNotNone(manager)
+
+        # Test creating a consumer
+        consumer = Consumer(next_snapshot=1)
+        manager.reset_consumer('test_consumer', consumer)
+
+        # Verify consumer was created
+        retrieved_consumer = manager.consumer('test_consumer')
+        self.assertIsNotNone(retrieved_consumer)
+        self.assertEqual(retrieved_consumer.next_snapshot, 1)
