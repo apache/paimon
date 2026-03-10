@@ -26,6 +26,7 @@ import org.apache.paimon.utils.Filter;
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
 
@@ -33,6 +34,17 @@ import java.util.List;
 public interface LookupTable extends Closeable {
 
     void specifyPartitions(List<BinaryRow> scanPartitions, @Nullable Predicate partitionFilter);
+
+    /**
+     * Create a new LookupTable instance with the same configuration but a different temp path. The
+     * new table is not opened yet.
+     *
+     * @throws UnsupportedOperationException if the implementation does not support this operation
+     */
+    default LookupTable copyWithNewPath(File newPath) {
+        throw new UnsupportedOperationException(
+                "copyWithNewPath is not supported by " + getClass().getSimpleName());
+    }
 
     void open() throws Exception;
 
@@ -43,4 +55,51 @@ public interface LookupTable extends Closeable {
     void specifyCacheRowFilter(Filter<InternalRow> filter);
 
     Long nextSnapshotId();
+
+    // ---- Partition refresh methods ----
+
+    /** Whether partition refresh is configured to run asynchronously. */
+    default boolean isPartitionRefreshAsync() {
+        return false;
+    }
+
+    /**
+     * Start a partition refresh (synchronous or asynchronous depending on configuration).
+     *
+     * @param newPartitions the new partitions to refresh to
+     * @param partitionFilter the partition filter for the new partitions
+     */
+    default void startPartitionRefresh(
+            List<BinaryRow> newPartitions, @Nullable Predicate partitionFilter) throws Exception {
+        close();
+        specifyPartitions(newPartitions, partitionFilter);
+        open();
+    }
+
+    /**
+     * Check if an async partition refresh has completed. If a new table is ready, this method
+     * returns it and the caller should replace its current lookup table reference. Returns {@code
+     * null} if no switch is needed.
+     *
+     * <p>For synchronous partition refresh, this always returns {@code null}.
+     */
+    @Nullable
+    default LookupTable checkPartitionRefreshCompletion() throws Exception {
+        return null;
+    }
+
+    /**
+     * Return the partitions that the current lookup table was loaded with. During async refresh,
+     * this may differ from the latest partitions detected by the partition loader.
+     *
+     * @return the active partitions, or {@code null} if partition refresh is not managed by this
+     *     table
+     */
+    @Nullable
+    default List<BinaryRow> activePartitions() {
+        return null;
+    }
+
+    /** Close partition refresh resources (executor, pending tables, etc.). */
+    default void closePartitionRefresh() throws IOException {}
 }
