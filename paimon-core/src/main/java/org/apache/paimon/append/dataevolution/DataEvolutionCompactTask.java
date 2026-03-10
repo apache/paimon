@@ -33,6 +33,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -43,6 +44,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -74,12 +76,14 @@ public class DataEvolutionCompactTask extends AppendCompactTask {
             // TODO: support vector-store file compaction
             throw new UnsupportedOperationException("Vector-store task is not supported");
         }
-        List<String> separatedVectorStoreFields =
-                VectorStoreUtils.isDifferentFormat(
-                                FileFormat.vectorStoreFileFormat(table.coreOptions()),
+        Set<String> separatedVectorStoreFields =
+                VectorStoreUtils.fieldsInVectorFile(
+                                table.rowType(),
+                                FileFormat.vectorFileFormat(table.coreOptions()),
                                 FileFormat.fileFormat(table.coreOptions()))
-                        ? table.coreOptions().vectorStoreFieldNames()
-                        : Collections.emptyList();
+                        .stream()
+                        .map(DataField::name)
+                        .collect(Collectors.toSet());
 
         table = table.copy(DYNAMIC_WRITE_OPTIONS);
         long firstRowId = compactBefore.get(0).nonNullFirstRowId();

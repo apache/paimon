@@ -53,7 +53,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 /** Tests for table with vector-store and data evolution. */
 public class VectorStoreTableTest extends TableTestBase {
 
-    private static final int VECTOR_DIM = 10;
+    private static final int VECTOR_DIM = 12;
 
     private AtomicInteger uniqueIdGen = new AtomicInteger(0);
 
@@ -231,7 +231,7 @@ public class VectorStoreTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "4 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.VECTOR_FIELDS.key(), "f3,f4");
+        schemaBuilder.option(CoreOptions.VECTOR_FIELD.key(), "f3");
         schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
         return schemaBuilder.build();
@@ -247,7 +247,7 @@ public class VectorStoreTableTest extends TableTestBase {
         schemaBuilder.option(CoreOptions.VECTOR_TARGET_FILE_SIZE.key(), "4 MB");
         schemaBuilder.option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true");
         schemaBuilder.option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true");
-        schemaBuilder.option(CoreOptions.VECTOR_FIELDS.key(), "f2,f3");
+        schemaBuilder.option(CoreOptions.VECTOR_FIELD.key(), "f2");
         schemaBuilder.option(CoreOptions.VECTOR_FILE_FORMAT.key(), "json");
         schemaBuilder.option(CoreOptions.FILE_COMPRESSION.key(), "none");
         return schemaBuilder.build();

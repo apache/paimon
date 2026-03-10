@@ -273,7 +273,6 @@ public class KeyValueFileReadWriteTest {
                         0,
                         fileFormat,
                         null,
-                        Collections.emptyList(),
                         10,
                         10,
                         10,

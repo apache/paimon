@@ -44,7 +44,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -99,7 +98,6 @@ public class DataEvolutionRollingFileWriterTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         null,
-                        Collections.emptyList(),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
@@ -193,7 +191,6 @@ public class DataEvolutionRollingFileWriterTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         null,
-                        Collections.emptyList(),
                         128 * 1024 * 1024,
                         blobTargetFileSize, // Different blob target size
                         128 * 1024 * 1024,
@@ -280,7 +277,6 @@ public class DataEvolutionRollingFileWriterTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         null,
-                        Collections.emptyList(),
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
@@ -361,7 +357,6 @@ public class DataEvolutionRollingFileWriterTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         null,
-                        Collections.emptyList(),
                         128 * 1024 * 1024,
                         blobTargetFileSize,
                         128 * 1024 * 1024,
@@ -580,7 +575,6 @@ public class DataEvolutionRollingFileWriterTest {
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
                         null,
-                        Collections.emptyList(),
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,
                         TARGET_FILE_SIZE,

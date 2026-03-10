@@ -264,7 +264,7 @@ public class DataFilePathFactory {
 
         @Override
         protected String makeExtension(String compressExtension, String formatIdentifier) {
-            return ".vector-store" + super.makeExtension(compressExtension, formatIdentifier);
+            return ".vector" + super.makeExtension(compressExtension, formatIdentifier);
         }
     }
 }

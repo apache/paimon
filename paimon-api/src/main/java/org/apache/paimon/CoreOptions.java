@@ -2320,11 +2320,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Specify the vector store file format.");
 
-    public static final ConfigOption<String> VECTOR_FIELDS =
+    public static final ConfigOption<String> VECTOR_FIELD =
             key("vector-field")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Specify the vector store fields.");
+                    .withDescription(
+                            "Specifies column names that should be stored as vector type. "
+                                    + "This is used when you want to treat a ARRAY column as a VECTOR.");
 
     public static final ConfigOption<MemorySize> VECTOR_TARGET_FILE_SIZE =
             key("vector.target-file-size")
@@ -3656,20 +3658,27 @@ public class CoreOptions implements Serializable {
         return options.get(VISIBILITY_CALLBACK_CHECK_INTERVAL);
     }
 
-    public String vectorStoreFileFormatString() {
+    public String vectorFileFormatString() {
         return normalizeFileFormat(options.get(VECTOR_FILE_FORMAT));
     }
 
-    public List<String> vectorStoreFieldNames() {
-        String vectorStoreFields = options.get(CoreOptions.VECTOR_FIELDS);
-        if (vectorStoreFields == null || vectorStoreFields.trim().isEmpty()) {
-            return new ArrayList<>();
-        } else {
-            return Arrays.asList(vectorStoreFields.trim().split(","));
+    public Set<String> vectorField() {
+        String vectorFields = options.get(CoreOptions.VECTOR_FIELD);
+        if (vectorFields == null || vectorFields.trim().isEmpty()) {
+            return Collections.emptySet();
         }
+        return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
     }
 
-    public long vectorStoreTargetFileSize() {
+    public static Set<String> vectorField(Map<String, String> options) {
+        String vectorFields = options.getOrDefault(CoreOptions.VECTOR_FIELD.key(), null);
+        if (vectorFields == null || vectorFields.trim().isEmpty()) {
+            return Collections.emptySet();
+        }
+        return Arrays.stream(vectorFields.trim().split(",")).collect(Collectors.toSet());
+    }
+
+    public long vectorTargetFileSize() {
         // Since vectors are large, it would be better to set a larger target size for vectors.
         return options.getOptional(VECTOR_TARGET_FILE_SIZE)
                 .map(MemorySize::getBytes)

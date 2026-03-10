@@ -96,7 +96,7 @@ public class FlinkVectorStoreE2eTest extends E2eTestBase {
         runBatchSql(
                 "INSERT INTO result2 SELECT "
                         + "COUNT(*) AS total, "
-                        + "SUM(CASE WHEN file_path LIKE '%.vector-store%.json' THEN 1 ELSE 0 END) "
+                        + "SUM(CASE WHEN file_path LIKE '%.vector.json' THEN 1 ELSE 0 END) "
                         + "AS vector_files "
                         + "FROM \\`ts_table\\$files\\`;",
                 catalogDdl,

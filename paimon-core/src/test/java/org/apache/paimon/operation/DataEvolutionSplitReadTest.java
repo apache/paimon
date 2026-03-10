@@ -118,11 +118,11 @@ class DataEvolutionSplitReadTest {
     @Test
     public void testSplitWithMultipleVectorStoreFilesPerGroup() {
         DataFileMeta file1 = createFile("file1.parquet", 1L, 10, 1);
-        DataFileMeta file2 = createFile("file2.vector-store.json", 1L, 1, 1);
-        DataFileMeta file3 = createFile("file3.vector-store.json", 2L, 9, 1);
+        DataFileMeta file2 = createFile("file2.vector.json", 1L, 1, 1);
+        DataFileMeta file3 = createFile("file3.vector.json", 2L, 9, 1);
         DataFileMeta file4 = createFile("file4.parquet", 20L, 10, 2);
-        DataFileMeta file5 = createFile("file5.vector-store.json", 20L, 5, 2);
-        DataFileMeta file6 = createFile("file6.vector-store.json", 25L, 5, 2);
+        DataFileMeta file5 = createFile("file5.vector.json", 20L, 5, 2);
+        DataFileMeta file6 = createFile("file6.vector.json", 25L, 5, 2);
         DataFileMeta file7 = createFile("file7.parquet", 1L, 10, 3);
 
         List<DataFileMeta> files = Arrays.asList(file1, file2, file3, file4, file5, file6, file7);

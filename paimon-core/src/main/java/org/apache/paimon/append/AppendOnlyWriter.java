@@ -77,11 +77,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     private final FileIO fileIO;
     private final long schemaId;
     private final FileFormat fileFormat;
-    private final FileFormat vectorStoreFileFormat;
-    private final List<String> vectorStoreFieldNames;
+    private final FileFormat vectorFileFormat;
     private final long targetFileSize;
     private final long blobTargetFileSize;
-    private final long vectorStoreTargetFileSize;
+    private final long vectorTargetFileSize;
     private final RowType writeSchema;
     @Nullable private final List<String> writeCols;
     private final DataFilePathFactory pathFactory;
@@ -112,11 +111,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
             @Nullable IOManager ioManager,
             long schemaId,
             FileFormat fileFormat,
-            FileFormat vectorStoreFileFormat,
-            List<String> vectorStoreFieldNames,
+            FileFormat vectorFileFormat,
             long targetFileSize,
             long blobTargetFileSize,
-            long vectorStoreTargetFileSize,
+            long vectorTargetFileSize,
             RowType writeSchema,
             @Nullable List<String> writeCols,
             long maxSequenceNumber,
@@ -139,11 +137,10 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
-        this.vectorStoreFileFormat = vectorStoreFileFormat;
-        this.vectorStoreFieldNames = vectorStoreFieldNames;
+        this.vectorFileFormat = vectorFileFormat;
         this.targetFileSize = targetFileSize;
         this.blobTargetFileSize = blobTargetFileSize;
-        this.vectorStoreTargetFileSize = vectorStoreTargetFileSize;
+        this.vectorTargetFileSize = vectorTargetFileSize;
         this.writeSchema = writeSchema;
         this.writeCols = writeCols;
         this.pathFactory = pathFactory;
@@ -317,33 +314,38 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        boolean hasBlob = (blobContext != null);
-        List<DataField> fieldsInBlobFile =
-                hasBlob
-                        ? fieldsInBlobFile(writeSchema, blobContext.blobDescriptorFields())
-                        : Collections.emptyList();
-        Set<String> blobFieldNames =
-                fieldsInBlobFile.stream().map(DataField::name).collect(Collectors.toSet());
-        boolean hasVectorStore = !vectorStoreFieldNames.isEmpty();
-        boolean hasNormal =
-                writeSchema.getFields().stream()
-                        .anyMatch(
-                                f ->
-                                        !blobFieldNames.contains(f.name())
-                                                && !vectorStoreFieldNames.contains(f.name()));
-        boolean hasSeparatedVectorStore =
-                VectorStoreUtils.isDifferentFormat(vectorStoreFileFormat, fileFormat);
+        boolean hasNormal, hasBlob, hasVectorStore;
+        {
+            hasBlob = (blobContext != null);
 
-        if (hasBlob || (hasNormal && hasVectorStore && hasSeparatedVectorStore)) {
+            List<DataField> fieldsInVectorFile =
+                    VectorStoreUtils.fieldsInVectorFile(writeSchema, fileFormat, vectorFileFormat);
+            Set<String> vectorFieldNames =
+                    fieldsInVectorFile.stream().map(DataField::name).collect(Collectors.toSet());
+            hasVectorStore = !fieldsInVectorFile.isEmpty();
+
+            List<DataField> fieldsInBlobFile =
+                    hasBlob
+                            ? fieldsInBlobFile(writeSchema, blobContext.blobDescriptorFields())
+                            : Collections.emptyList();
+            Set<String> blobFieldNames =
+                    fieldsInBlobFile.stream().map(DataField::name).collect(Collectors.toSet());
+            hasNormal =
+                    writeSchema.getFields().stream()
+                            .anyMatch(
+                                    f ->
+                                            !blobFieldNames.contains(f.name())
+                                                    && !vectorFieldNames.contains(f.name()));
+        }
+        if (hasBlob || (hasNormal && hasVectorStore)) {
             return new DataEvolutionRollingFileWriter(
                     fileIO,
                     schemaId,
                     fileFormat,
-                    vectorStoreFileFormat,
-                    vectorStoreFieldNames,
+                    vectorFileFormat,
                     targetFileSize,
                     blobTargetFileSize,
-                    vectorStoreTargetFileSize,
+                    vectorTargetFileSize,
                     writeSchema,
                     pathFactory,
                     seqNumCounterProvider,
@@ -354,20 +356,15 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
                     statsDenseStore,
                     blobContext);
         }
-        FileFormat realFileFormat = hasNormal ? fileFormat : vectorStoreFileFormat;
-        long realTargetFileSize = hasNormal ? targetFileSize : vectorStoreTargetFileSize;
-        DataFilePathFactory realPathFactory =
-                hasNormal
-                        ? pathFactory
-                        : pathFactory.vectorStorePathFactory(
-                                vectorStoreFileFormat.getFormatIdentifier());
+        FileFormat realFileFormat = hasNormal ? fileFormat : vectorFileFormat;
+        long realTargetFileSize = hasNormal ? targetFileSize : vectorTargetFileSize;
         return new RowDataRollingFileWriter(
                 fileIO,
                 schemaId,
                 realFileFormat,
                 realTargetFileSize,
                 writeSchema,
-                realPathFactory,
+                pathFactory,
                 seqNumCounterProvider,
                 fileCompression,
                 statsCollectorFactories.statsCollectors(writeSchema.getFieldNames()),
