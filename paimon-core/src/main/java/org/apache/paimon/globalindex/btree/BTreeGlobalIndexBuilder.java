@@ -179,17 +179,11 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     }
 
     public List<CommitMessage> buildForSinglePartition(
-            Range rowRange,
-            BinaryRow partition,
-            Iterator<InternalRow> data,
-            int indexFieldPos,
-            int rowIdPos)
-            throws IOException {
+            Range rowRange, BinaryRow partition, Iterator<InternalRow> data) throws IOException {
         long counter = 0;
         GlobalIndexParallelWriter currentWriter = null;
         List<CommitMessage> commitMessages = new ArrayList<>();
-        FieldGetter indexFieldGetter =
-                InternalRow.createFieldGetter(indexField.type(), indexFieldPos);
+        FieldGetter indexFieldGetter = InternalRow.createFieldGetter(indexField.type(), 0);
 
         while (data.hasNext()) {
             InternalRow row = data.next();
@@ -205,7 +199,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                 currentWriter = createWriter();
             }
 
-            long localRowId = row.getLong(rowIdPos) - rowRange.from;
+            long localRowId = row.getLong(1) - rowRange.from;
             currentWriter.write(indexFieldGetter.getFieldOrNull(row), localRowId);
         }
 

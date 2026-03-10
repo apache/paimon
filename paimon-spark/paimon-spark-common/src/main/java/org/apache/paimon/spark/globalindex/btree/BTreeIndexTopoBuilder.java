@@ -228,7 +228,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
                 InstantiationUtil.deserializeObject(
                         serializedBuilder, BTreeGlobalIndexBuilder.class.getClassLoader());
         return CommitMessageSerializer.serializeAll(
-                        builder.buildForSinglePartition(range, partition, input, 0, 1))
+                        builder.buildForSinglePartition(range, partition, input))
                 .iterator();
     }
 }
