@@ -46,7 +46,7 @@ This project bundles the following dependencies under the Apache Software Licens
 - org.apache.logging.log4j:log4j-api:2.17.1
 - org.apache.logging.log4j:log4j-core:2.17.1
 - org.apache.logging.log4j:log4j-slf4j-impl:2.17.1
-- org.xerial.snappy:snappy-java:1.1.8.2
+- org.xerial.snappy:snappy-java:1.1.10.8
 
 This project bundles the following dependencies under BSD-2 License (https://opensource.org/licenses/BSD-2-Clause):
 - com.github.luben:zstd-jni:1.5.5-11
