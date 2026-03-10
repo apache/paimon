@@ -108,7 +108,7 @@ public abstract class FlinkTableSinkBase
 
         if (table instanceof FormatTable) {
             FormatTable formatTable = (FormatTable) table;
-            return PaimonDataStreamSinkProvider.createProvider(
+            return new PaimonDataStreamSinkProvider(
                     (dataStream) ->
                             new FlinkFormatTableDataStreamSink(
                                             formatTable, overwrite, staticPartitions)
@@ -119,7 +119,7 @@ public abstract class FlinkTableSinkBase
 
         Options conf = Options.fromMap(table.options());
         // Do not sink to log store when overwrite mode
-        return PaimonDataStreamSinkProvider.createProvider(
+        return new PaimonDataStreamSinkProvider(
                 (dataStream) -> {
                     FlinkSinkBuilder builder = createSinkBuilder();
                     builder.forRowData(

@@ -117,7 +117,7 @@ public class SystemTableSource extends FlinkTableSource {
                                                     CoreOptions.BLOB_AS_DESCRIPTOR.key(),
                                                     "false")));
         }
-        return PaimonDataStreamScanProvider.createProvider(
+        return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,
                 env -> {
                     Integer parallelism = inferSourceParallelism(env);

@@ -18,40 +18,44 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.flink.lineage.DataStreamProviderFactory;
+import org.apache.paimon.flink.lineage.LineageUtils;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.lineage.LineageVertex;
+import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
-import org.apache.flink.table.connector.sink.DynamicTableSink.SinkRuntimeProvider;
 import org.apache.flink.table.data.RowData;
 
 import java.util.function.Function;
 
-/** Paimon {@link DataStreamSinkProvider}. */
-public class PaimonDataStreamSinkProvider implements DataStreamSinkProvider {
+/**
+ * Paimon {@link DataStreamSinkProvider} that also implements {@link LineageVertexProvider} so
+ * Flink's lineage graph discovers the Paimon sink table.
+ */
+public class PaimonDataStreamSinkProvider implements DataStreamSinkProvider, LineageVertexProvider {
 
     private final Function<DataStream<RowData>, DataStreamSink<?>> producer;
+    private final String name;
+    private final Table table;
 
-    public PaimonDataStreamSinkProvider(Function<DataStream<RowData>, DataStreamSink<?>> producer) {
-        this.producer = producer;
-    }
-
-    /**
-     * Creates a {@link SinkRuntimeProvider} that may be enriched with lineage metadata when running
-     * on a Flink version that supports it.
-     */
-    public static SinkRuntimeProvider createProvider(
+    public PaimonDataStreamSinkProvider(
             Function<DataStream<RowData>, DataStreamSink<?>> producer, String name, Table table) {
-        return DataStreamProviderFactory.getSinkProvider(
-                new PaimonDataStreamSinkProvider(producer), name, table);
+        this.producer = producer;
+        this.name = name;
+        this.table = table;
     }
 
     @Override
     public DataStreamSink<?> consumeDataStream(
             ProviderContext providerContext, DataStream<RowData> dataStream) {
         return producer.apply(dataStream);
+    }
+
+    @Override
+    public LineageVertex getLineageVertex() {
+        return LineageUtils.sinkLineageVertex(name, table);
     }
 }

@@ -18,41 +18,39 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.flink.lineage.DataStreamProviderFactory;
+import org.apache.paimon.flink.lineage.LineageUtils;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.lineage.LineageVertex;
+import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 import org.apache.flink.table.connector.ProviderContext;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.data.RowData;
 
 import java.util.function.Function;
 
-/** Paimon {@link DataStreamScanProvider}. */
-public class PaimonDataStreamScanProvider implements DataStreamScanProvider {
+/**
+ * Paimon {@link DataStreamScanProvider} that also implements {@link LineageVertexProvider} so
+ * Flink's lineage graph discovers the Paimon source table.
+ */
+public class PaimonDataStreamScanProvider implements DataStreamScanProvider, LineageVertexProvider {
 
     private final boolean isBounded;
     private final Function<StreamExecutionEnvironment, DataStream<RowData>> producer;
+    private final String name;
+    private final Table table;
 
     public PaimonDataStreamScanProvider(
-            boolean isBounded, Function<StreamExecutionEnvironment, DataStream<RowData>> producer) {
-        this.isBounded = isBounded;
-        this.producer = producer;
-    }
-
-    /**
-     * Creates a {@link ScanRuntimeProvider} that may be enriched with lineage metadata when running
-     * on a Flink version that supports it.
-     */
-    public static ScanRuntimeProvider createProvider(
             boolean isBounded,
             Function<StreamExecutionEnvironment, DataStream<RowData>> producer,
             String name,
             Table table) {
-        return DataStreamProviderFactory.getScanProvider(
-                new PaimonDataStreamScanProvider(isBounded, producer), name, table);
+        this.isBounded = isBounded;
+        this.producer = producer;
+        this.name = name;
+        this.table = table;
     }
 
     @Override
@@ -64,5 +62,10 @@ public class PaimonDataStreamScanProvider implements DataStreamScanProvider {
     @Override
     public boolean isBounded() {
         return isBounded;
+    }
+
+    @Override
+    public LineageVertex getLineageVertex() {
+        return LineageUtils.sourceLineageVertex(name, isBounded, table);
     }
 }

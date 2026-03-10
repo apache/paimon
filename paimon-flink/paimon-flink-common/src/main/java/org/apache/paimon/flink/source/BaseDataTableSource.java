@@ -195,7 +195,7 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
-        return PaimonDataStreamScanProvider.createProvider(
+        return new PaimonDataStreamScanProvider(
                 !unbounded,
                 env ->
                         sourceBuilder

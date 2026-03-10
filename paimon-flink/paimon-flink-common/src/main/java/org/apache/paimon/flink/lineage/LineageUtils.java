@@ -33,8 +33,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Lineage utilities for Flink 2.0+. Builds {@link SourceLineageVertex} and {@link LineageVertex}
- * from a Paimon table name and its physical warehouse path (namespace).
+ * Lineage utilities for building {@link SourceLineageVertex} and {@link LineageVertex} from a
+ * Paimon table name and its physical warehouse path (namespace).
  */
 public class LineageUtils {
 

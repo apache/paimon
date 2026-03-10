@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.PaimonDataStreamScanProvider;
+import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
@@ -30,19 +32,12 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.lineage.DatasetConfigFacet;
 import org.apache.flink.streaming.api.lineage.LineageDataset;
 import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.api.lineage.LineageVertex;
 import org.apache.flink.streaming.api.lineage.LineageVertexProvider;
 import org.apache.flink.streaming.api.lineage.SourceLineageVertex;
-import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
-import org.apache.flink.table.connector.sink.DynamicTableSink.SinkRuntimeProvider;
-import org.apache.flink.table.connector.source.DataStreamScanProvider;
-import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
-import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -183,45 +178,30 @@ class LineageUtilsTest {
     }
 
     @Test
-    void testGetScanProviderImplementsLineageVertexProvider() throws Exception {
+    void testScanProviderImplementsLineageVertexProvider() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
-        DataStreamScanProvider stub =
-                new DataStreamScanProvider() {
-                    @Override
-                    public DataStream<RowData> produceDataStream(
-                            org.apache.flink.table.connector.ProviderContext context,
-                            StreamExecutionEnvironment env) {
-                        return null;
-                    }
+        PaimonDataStreamScanProvider provider =
+                new PaimonDataStreamScanProvider(true, env -> null, "paimon.db.src", table);
 
-                    @Override
-                    public boolean isBounded() {
-                        return true;
-                    }
-                };
-        ScanRuntimeProvider wrapped =
-                DataStreamProviderFactory.getScanProvider(stub, "paimon.db.src", table);
-
-        assertThat(wrapped).isInstanceOf(LineageVertexProvider.class);
-        LineageVertex vertex = ((LineageVertexProvider) wrapped).getLineageVertex();
+        assertThat(provider).isInstanceOf(LineageVertexProvider.class);
+        LineageVertex vertex = provider.getLineageVertex();
         assertThat(vertex).isInstanceOf(SourceLineageVertex.class);
         assertThat(vertex.datasets()).hasSize(1);
         assertThat(vertex.datasets().get(0).name()).isEqualTo("paimon.db.src");
     }
 
     @Test
-    void testGetSinkProviderImplementsLineageVertexProvider() throws Exception {
+    void testSinkProviderImplementsLineageVertexProvider() throws Exception {
         FileStoreTable table =
                 createTable(new HashMap<>(), Collections.emptyList(), Arrays.asList("f0"));
 
-        DataStreamSinkProvider stub = (providerContext, dataStream) -> null;
-        SinkRuntimeProvider wrapped =
-                DataStreamProviderFactory.getSinkProvider(stub, "paimon.db.sink", table);
+        PaimonDataStreamSinkProvider provider =
+                new PaimonDataStreamSinkProvider(dataStream -> null, "paimon.db.sink", table);
 
-        assertThat(wrapped).isInstanceOf(LineageVertexProvider.class);
-        LineageVertex vertex = ((LineageVertexProvider) wrapped).getLineageVertex();
+        assertThat(provider).isInstanceOf(LineageVertexProvider.class);
+        LineageVertex vertex = provider.getLineageVertex();
         assertThat(vertex.datasets()).hasSize(1);
         assertThat(vertex.datasets().get(0).name()).isEqualTo("paimon.db.sink");
     }
