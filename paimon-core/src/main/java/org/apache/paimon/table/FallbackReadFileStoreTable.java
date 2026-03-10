@@ -47,6 +47,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SegmentsCache;
 
@@ -189,7 +190,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     @Override
     public DataTableScan newScan() {
         validateSchema();
-        return new FallbackReadScan(wrapped.newScan(), fallback.newScan());
+        return new FallbackReadScan(
+                wrapped.newScan(), fallback.newScan(), wrapped, fallback, wrapped.schema());
     }
 
     protected void validateSchema() {
@@ -356,10 +358,22 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         protected final DataTableScan mainScan;
         protected final DataTableScan fallbackScan;
+        protected final FileStoreTable wrappedTable;
+        protected final FileStoreTable fallbackTable;
+        protected final TableSchema tableSchema;
+        private PartitionPredicate partitionPredicate;
 
-        public FallbackReadScan(DataTableScan mainScan, DataTableScan fallbackScan) {
+        public FallbackReadScan(
+                DataTableScan mainScan,
+                DataTableScan fallbackScan,
+                FileStoreTable wrappedTable,
+                FileStoreTable fallbackTable,
+                TableSchema tableSchema) {
             this.mainScan = mainScan;
             this.fallbackScan = fallbackScan;
+            this.wrappedTable = wrappedTable;
+            this.fallbackTable = fallbackTable;
+            this.tableSchema = tableSchema;
         }
 
         @Override
@@ -373,6 +387,14 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withFilter(Predicate predicate) {
             mainScan.withFilter(predicate);
             fallbackScan.withFilter(predicate);
+            if (predicate != null) {
+                Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
+                        PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
+                                predicate,
+                                tableSchema.logicalRowType(),
+                                tableSchema.partitionKeys());
+                setPartitionPredicate(pair.getLeft().orElse(null));
+            }
             return this;
         }
 
@@ -387,6 +409,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withPartitionFilter(Map<String, String> partitionSpec) {
             mainScan.withPartitionFilter(partitionSpec);
             fallbackScan.withPartitionFilter(partitionSpec);
+            if (partitionSpec != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMap(
+                                tableSchema.logicalPartitionType(),
+                                partitionSpec,
+                                CoreOptions.fromMap(tableSchema.options()).partitionDefaultName()));
+            }
             return this;
         }
 
@@ -394,6 +423,11 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public FallbackReadScan withPartitionFilter(List<BinaryRow> partitions) {
             mainScan.withPartitionFilter(partitions);
             fallbackScan.withPartitionFilter(partitions);
+            if (partitions != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMultiple(
+                                tableSchema.logicalPartitionType(), partitions));
+            }
             return this;
         }
 
@@ -401,6 +435,13 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
             mainScan.withPartitionsFilter(partitions);
             fallbackScan.withPartitionsFilter(partitions);
+            if (partitions != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromMaps(
+                                tableSchema.logicalPartitionType(),
+                                partitions,
+                                CoreOptions.fromMap(tableSchema.options()).partitionDefaultName()));
+            }
             return this;
         }
 
@@ -408,6 +449,21 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
             mainScan.withPartitionFilter(partitionPredicate);
             fallbackScan.withPartitionFilter(partitionPredicate);
+            if (partitionPredicate != null) {
+                setPartitionPredicate(partitionPredicate);
+            }
+            return this;
+        }
+
+        @Override
+        public FallbackReadScan withPartitionFilter(Predicate partitionPredicate) {
+            mainScan.withPartitionFilter(partitionPredicate);
+            fallbackScan.withPartitionFilter(partitionPredicate);
+            if (partitionPredicate != null) {
+                setPartitionPredicate(
+                        PartitionPredicate.fromPredicate(
+                                tableSchema.logicalPartitionType(), partitionPredicate));
+            }
             return this;
         }
 
@@ -446,18 +502,26 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             return this;
         }
 
+        /**
+         * Builds a plan for fallback read.
+         *
+         * <p>Partitions that exist in the main branch (based on partition predicates only) are
+         * treated as complete and are read from the main branch with the full predicate. Partitions
+         * that exist only in the fallback branch are read from the fallback branch.
+         */
         @Override
         public TableScan.Plan plan() {
             List<Split> splits = new ArrayList<>();
-            Set<BinaryRow> completePartitions = new HashSet<>();
+            Set<BinaryRow> completePartitions =
+                    new HashSet<>(
+                            newPartitionListingScan(true, partitionPredicate).listPartitions());
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
                 splits.add(toFallbackSplit(dataSplit, false));
-                completePartitions.add(dataSplit.partition());
             }
 
             List<BinaryRow> remainingPartitions =
-                    fallbackScan.listPartitions().stream()
+                    newPartitionListingScan(false, partitionPredicate).listPartitions().stream()
                             .filter(p -> !completePartitions.contains(p))
                             .collect(Collectors.toList());
             if (!remainingPartitions.isEmpty()) {
@@ -471,17 +535,37 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         @Override
         public List<PartitionEntry> listPartitionEntries() {
+            DataTableScan mainListingScan = newPartitionListingScan(true, partitionPredicate);
+            DataTableScan fallbackListingScan = newPartitionListingScan(false, partitionPredicate);
             List<PartitionEntry> partitionEntries =
-                    new ArrayList<>(mainScan.listPartitionEntries());
+                    new ArrayList<>(mainListingScan.listPartitionEntries());
             Set<BinaryRow> partitions =
                     partitionEntries.stream()
                             .map(PartitionEntry::partition)
                             .collect(Collectors.toSet());
-            List<PartitionEntry> fallBackPartitionEntries = fallbackScan.listPartitionEntries();
+            List<PartitionEntry> fallBackPartitionEntries =
+                    fallbackListingScan.listPartitionEntries();
             fallBackPartitionEntries.stream()
                     .filter(e -> !partitions.contains(e.partition()))
                     .forEach(partitionEntries::add);
             return partitionEntries;
+        }
+
+        protected void setPartitionPredicate(PartitionPredicate predicate) {
+            this.partitionPredicate = predicate;
+        }
+
+        protected PartitionPredicate getPartitionPredicate() {
+            return partitionPredicate;
+        }
+
+        private DataTableScan newPartitionListingScan(
+                boolean isMain, PartitionPredicate scanPartitionPredicate) {
+            DataTableScan scan = isMain ? wrappedTable.newScan() : fallbackTable.newScan();
+            if (scanPartitionPredicate != null) {
+                scan.withPartitionFilter(scanPartitionPredicate);
+            }
+            return scan;
         }
     }
 
