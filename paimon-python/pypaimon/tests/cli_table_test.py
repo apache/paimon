@@ -1020,6 +1020,35 @@ class CliTableTest(unittest.TestCase):
                 self.assertIn('Eve', output)
                 self.assertNotIn('Alice', output)
 
+    def test_cli_table_read_where_field_not_in_select(self):
+        """Test that where filter works even when the filtered field is not in select."""
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--select', 'name,city',
+                    '--where', 'age > 30']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # age > 30: Charlie(35,Guangzhou), Eve(32,Hangzhou)
+                # Filter should work even though 'age' is not in select
+                self.assertIn('Charlie', output)
+                self.assertIn('Eve', output)
+                self.assertIn('Guangzhou', output)
+                self.assertIn('Hangzhou', output)
+                # Excluded rows should not appear
+                self.assertNotIn('Alice', output)
+                self.assertNotIn('Bob', output)
+                self.assertNotIn('David', output)
+                # The 'age' column should NOT appear in output (it was only needed for filtering)
+                self.assertNotIn(' 35', output)
+                self.assertNotIn(' 32', output)
+                self.assertNotIn(' 25', output)
+
     def test_cli_table_read_with_invalid_where(self):
         """Test table read with invalid --where clause via CLI."""
         with patch('sys.argv',

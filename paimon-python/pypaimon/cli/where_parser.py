@@ -48,6 +48,27 @@ from pypaimon.common.predicate_builder import PredicateBuilder
 from pypaimon.schema.data_types import AtomicType, DataField
 
 
+def extract_fields_from_where(where_string: str, available_fields: set) -> set:
+    """Extract all field names referenced in a WHERE clause.
+
+    Args:
+        where_string: The WHERE clause string.
+        available_fields: Set of valid field names from the table schema.
+
+    Returns:
+        A set of field names referenced in the WHERE clause.
+    """
+    if not where_string or not where_string.strip():
+        return set()
+
+    tokens = _tokenize(where_string.strip())
+    referenced_fields = set()
+    for token in tokens:
+        if token in available_fields:
+            referenced_fields.add(token)
+    return referenced_fields
+
+
 def parse_where_clause(where_string: str, fields: List[DataField]) -> Optional[Predicate]:
     """Parse a SQL-like WHERE clause string into a Predicate.
 
