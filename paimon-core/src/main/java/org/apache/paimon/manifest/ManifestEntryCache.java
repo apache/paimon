@@ -31,6 +31,7 @@ import org.apache.paimon.partition.PartitionPredicate.MultiplePartitionPredicate
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFunctionWithIOE;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectsCache;

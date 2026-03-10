@@ -114,7 +114,8 @@ public abstract class ObjectsFile<T> implements SimpleFileReader<T> {
         return readWithIOException(fileName, null);
     }
 
-    public List<T> readWithIOException(String fileName, @Nullable Long fileSize) throws IOException {
+    public List<T> readWithIOException(String fileName, @Nullable Long fileSize)
+            throws IOException {
         return readWithIOException(
                 fileName,
                 fileSize,

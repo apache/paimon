@@ -88,7 +88,8 @@ public abstract class ObjectsCache<K, V, S extends Segments> {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseHitObject();
             }
-            return convert(readFromSegments(segments, new Filters<>(readFilter, readVFilter)), convertor);
+            return convert(
+                    readFromSegments(segments, new Filters<>(readFilter, readVFilter)), convertor);
         } else {
             if (cacheMetrics != null) {
                 cacheMetrics.increaseMissedObject();
