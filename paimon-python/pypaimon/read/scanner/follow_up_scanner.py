@@ -26,4 +26,5 @@ class FollowUpScanner(ABC):
     """Determines which snapshots to scan after the initial streaming scan."""
 
     @abstractmethod
-    def should_scan(self, snapshot: Snapshot) -> bool: ...
+    def should_scan(self, snapshot: Snapshot) -> bool:
+        ...
