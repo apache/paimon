@@ -27,6 +27,7 @@ import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -65,5 +66,78 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
 
         // assert select with filter
         assertThat(sql("SELECT * FROM T WHERE id = 100")).containsOnly(Row.of(100, "name_100"));
+    }
+
+    @Test
+    public void testBTreeIndexWithMultiPartition() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_MP (pt INT, id INT, name STRING) PARTITIONED BY (pt) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+
+        // write partition 0: 100k rows
+        insertPartitionRows("T_MP", 0, 0, 500, "p0_a_");
+        insertPartitionRows("T_MP", 0, 500, 500, "p0_a_");
+        // write partition 1: 100k rows
+        insertPartitionRows("T_MP", 1, 1_000, 1_000, "p1_");
+        // write partition 0 again: 100k rows
+        insertPartitionRows("T_MP", 0, 2_000, 1_000, "p0_b_");
+
+        buildBTreeIndexForTable("T_MP", "id");
+
+        FileStoreTable table = paimonTable("T_MP");
+        List<IndexManifestEntry> btreeEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> "btree".equals(e.indexFile().indexType()))
+                        .collect(Collectors.toList());
+
+        long totalRowCount =
+                btreeEntries.stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .mapToLong(IndexFileMeta::rowCount)
+                        .sum();
+        Map<Object, Long> partitionRowCounts =
+                btreeEntries.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        IndexManifestEntry::partition,
+                                        Collectors.summingLong(e -> e.indexFile().rowCount())));
+
+        assertThat(partitionRowCounts).hasSize(2);
+        assertThat(partitionRowCounts.values()).containsExactlyInAnyOrder(1_000L, 2_000L);
+        assertThat(totalRowCount).isEqualTo(3_000L);
+
+        assertThat(sql("SELECT * FROM T_MP WHERE id = 999"))
+                .containsOnly(Row.of(0, 999, "p0_a_999"));
+        assertThat(sql("SELECT * FROM T_MP WHERE id = 1500"))
+                .containsOnly(Row.of(1, 1500, "p1_1500"));
+        assertThat(sql("SELECT * FROM T_MP WHERE id = 2500"))
+                .containsOnly(Row.of(0, 2500, "p0_b_2500"));
+    }
+
+    private void insertPartitionRows(
+            String tableName, int partition, int startId, int count, String namePrefix) {
+        final int batchSize = 5_000;
+        for (int offset = 0; offset < count; offset += batchSize) {
+            int batchStart = startId + offset;
+            int batchEnd = Math.min(startId + count, batchStart + batchSize);
+            String values =
+                    IntStream.range(batchStart, batchEnd)
+                            .mapToObj(
+                                    i ->
+                                            String.format(
+                                                    "(%d, %d, '%s%d')",
+                                                    partition, i, namePrefix, i))
+                            .collect(Collectors.joining(","));
+            sql("INSERT INTO %s VALUES %s", tableName, values);
+        }
+    }
+
+    private void buildBTreeIndexForTable(String tableName, String indexColumn) {
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.%s', index_column => '%s', index_type => 'btree')",
+                tableName, indexColumn);
     }
 }

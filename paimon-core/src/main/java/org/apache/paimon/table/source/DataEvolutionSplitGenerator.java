@@ -65,22 +65,21 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                         .sum(),
                                 openFileCost);
         return BinPacking.packForOrdered(ranges, weightFunc, targetSplitSize).stream()
-                .map(
-                        f -> {
-                            boolean rawConvertible = f.stream().allMatch(file -> file.size() == 1);
-                            List<DataFileMeta> groupFiles =
-                                    f.stream()
-                                            .flatMap(Collection::stream)
-                                            .collect(Collectors.toList());
-                            return rawConvertible
-                                    ? SplitGroup.rawConvertibleGroup(groupFiles)
-                                    : SplitGroup.nonRawConvertibleGroup(groupFiles);
-                        })
+                .map(this::toPackedSplitGroup)
                 .collect(Collectors.toList());
     }
 
     @Override
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         return splitForBatch(files);
+    }
+
+    private SplitGroup toPackedSplitGroup(List<List<DataFileMeta>> fileGroups) {
+        boolean rawConvertible = fileGroups.stream().allMatch(file -> file.size() == 1);
+        List<DataFileMeta> groupFiles =
+                fileGroups.stream().flatMap(Collection::stream).collect(Collectors.toList());
+        return rawConvertible
+                ? SplitGroup.rawConvertibleGroup(groupFiles)
+                : SplitGroup.nonRawConvertibleGroup(groupFiles);
     }
 }

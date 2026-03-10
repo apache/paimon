@@ -510,7 +510,8 @@ public class JavaPyE2ETest {
         BTreeGlobalIndexBuilder builder =
                 new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+            commit.commit(
+                    builder.build(builder.scan().get(0), IOManager.create(warehouse.toString())));
         }
 
         // assert index
@@ -578,7 +579,8 @@ public class JavaPyE2ETest {
         BTreeGlobalIndexBuilder builder =
                 new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+            commit.commit(
+                    builder.build(builder.scan().get(0), IOManager.create(warehouse.toString())));
         }
 
         // assert index
@@ -648,7 +650,8 @@ public class JavaPyE2ETest {
         BTreeGlobalIndexBuilder builder =
                 new BTreeGlobalIndexBuilder(table).withIndexType("btree").withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(builder.build(builder.scan(), IOManager.create(warehouse.toString())));
+            commit.commit(
+                    builder.build(builder.scan().get(0), IOManager.create(warehouse.toString())));
         }
 
         // assert index
