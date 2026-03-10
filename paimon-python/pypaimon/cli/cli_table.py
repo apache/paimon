@@ -104,9 +104,11 @@ def cmd_table_read(args):
             print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Apply limit if specified
+    # Apply limit: only push down when there is no where clause,
+    # because limit push-down may stop reading before enough rows
+    # pass the filter, leading to fewer results than expected.
     limit = args.limit
-    if limit:
+    if limit and not where_clause:
         read_builder = read_builder.with_limit(limit)
     
     # Scan and read
@@ -116,10 +118,22 @@ def cmd_table_read(args):
     
     read = read_builder.new_read()
 
-    # Use pandas to display as a nice table
-    df = read.to_pandas(splits)
-    if limit and len(df) > limit:
-        df = df.head(limit)
+    # Read splits incrementally, stopping early when limit is reached
+    if limit:
+        import pandas as pd
+        collected_rows = 0
+        table_list = []
+        for split in splits:
+            if collected_rows >= limit:
+                break
+            partial_df = read.to_pandas([split])
+            collected_rows += len(partial_df)
+            table_list.append(partial_df)
+        df = pd.concat(table_list, ignore_index=True) if table_list else read.to_pandas([])
+        if len(df) > limit:
+            df = df.head(limit)
+    else:
+        df = read.to_pandas(splits)
 
     # Drop extra columns that were added only for where-clause filtering
     if extra_where_columns:
