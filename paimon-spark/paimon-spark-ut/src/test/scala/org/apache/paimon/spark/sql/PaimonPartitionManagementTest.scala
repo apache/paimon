@@ -234,4 +234,80 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
         "SELECT 1 AS a, CAST('2024-06-01 10:30:01' AS TIMESTAMP) AS dt UNION ALL SELECT 2, CAST('2024-06-02 15:45:30' AS TIMESTAMP) ORDER BY dt")
     )
   }
+
+  test("Paimon Partition Management: batch drop partitions") {
+    withTable("T_Batch") {
+      spark.sql(s"""
+                   |CREATE TABLE T_Batch (a INT, dt INT, hh STRING, mm STRING)
+                   |using paimon
+                   |TBLPROPERTIES ('file.format' = 'avro')
+                   |PARTITIONED BY (dt, hh, mm)
+                   |""".stripMargin)
+
+      spark.sql(
+        "INSERT INTO T_Batch VALUES " +
+          "(1, 20240101, '00', '00'), " +
+          "(2, 20240101, '00', '01'), " +
+          "(3, 20240101, '01', '00'), " +
+          "(4, 20240102, '00', '00'), " +
+          "(5, 20240102, '00', '01')")
+      checkAnswer(
+        spark.sql("SHOW PARTITIONS T_Batch"),
+        Row("dt=20240101/hh=00/mm=00") ::
+          Row("dt=20240101/hh=00/mm=01") ::
+          Row("dt=20240101/hh=01/mm=00") ::
+          Row("dt=20240102/hh=00/mm=00") ::
+          Row("dt=20240102/hh=00/mm=01") :: Nil
+      )
+
+      // First, drop all sub-partitions for dt=20240101 by specifying only the first-level partition column dt
+      spark.sql("ALTER TABLE T_Batch DROP PARTITION (dt=20240101)")
+      checkAnswer(
+        spark.sql("SHOW PARTITIONS T_Batch"),
+        Row("dt=20240102/hh=00/mm=00") ::
+          Row("dt=20240102/hh=00/mm=01") :: Nil
+      )
+
+      // Then, drop all sub-partitions under dt=20240102 and hh='00' by specifying the first two partition columns dt and hh
+      spark.sql("ALTER TABLE T_Batch DROP PARTITION (dt=20240102, hh='00')")
+      checkAnswer(
+        spark.sql("SHOW PARTITIONS T_Batch"),
+        Nil
+      )
+    }
+  }
+
+  test("Paimon Partition Management: batch drop partitions with mixed full and partial specs") {
+    withTable("T_Mixed_Batch") {
+      spark.sql(s"""
+                   |CREATE TABLE T_Mixed_Batch (a INT, dt INT, hh STRING, mm STRING)
+                   |using paimon
+                   |TBLPROPERTIES ('file.format' = 'avro')
+                   |PARTITIONED BY (dt, hh, mm)
+                   |""".stripMargin)
+
+      spark.sql(
+        "INSERT INTO T_Mixed_Batch VALUES " +
+          "(1, 20240101, '00', '00'), " +
+          "(2, 20240101, '00', '01'), " +
+          "(3, 20240101, '01', '00'), " +
+          "(4, 20240102, '00', '00'), " +
+          "(5, 20240102, '00', '01')")
+
+      spark.sql(
+        "ALTER TABLE T_Mixed_Batch DROP PARTITION (dt=20240101, hh='00', mm='00'), " +
+          "PARTITION (dt=20240102)")
+
+      checkAnswer(
+        spark.sql("SELECT COUNT(*) FROM `T_Mixed_Batch$snapshots` WHERE commit_kind = 'OVERWRITE'"),
+        Row(1L) :: Nil
+      )
+
+      checkAnswer(
+        spark.sql("SHOW PARTITIONS T_Mixed_Batch"),
+        Row("dt=20240101/hh=00/mm=01") ::
+          Row("dt=20240101/hh=01/mm=00") :: Nil
+      )
+    }
+  }
 }
