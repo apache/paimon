@@ -102,15 +102,7 @@ class SnapshotManager:
         return str(max_snapshot_id)
 
     def get_snapshot_path(self, snapshot_id: int) -> str:
-        """
-        Get the path for a snapshot file.
-
-        Args:
-            snapshot_id: The snapshot ID
-
-        Returns:
-            Path to the snapshot file
-        """
+        """Get the file path for the given snapshot ID."""
         return f"{self.snapshot_dir}/snapshot-{snapshot_id}"
 
     def try_get_earliest_snapshot(self) -> Optional[Snapshot]:
@@ -137,13 +129,35 @@ class SnapshotManager:
         Returns:
             The latest snapshot with time_millis <= timestamp, or None if no such snapshot exists
         """
-        earliest = 1
-        latest = self.get_latest_snapshot().id
+        earliest_snap = self.try_get_earliest_snapshot()
+        latest_snap = self.get_latest_snapshot()
+
+        if earliest_snap is None or latest_snap is None:
+            return None
+
+        earliest = earliest_snap.id
+        latest = latest_snap.id
         final_snapshot = None
 
         while earliest <= latest:
             mid = earliest + (latest - earliest) // 2
             snapshot = self.get_snapshot_by_id(mid)
+
+            # Handle gaps in snapshot sequence (expired snapshots)
+            if snapshot is None:
+                # Search forward to find next existing snapshot
+                found = False
+                for i in range(mid + 1, latest + 1):
+                    snapshot = self.get_snapshot_by_id(i)
+                    if snapshot is not None:
+                        mid = i
+                        found = True
+                        break
+                if not found:
+                    # No snapshots from mid to latest, search lower half
+                    latest = mid - 1
+                    continue
+
             commit_time = snapshot.time_millis
 
             if commit_time > timestamp:
@@ -170,6 +184,5 @@ class SnapshotManager:
         snapshot_file = self.get_snapshot_path(snapshot_id)
         if not self.file_io.exists(snapshot_file):
             return None
-
         snapshot_content = self.file_io.read_file_utf8(snapshot_file)
         return JSON.from_json(snapshot_content, Snapshot)

@@ -53,6 +53,17 @@ class ManifestFileManager:
         def _process_single_manifest(manifest_file: ManifestFileMeta) -> List[ManifestEntry]:
             return self.read(manifest_file.file_name, manifest_entry_filter, drop_stats)
 
+        def _entry_identifier(e: ManifestEntry) -> tuple:
+            return (
+                tuple(e.partition.values),
+                e.bucket,
+                e.file.level,
+                e.file.file_name,
+                tuple(e.file.extra_files) if e.file.extra_files else (),
+                e.file.embedded_index,
+                e.file.external_path,
+            )
+
         deleted_entry_keys = set()
         added_entries = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -62,11 +73,11 @@ class ManifestFileManager:
                     if entry.kind == 0:  # ADD
                         added_entries.append(entry)
                     else:  # DELETE
-                        deleted_entry_keys.add(entry.identifier())
+                        deleted_entry_keys.add(_entry_identifier(entry))
 
         final_entries = [
             entry for entry in added_entries
-            if entry.identifier() not in deleted_entry_keys
+            if _entry_identifier(entry) not in deleted_entry_keys
         ]
         return final_entries
 
