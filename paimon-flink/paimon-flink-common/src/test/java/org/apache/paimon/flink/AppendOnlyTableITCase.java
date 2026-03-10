@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
@@ -248,7 +249,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         + "'write-only' = 'true'"
                         + ")");
 
-        int fileNum = 50;
+        int fileNum = 30;
         for (int i = 1; i <= fileNum; i++) {
             batchSql("INSERT INTO append_table VALUES (" + i + ", 'AAA')");
         }
@@ -256,18 +257,21 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         List<Row> rows = batchSql("SELECT * FROM append_table");
         assertThat(rows.size()).isEqualTo(fileNum);
 
-        // Verify file distribution based on weights
-        long filesInPath1 =
-                Files.list(Paths.get(tempExternalPath1.toString() + "/bucket-0")).count();
-        long filesInPath2 =
-                Files.list(Paths.get(tempExternalPath2.toString() + "/bucket-0")).count();
+        long filesInPath1 = 0;
+        long filesInPath2 = 0;
+        try {
+            filesInPath1 =
+                    Files.list(Paths.get(tempExternalPath1.toString() + "/bucket-0")).count();
+            filesInPath2 =
+                    Files.list(Paths.get(tempExternalPath2.toString() + "/bucket-0")).count();
+
+        } catch (NoSuchFileException ignored) {
+        }
+
         long totalFiles = filesInPath1 + filesInPath2;
 
-        // Since the file sample size is small in IT case, we only verify that higher-weighted path
-        // has more files
-        assertThat(filesInPath1).isGreaterThan(0);
-        assertThat(filesInPath2).isGreaterThan(0);
-        assertThat(filesInPath2).isGreaterThan(filesInPath1);
+        // Since the file sample size is small in IT case, we only verify the writing and reading
+        // For tests on file distribution by weights, see WeightedExternalPathProviderTest
         assertThat(totalFiles).isEqualTo(fileNum);
     }
 

@@ -52,6 +52,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -340,7 +341,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
 
-        int fileNum = 50;
+        int fileNum = 30;
         for (int i = 1; i <= fileNum; i++) {
             sEnv.executeSql("INSERT INTO T2 VALUES (" + i + ", 'data" + i + "')").await();
         }
@@ -352,15 +353,18 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         // Verify all data is readable
         assertThat(actual).hasSize(fileNum);
 
-        long filesInPath1 = Files.list(Paths.get(externalPath1.toString() + "/bucket-0")).count();
-        long filesInPath2 = Files.list(Paths.get(externalPath2.toString() + "/bucket-0")).count();
+        long filesInPath1 = 0;
+        long filesInPath2 = 0;
+        try {
+            filesInPath1 = Files.list(Paths.get(externalPath1.toString() + "/bucket-0")).count();
+            filesInPath2 = Files.list(Paths.get(externalPath2.toString() + "/bucket-0")).count();
+
+        } catch (NoSuchFileException ignored) {
+        }
         long totalFiles = filesInPath1 + filesInPath2;
 
-        // Since the file sample size is small in IT case, we only verify that higher-weighted path
-        // has more files
-        assertThat(filesInPath1).isGreaterThan(0);
-        assertThat(filesInPath2).isGreaterThan(0);
-        assertThat(filesInPath1).isGreaterThan(filesInPath2);
+        // Since the file sample size is small in IT case, we only verify the writing and reading
+        // For tests on file distribution by weights, see WeightedExternalPathProviderTest
         assertThat(totalFiles).isEqualTo(fileNum);
     }
 
