@@ -492,6 +492,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Function<ManifestEntry, T> finalConverter =
                 dropStats ? e -> converter.apply(dropStats(e)) : converter;
 
+        Filter<InternalRow> entryRowFilter = createEntryRowFilter();
+
         List<T> entries =
                 manifestFileFactory
                         .create()
@@ -500,9 +502,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
-                                manifestsReader.partitionFilter(),
-                                createBucketFilter(),
-                                createEntryRowFilter().and(additionalFilter),
+                                entryRowFilter,
+                                entryRowFilter.and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
