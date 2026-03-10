@@ -104,9 +104,11 @@ def cmd_table_read(args):
             print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # Apply limit if specified
+    # Apply limit: only push down when there is no where clause,
+    # because limit push-down may stop reading before enough rows
+    # pass the filter, leading to fewer results than expected.
     limit = args.limit
-    if limit:
+    if limit and not where_clause:
         read_builder = read_builder.with_limit(limit)
     
     # Scan and read

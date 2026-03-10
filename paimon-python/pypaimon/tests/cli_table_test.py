@@ -1049,6 +1049,60 @@ class CliTableTest(unittest.TestCase):
                 self.assertNotIn(' 32', output)
                 self.assertNotIn(' 25', output)
 
+    def test_cli_table_read_with_where_and_limit(self):
+        """Test that where + limit returns correct filtered results without limit push-down.
+
+        Writes data in two batches to produce multiple splits, so that limit
+        push-down would actually take effect and potentially miss matching rows
+        in later splits.
+        """
+
+        # Create a dedicated table for this test with two batches of data
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string()),
+            ('score', pa.int32()),
+        ])
+        # Important: multiple splits are required for the limit to take effect
+        schema = Schema.from_pyarrow_schema(pa_schema, options={'source.split.target-size': '1b'})
+        self.catalog.create_table('test_db.limit_test', schema, True)
+        table = self.catalog.get_table('test_db.limit_test')
+
+        def write_batch():
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            batch = pa.Table.from_pydict({
+                'id': [1, 2, 3],
+                'val': ['a', 'b', 'c'],
+                'score': [10, 20, 30],
+            }, schema=pa_schema)
+            table_write.write_arrow(batch)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        write_batch()
+        write_batch()
+        write_batch()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.limit_test',
+                    '--where', 'score = 20',
+                    '--limit', '2']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                lines = [line for line in output.strip().split('\n') if line.strip()]
+                self.assertEqual(len(lines), 3)
+                self.assertNotIn(' a ', output)
+                self.assertNotIn(' c ', output)
+
     def test_cli_table_read_with_invalid_where(self):
         """Test table read with invalid --where clause via CLI."""
         with patch('sys.argv',
