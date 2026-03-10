@@ -723,6 +723,9 @@ public class SchemaValidation {
                             || changelogProducer == ChangelogProducer.INPUT,
                     "Changelog producer must be none or input for chain table.");
             Preconditions.checkArgument(
+                    !options.deletionVectorsEnabled(),
+                    "Chain table do not support enable deletion vector");
+            Preconditions.checkArgument(
                     options.partitionTimestampPattern() != null,
                     "Partition timestamp pattern is required for chain table.");
             Preconditions.checkArgument(
