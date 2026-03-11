@@ -14,66 +14,52 @@
 #  KIND, either express or implied.  See the License for the
 #  specific language governing permissions and limitations
 #  under the License.
-"""TableSnapshot wrapper class."""
+"""TableSnapshot class with snapshot and table statistics."""
 
+from dataclasses import dataclass
 
+from pypaimon.common.json_util import json_field
 from pypaimon.snapshot.snapshot import Snapshot
 
 
+@dataclass
 class TableSnapshot:
-    """Wrapper for snapshot that includes table metadata.
-    
-    This class wraps a Snapshot and provides additional table-level information.
+    """Snapshot of a table, including basic statistics of this table.
+
+    This class wraps a Snapshot and provides additional table-level statistics
+    such as record count, file size, file count, and last file creation time.
     """
 
-    def __init__(self, snapshot: Snapshot):
-        """Initialize TableSnapshot with a Snapshot.
-        
-        Args:
-            snapshot: The Snapshot instance to wrap
-        """
-        self._snapshot = snapshot
-
-    def snapshot(self) -> Snapshot:
-        """Get the underlying Snapshot.
-        
-        Returns:
-            The wrapped Snapshot instance
-        """
-        return self._snapshot
-
-    def snapshot_json(self) -> str:
-        """Get the snapshot as JSON string.
-        
-        Returns:
-            JSON string representation of the snapshot
-        """
-        from pypaimon.common.json_util import JSON
-        return JSON.to_json(self._snapshot)
+    # Required fields
+    snapshot: Snapshot = json_field("snapshot")
+    record_count: int = json_field("recordCount")
+    file_size_in_bytes: int = json_field("fileSizeInBytes")
+    file_count: int = json_field("fileCount")
+    last_file_creation_time: int = json_field("lastFileCreationTime")
 
     @property
     def id(self) -> int:
         """Get the snapshot ID.
-        
+
         Returns:
             The snapshot ID
         """
-        return self._snapshot.id
+        return self.snapshot.id
 
     @property
     def schema_id(self) -> int:
         """Get the schema ID.
-        
+
         Returns:
             The schema ID
         """
-        return self._snapshot.schema_id
+        return self.snapshot.schema_id
 
     @property
     def time_millis(self) -> int:
         """Get the snapshot time in milliseconds.
-        
+
         Returns:
             The snapshot time
         """
-        return self._snapshot.time_millis
+        return self.snapshot.time_millis

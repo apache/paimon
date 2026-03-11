@@ -84,22 +84,13 @@ class FileStoreTable(Table):
         """Get the current branch name from options."""
         return self.options.branch()
 
-    def snapshot_manager(
-        self,
-        snapshot_loader=None,
-        cache=None
-    ):
+    def snapshot_manager(self):
         """Get the snapshot manager for this table.
-        
-        Args:
-            snapshot_loader: Optional SnapshotLoader instance for loading snapshots from catalog
-            cache: Optional cache instance for caching snapshots
-            
         Returns:
             SnapshotManager instance
         """
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
-        return SnapshotManager(self, snapshot_loader, cache)
+        return SnapshotManager(self)
 
     def tag_manager(self):
         """Get the tag manager for this table."""

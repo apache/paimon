@@ -18,6 +18,8 @@
 
 from typing import Optional
 
+from pypaimon.common.json_util import JSON
+
 
 class SnapshotLoader:
     """Loader to load latest snapshot from a catalog.
@@ -51,7 +53,7 @@ class SnapshotLoader:
             if table_snapshot is None:
                 return None
             # Get the snapshot JSON from TableSnapshot
-            return table_snapshot.snapshot_json()
+            return JSON.to_json(table_snapshot.snapshot)
         except RuntimeError as e:
             raise e
         except Exception as e:

@@ -272,6 +272,106 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIn("no-such-tag", str(context.exception))
         self.assertIn("doesn't exist", str(context.exception))
 
+    def test_catalog_load_snapshot(self):
+        """Test RESTCatalog.load_snapshot returns the latest snapshot."""
+        table_name = "default.table_for_load_snapshot"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        identifier = Identifier.from_string(table_name)
+
+        # Initially, no snapshot exists
+        table_snapshot = self.rest_catalog.load_snapshot(identifier)
+        self.assertIsNone(table_snapshot)
+
+        # Write 3 commits
+        for i in range(3):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({'col1': [i]}, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Load snapshot should return the latest (snapshot 3)
+        table_snapshot = self.rest_catalog.load_snapshot(identifier)
+        self.assertIsNotNone(table_snapshot)
+        self.assertEqual(table_snapshot.id, 3)
+
+        # Verify snapshot properties
+        snapshot = table_snapshot.snapshot
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.id, 3)
+        self.assertEqual(snapshot.schema_id, 0)
+
+    def test_catalog_load_snapshot_with_string_identifier(self):
+        """Test load_snapshot using a string identifier instead of Identifier object."""
+        table_name = "default.table_load_snapshot_str_id"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+
+        # Write 2 commits
+        for i in range(2):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({'col1': [i]}, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Use string identifier directly
+        table_snapshot = self.rest_catalog.load_snapshot(table_name)
+        self.assertIsNotNone(table_snapshot)
+        self.assertEqual(table_snapshot.id, 2)
+
+    def test_catalog_load_snapshot_nonexistent_table(self):
+        """Test that load_snapshot on a non-existent table raises an error."""
+        from pypaimon.catalog.catalog_exception import TableNotExistException
+        identifier = Identifier.from_string("default.no_such_table_for_snapshot")
+        with self.assertRaises(TableNotExistException) as context:
+            self.rest_catalog.load_snapshot(identifier)
+        self.assertIn("no_such_table_for_snapshot", str(context.exception))
+        self.assertIn("does not exist", str(context.exception))
+
+    def test_catalog_load_snapshot_after_rollback(self):
+        """Test load_snapshot returns correct snapshot after rollback."""
+        table_name = "default.table_load_snapshot_after_rollback"
+        pa_schema = pa.schema([('col1', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.rest_catalog.create_table(table_name, schema, False)
+        table = self.rest_catalog.get_table(table_name)
+        identifier = Identifier.from_string(table_name)
+
+        # Write 5 commits
+        for i in range(5):
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({'col1': [i]}, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+        # Verify latest snapshot is 5
+        table_snapshot = self.rest_catalog.load_snapshot(identifier)
+        self.assertEqual(table_snapshot.id, 5)
+
+        # Rollback to snapshot 3
+        from pypaimon.table.instant import Instant
+        self.rest_catalog.rollback_to(identifier, Instant.snapshot(3))
+
+        # Load snapshot should now return snapshot 3
+        table_snapshot = self.rest_catalog.load_snapshot(identifier)
+        self.assertIsNotNone(table_snapshot)
+        self.assertEqual(table_snapshot.id, 3)
 
 if __name__ == '__main__':
     unittest.main()
