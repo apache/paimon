@@ -37,35 +37,35 @@ public class WeightedExternalPathProviderTest {
 
     @Test
     public void testEqualWeights() {
-        int fileNum = 3000;
+        int fileNum = 30000;
         int[] weights = {10, 10, 10};
         Map<String, Integer> pathCounts = generatePaths(fileNum, weights);
 
         int expectedCount = fileNum / 3;
         for (int count : pathCounts.values()) {
-            assertThat(count).isBetween(expectedCount - 100, expectedCount + 100);
+            assertThat(count).isBetween(expectedCount - 1000, expectedCount + 1000);
         }
     }
 
     @Test
     public void testDifferentWeights() {
         int[] weights = {10, 5, 15};
-        int fileNum = 3000;
+        int fileNum = 30000;
         Map<String, Integer> pathCounts = generatePaths(fileNum, weights);
 
         int totalWeight = 30;
         assertThat(pathCounts.get("s3://bucket1/data"))
                 .isBetween(
-                        (int) (fileNum * 10.0 / totalWeight) - 100,
-                        (int) (fileNum * 10.0 / totalWeight) + 100);
+                        (int) (fileNum * 10.0 / totalWeight) - 1000,
+                        (int) (fileNum * 10.0 / totalWeight) + 1000);
         assertThat(pathCounts.get("oss://bucket2/data"))
                 .isBetween(
-                        (int) (fileNum * 5.0 / totalWeight) - 100,
-                        (int) (fileNum * 5.0 / totalWeight) + 100);
+                        (int) (fileNum * 5.0 / totalWeight) - 1000,
+                        (int) (fileNum * 5.0 / totalWeight) + 1000);
         assertThat(pathCounts.get("hdfs://namenode/data"))
                 .isBetween(
-                        (int) (fileNum * 15.0 / totalWeight) - 100,
-                        (int) (fileNum * 15.0 / totalWeight) + 100);
+                        (int) (fileNum * 15.0 / totalWeight) - 1000,
+                        (int) (fileNum * 15.0 / totalWeight) + 1000);
     }
 
     @Test

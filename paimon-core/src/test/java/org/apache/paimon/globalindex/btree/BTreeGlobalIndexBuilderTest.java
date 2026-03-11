@@ -37,6 +37,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -107,7 +108,11 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         builder.withIndexField("f0");
         builder.withIndexType("btree");
         builder.withPartitionPredicate(partitionPredicate);
-        List<CommitMessage> commitMessages = builder.build(builder.scan(), ioManager);
+        List<DataSplit> dataSplits = builder.scan();
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : dataSplits) {
+            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        }
 
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);

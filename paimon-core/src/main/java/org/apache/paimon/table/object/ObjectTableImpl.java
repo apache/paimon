@@ -46,6 +46,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -61,13 +62,19 @@ public class ObjectTableImpl implements ReadonlyTable, ObjectTable {
     private final Identifier identifier;
     private final FileIO fileIO;
     private final String location;
+    private final Map<String, String> options;
     @Nullable private final String comment;
 
     public ObjectTableImpl(
-            Identifier identifier, FileIO fileIO, String location, @Nullable String comment) {
+            Identifier identifier,
+            FileIO fileIO,
+            String location,
+            Map<String, String> options,
+            @Nullable String comment) {
         this.identifier = identifier;
         this.fileIO = fileIO;
         this.location = location;
+        this.options = options;
         this.comment = comment;
     }
 
@@ -98,7 +105,7 @@ public class ObjectTableImpl implements ReadonlyTable, ObjectTable {
 
     @Override
     public Map<String, String> options() {
-        return Collections.emptyMap();
+        return options;
     }
 
     @Override
@@ -123,7 +130,9 @@ public class ObjectTableImpl implements ReadonlyTable, ObjectTable {
 
     @Override
     public ObjectTable copy(Map<String, String> dynamicOptions) {
-        return new ObjectTableImpl(identifier, fileIO, location, comment);
+        Map<String, String> newOptions = new HashMap<>(options);
+        newOptions.putAll(dynamicOptions);
+        return new ObjectTableImpl(identifier, fileIO, location, newOptions, comment);
     }
 
     @Override

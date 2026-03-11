@@ -88,6 +88,7 @@ Notice that:
 - Chain table should ensure that the schema of each branch is consistent.
 - Only spark support now, flink will be supported later.
 - Chain compact is not supported for now, and it will be supported later.
+- Deletion vector is not supported for chain table.
 
 After creating a chain table, you can read and write data in the following ways.
 

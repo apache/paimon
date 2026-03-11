@@ -54,9 +54,10 @@ class DataBunch(FieldBunch):
 class BlobBunch(FieldBunch):
     """Files for partial field (blob files)."""
 
-    def __init__(self, expected_row_count: int):
+    def __init__(self, expected_row_count: int, row_id_push_down: bool = False):
         self._files: List[DataFileMeta] = []
         self.expected_row_count = expected_row_count
+        self.row_id_push_down = row_id_push_down
         self.latest_first_row_id = -1
         self.expected_next_first_row_id = -1
         self.latest_max_sequence_number = -1
@@ -76,26 +77,36 @@ class BlobBunch(FieldBunch):
 
         if self._files:
             first_row_id = file.first_row_id
-            if first_row_id < self.expected_next_first_row_id:
-                if file.max_sequence_number >= self.latest_max_sequence_number:
+            if self.row_id_push_down:
+                if first_row_id < self.expected_next_first_row_id:
+                    if file.max_sequence_number > self.latest_max_sequence_number:
+                        last_file = self._files.pop()
+                        self._row_count -= last_file.row_count
+                    else:
+                        return
+            else:
+                if first_row_id < self.expected_next_first_row_id:
+                    if file.max_sequence_number >= self.latest_max_sequence_number:
+                        raise ValueError(
+                            "Blob file with overlapping row id should have "
+                            "decreasing sequence number."
+                        )
+                    return
+                elif first_row_id > self.expected_next_first_row_id:
                     raise ValueError(
-                        "Blob file with overlapping row id should have decreasing sequence number."
+                        f"Blob file first row id should be continuous, expect "
+                        f"{self.expected_next_first_row_id} but got {first_row_id}"
                     )
-                return
-            elif first_row_id > self.expected_next_first_row_id:
-                raise ValueError(
-                    f"Blob file first row id should be continuous, expect "
-                    f"{self.expected_next_first_row_id} but got {first_row_id}"
-                )
 
-            if file.schema_id != self._files[0].schema_id:
-                raise ValueError(
-                    "All files in a blob bunch should have the same schema id."
-                )
-            if file.write_cols != self._files[0].write_cols:
-                raise ValueError(
-                    "All files in a blob bunch should have the same write columns."
-                )
+            if self._files:
+                if file.schema_id != self._files[0].schema_id:
+                    raise ValueError(
+                        "All files in a blob bunch should have the same schema id."
+                    )
+                if file.write_cols != self._files[0].write_cols:
+                    raise ValueError(
+                        "All files in a blob bunch should have the same write columns."
+                    )
 
         self._files.append(file)
         self._row_count += file.row_count
