@@ -37,7 +37,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -234,14 +233,13 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         List<Snapshot> skippingSnapshots =
                 findSkippingTags(taggedSnapshots, beginInclusiveId, endExclusiveId);
 
-        Optional<Snapshot> endExclusiveSnapshot =
-                snapshotsIncludingEnd.stream().filter(s -> s.id() == endExclusiveId).findAny();
-        if (!endExclusiveSnapshot.isPresent()) {
+        Snapshot lastSnapshot = snapshotsIncludingEnd.get(snapshotsIncludingEnd.size() - 1);
+        if (lastSnapshot.id() != endExclusiveId) {
             // the end exclusive snapshot is gone
             // there is no need to proceed
             return 0;
         }
-        skippingSnapshots.add(endExclusiveSnapshot.get());
+        skippingSnapshots.add(lastSnapshot);
 
         Set<String> skippingSet = null;
         try {
@@ -273,7 +271,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 duration,
                 beginInclusiveId,
                 endExclusiveId);
-        return (int) (endExclusiveId - beginInclusiveId);
+        return snapshotsExcludingEnd.size();
     }
 
     private List<Snapshot> collectSortedSnapshots(long earliestId, long endExclusiveId)
@@ -297,7 +295,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         for (CompletableFuture<Optional<Snapshot>> future : futures) {
             future.get().ifPresent(snapshots::add);
         }
-        snapshots.sort(Comparator.comparingLong(Snapshot::id));
         return snapshots;
     }
 
