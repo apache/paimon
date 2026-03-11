@@ -63,9 +63,52 @@ def cmd_table_read(args):
     # Build read pipeline
     read_builder = table.new_read_builder()
     
-    # Apply limit if specified
+    available_fields = set(field.name for field in table.table_schema.fields)
+
+    # Parse select and where options
+    select_columns = args.select
+    where_clause = args.where
+    user_columns = None
+    extra_where_columns = []
+
+    if select_columns:
+        # Parse column names (comma-separated)
+        user_columns = [col.strip() for col in select_columns.split(',')]
+
+        # Validate that all columns exist in the table schema
+        invalid_columns = [col for col in user_columns if col not in available_fields]
+        if invalid_columns:
+            print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.", file=sys.stderr)
+            sys.exit(1)
+
+    # When both select and where are specified, ensure where-referenced fields
+    # are included in the projection so the filter can work correctly.
+    if user_columns and where_clause:
+        from pypaimon.cli.where_parser import extract_fields_from_where
+        where_fields = extract_fields_from_where(where_clause, available_fields)
+        user_column_set = set(user_columns)
+        extra_where_columns = [f for f in where_fields if f not in user_column_set]
+        projection_columns = user_columns + extra_where_columns
+        read_builder = read_builder.with_projection(projection_columns)
+    elif user_columns:
+        read_builder = read_builder.with_projection(user_columns)
+
+    # Apply where filter if specified
+    if where_clause:
+        from pypaimon.cli.where_parser import parse_where_clause
+        try:
+            predicate = parse_where_clause(where_clause, table.table_schema.fields)
+            if predicate:
+                read_builder = read_builder.with_filter(predicate)
+        except ValueError as e:
+            print(f"Error: Invalid WHERE clause: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Apply limit: only push down when there is no where clause,
+    # because limit push-down may stop reading before enough rows
+    # pass the filter, leading to fewer results than expected.
     limit = args.limit
-    if limit:
+    if limit and not where_clause:
         read_builder = read_builder.with_limit(limit)
     
     # Scan and read
@@ -75,10 +118,27 @@ def cmd_table_read(args):
     
     read = read_builder.new_read()
 
-    # Use pandas to display as a nice table
-    df = read.to_pandas(splits)
-    if limit and len(df) > limit:
-        df = df.head(limit)
+    # Read splits incrementally, stopping early when limit is reached
+    if limit:
+        import pandas as pd
+        collected_rows = 0
+        table_list = []
+        for split in splits:
+            if collected_rows >= limit:
+                break
+            partial_df = read.to_pandas([split])
+            collected_rows += len(partial_df)
+            table_list.append(partial_df)
+        df = pd.concat(table_list, ignore_index=True) if table_list else read.to_pandas([])
+        if len(df) > limit:
+            df = df.head(limit)
+    else:
+        df = read.to_pandas(splits)
+
+    # Drop extra columns that were added only for where-clause filtering
+    if extra_where_columns:
+        df = df.drop(columns=extra_where_columns, errors='ignore')
+
     print(df.to_string(index=False))
 
 
@@ -527,6 +587,19 @@ def add_table_subcommands(table_parser):
     read_parser.add_argument(
         'table',
         help='Table identifier in format: database.table'
+    )
+    read_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Select specific columns to read (comma-separated, e.g., "id,name,age")'
+    )
+    read_parser.add_argument(
+        '--where', '-w',
+        type=str,
+        default=None,
+        help=('Filter condition in SQL-like syntax '
+              '(e.g., "age > 18", "name = \'Alice\' AND status IN (\'active\', \'pending\')")')
     )
     read_parser.add_argument(
         '--limit', '-l',

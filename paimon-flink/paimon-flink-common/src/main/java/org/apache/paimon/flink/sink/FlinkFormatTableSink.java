@@ -60,7 +60,9 @@ public class FlinkFormatTableSink
         return new PaimonDataStreamSinkProvider(
                 (dataStream) ->
                         new FlinkFormatTableDataStreamSink(table, overwrite, staticPartitions)
-                                .sinkFrom(dataStream));
+                                .sinkFrom(dataStream),
+                tableIdentifier.asSummaryString(),
+                table);
     }
 
     @Override

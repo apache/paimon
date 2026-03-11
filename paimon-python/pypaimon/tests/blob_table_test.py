@@ -2913,6 +2913,54 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(list(df['text']), [f'text_{i}' for i in range(num_rows)])
         self.assertEqual(list(df['video_path']), [f'video_{i}.mp4' for i in range(num_rows)])
 
+    def test_blob_with_row_id_equal(self):
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('name', pa.string()),
+            ('data', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob.target-file-size': '500 KB',
+            }
+        )
+        self.catalog.create_table('test_db.blob_rowid_equal', schema, False)
+        table = self.catalog.get_table('test_db.blob_rowid_equal')
+
+        blob_bytes = os.urandom(248 * 1024)
+        write_builder = table.new_batch_write_builder()
+        tw = write_builder.new_write()
+        tc = write_builder.new_commit()
+        batch = pa.Table.from_pydict({
+            'id': list(range(20)),
+            'name': [f'item_{i}' for i in range(20)],
+            'data': [blob_bytes] * 20,
+        }, schema=pa_schema)
+        tw.write_arrow(batch)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        from pypaimon.common.predicate_builder import PredicateBuilder
+        from pypaimon.table.special_fields import SpecialFields
+
+        rb = table.new_read_builder()
+        fields = list(table.fields)
+        fields.append(SpecialFields.ROW_ID)
+        pb = PredicateBuilder(fields)
+        pred = pb.equal(SpecialFields.ROW_ID.name, 5)
+        rb.with_filter(pred)
+
+        scan = rb.new_scan()
+        splits = scan.plan().splits()
+        read = rb.new_read()
+        result = read.to_arrow(splits)
+        self.assertEqual(result.num_rows, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

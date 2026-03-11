@@ -44,9 +44,11 @@ from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
 from pypaimon.table.iceberg.iceberg_table import IcebergTable
+from pypaimon.table.object.object_table import ObjectTable
 
 FORMAT_TABLE_TYPE = "format-table"
 ICEBERG_TABLE_TYPE = "iceberg-table"
+OBJECT_TABLE_TYPE = "object-table"
 
 
 class RESTCatalog(Catalog):
@@ -253,7 +255,7 @@ class RESTCatalog(Catalog):
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
         table = self.get_table(identifier)
-        if isinstance(table, (FormatTable, IcebergTable)):
+        if isinstance(table, (FormatTable, IcebergTable, ObjectTable)):
             unsupported_type = type(table).__name__
             raise ValueError(
                 f"drop_partitions is not supported for table type '{unsupported_type}'. "
@@ -355,6 +357,8 @@ class RESTCatalog(Catalog):
         data_file_io = external_file_io if metadata.is_external else internal_file_io
         if table_type == ICEBERG_TABLE_TYPE:
             return self._create_iceberg_table(identifier, metadata, data_file_io)
+        if table_type == OBJECT_TABLE_TYPE:
+            return self._create_object_table(identifier, metadata, data_file_io)
         catalog_env = CatalogEnvironment(
             identifier=identifier,
             uuid=metadata.uuid,
@@ -409,6 +413,23 @@ class RESTCatalog(Catalog):
             options=dict(schema.options),
             comment=schema.comment,
             uuid=metadata.uuid,
+        )
+
+    def _create_object_table(self,
+                             identifier: Identifier,
+                             metadata: TableMetadata,
+                             file_io: Callable[[str], Any],
+                             ) -> ObjectTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        file_io = file_io(location)
+        return ObjectTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            options=dict(schema.options),
+            comment=schema.comment,
         )
 
     @staticmethod
