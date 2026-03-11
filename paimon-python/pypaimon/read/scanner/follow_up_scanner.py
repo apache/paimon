@@ -27,5 +27,4 @@ class FollowUpScanner(ABC):
 
     @abstractmethod
     def should_scan(self, snapshot: Snapshot) -> bool:
-        """Return True if the given snapshot should be scanned."""
         ...
