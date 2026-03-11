@@ -195,14 +195,15 @@ public abstract class BaseDataTableSource extends FlinkTableSource
                         .limit(limit)
                         .watermarkStrategy(watermarkStrategy)
                         .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields());
-
         return new PaimonDataStreamScanProvider(
                 !unbounded,
                 env ->
                         sourceBuilder
                                 .sourceParallelism(inferSourceParallelism(env))
                                 .env(env)
-                                .build());
+                                .build(),
+                tableIdentifier.asSummaryString(),
+                table);
     }
 
     private ScanRuntimeProvider createCountStarScan() {
