@@ -79,18 +79,18 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     private static final double FLOATING = 1.2;
 
-    private final FileStoreTable table;
-    private final RowType rowType;
-    private final Options options;
-    private final long recordsPerRange;
+    protected final FileStoreTable table;
+    protected final RowType rowType;
+    protected final Options options;
+    protected final long recordsPerRange;
 
-    private String indexType;
-    private DataField indexField;
+    protected String indexType;
+    protected DataField indexField;
 
     // readRowType is composed by partition fields, indexed field and _ROW_ID field
-    private RowType readRowType;
+    protected RowType readRowType;
 
-    @Nullable private PartitionPredicate partitionPredicate;
+    @Nullable protected PartitionPredicate partitionPredicate;
 
     public BTreeGlobalIndexBuilder(Table table) {
         this.table = (FileStoreTable) table;
