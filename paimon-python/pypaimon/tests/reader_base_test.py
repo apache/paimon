@@ -488,6 +488,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('name', pa.string()),
             ('price', pa.float64()),
         ])
+        pk_write_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
         pk_schema = Schema.from_pyarrow_schema(
             pk_pa_schema,
             primary_keys=['id'],
@@ -500,7 +505,7 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-        }, schema=pk_pa_schema)
+        }, schema=pk_write_schema)
 
         pk_write_builder = pk_table.new_batch_write_builder()
         pk_writer = pk_write_builder.new_write()
@@ -558,6 +563,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('name', pa.string()),
             ('price', pa.float64()),
         ])
+        pk_pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=['id'],
@@ -570,7 +580,7 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-        }, schema=pa_schema)
+        }, schema=pk_pa_schema)
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
@@ -1047,6 +1057,12 @@ class ReaderBasicTest(unittest.TestCase):
             ('price', pa.float64()),
             ('category', pa.string())
         ])
+        pk_pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+            ('category', pa.string())
+        ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=['id'],
@@ -1060,7 +1076,7 @@ class ReaderBasicTest(unittest.TestCase):
             'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             'price': [10.5, 20.3, 30.7, 40.1, 50.9],
             'category': ['A', 'B', 'C', 'D', 'E']
-        }, schema=pa_schema)
+        }, schema=pk_pa_schema)
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
