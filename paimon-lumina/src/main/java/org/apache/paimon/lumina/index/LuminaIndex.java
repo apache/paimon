@@ -19,14 +19,13 @@
 package org.apache.paimon.lumina.index;
 
 import org.aliyun.lumina.LuminaBuilder;
+import org.aliyun.lumina.LuminaDataset;
 import org.aliyun.lumina.LuminaFileInput;
 import org.aliyun.lumina.LuminaFileOutput;
 import org.aliyun.lumina.LuminaSearcher;
 import org.aliyun.lumina.MetricType;
 
 import java.io.Closeable;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -91,18 +90,18 @@ public class LuminaIndex implements Closeable {
         return index;
     }
 
-    /** Pretrain the index with sample vectors before insertion. */
-    public void pretrain(ByteBuffer vectorBuffer, int n) {
+    /** Pretrain using a streaming dataset (no contiguous buffer needed). */
+    public void pretrainFrom(LuminaDataset dataset) {
         ensureOpen();
         ensureBuilder();
-        builder.pretrain(vectorBuffer, n);
+        builder.pretrainFrom(dataset);
     }
 
-    /** Insert a batch of vectors with IDs (zero-copy). */
-    public void insertBatch(ByteBuffer vectorBuffer, ByteBuffer idBuffer, int n) {
+    /** Insert vectors using a streaming dataset (no contiguous buffer needed). */
+    public void insertFrom(LuminaDataset dataset) {
         ensureOpen();
         ensureBuilder();
-        builder.insertBatch(vectorBuffer, idBuffer, n);
+        builder.insertFrom(dataset);
     }
 
     /** Dump (serialize) the built index to a streaming file output. */
@@ -159,21 +158,6 @@ public class LuminaIndex implements Closeable {
 
     public LuminaVectorMetric metric() {
         return metric;
-    }
-
-    public static ByteBuffer allocateVectorBuffer(int numVectors, int dimension) {
-        long size = (long) numVectors * dimension * Float.BYTES;
-        if (size > Integer.MAX_VALUE) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Vector buffer size exceeds Integer.MAX_VALUE: %d * %d * %d = %d",
-                            numVectors, dimension, Float.BYTES, size));
-        }
-        return ByteBuffer.allocateDirect((int) size).order(ByteOrder.nativeOrder());
-    }
-
-    public static ByteBuffer allocateIdBuffer(int numIds) {
-        return ByteBuffer.allocateDirect(numIds * Long.BYTES).order(ByteOrder.nativeOrder());
     }
 
     /**

@@ -65,7 +65,7 @@ public class LuminaVectorIndexOptions {
     public static final ConfigOption<String> DISTANCE_METRIC =
             ConfigOptions.key("lumina.distance.metric")
                     .stringType()
-                    .defaultValue("l2")
+                    .defaultValue("inner_product")
                     .withDescription(
                             "The distance metric for vector search (l2, cosine, inner_product).");
 
@@ -112,6 +112,19 @@ public class LuminaVectorIndexOptions {
                     .defaultValue(4)
                     .withDescription("The beam width for DiskANN search.");
 
+    public static final ConfigOption<Integer> ENCODING_PQ_M =
+            ConfigOptions.key("lumina.encoding.pq.m")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription("Number of sub-quantizers for PQ encoding.");
+
+    public static final ConfigOption<Integer> DISKANN_DISK_ENCODING_PQ_THREAD_COUNT =
+            ConfigOptions.key("lumina.diskann.disk_encoding.encoding.pq.thread_count")
+                    .intType()
+                    .defaultValue(64)
+                    .withDescription(
+                            "Number of threads used for PQ training when DiskANN disk encoding type is PQ.");
+
     public static final ConfigOption<Integer> SEARCH_PARALLEL_NUMBER =
             ConfigOptions.key("lumina.search.parallel_number")
                     .intType()
@@ -126,7 +139,7 @@ public class LuminaVectorIndexOptions {
         this.dimension = validatePositive(options.get(DIMENSION), DIMENSION.key());
         this.metric = parseMetric(options.get(DISTANCE_METRIC));
         validateEncodingMetricCombination(options.get(ENCODING_TYPE), this.metric);
-        this.luminaOptions = buildLuminaOptions(options);
+        this.luminaOptions = buildLuminaOptions(options, this.dimension);
     }
 
     /**
@@ -172,6 +185,8 @@ public class LuminaVectorIndexOptions {
                     DISKANN_BUILD_THREAD_COUNT,
                     DISKANN_SEARCH_LIST_SIZE,
                     DISKANN_SEARCH_BEAM_WIDTH,
+                    ENCODING_PQ_M,
+                    DISKANN_DISK_ENCODING_PQ_THREAD_COUNT,
                     SEARCH_PARALLEL_NUMBER);
 
     /**
@@ -180,7 +195,7 @@ public class LuminaVectorIndexOptions {
      * like {@code index.type} are always present in the metadata, matching paimon-cpp behavior.
      */
     @SuppressWarnings("unchecked")
-    private static Map<String, String> buildLuminaOptions(Options options) {
+    private static Map<String, String> buildLuminaOptions(Options options, int dimension) {
         Map<String, String> result = new LinkedHashMap<>();
         // Populate all known options with their resolved values (user-set or default).
         for (ConfigOption<?> opt : ALL_OPTIONS) {
@@ -196,7 +211,28 @@ public class LuminaVectorIndexOptions {
                 result.putIfAbsent(key.substring(LUMINA_PREFIX.length()), entry.getValue());
             }
         }
+        // PQ encoding requires pq.m <= dimension; auto-cap to avoid native init failures.
+        capPqM(result, dimension);
         return result;
+    }
+
+    /**
+     * Ensures {@code encoding.pq.m} does not exceed the vector dimension. Lumina's QuantizerTrainer
+     * requires numChunks (pq.m) to be &gt; 0 and &le; dimension.
+     */
+    private static void capPqM(Map<String, String> opts, int dimension) {
+        String encoding = opts.get(toLuminaKey(ENCODING_TYPE));
+        if (!"pq".equalsIgnoreCase(encoding)) {
+            return;
+        }
+        String pqMKey = toLuminaKey(ENCODING_PQ_M);
+        String pqMStr = opts.get(pqMKey);
+        if (pqMStr != null) {
+            int pqM = Integer.parseInt(pqMStr);
+            if (pqM > dimension) {
+                opts.put(pqMKey, String.valueOf(dimension));
+            }
+        }
     }
 
     /**
