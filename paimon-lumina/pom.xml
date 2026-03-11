@@ -36,6 +36,10 @@ under the License.
             <id>lumina</id>
             <url>https://lumina-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
         </repository>
+        <repository>
+            <id>jindodata</id>
+            <url>https://jindodata-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -103,5 +107,40 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-jindo</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun.jindodata</groupId>
+            <artifactId>jindo-core</artifactId>
+            <version>6.9.1</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun.jindodata</groupId>
+            <artifactId>jindo-sdk</artifactId>
+            <version>6.9.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*Benchmark*</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
