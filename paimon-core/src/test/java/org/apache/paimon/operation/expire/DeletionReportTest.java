@@ -38,7 +38,6 @@ public class DeletionReportTest {
     @Test
     public void testSerialization() throws IOException, ClassNotFoundException {
         DeletionReport report = new DeletionReport(1L);
-        report.setDataFilesDeleted(true);
 
         DeletionReport deserialized = InstantiationUtil.clone(report);
         assertThat(deserialized.snapshotId()).isEqualTo(1L);

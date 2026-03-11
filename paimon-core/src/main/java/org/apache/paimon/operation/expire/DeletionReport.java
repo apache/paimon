@@ -35,28 +35,12 @@ public class DeletionReport implements Serializable {
     /** Whether this task was skipped (e.g., snapshot already deleted). */
     private boolean skipped;
 
-    /** Whether data files were deleted. */
-    private boolean dataFilesDeleted;
-
-    /** Whether changelog data files were deleted. */
-    private boolean changelogDeleted;
-
-    /** Whether manifest files were deleted. */
-    private boolean manifestsDeleted;
-
-    /** Whether snapshot metadata file was deleted. */
-    private boolean snapshotDeleted;
-
     /** Buckets that had files deleted (for empty directory cleanup in parallel phase). */
     private Map<BinaryRow, Set<Integer>> deletionBuckets;
 
     public DeletionReport(long snapshotId) {
         this.snapshotId = snapshotId;
         this.skipped = false;
-        this.dataFilesDeleted = false;
-        this.changelogDeleted = false;
-        this.manifestsDeleted = false;
-        this.snapshotDeleted = false;
         this.deletionBuckets = new HashMap<>();
     }
 
@@ -80,22 +64,6 @@ public class DeletionReport implements Serializable {
         return skipped;
     }
 
-    public void setDataFilesDeleted(boolean dataFilesDeleted) {
-        this.dataFilesDeleted = dataFilesDeleted;
-    }
-
-    public void setChangelogDeleted(boolean changelogDeleted) {
-        this.changelogDeleted = changelogDeleted;
-    }
-
-    public void setManifestsDeleted(boolean manifestsDeleted) {
-        this.manifestsDeleted = manifestsDeleted;
-    }
-
-    public void setSnapshotDeleted(boolean snapshotDeleted) {
-        this.snapshotDeleted = snapshotDeleted;
-    }
-
     public void setDeletionBuckets(Map<BinaryRow, Set<Integer>> deletionBuckets) {
         this.deletionBuckets = deletionBuckets;
     }
@@ -111,14 +79,6 @@ public class DeletionReport implements Serializable {
                 + snapshotId
                 + ", skipped="
                 + skipped
-                + ", dataFilesDeleted="
-                + dataFilesDeleted
-                + ", changelogDeleted="
-                + changelogDeleted
-                + ", manifestsDeleted="
-                + manifestsDeleted
-                + ", snapshotDeleted="
-                + snapshotDeleted
                 + ", deletionBucketsCount="
                 + deletionBuckets.size()
                 + '}';

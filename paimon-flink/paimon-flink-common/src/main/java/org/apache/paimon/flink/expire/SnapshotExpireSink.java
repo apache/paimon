@@ -93,7 +93,9 @@ public class SnapshotExpireSink implements Sink<DeletionReport> {
         return new ExpireSinkWriter(initExecutor());
     }
 
-    @Override
+    /**
+     * Do not annotate with <code>@Override</code> here to maintain compatibility with Flink 1.18-.
+     */
     public SinkWriter<DeletionReport> createWriter(WriterInitContext context) throws IOException {
         return new ExpireSinkWriter(initExecutor());
     }

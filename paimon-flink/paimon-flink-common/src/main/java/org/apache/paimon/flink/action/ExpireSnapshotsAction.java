@@ -30,8 +30,6 @@ import org.apache.paimon.operation.expire.ExpireSnapshotsPlanner;
 import org.apache.paimon.operation.expire.SnapshotExpireTask;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProcedureUtils;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -75,7 +73,7 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
     private final String olderThan;
     private final Integer maxDeletes;
     private final String options;
-    private final Integer parallelism;
+    private final int parallelism;
 
     public ExpireSnapshotsAction(
             String database,
@@ -95,21 +93,20 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
         this.olderThan = olderThan;
         this.maxDeletes = maxDeletes;
         this.options = options;
-        this.parallelism = parallelism;
+        this.parallelism = resolveParallelism(parallelism);
     }
 
-    /** Returns true if forceStartFlinkJob is enabled and parallelism is greater than 1. */
-    private boolean isParallelMode() {
-        return forceStartFlinkJob && parallelism != null && parallelism > 1;
+    private int resolveParallelism(Integer parallelism) {
+        if (parallelism != null) {
+            return parallelism;
+        }
+        int envParallelism = env.getParallelism();
+        return envParallelism > 0 ? envParallelism : 1;
     }
 
     @Override
     public void run() throws Exception {
-        if (parallelism != null && parallelism > 1 && !forceStartFlinkJob) {
-            throw new IllegalArgumentException(
-                    "Parallel expire mode requires both --parallelism > 1 and --force_start_flink_job enabled.");
-        }
-        if (isParallelMode()) {
+        if (parallelism > 1) {
             // Parallel mode: build and execute Flink job (multi parallelism)
             build();
             execute(this.getClass().getSimpleName());
@@ -132,22 +129,25 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
 
     @Override
     public void build() throws Exception {
-        if (!isParallelMode()) {
+        if (parallelism <= 1) {
             // Not in parallel mode, nothing to build
             return;
         }
 
-        // Prepare table and config using shared method
-        Pair<FileStoreTable, ExpireConfig> prepared =
-                resolveExpireTableAndConfig(
-                        catalog.getTable(Identifier.fromString(database + "." + table)),
-                        options,
-                        retainMax,
-                        retainMin,
-                        olderThan,
-                        maxDeletes);
-        FileStoreTable fileStoreTable = prepared.getLeft();
-        ExpireConfig expireConfig = prepared.getRight();
+        Identifier identifier = new Identifier(database, table);
+
+        // Prepare table with dynamic options
+        HashMap<String, String> dynamicOptions = new HashMap<>();
+        ProcedureUtils.putAllOptions(dynamicOptions, options);
+        FileStoreTable fileStoreTable =
+                (FileStoreTable) catalog.getTable(identifier).copy(dynamicOptions);
+
+        // Build expire config
+        CoreOptions tableOptions = fileStoreTable.store().options();
+        ExpireConfig expireConfig =
+                ProcedureUtils.fillInSnapshotOptions(
+                                tableOptions, retainMax, retainMin, olderThan, maxDeletes)
+                        .build();
 
         // Create planner using factory method
         ExpireSnapshotsPlanner planner = ExpireSnapshotsPlanner.create(fileStoreTable);
@@ -164,8 +164,6 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
                 plan.endExclusiveId() - plan.beginInclusiveId(),
                 plan.beginInclusiveId(),
                 plan.endExclusiveId());
-
-        Identifier identifier = new Identifier(database, table);
 
         // Build worker phase
         DataStream<DeletionReport> reports = buildWorkerPhase(plan, identifier);
@@ -228,35 +226,5 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
                                 plan.snapshotFileTasks()))
                 .setParallelism(1)
                 .name("SnapshotExpire");
-    }
-
-    /**
-     * Prepares the table with dynamic options and builds the ExpireConfig.
-     *
-     * @param table the original table
-     * @param options dynamic options string
-     * @param retainMax maximum snapshots to retain
-     * @param retainMin minimum snapshots to retain
-     * @param olderThan expire snapshots older than this timestamp
-     * @param maxDeletes maximum number of snapshots to delete
-     * @return a pair of (FileStoreTable with dynamic options applied, ExpireConfig)
-     */
-    private Pair<FileStoreTable, ExpireConfig> resolveExpireTableAndConfig(
-            Table table,
-            String options,
-            Integer retainMax,
-            Integer retainMin,
-            String olderThan,
-            Integer maxDeletes) {
-        HashMap<String, String> dynamicOptions = new HashMap<>();
-        ProcedureUtils.putAllOptions(dynamicOptions, options);
-        FileStoreTable fileStoreTable = (FileStoreTable) table.copy(dynamicOptions);
-
-        CoreOptions tableOptions = fileStoreTable.store().options();
-        ExpireConfig expireConfig =
-                ProcedureUtils.fillInSnapshotOptions(
-                                tableOptions, retainMax, retainMin, olderThan, maxDeletes)
-                        .build();
-        return Pair.of(fileStoreTable, expireConfig);
     }
 }

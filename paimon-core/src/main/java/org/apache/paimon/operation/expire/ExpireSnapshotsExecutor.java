@@ -134,42 +134,30 @@ public class ExpireSnapshotsExecutor {
         if (skipper != null) {
             snapshotDeletion.cleanUnusedDataFiles(snapshot, skipper);
         }
-        DeletionReport report = new DeletionReport(task.snapshotId());
-        report.setDataFilesDeleted(true);
-
-        return report;
+        return new DeletionReport(task.snapshotId());
     }
 
     private DeletionReport executeDeleteChangelogFiles(SnapshotExpireTask task, Snapshot snapshot) {
-
-        DeletionReport report = new DeletionReport(task.snapshotId());
-
         if (snapshot.changelogManifestList() != null) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete changelog files from snapshot #" + task.snapshotId());
             }
             snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
-            report.setChangelogDeleted(true);
         }
 
-        return report;
+        return new DeletionReport(task.snapshotId());
     }
 
     private DeletionReport executeDeleteManifests(
             SnapshotExpireTask task, Snapshot snapshot, Set<String> skippingSet) {
         checkNotNull(skippingSet);
 
-        DeletionReport report = new DeletionReport(task.snapshotId());
-
         snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
-        report.setManifestsDeleted(true);
 
-        return report;
+        return new DeletionReport(task.snapshotId());
     }
 
     private DeletionReport executeDeleteSnapshot(SnapshotExpireTask task, Snapshot snapshot) {
-        DeletionReport report = new DeletionReport(task.snapshotId());
-
         // 1. Commit changelog before deleting snapshot
         if (task.isChangelogDecoupled() && changelogManager != null) {
             commitChangelog(new Changelog(snapshot));
@@ -177,9 +165,8 @@ public class ExpireSnapshotsExecutor {
 
         // 2. Delete snapshot metadata file
         snapshotManager.deleteSnapshot(snapshot.id());
-        report.setSnapshotDeleted(true);
 
-        return report;
+        return new DeletionReport(task.snapshotId());
     }
 
     // ==================== Utility Methods ====================
