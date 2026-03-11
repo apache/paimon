@@ -322,28 +322,24 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     @VisibleForTesting
     void tryRefresh() throws Exception {
-        // 0. check if async partition refresh has completed, and switch if so
-        LookupTable switchedTable = lookupTable.checkPartitionRefreshCompletion();
-        if (switchedTable != null) {
-            LookupTable oldTable = this.lookupTable;
-            this.lookupTable = switchedTable;
-            this.lookupTable.specifyPartitions(
-                    partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
-            this.path = ((FullCacheLookupTable) switchedTable).context.tempPath;
-            // close old table and clean up old temp directory
-            try {
-                oldTable.close();
-            } catch (IOException e) {
-                LOG.warn("Failed to close old lookup table for table {}.", table.name(), e);
-            }
-        }
-
         // 1. check if this time is in black list
         if (refreshBlacklist != null && !refreshBlacklist.canRefresh()) {
             return;
         }
 
-        // 2. refresh dynamic partition
+        // 2. check if async partition refresh has completed, and switch if so
+        LookupTable switchedTable = lookupTable.checkPartitionRefreshCompletion();
+        if (switchedTable != null) {
+            LookupTable oldTable = this.lookupTable;
+            lookupTable = switchedTable;
+            lookupTable.specifyPartitions(
+                    partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
+            path = ((FullCacheLookupTable) switchedTable).context.tempPath;
+            // close old table
+            oldTable.close();
+        }
+
+        // 3. refresh dynamic partition
         if (partitionLoader != null) {
             boolean partitionChanged = partitionLoader.checkRefresh();
             List<BinaryRow> partitions = partitionLoader.partitions();
@@ -360,7 +356,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
         }
 
-        // 3. refresh lookup table
+        // 4. refresh lookup table
         if (shouldRefreshLookupTable()) {
             // Check if we should do full load (close and reopen table) instead of incremental
             // refresh
