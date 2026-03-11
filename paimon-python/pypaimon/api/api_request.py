@@ -71,7 +71,7 @@ class CreateTableRequest(RESTRequest):
 
 @dataclass
 class CommitTableRequest(RESTRequest):
-    FIELD_TABLE_UUID = "tableUuid"
+    FIELD_TABLE_UUID = "tableId"
     FIELD_SNAPSHOT = "snapshot"
     FIELD_STATISTICS = "statistics"
 

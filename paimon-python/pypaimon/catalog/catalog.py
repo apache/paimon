@@ -122,10 +122,10 @@ class Catalog(ABC):
 
     @abstractmethod
     def alter_table(
-        self,
-        identifier: Union[str, Identifier],
-        changes: List[SchemaChange],
-        ignore_if_not_exists: bool = False
+            self,
+            identifier: Union[str, Identifier],
+            changes: List[SchemaChange],
+            ignore_if_not_exists: bool = False
     ):
         """Alter table with schema changes."""
 
@@ -137,6 +137,21 @@ class Catalog(ABC):
             True if the catalog supports version management, False otherwise
         """
         return False
+
+    @abstractmethod
+    def load_snapshot(self, identifier: Identifier):
+        """Load the snapshot of table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+
+        Returns:
+            TableSnapshot instance
+
+        Raises:
+            NotImplementedError: If the catalog does not support version management
+            TableNotExistException: If the table does not exist
+        """
 
     @abstractmethod
     def commit_snapshot(
@@ -178,9 +193,9 @@ class Catalog(ABC):
         )
 
     def drop_partitions(
-        self,
-        identifier: Union[str, Identifier],
-        partitions: List[Dict[str, str]],
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
     ) -> None:
         raise NotImplementedError(
             "drop_partitions is not supported by this catalog. Use REST catalog for partition drop."

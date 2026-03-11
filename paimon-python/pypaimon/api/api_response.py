@@ -23,6 +23,7 @@ from typing import Dict, Generic, List, Optional
 from pypaimon.common.json_util import T, json_field
 from pypaimon.common.options import Options
 from pypaimon.schema.schema import Schema
+from pypaimon.snapshot.snapshot import Snapshot
 
 
 @dataclass
@@ -267,3 +268,18 @@ class CommitTableResponse(RESTResponse):
 
     def is_success(self) -> bool:
         return self.success
+
+
+@dataclass
+class GetTableSnapshotResponse(RESTResponse):
+    """Response for getting table snapshot."""
+
+    FIELD_SNAPSHOT = "snapshot"
+
+    snapshot: Optional[Snapshot] = json_field(FIELD_SNAPSHOT, default=None)
+
+    def __init__(self, snapshot: Optional[Snapshot] = None):
+        self.snapshot = snapshot
+
+    def get_snapshot(self) -> Optional[Snapshot]:
+        return self.snapshot

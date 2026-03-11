@@ -243,3 +243,14 @@ class FileSystemCatalog(Catalog):
             statistics: List[PartitionStatistics]
     ) -> bool:
         raise NotImplementedError("This catalog does not support commit catalog")
+
+    def load_snapshot(self, identifier: Identifier):
+        """Load the snapshot of table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+
+        Raises:
+            NotImplementedError: FileSystemCatalog does not support version management
+        """
+        raise NotImplementedError("This catalog does not support load_snapshot")

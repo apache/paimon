@@ -380,6 +380,33 @@ class RESTApi:
             self.rest_auth_function
         )
 
+    def load_snapshot(self, identifier: Identifier) -> Optional['TableSnapshot']:
+        """Load latest snapshot for table.
+
+        Args:
+            identifier: Database name and table name.
+
+        Returns:
+            TableSnapshot instance or None if snapshot not found.
+
+        Raises:
+            NoSuchResourceException: Exception thrown on HTTP 404 means the table or the latest
+                snapshot not exists
+            ForbiddenException: Exception thrown on HTTP 403 means don't have the permission for
+                this table
+        """
+        from pypaimon.snapshot.table_snapshot import TableSnapshot
+
+        database_name, table_name = self.__validate_identifier(identifier)
+        response = self.client.get(
+            self.resource_paths.table_snapshot(database_name, table_name),
+            'GetTableSnapshotResponse',
+            self.rest_auth_function
+        )
+        if response is None or response.get_snapshot() is None:
+            return None
+        return TableSnapshot(response.get_snapshot())
+
     @staticmethod
     def __validate_identifier(identifier: Identifier):
         if not identifier:
