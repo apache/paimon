@@ -189,7 +189,9 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                                 "%s-lookup-refresh",
                                                 Thread.currentThread().getName())))
                         : null;
-        initPartitionRefresh();
+        if (partitionRefreshAsync) {
+            initPartitionRefresh();
+        }
     }
 
     private StateFactory createStateFactory() throws IOException {
@@ -370,24 +372,21 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     private void initPartitionRefresh() {
-        if (partitionRefreshAsync) {
-            this.pendingLookupTable = new AtomicReference<>(null);
-            this.pendingPath = new AtomicReference<>(null);
-            this.pendingPartitions = new AtomicReference<>(null);
-            this.partitionRefreshException = new AtomicReference<>(null);
-            this.partitionRefreshFuture = null;
-            this.currentActivePartitions =
-                    scanPartitions != null ? scanPartitions : Collections.emptyList();
-            this.partitionRefreshExecutor =
-                    Executors.newSingleThreadExecutor(
-                            r -> {
-                                Thread thread = new Thread(r);
-                                thread.setName(
-                                        Thread.currentThread().getName() + "-partition-refresh");
-                                thread.setDaemon(true);
-                                return thread;
-                            });
-        }
+        this.pendingLookupTable = new AtomicReference<>(null);
+        this.pendingPath = new AtomicReference<>(null);
+        this.pendingPartitions = new AtomicReference<>(null);
+        this.partitionRefreshException = new AtomicReference<>(null);
+        this.partitionRefreshFuture = null;
+        this.currentActivePartitions =
+                scanPartitions != null ? scanPartitions : Collections.emptyList();
+        this.partitionRefreshExecutor =
+                Executors.newSingleThreadExecutor(
+                        r -> {
+                            Thread thread = new Thread(r);
+                            thread.setName(Thread.currentThread().getName() + "-partition-refresh");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
     }
 
     @Override
