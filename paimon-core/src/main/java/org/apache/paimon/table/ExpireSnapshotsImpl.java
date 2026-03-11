@@ -37,15 +37,16 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.SnapshotManager.findPreviousOrEqualSnapshot;
 import static org.apache.paimon.utils.SnapshotManager.findPreviousSnapshot;
@@ -174,32 +175,29 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         // collect all snapshots
-        Map<Long, Snapshot> snapshots = collectSnapshots(earliestId, endExclusiveId);
-
-        // find first snapshot to expire
-        long beginInclusiveId = earliestId;
-        for (long id = endExclusiveId - 1; id >= earliestId; id--) {
-            if (!snapshots.containsKey(id)) {
-                // only latest snapshots are retained, as we cannot find this snapshot, we can
-                // assume that all snapshots preceding it have been removed
-                beginInclusiveId = id + 1;
-                break;
-            }
+        List<Snapshot> snapshotsIncludingEnd = collectSortedSnapshots(earliestId, endExclusiveId);
+        if (snapshotsIncludingEnd.isEmpty()) {
+            return 0;
         }
+        List<Snapshot> snapshotsExcludingEnd =
+                snapshotsIncludingEnd.stream()
+                        .filter(s -> s.id() != endExclusiveId)
+                        .collect(Collectors.toList());
+        long beginInclusiveId = snapshotsIncludingEnd.get(0).id();
 
+        // tags to create data file skipper
         List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
+        for (Snapshot snapshot : snapshotsIncludingEnd) {
+            long id = snapshot.id();
+            if (id == beginInclusiveId) {
+                continue;
+            }
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete merge tree files not used by snapshot #{}", id);
-            }
-            Snapshot snapshot = snapshots.get(id);
-            if (snapshot == null) {
-                beginInclusiveId = id + 1;
-                continue;
             }
             // expire merge tree files and collect changed buckets
             Predicate<ExpireFileEntry> skipper;
@@ -218,14 +216,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         // delete changelog files
         if (!expireConfig.isChangelogDecoupled()) {
-            for (long id = beginInclusiveId; id < endExclusiveId; id++) {
+            for (Snapshot snapshot : snapshotsExcludingEnd) {
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("Ready to delete changelog files from snapshot #{}", id);
-                }
-                Snapshot snapshot = snapshots.get(id);
-                if (snapshot == null) {
-                    beginInclusiveId = id + 1;
-                    continue;
+                    LOG.debug("Ready to delete changelog files from snapshot #{}", snapshot.id());
                 }
                 if (snapshot.changelogManifestList() != null) {
                     snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
@@ -241,13 +234,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         List<Snapshot> skippingSnapshots =
                 findSkippingTags(taggedSnapshots, beginInclusiveId, endExclusiveId);
 
-        Snapshot endExclusiveSnapshot = snapshots.get(endExclusiveId);
-        if (endExclusiveSnapshot == null) {
+        Optional<Snapshot> endExclusiveSnapshot =
+                snapshotsIncludingEnd.stream().filter(s -> s.id() == endExclusiveId).findAny();
+        if (!endExclusiveSnapshot.isPresent()) {
             // the end exclusive snapshot is gone
             // there is no need to proceed
             return 0;
         }
-        skippingSnapshots.add(endExclusiveSnapshot);
+        skippingSnapshots.add(endExclusiveSnapshot.get());
 
         Set<String> skippingSet = null;
         try {
@@ -256,31 +250,20 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             LOG.info("Skip cleaning manifest files due to failed to build skipping set.", e);
         }
         if (skippingSet != null) {
-            for (long id = beginInclusiveId; id < endExclusiveId; id++) {
+            for (Snapshot snapshot : snapshotsExcludingEnd) {
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("Ready to delete manifests in snapshot #{}", id);
-                }
-
-                Snapshot snapshot = snapshots.get(id);
-                if (snapshot == null) {
-                    beginInclusiveId = id + 1;
-                    continue;
+                    LOG.debug("Ready to delete manifests in snapshot #{}", snapshot.id());
                 }
                 snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
             }
         }
 
         // delete snapshot file finally
-        for (long id = beginInclusiveId; id < endExclusiveId; id++) {
-            Snapshot snapshot = snapshots.get(id);
-            if (snapshot == null) {
-                beginInclusiveId = id + 1;
-                continue;
-            }
+        for (Snapshot snapshot : snapshotsExcludingEnd) {
             if (expireConfig.isChangelogDecoupled()) {
                 commitChangelog(new Changelog(snapshot));
             }
-            snapshotManager.deleteSnapshot(id);
+            snapshotManager.deleteSnapshot(snapshot.id());
         }
 
         writeEarliestHint(endExclusiveId);
@@ -293,25 +276,28 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return (int) (endExclusiveId - beginInclusiveId);
     }
 
-    private Map<Long, Snapshot> collectSnapshots(long earliestId, long endExclusiveId)
+    private List<Snapshot> collectSortedSnapshots(long earliestId, long endExclusiveId)
             throws InterruptedException, ExecutionException {
-        Map<Long, Snapshot> snapshots = new ConcurrentHashMap<>();
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        List<CompletableFuture<Optional<Snapshot>>> futures = new ArrayList<>();
         for (long id = earliestId; id <= endExclusiveId; id++) {
             long snapshotId = id;
-            CompletableFuture<Void> future =
-                    CompletableFuture.runAsync(
+            CompletableFuture<Optional<Snapshot>> future =
+                    CompletableFuture.supplyAsync(
                             () -> {
                                 try {
-                                    Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
-                                    snapshots.put(snapshotId, snapshot);
+                                    return Optional.of(snapshotManager.tryGetSnapshot(snapshotId));
                                 } catch (FileNotFoundException ignored) {
+                                    return Optional.empty();
                                 }
                             },
                             fileExecutor);
             futures.add(future);
         }
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
+        List<Snapshot> snapshots = new ArrayList<>();
+        for (CompletableFuture<Optional<Snapshot>> future : futures) {
+            future.get().ifPresent(snapshots::add);
+        }
+        snapshots.sort(Comparator.comparingLong(Snapshot::id));
         return snapshots;
     }
 
