@@ -390,13 +390,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     private void asyncPartitionRefresh(
             List<BinaryRow> newPartitions, @Nullable Predicate partitionFilter) {
-        if (partitionRefreshFuture != null && !partitionRefreshFuture.isDone()) {
-            LOG.info(
-                    "Async partition refresh is already in progress for table {}, "
-                            + "skipping new partition change.",
-                    table.name());
-            return;
-        }
 
         LOG.info(
                 "Starting async partition refresh for table {}, new partitions detected.",
