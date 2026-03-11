@@ -75,7 +75,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     private final boolean cleanEmptyDirectories;
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
 
-    private final Executor deleteFileExecutor;
+    private final Executor fileExecutor;
 
     protected boolean changelogDecoupled;
 
@@ -102,7 +102,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         this.statsFileHandler = statsFileHandler;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.deletionBuckets = new HashMap<>();
-        this.deleteFileExecutor = FileOperationThreadPool.getExecutorService(deleteFileThreadNum);
+        this.fileExecutor = FileOperationThreadPool.getExecutorService(deleteFileThreadNum);
+    }
+
+    public Executor fileExecutor() {
+        return fileExecutor;
     }
 
     /**
@@ -461,7 +465,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         List<CompletableFuture<Void>> deletionFutures = new ArrayList<>(files.size());
         for (F file : files) {
             deletionFutures.add(
-                    CompletableFuture.runAsync(() -> deletion.accept(file), deleteFileExecutor));
+                    CompletableFuture.runAsync(() -> deletion.accept(file), fileExecutor));
         }
 
         try {
