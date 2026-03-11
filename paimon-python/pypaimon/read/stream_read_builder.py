@@ -58,6 +58,7 @@ class StreamReadBuilder:
         self._poll_interval_ms: int = 1000
         self._include_row_kind: bool = False
         self._bucket_filter: Optional[Callable[[int], bool]] = None
+        self._consumer_id: Optional[str] = None
 
     def with_filter(self, predicate: Predicate) -> 'StreamReadBuilder':
         """Set a filter predicate for the streaming read."""
@@ -82,6 +83,11 @@ class StreamReadBuilder:
         -D (delete).
         """
         self._include_row_kind = include
+        return self
+
+    def with_consumer_id(self, consumer_id: str) -> 'StreamReadBuilder':
+        """Set a consumer ID for persisting streaming read progress."""
+        self._consumer_id = consumer_id
         return self
 
     def with_bucket_filter(
@@ -113,7 +119,8 @@ class StreamReadBuilder:
             table=self.table,
             predicate=self._predicate,
             poll_interval_ms=self._poll_interval_ms,
-            bucket_filter=self._bucket_filter
+            bucket_filter=self._bucket_filter,
+            consumer_id=self._consumer_id
         )
 
     def new_read(self) -> TableRead:
