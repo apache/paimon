@@ -36,6 +36,16 @@ class ExternalPathStrategy(str, Enum):
     SPECIFIC_FS = "specific-fs"
 
 
+class ChangelogProducer(str, Enum):
+    """
+    Changelog producer for streaming reads.
+    """
+    NONE = "none"
+    INPUT = "input"
+    FULL_COMPACTION = "full-compaction"
+    LOOKUP = "lookup"
+
+
 class MergeEngine(str, Enum):
     """
     Specifies the merge engine for table with primary key.
@@ -273,6 +283,14 @@ class CoreOptions:
         .with_description("Whether to enable deletion vectors.")
     )
 
+    CHANGELOG_PRODUCER: ConfigOption[ChangelogProducer] = (
+        ConfigOptions.key("changelog-producer")
+        .enum_type(ChangelogProducer)
+        .default_value(ChangelogProducer.NONE)
+        .with_description("The changelog producer for streaming reads. "
+                          "Options: none, input, full-compaction, lookup.")
+    )
+
     MERGE_ENGINE: ConfigOption[MergeEngine] = (
         ConfigOptions.key("merge-engine")
         .enum_type(MergeEngine)
@@ -499,6 +517,9 @@ class CoreOptions:
 
     def deletion_vectors_enabled(self, default=None):
         return self.options.get(CoreOptions.DELETION_VECTORS_ENABLED, default)
+
+    def changelog_producer(self, default=None):
+        return self.options.get(CoreOptions.CHANGELOG_PRODUCER, default)
 
     def merge_engine(self, default=None):
         return self.options.get(CoreOptions.MERGE_ENGINE, default)

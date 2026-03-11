@@ -30,8 +30,6 @@ from typing import AsyncIterator, Callable, Iterator, List, Optional
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.common.predicate import Predicate
-from pypaimon.consumer.consumer import Consumer
-from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
@@ -76,9 +74,6 @@ class AsyncStreamingTableScan:
         predicate: Optional[Predicate] = None,
         poll_interval_ms: int = 1000,
         follow_up_scanner: Optional[FollowUpScanner] = None,
-        consumer_id: Optional[str] = None,
-        shard_index: Optional[int] = None,
-        shard_count: Optional[int] = None,
         bucket_filter: Optional[Callable[[int], bool]] = None,
         prefetch_enabled: bool = True,
         diff_threshold: int = 10
@@ -91,21 +86,15 @@ class AsyncStreamingTableScan:
             predicate: Optional predicate for filtering data
             poll_interval_ms: How often to poll for new snapshots (milliseconds)
             follow_up_scanner: Scanner for follow-up reads (default: DeltaFollowUpScanner)
-            consumer_id: Optional consumer ID for persisting read progress
-            shard_index: Index of this consumer for sharded reads (0 to shard_count-1)
-            shard_count: Total number of parallel consumers
-            bucket_filter: Custom bucket filter function (alternative to sharding)
+            bucket_filter: Custom bucket filter function for parallel consumption
             prefetch_enabled: Enable prefetching of next snapshot plan (default: True)
             diff_threshold: Number of snapshots gap before using diff approach (default: 10)
         """
         self.table = table
         self.predicate = predicate
         self.poll_interval = poll_interval_ms / 1000.0
-        self.consumer_id = consumer_id
 
-        # Sharding configuration for parallel consumption
-        self._shard_index = shard_index
-        self._shard_count = shard_count
+        # Bucket filter for parallel consumption
         self._bucket_filter = bucket_filter
 
         # Diff-based catch-up configuration
@@ -127,7 +116,6 @@ class AsyncStreamingTableScan:
         self._snapshot_manager = SnapshotManager(table)
         self._manifest_list_manager = ManifestListManager(table)
         self._manifest_file_manager = ManifestFileManager(table)
-        self._consumer_manager = ConsumerManager(table.file_io, table.table_path)
 
         # Scanner for determining which snapshots to read
         # Auto-select based on changelog-producer if not explicitly provided
@@ -136,12 +124,6 @@ class AsyncStreamingTableScan:
         # State tracking
         self.next_snapshot_id: Optional[int] = None
         self._initialized = False
-
-        # Restore from consumer if consumer_id is set
-        if self.consumer_id:
-            existing_consumer = self._consumer_manager.consumer(self.consumer_id)
-            if existing_consumer:
-                self.next_snapshot_id = existing_consumer.next_snapshot
 
     async def stream(self) -> AsyncIterator[Plan]:
         """
@@ -270,24 +252,6 @@ class AsyncStreamingTableScan:
         finally:
             loop.close()
 
-    def notify_checkpoint_complete(self, next_snapshot_id: int) -> None:
-        """
-        Notify that a checkpoint has completed successfully.
-
-        If a consumer_id is set, this persists the read progress to the table's
-        consumer directory. This enables:
-        - Cross-process recovery of read progress
-        - Snapshot expiration awareness of which snapshots are still needed
-
-        Args:
-            next_snapshot_id: The next snapshot ID to read from
-        """
-        if self.consumer_id:
-            self._consumer_manager.reset_consumer(
-                self.consumer_id,
-                Consumer(next_snapshot=next_snapshot_id)
-            )
-
     def _start_prefetch(self, snapshot_id: int) -> None:
         """
         Start prefetching the next scannable snapshot in a background thread.
@@ -376,11 +340,7 @@ class AsyncStreamingTableScan:
 
     def _filter_entries_for_shard(self, entries: List) -> List:
         """
-        Filter manifest entries to only those for this shard/bucket filter.
-
-        This implements the Java pattern from SnapshotReaderImpl.withShard():
-        - For sharding: bucket % shard_count == shard_index
-        - For bucket filter: apply the custom filter function
+        Filter manifest entries by bucket filter.
 
         Args:
             entries: List of ManifestEntry objects to filter
@@ -388,13 +348,8 @@ class AsyncStreamingTableScan:
         Returns:
             Filtered list of ManifestEntry objects
         """
-        if self._shard_index is not None and self._shard_count is not None:
-            # Shard-based filtering: bucket % N == index
-            return [e for e in entries if e.bucket % self._shard_count == self._shard_index]
-        elif self._bucket_filter is not None:
-            # Custom bucket filter
+        if self._bucket_filter is not None:
             return [e for e in entries if self._bucket_filter(e.bucket)]
-        # No filtering
         return entries
 
     def _create_initial_plan(self, snapshot: Snapshot) -> Plan:
@@ -413,10 +368,7 @@ class AsyncStreamingTableScan:
             self.table,
             all_manifests,
             predicate=self.predicate,
-            limit=None,
-            shard_index=self._shard_index,
-            shard_count=self._shard_count,
-            bucket_filter=self._bucket_filter
+            limit=None
         )
         return starting_scanner.scan()
 
@@ -560,10 +512,7 @@ class AsyncStreamingTableScan:
                 self.table,
                 end_snapshot_manifests,
                 predicate=self.predicate,
-                limit=None,
-                shard_index=self._shard_index,
-                shard_count=self._shard_count,
-                bucket_filter=self._bucket_filter
+                limit=None
             )
             return starting_scanner.scan()
         else:

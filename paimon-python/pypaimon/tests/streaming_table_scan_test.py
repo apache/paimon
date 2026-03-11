@@ -714,9 +714,8 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
     @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
-    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
     def test_catch_up_uses_diff_for_large_gap(
-        self, MockConsumerManager, MockManifestFileManager, MockManifestListManager, MockSnapshotManager
+        self, MockManifestFileManager, MockManifestListManager, MockSnapshotManager
     ):
         """
         When resuming from a checkpoint with a large gap, should use diff approach.
@@ -731,8 +730,6 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
         mock_snapshot_manager = MockSnapshotManager.return_value
         MockManifestListManager.return_value
         MockManifestFileManager.return_value
-        mock_consumer_manager = MockConsumerManager.return_value
-        mock_consumer_manager.consumer.return_value = None
 
         # Setup: gap is 95 snapshots (5 to 100)
         mock_snapshot_manager.get_latest_snapshot.return_value = self._create_mock_snapshot(100)
@@ -758,9 +755,8 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
     @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
-    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
     def test_catch_up_uses_delta_for_small_gap(
-        self, MockConsumerManager, MockManifestFileManager, MockManifestListManager, MockSnapshotManager
+        self, MockManifestFileManager, MockManifestListManager, MockSnapshotManager
     ):
         """
         When gap is small, should use normal delta approach (more efficient).
@@ -773,8 +769,6 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
         table, _ = self._create_mock_table(latest_snapshot_id=100)
 
         mock_snapshot_manager = MockSnapshotManager.return_value
-        mock_consumer_manager = MockConsumerManager.return_value
-        mock_consumer_manager.consumer.return_value = None
 
         mock_snapshot_manager.get_latest_snapshot.return_value = self._create_mock_snapshot(100)
 
@@ -795,9 +789,8 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
     @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
-    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
     def test_stream_triggers_diff_catch_up_for_large_gap(
-        self, MockConsumerManager, MockManifestFileManager, MockManifestListManager,
+        self, MockManifestFileManager, MockManifestListManager,
         MockSnapshotManager, MockDiffScanner
     ):
         """
@@ -812,9 +805,7 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
         table, _ = self._create_mock_table(latest_snapshot_id=100)
 
         mock_snapshot_manager = MockSnapshotManager.return_value
-        mock_consumer_manager = MockConsumerManager.return_value
         mock_diff_scanner = MockDiffScanner.return_value
-        mock_consumer_manager.consumer.return_value = None
 
         # Setup: latest is 100, start is 5 (gap=95)
         mock_snapshot_manager.get_latest_snapshot.return_value = self._create_mock_snapshot(100)
