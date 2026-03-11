@@ -252,6 +252,14 @@ abstract class RowTrackingTestBase extends PaimonSparkTestBase {
         sql("SELECT *, _ROW_ID, _SEQUENCE_NUMBER FROM t ORDER BY id"),
         Seq(Row(1, 1, 0, 1), Row(2, 2, 1, 2), Row(3, 3, 2, 3))
       )
+
+      sql("INSERT INTO t VALUES (4, '4')")
+      sql("INSERT INTO t VALUES (5, '5')")
+      sql("CALL sys.compact(table => 't')")
+      checkAnswer(
+        sql("SELECT min_sequence_number, max_sequence_number FROM `t$files`"),
+        Seq(Row(1, 5))
+      )
     }
   }
 

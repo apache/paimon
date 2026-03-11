@@ -35,6 +35,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 
@@ -49,6 +50,7 @@ public class AppendCompactTask {
 
     public AppendCompactTask(BinaryRow partition, List<DataFileMeta> files) {
         Preconditions.checkArgument(files != null);
+        files.sort(Comparator.comparingLong(DataFileMeta::minSequenceNumber));
         this.partition = partition;
         compactBefore = new ArrayList<>(files);
         compactAfter = new ArrayList<>();
