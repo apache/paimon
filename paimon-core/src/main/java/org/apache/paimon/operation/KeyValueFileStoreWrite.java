@@ -166,7 +166,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     @Override
     public FileStoreWrite<KeyValue> withMetricRegistry(MetricRegistry metricRegistry) {
         super.withMetricRegistry(metricRegistry);
-        compactManagerFactory.withCompactionMetrics(compactionMetrics);
+        compactManagerFactory.withCompactionMetrics(this.compactionMetrics);
         return this;
     }
 
