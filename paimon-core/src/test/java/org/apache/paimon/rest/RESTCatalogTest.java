@@ -2697,14 +2697,37 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
 
     @Test
     public void testObjectTable() throws Exception {
-        // create object table
+        // create object table with custom options
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "object_table");
-        Schema schema = Schema.newBuilder().option(TYPE.key(), OBJECT_TABLE.toString()).build();
+        Schema schema =
+                Schema.newBuilder()
+                        .option(TYPE.key(), OBJECT_TABLE.toString())
+                        .option("custom-key", "custom-value")
+                        .build();
         catalog.createTable(identifier, schema, false);
         Table table = catalog.getTable(identifier);
         assertThat(table).isInstanceOf(ObjectTable.class);
         ObjectTable objectTable = (ObjectTable) table;
+
+        // verify options are preserved
+        assertThat(objectTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(objectTable.options().containsKey("path")).isTrue();
+
+        // verify copy merges dynamic options
+        ObjectTable copiedTable =
+                objectTable.copy(Collections.singletonMap("dynamic-key", "dynamic-value"));
+        assertThat(copiedTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(copiedTable.options()).containsEntry("dynamic-key", "dynamic-value");
+
+        // verify copy can override existing options
+        ObjectTable overriddenTable =
+                objectTable.copy(Collections.singletonMap("custom-key", "overridden"));
+        assertThat(overriddenTable.options()).containsEntry("custom-key", "overridden");
+
+        // verify original table is not modified after copy
+        assertThat(objectTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(objectTable.options()).doesNotContainKey("dynamic-key");
 
         // write file to object path
         FileIO fileIO = objectTable.fileIO();

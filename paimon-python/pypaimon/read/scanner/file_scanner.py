@@ -15,38 +15,39 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
 import os
 import time
-import logging
-from typing import List, Optional, Dict, Set, Callable
+from typing import Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.globalindex import ScoredGlobalIndexResult
-from pypaimon.table.source.deletion_file import DeletionFile
 from pypaimon.manifest.index_manifest_file import IndexManifestFile
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.manifest.schema.manifest_file_meta import ManifestFileMeta
+from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
 from pypaimon.read.plan import Plan
-from pypaimon.read.push_down_utils import (
-    remove_row_id_filter,
-    trim_and_transform_predicate,
-)
-from pypaimon.read.scanner.append_table_split_generator import AppendTableSplitGenerator
-from pypaimon.read.scanner.data_evolution_split_generator import DataEvolutionSplitGenerator
-from pypaimon.read.scanner.primary_key_table_split_generator import PrimaryKeyTableSplitGenerator
+from pypaimon.read.push_down_utils import (remove_row_id_filter,
+                                           trim_and_transform_predicate)
+from pypaimon.read.scanner.append_table_split_generator import \
+    AppendTableSplitGenerator
+from pypaimon.read.scanner.data_evolution_split_generator import \
+    DataEvolutionSplitGenerator
+from pypaimon.read.scanner.primary_key_table_split_generator import \
+    PrimaryKeyTableSplitGenerator
 from pypaimon.read.split import DataSplit
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.table.bucket_mode import BucketMode
-from pypaimon.manifest.simple_stats_evolutions import SimpleStatsEvolutions
+from pypaimon.table.source.deletion_file import DeletionFile
 
 
 def _row_ranges_from_predicate(predicate: Optional[Predicate]) -> Optional[List]:
-    from pypaimon.utils.range import Range
     from pypaimon.table.special_fields import SpecialFields
+    from pypaimon.utils.range import Range
 
     if predicate is None:
         return None
@@ -299,9 +300,8 @@ class FileScanner:
 
     def _eval_global_index(self):
         from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scan_builder import (
+        from pypaimon.globalindex.global_index_scan_builder import \
             GlobalIndexScanBuilder
-        )
         from pypaimon.utils.range import Range
 
         # No filter and no vector search - nothing to evaluate
@@ -361,7 +361,7 @@ class FileScanner:
         return result
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
-        max_workers = max(8, self.table.options.scan_manifest_parallelism(os.cpu_count() or 8))
+        max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)
         manifest_files = [entry for entry in manifest_files if self._filter_manifest_file(entry)]
         return self.manifest_file_manager.read_entries_parallel(
             manifest_files,

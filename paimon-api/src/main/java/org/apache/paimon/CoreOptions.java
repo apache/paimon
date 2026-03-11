@@ -152,7 +152,10 @@ public class CoreOptions implements Serializable {
         MOD(
                 "mod",
                 "The modulus bucket function which will use modulus arithmetic: bucket_id = Math.floorMod(bucket_key_value, numBuckets) to get bucket. "
-                        + "Note: the bucket key must be a single field of INT or BIGINT datatype.");
+                        + "Note: the bucket key must be a single field of INT or BIGINT datatype."),
+        HIVE(
+                "hive",
+                "The hive bucket function which will use hive-compatible hash arithmetic to get bucket.");
 
         private final String value;
         private final String description;
@@ -172,6 +175,8 @@ public class CoreOptions implements Serializable {
                 return DEFAULT;
             } else if (MOD.value.equalsIgnoreCase(bucketType)) {
                 return MOD;
+            } else if (HIVE.value.equalsIgnoreCase(bucketType)) {
+                return HIVE;
             }
             throw new IllegalArgumentException(
                     "cannot match type: " + bucketType + " for bucket function");

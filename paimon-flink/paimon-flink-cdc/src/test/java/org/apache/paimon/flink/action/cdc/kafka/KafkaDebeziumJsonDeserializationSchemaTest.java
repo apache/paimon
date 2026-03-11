@@ -22,11 +22,14 @@ import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
+import org.apache.flink.api.common.functions.util.ListCollector;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Unit tests for {@link KafkaDebeziumJsonDeserializationSchema}. Ensures that deserialization
@@ -43,8 +46,11 @@ public class KafkaDebeziumJsonDeserializationSchemaTest {
         byte[] rawKey = "non-json-key".getBytes(StandardCharsets.UTF_8);
         byte[] jsonValue = "{\"after\":{\"id\":1},\"op\":\"c\"}".getBytes(StandardCharsets.UTF_8);
 
-        CdcSourceRecord record =
-                schema.deserialize(new ConsumerRecord<>("topic", 0, 0L, rawKey, jsonValue));
+        List<CdcSourceRecord> results = new ArrayList<>();
+        schema.deserialize(
+                new ConsumerRecord<>("topic", 0, 0L, rawKey, jsonValue),
+                new ListCollector<>(results));
+        CdcSourceRecord record = results.isEmpty() ? null : results.get(0);
 
         Assertions.assertNotNull(record, "Deserialization should succeed and return a record");
         Assertions.assertNull(record.getKey(), "Key should be null when the Kafka key is not JSON");

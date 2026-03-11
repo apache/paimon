@@ -157,7 +157,11 @@ public class CreateGlobalIndexProcedure extends BaseProcedure {
                                         userOptions);
 
                         try (TableCommitImpl commit =
-                                table.newCommit("global-index-create-" + UUID.randomUUID())) {
+                                table.newCommit(
+                                        "global-index-"
+                                                + indexType
+                                                + "-create-"
+                                                + UUID.randomUUID())) {
                             commit.commit(indexResults);
                         }
 
