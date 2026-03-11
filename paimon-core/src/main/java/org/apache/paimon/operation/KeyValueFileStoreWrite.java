@@ -47,7 +47,6 @@ import org.apache.paimon.mergetree.LookupFile;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeWriter;
-import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.EarlyFullCompaction;
 import org.apache.paimon.mergetree.compact.ForceUpLevel0Compaction;
@@ -68,6 +67,7 @@ import org.apache.paimon.mergetree.lookup.PersistProcessor;
 import org.apache.paimon.mergetree.lookup.PersistValueAndPosProcessor;
 import org.apache.paimon.mergetree.lookup.PersistValueProcessor;
 import org.apache.paimon.mergetree.lookup.RemoteLookupFileManager;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -285,7 +285,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         } else {
             Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
             @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
-            CompactRewriter rewriter =
+            MergeTreeCompactRewriter rewriter =
                     createRewriter(
                             partition,
                             bucket,
@@ -293,6 +293,13 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             userDefinedSeqComparator,
                             levels,
                             dvMaintainer);
+            CompactionMetrics.Reporter metricsReporter =
+                    compactionMetrics == null
+                            ? null
+                            : compactionMetrics.createReporter(partition, bucket);
+            if (metricsReporter != null) {
+                rewriter.setMetricsReporter(metricsReporter);
+            }
             return new MergeTreeCompactManager(
                     compactExecutor,
                     levels,
@@ -301,9 +308,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     options.compactionFileSize(true),
                     options.numSortedRunStopTrigger(),
                     rewriter,
-                    compactionMetrics == null
-                            ? null
-                            : compactionMetrics.createReporter(partition, bucket),
+                    metricsReporter,
                     dvMaintainer,
                     options.prepareCommitWaitCompaction(),
                     options.needLookup(),
