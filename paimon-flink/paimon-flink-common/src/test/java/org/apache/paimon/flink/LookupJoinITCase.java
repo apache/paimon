@@ -1640,7 +1640,6 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE NON_PK_DIM (pt STRING, k INT, v INT)"
                         + "PARTITIONED BY (`pt`) WITH ("
-                        + "'bucket' = '1', "
                         + "'lookup.dynamic-partition' = 'max_pt()', "
                         + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
                         + "'lookup.dynamic-partition.refresh.async' = 'true', "
