@@ -46,10 +46,12 @@ import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -146,17 +148,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.cachedException = new AtomicReference<>();
         this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
         this.partitionRefreshAsync = options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC);
-    }
-
-    @Override
-    public LookupTable copyWithNewPath(File newPath) {
-        Context newContext = context.copyWithNewPath(newPath);
-        Options options = Options.fromMap(context.table.options());
-        FullCacheLookupTable newTable = create(newContext, options.get(LOOKUP_CACHE_ROWS));
-        if (cacheRowFilter != null) {
-            newTable.specifyCacheRowFilter(cacheRowFilter);
-        }
-        return newTable;
     }
 
     @Override
@@ -442,6 +433,17 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                 }
                             }
                         });
+    }
+
+    @Override
+    public LookupTable copyWithNewPath(File newPath) {
+        Context newContext = context.copyWithNewPath(newPath);
+        Options options = Options.fromMap(context.table.options());
+        FullCacheLookupTable newTable = create(newContext, options.get(LOOKUP_CACHE_ROWS));
+        if (cacheRowFilter != null) {
+            newTable.specifyCacheRowFilter(cacheRowFilter);
+        }
+        return newTable;
     }
 
     @Nullable

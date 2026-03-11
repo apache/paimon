@@ -332,8 +332,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         if (switchedTable != null) {
             LookupTable oldTable = this.lookupTable;
             lookupTable = switchedTable;
-            lookupTable.specifyPartitions(
-                    partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
             path = ((FullCacheLookupTable) switchedTable).context.tempPath;
             // close old table
             oldTable.close();
