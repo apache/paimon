@@ -271,19 +271,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (partitionLoader == null) {
                 return lookupInternal(key);
             }
-
-            // use activePartitions from lookupTable if available (async mode tracks
-            // which partitions the current table was loaded with); otherwise fall back
-            // to partitionLoader.partitions()
-            List<BinaryRow> activePartitions = lookupTable.activePartitions();
-            List<BinaryRow> currentPartitions =
-                    activePartitions != null ? activePartitions : partitionLoader.partitions();
-            if (currentPartitions.isEmpty()) {
+            List<BinaryRow> partitions =
+                    lookupTable.scanPartitions() == null
+                            ? partitionLoader.partitions()
+                            : lookupTable.scanPartitions();
+            if (partitions.isEmpty()) {
                 return Collections.emptyList();
             }
 
             List<RowData> rows = new ArrayList<>();
-            for (BinaryRow partition : currentPartitions) {
+            for (BinaryRow partition : partitions) {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
             return rows;
@@ -330,9 +327,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         if (switchedTable != null) {
             LookupTable oldTable = this.lookupTable;
             this.lookupTable = switchedTable;
-            if (switchedTable instanceof FullCacheLookupTable) {
-                this.path = ((FullCacheLookupTable) switchedTable).context.tempPath;
-            }
+            this.lookupTable.specifyPartitions(
+                    partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
+            this.path = ((FullCacheLookupTable) switchedTable).context.tempPath;
             // close old table and clean up old temp directory
             try {
                 oldTable.close();
@@ -434,7 +431,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     @Override
     public void close() throws IOException {
         if (lookupTable != null) {
-            lookupTable.closePartitionRefresh();
             lookupTable.close();
             lookupTable = null;
         }

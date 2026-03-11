@@ -102,10 +102,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Nullable private ExecutorService partitionRefreshExecutor;
     private volatile Future<?> partitionRefreshFuture;
     private AtomicReference<LookupTable> pendingLookupTable;
-    private AtomicReference<File> pendingPath;
-    private AtomicReference<List<BinaryRow>> pendingPartitions;
     private AtomicReference<Exception> partitionRefreshException;
-    private volatile List<BinaryRow> currentActivePartitions;
 
     public FullCacheLookupTable(Context context) {
         this.table = context.table;
@@ -192,6 +189,19 @@ public abstract class FullCacheLookupTable implements LookupTable {
         if (partitionRefreshAsync) {
             initPartitionRefresh();
         }
+    }
+
+    private void initPartitionRefresh() {
+        this.pendingLookupTable = new AtomicReference<>(null);
+        this.partitionRefreshException = new AtomicReference<>(null);
+        this.partitionRefreshFuture = null;
+        this.scanPartitions = scanPartitions != null ? scanPartitions : Collections.emptyList();
+        this.partitionRefreshExecutor =
+                Executors.newSingleThreadExecutor(
+                        new ExecutorThreadFactory(
+                                String.format(
+                                        "%s-lookup-refresh-partition",
+                                        Thread.currentThread().getName())));
     }
 
     private StateFactory createStateFactory() throws IOException {
@@ -367,33 +377,10 @@ public abstract class FullCacheLookupTable implements LookupTable {
     // ---- Partition refresh implementation ----
 
     @Override
-    public boolean isPartitionRefreshAsync() {
-        return partitionRefreshAsync;
-    }
-
-    private void initPartitionRefresh() {
-        this.pendingLookupTable = new AtomicReference<>(null);
-        this.pendingPath = new AtomicReference<>(null);
-        this.pendingPartitions = new AtomicReference<>(null);
-        this.partitionRefreshException = new AtomicReference<>(null);
-        this.partitionRefreshFuture = null;
-        this.currentActivePartitions =
-                scanPartitions != null ? scanPartitions : Collections.emptyList();
-        this.partitionRefreshExecutor =
-                Executors.newSingleThreadExecutor(
-                        r -> {
-                            Thread thread = new Thread(r);
-                            thread.setName(Thread.currentThread().getName() + "-partition-refresh");
-                            thread.setDaemon(true);
-                            return thread;
-                        });
-    }
-
-    @Override
     public void startPartitionRefresh(
             List<BinaryRow> newPartitions, @Nullable Predicate partitionFilter) throws Exception {
         if (partitionRefreshAsync) {
-            startAsyncPartitionRefresh(newPartitions, partitionFilter);
+            asyncPartitionRefresh(newPartitions, partitionFilter);
         } else {
             syncPartitionRefresh(newPartitions, partitionFilter);
         }
@@ -410,7 +397,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         LOG.info("Synchronous partition refresh completed for table {}.", table.name());
     }
 
-    private void startAsyncPartitionRefresh(
+    private void asyncPartitionRefresh(
             List<BinaryRow> newPartitions, @Nullable Predicate partitionFilter) {
         if (partitionRefreshFuture != null && !partitionRefreshFuture.isDone()) {
             LOG.info(
@@ -441,8 +428,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                 newTable.open();
 
                                 pendingLookupTable.set(newTable);
-                                pendingPath.set(newPath);
-                                pendingPartitions.set(newPartitions);
                                 LOG.info(
                                         "Async partition refresh completed for table {}.",
                                         table.name());
@@ -479,43 +464,13 @@ public abstract class FullCacheLookupTable implements LookupTable {
             return null;
         }
 
-        pendingPath.getAndSet(null);
-        List<BinaryRow> newPartitions = pendingPartitions.getAndSet(null);
-
-        // set activePartitions on the new table since it will replace the current one
-        if (newPartitions != null && newTable instanceof FullCacheLookupTable) {
-            ((FullCacheLookupTable) newTable).currentActivePartitions = newPartitions;
-        }
-
         LOG.info("Switched to new lookup table for table {} with new partitions.", table.name());
         return newTable;
     }
 
-    @Nullable
     @Override
-    public List<BinaryRow> activePartitions() {
-        return currentActivePartitions;
-    }
-
-    @Override
-    public void closePartitionRefresh() throws IOException {
-        if (partitionRefreshExecutor != null) {
-            partitionRefreshExecutor.shutdownNow();
-            partitionRefreshExecutor = null;
-        }
-
-        if (pendingLookupTable != null) {
-            LookupTable pending = pendingLookupTable.getAndSet(null);
-            if (pending != null) {
-                pending.close();
-            }
-        }
-        if (pendingPath != null) {
-            File pending = pendingPath.getAndSet(null);
-            if (pending != null) {
-                FileIOUtils.deleteDirectoryQuietly(pending);
-            }
-        }
+    public List<BinaryRow> scanPartitions() {
+        return scanPartitions;
     }
 
     @Override
@@ -523,6 +478,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
         try {
             if (refreshExecutor != null) {
                 ExecutorUtils.gracefulShutdown(1L, TimeUnit.MINUTES, refreshExecutor);
+            }
+            if (partitionRefreshExecutor != null) {
+                ExecutorUtils.gracefulShutdown(1L, TimeUnit.MINUTES, partitionRefreshExecutor);
+            }
+            if (pendingLookupTable != null) {
+                LookupTable pending = pendingLookupTable.getAndSet(null);
+                if (pending != null) {
+                    pending.close();
+                }
             }
         } finally {
             stateFactory.close();

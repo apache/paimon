@@ -24,7 +24,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
-
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -34,17 +33,6 @@ import java.util.List;
 public interface LookupTable extends Closeable {
 
     void specifyPartitions(List<BinaryRow> scanPartitions, @Nullable Predicate partitionFilter);
-
-    /**
-     * Create a new LookupTable instance with the same configuration but a different temp path. The
-     * new table is not opened yet.
-     *
-     * @throws UnsupportedOperationException if the implementation does not support this operation
-     */
-    default LookupTable copyWithNewPath(File newPath) {
-        throw new UnsupportedOperationException(
-                "copyWithNewPath is not supported by " + getClass().getSimpleName());
-    }
 
     void open() throws Exception;
 
@@ -58,9 +46,15 @@ public interface LookupTable extends Closeable {
 
     // ---- Partition refresh methods ----
 
-    /** Whether partition refresh is configured to run asynchronously. */
-    default boolean isPartitionRefreshAsync() {
-        return false;
+    /**
+     * Create a new LookupTable instance with the same configuration but a different temp path. The
+     * new table is not opened yet.
+     *
+     * @throws UnsupportedOperationException if the implementation does not support this operation
+     */
+    default LookupTable copyWithNewPath(File newPath) {
+        throw new UnsupportedOperationException(
+                "copyWithNewPath is not supported by " + getClass().getSimpleName());
     }
 
     /**
@@ -96,10 +90,7 @@ public interface LookupTable extends Closeable {
      *     table
      */
     @Nullable
-    default List<BinaryRow> activePartitions() {
+    default List<BinaryRow> scanPartitions() {
         return null;
     }
-
-    /** Close partition refresh resources (executor, pending tables, etc.). */
-    default void closePartitionRefresh() throws IOException {}
 }
