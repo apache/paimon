@@ -551,6 +551,140 @@ table.rollback_to('v3')  # tag name
 The `rollback_to` method accepts either an `int` (snapshot ID) or a `str` (tag name) and automatically dispatches
 to the appropriate rollback logic.
 
+## Streaming Read
+
+Streaming reads allow you to continuously read new data as it arrives in a Paimon table. This is useful for building
+real-time data pipelines and ETL jobs.
+
+### Basic Streaming Read
+
+Use `StreamReadBuilder` to create a streaming scan that continuously polls for new snapshots:
+
+```python
+table = catalog.get_table('database_name.table_name')
+
+# Create streaming read builder
+stream_builder = table.new_stream_read_builder()
+stream_builder.with_poll_interval_ms(1000)  # Poll every 1 second
+
+# Create streaming scan and table read
+scan = stream_builder.new_streaming_scan()
+table_read = stream_builder.new_read()
+
+# Async streaming (recommended for ETL pipelines)
+import asyncio
+
+async def process_stream():
+    async for plan in scan.stream():
+        for split in plan.splits():
+            arrow_batch = table_read.to_arrow([split])
+            # Process the data
+            print(f"Received {arrow_batch.num_rows} rows")
+
+asyncio.run(process_stream())
+```
+
+### Synchronous Streaming
+
+For simpler use cases, you can use the synchronous wrapper:
+
+```python
+# Synchronous streaming
+for plan in scan.stream_sync():
+    arrow_table = table_read.to_arrow(plan.splits())
+    process(arrow_table)
+```
+
+### Manual Position Control
+
+You can directly read and set the scan position via `next_snapshot_id`:
+
+```python
+# Save current position
+saved_position = scan.next_snapshot_id
+
+# Later, restore position
+scan.next_snapshot_id = saved_position
+
+# Or start from a specific snapshot
+scan.next_snapshot_id = 42
+```
+
+### Filtering Streaming Data
+
+You can apply predicates and projections to streaming reads:
+
+```python
+stream_builder = table.new_stream_read_builder()
+
+# Build predicate
+predicate_builder = stream_builder.new_predicate_builder()
+predicate = predicate_builder.greater_than('timestamp', 1704067200000)
+
+# Apply filter and projection
+stream_builder.with_filter(predicate)
+stream_builder.with_projection(['id', 'name', 'timestamp'])
+
+scan = stream_builder.new_streaming_scan()
+```
+
+Key points about streaming reads:
+
+- **Poll Interval**: Controls how often to check for new snapshots (default: 1000ms)
+- **Initial Scan**: First iteration returns all existing data, subsequent iterations return only new data
+- **Commit Types**: By default, only APPEND commits are processed; COMPACT and OVERWRITE are skipped
+
+### Parallel Consumption
+
+For high-throughput streaming, you can run multiple consumers in parallel, each reading a disjoint subset of buckets.
+This is similar to Kafka consumer groups.
+
+**Using `with_buckets()` for explicit bucket assignment**:
+
+```python
+# Consumer 0 reads buckets 0, 1, 2
+stream_builder.with_buckets([0, 1, 2])
+
+# Consumer 1 reads buckets 3, 4, 5
+stream_builder.with_buckets([3, 4, 5])
+```
+
+**Using `with_bucket_filter()` for custom filtering**:
+
+```python
+# Read only even buckets
+stream_builder.with_bucket_filter(lambda b: b % 2 == 0)
+```
+
+### Row Kind Support
+
+For changelog streams, you can include the row kind to distinguish between inserts, updates, and deletes:
+
+```python
+stream_builder = table.new_stream_read_builder()
+stream_builder.with_include_row_kind(True)
+
+scan = stream_builder.new_streaming_scan()
+table_read = stream_builder.new_read()
+
+async for plan in scan.stream():
+    arrow_table = table_read.to_arrow(plan.splits())
+    for row in arrow_table.to_pylist():
+        row_kind = row['_row_kind']  # +I, -U, +U, or -D
+        if row_kind == '+I':
+            handle_insert(row)
+        elif row_kind == '-D':
+            handle_delete(row)
+        elif row_kind in ('-U', '+U'):
+            handle_update(row)
+```
+
+Row kind values:
+- `+I`: Insert
+- `-U`: Update before (old value)
+- `+U`: Update after (new value)
+- `-D`: Delete
+
 ## Data Types
 
 | Python Native Type  | PyArrow Type                                     | Paimon Type                       |
@@ -624,3 +758,6 @@ The following shows the supported features of Python Paimon compared to Java Pai
     - Reading and writing blob data
     - `with_shard` feature
     - Rollback feature
+    - Streaming reads
+    - Parallel consumption with bucket filtering
+    - Row kind support for changelog streams
