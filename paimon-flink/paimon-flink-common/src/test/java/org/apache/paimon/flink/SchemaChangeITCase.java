@@ -1740,7 +1740,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO T_PK_PART VALUES(1, 100, 'buy', '2024-01-01', '10')");
 
-        // Add single column
+        //  Add single column
         sql("ALTER TABLE T_PK_PART ADD score DOUBLE");
 
         List<Row> result = sql("SHOW CREATE TABLE T_PK_PART");
