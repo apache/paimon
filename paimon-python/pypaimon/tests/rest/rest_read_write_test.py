@@ -286,7 +286,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
                                                 'bucket': '2',
                                                 'file.format': 'avro'
                                             })
-        self.rest_catalog.create_table('default.test_pk_avro', schema, True)
+        self.rest_catalog.create_table('default.test_pk_avro', schema, False)
         table = self.rest_catalog.get_table('default.test_pk_avro')
         self._write_test_table(table)
 

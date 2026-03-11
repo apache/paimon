@@ -41,6 +41,11 @@ class SimpleTableTest(unittest.TestCase):
             ('k', pa.int32()),
             ('v', pa.int64())
         ])
+        cls.pk_pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('k', pa.int32(), nullable=False),
+            ('v', pa.int64())
+        ])
 
     @classmethod
     def tearDownClass(cls):
@@ -72,7 +77,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1, 1],
             'k': [10, 20],
             'v': [100, 200]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data1)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -85,7 +90,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [2, 2],
             'k': [30, 40],
             'v': [101, 201]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data2)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -98,7 +103,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [3, 3],
             'k': [50, 60],
             'v': [500, 600]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data3)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -122,7 +127,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1, 1, 2, 2],
             'k': [10, 20, 30, 40],
             'v': [100, 200, 101, 201]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
 
         self.assertEqual(result_sorted.num_rows, 4)
         self.assertEqual(result_sorted.column('pt').to_pylist(), expected.column('pt').to_pylist())
@@ -173,7 +178,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1, 1],
             'k': [10, 20],
             'v': [100, 200]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -197,7 +202,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1, 1],
             'k': [10, 20],
             'v': [100, 200]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -237,7 +242,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1],
             'k': [10],
             'v': [100]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -274,7 +279,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1],
             'k': [10],
             'v': [100]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -317,7 +322,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1],
             'k': [10],
             'v': [100]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -348,7 +353,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1],
             'k': [10],
             'v': [100]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -388,7 +393,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1, 1],
             'k': [10, 20],
             'v': [100, 200]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data1)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -401,7 +406,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [2, 2],
             'k': [30, 40],
             'v': [101, 201]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data2)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -427,7 +432,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1, 1],
             'k': [10, 20],
             'v': [100, 200]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
 
         self.assertEqual(result_sorted.num_rows, 2)
         self.assertEqual(result_sorted.column('pt').to_pylist(), expected.column('pt').to_pylist())
@@ -559,7 +564,7 @@ class SimpleTableTest(unittest.TestCase):
                 'pt': [1],
                 'k': [i],
                 'v': [i * 100]
-            }, schema=self.pa_schema)
+            }, schema=self.pk_pa_schema)
             table_write.write_arrow(data)
             table_commit.commit(table_write.prepare_commit())
             table_write.close()
@@ -596,7 +601,7 @@ class SimpleTableTest(unittest.TestCase):
                 'pt': [1],
                 'k': [i],
                 'v': [i * 100]
-            }, schema=self.pa_schema)
+            }, schema=self.pk_pa_schema)
             table_write.write_arrow(data)
             table_commit.commit(table_write.prepare_commit())
             table_write.close()
@@ -638,7 +643,7 @@ class SimpleTableTest(unittest.TestCase):
                 'pt': [1],
                 'k': [i],
                 'v': [i * 100]
-            }, schema=self.pa_schema)
+            }, schema=self.pk_pa_schema)
             table_write.write_arrow(data)
             table_commit.commit(table_write.prepare_commit())
             table_write.close()
@@ -670,7 +675,7 @@ class SimpleTableTest(unittest.TestCase):
             'pt': [1],
             'k': [10],
             'v': [100]
-        }, schema=self.pa_schema)
+        }, schema=self.pk_pa_schema)
         table_write.write_arrow(data)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
