@@ -455,10 +455,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
         Exception asyncException = partitionRefreshException.getAndSet(null);
         if (asyncException != null) {
-            LOG.warn(
-                    "Async partition refresh had failed for table {}, "
-                            + "will retry on next partition change. Continuing with old partitions.",
-                    table.name());
+            LOG.error(
+                    "Async partition refresh failed for table {}, " + "will stop running.",
+                    table.name(),
+                    asyncException);
+            throw asyncException;
         }
 
         LookupTable newTable = pendingLookupTable.getAndSet(null);

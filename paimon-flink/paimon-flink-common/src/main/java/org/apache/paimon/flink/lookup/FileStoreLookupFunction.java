@@ -330,11 +330,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         // 2. check if async partition refresh has completed, and switch if so
         LookupTable switchedTable = lookupTable.checkPartitionRefreshCompletion();
         if (switchedTable != null) {
-            LookupTable oldTable = this.lookupTable;
+            close();
             lookupTable = switchedTable;
             path = ((FullCacheLookupTable) switchedTable).context.tempPath;
-            // close old table
-            oldTable.close();
         }
 
         // 3. refresh dynamic partition

@@ -59,7 +59,7 @@ public interface LookupTable extends Closeable {
     }
 
     /**
-     * Start a partition refresh (synchronous or asynchronous depending on configuration).
+     * Start refresh partition refresh.
      *
      * @param newPartitions the new partitions to refresh to
      * @param partitionFilter the partition filter for the new partitions
