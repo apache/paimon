@@ -27,7 +27,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetTableTokenResponse,
                                        ListDatabasesResponse,
                                        ListTablesResponse, PagedList,
-                                       PagedResponse)
+                                       PagedResponse, GetTableSnapshotResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
@@ -395,17 +395,15 @@ class RESTApi:
             ForbiddenException: Exception thrown on HTTP 403 means don't have the permission for
                 this table
         """
-        from pypaimon.snapshot.table_snapshot import TableSnapshot
-
         database_name, table_name = self.__validate_identifier(identifier)
         response = self.client.get(
             self.resource_paths.table_snapshot(database_name, table_name),
-            'GetTableSnapshotResponse',
+            GetTableSnapshotResponse,
             self.rest_auth_function
         )
-        if response is None or response.get_snapshot() is None:
+        if response is None:
             return None
-        return TableSnapshot(response.get_snapshot())
+        return response.get_snapshot()
 
     @staticmethod
     def __validate_identifier(identifier: Identifier):

@@ -23,7 +23,7 @@ from typing import Dict, Generic, List, Optional
 from pypaimon.common.json_util import T, json_field
 from pypaimon.common.options import Options
 from pypaimon.schema.schema import Schema
-from pypaimon.snapshot.snapshot import Snapshot
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 
 
 @dataclass
@@ -38,6 +38,18 @@ class RESTResponse(ABC):
 
 @dataclass
 class ErrorResponse(RESTResponse):
+    """Error response"""
+    RESOURCE_TYPE_DATABASE = "DATABASE"
+    RESOURCE_TYPE_TABLE = "TABLE"
+    RESOURCE_TYPE_VIEW = "VIEW"
+    RESOURCE_TYPE_FUNCTION = "FUNCTION"
+    RESOURCE_TYPE_COLUMN = "COLUMN"
+    RESOURCE_TYPE_SNAPSHOT = "SNAPSHOT"
+    RESOURCE_TYPE_TAG = "TAG"
+    RESOURCE_TYPE_BRANCH = "BRANCH"
+    RESOURCE_TYPE_DEFINITION = "DEFINITION"
+    RESOURCE_TYPE_DIALECT = "DIALECT"
+
     resource_type: Optional[str] = json_field("resourceType", default=None)
     resource_name: Optional[str] = json_field("resourceName", default=None)
     message: Optional[str] = json_field("message", default=None)
@@ -276,10 +288,10 @@ class GetTableSnapshotResponse(RESTResponse):
 
     FIELD_SNAPSHOT = "snapshot"
 
-    snapshot: Optional[Snapshot] = json_field(FIELD_SNAPSHOT, default=None)
+    snapshot: Optional[TableSnapshot] = json_field(FIELD_SNAPSHOT, default=None)
 
-    def __init__(self, snapshot: Optional[Snapshot] = None):
+    def __init__(self, snapshot: Optional[TableSnapshot] = None):
         self.snapshot = snapshot
 
-    def get_snapshot(self) -> Optional[Snapshot]:
+    def get_snapshot(self) -> Optional[TableSnapshot]:
         return self.snapshot

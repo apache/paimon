@@ -35,7 +35,7 @@ from pypaimon.api.api_request import (AlterTableRequest, CreateDatabaseRequest,
 from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        GetTableResponse, ListDatabasesResponse,
                                        ListTablesResponse, PagedList,
-                                       RESTResponse)
+                                       RESTResponse, ErrorResponse)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
@@ -45,44 +45,11 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 TableAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.json_util import JSON, json_field
+from pypaimon.common.json_util import JSON
 from pypaimon import Schema
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
-
-
-@dataclass
-class ErrorResponse(RESTResponse):
-    """Error response"""
-    RESOURCE_TYPE_DATABASE = "database"
-    RESOURCE_TYPE_TABLE = "table"
-    RESOURCE_TYPE_VIEW = "view"
-    RESOURCE_TYPE_FUNCTION = "function"
-    RESOURCE_TYPE_COLUMN = "column"
-    RESOURCE_TYPE_SNAPSHOT = "snapshot"
-    RESOURCE_TYPE_TAG = "tag"
-    RESOURCE_TYPE_BRANCH = "branch"
-    RESOURCE_TYPE_DEFINITION = "definition"
-    RESOURCE_TYPE_DIALECT = "dialect"
-
-    resource_type: Optional[str] = json_field("resourceType", default=None)
-    resource_name: Optional[str] = json_field("resourceName", default=None)
-    message: Optional[str] = json_field("message", default=None)
-    code: Optional[int] = json_field("code", default=None)
-
-    def __init__(
-        self,
-        resource_type: Optional[str] = None,
-        resource_name: Optional[str] = None,
-        message: Optional[str] = None,
-        code: Optional[int] = None,
-    ):
-        self.resource_type = resource_type
-        self.resource_name = resource_name
-        self.message = message
-        self.code = code
-
 
 # Constants
 DEFAULT_MAX_RESULTS = 100
