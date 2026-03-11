@@ -187,7 +187,43 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 projectFields,
                 joinKeys);
 
-        this.lookupTable = createLookupTable(path, projection);
+        LOG.info("Creating lookup table for {}.", table.name());
+        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
+                && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
+            if (isRemoteServiceAvailable(table)) {
+                this.lookupTable =
+                        PrimaryKeyPartialLookupTable.createRemoteTable(table, projection, joinKeys);
+                LOG.info(
+                        "Remote service is available. Created PrimaryKeyPartialLookupTable with remote service.");
+            } else {
+                try {
+                    this.lookupTable =
+                            PrimaryKeyPartialLookupTable.createLocalTable(
+                                    table, projection, path, joinKeys, getRequireCachedBucketIds());
+                    LOG.info(
+                            "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
+                } catch (UnsupportedOperationException e) {
+                    LOG.info(
+                            "Remote service isn't available. Cannot create PrimaryKeyPartialLookupTable with LocalQueryExecutor "
+                                    + "because {}. Will create FullCacheLookupTable.",
+                            e.getMessage());
+                }
+            }
+        }
+
+        if (lookupTable == null) {
+            FullCacheLookupTable.Context context =
+                    new FullCacheLookupTable.Context(
+                            table,
+                            projection,
+                            predicate,
+                            createProjectedPredicate(projection),
+                            path,
+                            joinKeys,
+                            getRequireCachedBucketIds());
+            this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
+            LOG.info("Created {}.", lookupTable.getClass().getSimpleName());
+        }
 
         if (partitionLoader != null) {
             partitionLoader.open();
@@ -203,59 +239,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             lookupTable.specifyCacheRowFilter(cacheRowFilter);
         }
         lookupTable.open();
-    }
-
-    /**
-     * Create a new {@link LookupTable} instance. This method is used both during initial open and
-     * during async partition refresh to create a new LookupTable with a separate temp directory.
-     */
-    private LookupTable createLookupTable(File tablePath, int[] projection) {
-        Options options = Options.fromMap(table.options());
-        LookupTable newLookupTable = null;
-
-        LOG.info("Creating lookup table for {}.", table.name());
-        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
-                && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
-            if (isRemoteServiceAvailable(table)) {
-                newLookupTable =
-                        PrimaryKeyPartialLookupTable.createRemoteTable(table, projection, joinKeys);
-                LOG.info(
-                        "Remote service is available. Created PrimaryKeyPartialLookupTable with remote service.");
-            } else {
-                try {
-                    newLookupTable =
-                            PrimaryKeyPartialLookupTable.createLocalTable(
-                                    table,
-                                    projection,
-                                    tablePath,
-                                    joinKeys,
-                                    getRequireCachedBucketIds());
-                    LOG.info(
-                            "Remote service isn't available. Created PrimaryKeyPartialLookupTable with LocalQueryExecutor.");
-                } catch (UnsupportedOperationException e) {
-                    LOG.info(
-                            "Remote service isn't available. Cannot create PrimaryKeyPartialLookupTable with LocalQueryExecutor "
-                                    + "because {}. Will create FullCacheLookupTable.",
-                            e.getMessage());
-                }
-            }
-        }
-
-        if (newLookupTable == null) {
-            FullCacheLookupTable.Context context =
-                    new FullCacheLookupTable.Context(
-                            table,
-                            projection,
-                            predicate,
-                            createProjectedPredicate(projection),
-                            tablePath,
-                            joinKeys,
-                            getRequireCachedBucketIds());
-            newLookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
-            LOG.info("Created {}.", newLookupTable.getClass().getSimpleName());
-        }
-
-        return newLookupTable;
     }
 
     @Nullable

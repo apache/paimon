@@ -1332,7 +1332,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         Thread.sleep(1000); // wait for async refresh to complete
         // trigger a lookup to check async completion and switch to new partition
         sql("INSERT INTO T VALUES (1), (2)");
-        iterator.collect(2);
+        result = iterator.collect(2);
         Thread.sleep(1000);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
