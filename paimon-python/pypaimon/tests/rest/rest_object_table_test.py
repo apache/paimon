@@ -28,14 +28,15 @@ from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 class RESTObjectTableTest(RESTBaseTest):
 
     def _create_object_table(self, table_name, extra_options=None):
-        """Helper to create an object table with the given name."""
+        """Helper to create an object table with the given name.
+
+        ObjectTable has a fixed schema and does not support custom fields.
+        Only options (including type=object-table) are needed.
+        """
         options = {"type": "object-table"}
         if extra_options:
             options.update(extra_options)
-        schema = Schema.from_pyarrow_schema(
-            pa.schema([("id", pa.int32())]),
-            options=options,
-        )
+        schema = Schema(options=options)
         self.rest_catalog.drop_table(table_name, True)
         self.rest_catalog.create_table(table_name, schema, False)
         return self.rest_catalog.get_table(table_name)
