@@ -85,8 +85,7 @@ public interface KvCompactionManagerFactory extends Closeable {
 
     void withIOManager(@Nullable IOManager ioManager);
 
-    void withCompactionMetrics(
-            @Nullable CompactionMetrics compactionMetrics);
+    void withCompactionMetrics(@Nullable CompactionMetrics compactionMetrics);
 
     /** Create a {@link CompactManager} for the given partition and bucket. */
     CompactManager create(

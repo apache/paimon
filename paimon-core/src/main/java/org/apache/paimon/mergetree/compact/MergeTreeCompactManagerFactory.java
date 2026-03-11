@@ -137,8 +137,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
     }
 
     @Override
-    public void withCompactionMetrics(
-            @Nullable CompactionMetrics compactionMetrics) {
+    public void withCompactionMetrics(@Nullable CompactionMetrics compactionMetrics) {
         this.compactionMetrics = compactionMetrics;
     }
 
