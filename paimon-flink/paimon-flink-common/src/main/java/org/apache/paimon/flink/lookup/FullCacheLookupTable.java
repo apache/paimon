@@ -430,7 +430,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public LookupTable copyWithNewPath(File newPath) {
-        Context newContext = context.copyWithNewPath(newPath);
+        Context newContext = context.copy(newPath);
         Options options = Options.fromMap(context.table.options());
         FullCacheLookupTable newTable = create(newContext, options.get(LOOKUP_CACHE_ROWS));
         if (cacheRowFilter != null) {
@@ -555,7 +555,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                     requiredCachedBucketIds);
         }
 
-        public Context copyWithNewPath(File newTempPath) {
+        public Context copy(File newTempPath) {
             return new Context(
                     table.wrapped(),
                     projection,
