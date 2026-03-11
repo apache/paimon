@@ -102,7 +102,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
     // ---- Partition refresh fields ----
     private final boolean partitionRefreshAsync;
     @Nullable private ExecutorService partitionRefreshExecutor;
-    private volatile Future<?> partitionRefreshFuture;
     private AtomicReference<LookupTable> pendingLookupTable;
     private AtomicReference<Exception> partitionRefreshException;
 
@@ -185,7 +184,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
     private void initPartitionRefresh() {
         this.pendingLookupTable = new AtomicReference<>(null);
         this.partitionRefreshException = new AtomicReference<>(null);
-        this.partitionRefreshFuture = null;
         this.scanPartitions = scanPartitions != null ? scanPartitions : Collections.emptyList();
         this.partitionRefreshExecutor =
                 Executors.newSingleThreadExecutor(
@@ -395,37 +393,31 @@ public abstract class FullCacheLookupTable implements LookupTable {
                 "Starting async partition refresh for table {}, new partitions detected.",
                 table.name());
 
-        partitionRefreshFuture =
-                partitionRefreshExecutor.submit(
-                        () -> {
-                            File newPath = null;
-                            try {
-                                newPath =
-                                        new File(
-                                                context.tempPath.getParent(),
-                                                "lookup-" + java.util.UUID.randomUUID());
-                                if (!newPath.mkdirs()) {
-                                    throw new RuntimeException("Failed to create dir: " + newPath);
-                                }
-                                LookupTable newTable = copyWithNewPath(newPath);
-                                newTable.specifyPartitions(newPartitions, partitionFilter);
-                                newTable.open();
+        partitionRefreshExecutor.submit(
+                () -> {
+                    File newPath = null;
+                    try {
+                        newPath =
+                                new File(
+                                        context.tempPath.getParent(),
+                                        "lookup-" + java.util.UUID.randomUUID());
+                        if (!newPath.mkdirs()) {
+                            throw new RuntimeException("Failed to create dir: " + newPath);
+                        }
+                        LookupTable newTable = copyWithNewPath(newPath);
+                        newTable.specifyPartitions(newPartitions, partitionFilter);
+                        newTable.open();
 
-                                pendingLookupTable.set(newTable);
-                                LOG.info(
-                                        "Async partition refresh completed for table {}.",
-                                        table.name());
-                            } catch (Exception e) {
-                                LOG.error(
-                                        "Async partition refresh failed for table {}.",
-                                        table.name(),
-                                        e);
-                                partitionRefreshException.set(e);
-                                if (newPath != null) {
-                                    FileIOUtils.deleteDirectoryQuietly(newPath);
-                                }
-                            }
-                        });
+                        pendingLookupTable.set(newTable);
+                        LOG.info("Async partition refresh completed for table {}.", table.name());
+                    } catch (Exception e) {
+                        LOG.error("Async partition refresh failed for table {}.", table.name(), e);
+                        partitionRefreshException.set(e);
+                        if (newPath != null) {
+                            FileIOUtils.deleteDirectoryQuietly(newPath);
+                        }
+                    }
+                });
     }
 
     @Override
