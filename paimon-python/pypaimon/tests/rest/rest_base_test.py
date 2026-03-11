@@ -199,7 +199,7 @@ class RESTBaseTest(unittest.TestCase):
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
-        table_pa_schema = self.pk_pa_schema
+        table_pa_schema = self.pk_pa_schema if table.primary_keys else self.pa_schema
 
         # first write
         table_write = write_builder.new_write()
