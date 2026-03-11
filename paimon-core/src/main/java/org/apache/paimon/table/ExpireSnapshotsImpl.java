@@ -174,7 +174,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         }
 
         // collect all snapshots
-        List<Snapshot> snapshotsIncludingEnd = collectSortedSnapshots(earliestId, endExclusiveId);
+        List<Snapshot> snapshotsIncludingEnd = collectSnapshots(earliestId, endExclusiveId);
         if (snapshotsIncludingEnd.isEmpty()) {
             return 0;
         }
@@ -274,7 +274,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         return snapshotsExcludingEnd.size();
     }
 
-    private List<Snapshot> collectSortedSnapshots(long earliestId, long endExclusiveId)
+    private List<Snapshot> collectSnapshots(long earliestId, long endExclusiveId)
             throws InterruptedException, ExecutionException {
         List<CompletableFuture<Optional<Snapshot>>> futures = new ArrayList<>();
         for (long id = earliestId; id <= endExclusiveId; id++) {
