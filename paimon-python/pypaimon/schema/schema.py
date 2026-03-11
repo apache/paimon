@@ -55,6 +55,13 @@ class Schema:
         # Convert PyArrow schema to Paimon fields
         fields = PyarrowFieldParser.to_paimon_schema(pa_schema)
 
+        # Primary key fields must be NOT NULL
+        pk_set = set(primary_keys) if primary_keys else set()
+        if pk_set:
+            for field in fields:
+                if field.name in pk_set:
+                    field.type.nullable = False
+
         # Check if Blob type exists in the schema
         has_blob_type = any(
             'blob' in str(field.type).lower()

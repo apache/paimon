@@ -45,6 +45,12 @@ class RESTSimpleTest(RESTBaseTest):
             ('behavior', pa.string()),
             ('dt', pa.string()),
         ])
+        self.pk_pa_schema = pa.schema([
+            pa.field('user_id', pa.int64(), nullable=False),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            pa.field('dt', pa.string(), nullable=False),
+        ])
         self.data = {
             'user_id': [2, 4, 6, 8, 10],
             'item_id': [1001, 1002, 1003, 1004, 1005],
@@ -597,13 +603,14 @@ class RESTSimpleTest(RESTBaseTest):
         self.rest_catalog.drop_table('default.test_with_shard', True)
         self.rest_catalog.create_table('default.test_with_shard', schema, False)
         table = self.rest_catalog.get_table('default.test_with_shard')
+        table_pa_schema = self.pk_pa_schema
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
         self.assertIsInstance(table_write.row_key_extractor, DynamicBucketRowKeyExtractor)
 
-        pa_table = pa.Table.from_pydict(self.data, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -616,7 +623,7 @@ class RESTSimpleTest(RESTBaseTest):
         splits.extend(read_builder.new_scan().with_shard(2, 3).plan().splits())
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
-        expected_sorted = table_sort_by(self.expected, 'user_id')
+        expected_sorted = table_sort_by(self.expected.cast(self.pk_pa_schema), 'user_id')
         actual_sorted = table_sort_by(actual, 'user_id')
         self.assertEqual(actual_sorted, expected_sorted)
 
@@ -626,13 +633,14 @@ class RESTSimpleTest(RESTBaseTest):
         self.rest_catalog.drop_table('default.test_with_shard', True)
         self.rest_catalog.create_table('default.test_with_shard', schema, False)
         table = self.rest_catalog.get_table('default.test_with_shard')
+        table_pa_schema = self.pk_pa_schema
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
         self.assertIsInstance(table_write.row_key_extractor, FixedBucketRowKeyExtractor)
 
-        pa_table = pa.Table.from_pydict(self.data, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -652,7 +660,7 @@ class RESTSimpleTest(RESTBaseTest):
             'behavior': ['b', 'c', 'a', 'd', 'e'],
             'dt': ['2025-08-10', '2025-08-11', '2000-10-10', '2025-08-12', '2025-08-13']
         }
-        expected = pa.Table.from_pydict(data_expected, schema=self.pa_schema)
+        expected = pa.Table.from_pydict(data_expected, schema=table_pa_schema)
         self.assertEqual(actual.combine_chunks(), expected.combine_chunks())
 
     def test_with_shard_uniform_division(self):

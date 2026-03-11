@@ -44,7 +44,7 @@ class BinaryRowTest(unittest.TestCase):
         cls.catalog = CatalogFactory.create({'warehouse': cls.warehouse})
         cls.catalog.create_database('default', False)
         pa_schema = pa.schema([
-            ('f0', pa.int64()),
+            pa.field('f0', pa.int64(), nullable=False),
             ('f1', pa.string()),
             ('f2', pa.int64()),
         ])

@@ -972,6 +972,14 @@ class RESTCatalogServer:
                                schema: Schema, uuid_str: str, is_external: bool) -> TableMetadata:
         """Create table metadata"""
         options = schema.options.copy()
+
+        fields = schema.fields
+        if schema.primary_keys:
+            pk_set = set(schema.primary_keys)
+            for field in fields:
+                if field.name in pk_set:
+                    field.type.nullable = False
+
         table_schema = TableSchema(
             version=TableSchema.CURRENT_VERSION,
             id=schema_id,

@@ -73,6 +73,13 @@ class RESTBaseTest(unittest.TestCase):
             ('dt', pa.string()),
             ('long-dt', pa.string())
         ])
+        self.pk_pa_schema = pa.schema([
+            pa.field('user_id', pa.int64(), nullable=False),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            pa.field('dt', pa.string(), nullable=False),
+            ('long-dt', pa.string())
+        ])
         self.raw_data = {
             'user_id': [1, 2, 3, 4, 5, 6, 7, 8],
             'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008],
@@ -82,6 +89,7 @@ class RESTBaseTest(unittest.TestCase):
                         'abcdefghijklmnopk', '2025-08-08']
         }
         self.expected = pa.Table.from_pydict(self.raw_data, schema=self.pa_schema)
+        self.pk_expected = pa.Table.from_pydict(self.raw_data, schema=self.pk_pa_schema)
 
         schema = Schema.from_pyarrow_schema(self.pa_schema)
         self.rest_catalog.create_table('default.test_reader_iterator', schema, False)
@@ -98,6 +106,8 @@ class RESTBaseTest(unittest.TestCase):
         # Shutdown server
         self.server.shutdown()
         print("Server stopped")
+        import gc
+        gc.collect()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_rest_catalog(self):
@@ -191,6 +201,7 @@ class RESTBaseTest(unittest.TestCase):
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
+        table_pa_schema = self.pk_pa_schema if table.primary_keys else self.pa_schema
 
         # first write
         table_write = write_builder.new_write()
@@ -202,7 +213,7 @@ class RESTBaseTest(unittest.TestCase):
             'dt': ['p1', 'p1', 'p2', 'p1'],
             'long-dt': ['2024-10-10', '2024-10-10', '2024-10-10', '2024-01-01'],
         }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data1, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -218,7 +229,7 @@ class RESTBaseTest(unittest.TestCase):
             'dt': ['p2', 'p1', 'p2', 'p2'],
             'long-dt': ['2024-10-10', '2025-01-23', 'abcdefghijklmnopk', '2025-08-08'],
         }
-        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data2, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()

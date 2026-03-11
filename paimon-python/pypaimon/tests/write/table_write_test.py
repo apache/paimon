@@ -44,12 +44,24 @@ class TableWriteTest(unittest.TestCase):
             ('behavior', pa.string()),
             ('dt', pa.string())
         ])
+        cls.pk_pa_schema = pa.schema([
+            pa.field('user_id', pa.int32(), nullable=False),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            pa.field('dt', pa.string(), nullable=False)
+        ])
         cls.expected = pa.Table.from_pydict({
             'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
             'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h', 'i', 'j'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2', 'p2', 'p1']
         }, schema=cls.pa_schema)
+        cls.pk_expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h', 'i', 'j'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2', 'p2', 'p1']
+        }, schema=cls.pk_pa_schema)
 
     @classmethod
     def tearDownClass(cls):
@@ -147,7 +159,7 @@ class TableWriteTest(unittest.TestCase):
             'behavior': ['a', 'b', 'c', None],
             'dt': ['p1', 'p1', 'p2', 'p1'],
         }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data1, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
         table_write.prepare_commit(0)
         # write 2
@@ -157,7 +169,7 @@ class TableWriteTest(unittest.TestCase):
             'behavior': ['e', 'f', 'g', 'h'],
             'dt': ['p2', 'p1', 'p2', 'p2'],
         }
-        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data2, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
         table_write.prepare_commit(1)
         # write 3
@@ -167,7 +179,7 @@ class TableWriteTest(unittest.TestCase):
             'behavior': ['i', 'j'],
             'dt': ['p2', 'p1'],
         }
-        pa_table = pa.Table.from_pydict(data3, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data3, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
         cm = table_write.prepare_commit(2)
         # commit
@@ -180,7 +192,7 @@ class TableWriteTest(unittest.TestCase):
         table_read = read_builder.new_read()
         splits = read_builder.new_scan().plan().splits()
         actual = table_read.to_arrow(splits).sort_by('user_id')
-        self.assertEqual(self.expected, actual)
+        self.assertEqual(self.pk_expected, actual)
 
     def test_postpone_read_write(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],
@@ -193,7 +205,7 @@ class TableWriteTest(unittest.TestCase):
             'behavior': ['a', 'b', 'c', None],
             'dt': ['p1', 'p1', 'p2', 'p1'],
         }
-        expect = pa.Table.from_pydict(data, schema=self.pa_schema)
+        expect = pa.Table.from_pydict(data, schema=self.pk_pa_schema)
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
@@ -234,7 +246,7 @@ class TableWriteTest(unittest.TestCase):
             'behavior': ['a', 'b'],
             'dt': ['p1', 'p1'],
         }
-        pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data, schema=self.pk_pa_schema)
         table_write.write_arrow(pa_table)
 
         commit_messages = table_write.prepare_commit()
@@ -368,11 +380,17 @@ class TableWriteTest(unittest.TestCase):
             'default.test_dynamic_bucket', schema, False)
         table = self.catalog.get_table(
             'default.test_dynamic_bucket')
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h', 'i', 'j'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2', 'p2', 'p1']
+        }, schema=self.pk_pa_schema)
         write_builder = table.new_batch_write_builder()
 
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
-        table_write.write_arrow(self.expected)
+        table_write.write_arrow(expected)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
@@ -383,7 +401,7 @@ class TableWriteTest(unittest.TestCase):
         actual = table_read.to_arrow(splits)
         sort_keys = [('user_id', 'ascending'), ('dt', 'ascending')]
         self.assertEqual(
-            self.expected.sort_by(sort_keys),
+            self.pk_expected.sort_by(sort_keys),
             actual.sort_by(sort_keys),
         )
 

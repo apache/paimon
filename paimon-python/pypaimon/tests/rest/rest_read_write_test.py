@@ -255,7 +255,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_pk_orc_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -292,7 +292,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_pk_lance_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -312,7 +312,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_lance_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
@@ -357,8 +357,8 @@ class RESTTableReadWriteTest(RESTBaseTest):
         read_builder = table.new_read_builder().with_filter(g1)
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = pa.concat_tables([
-            self.expected.slice(1, 1),  # 2/b
-            self.expected.slice(5, 1)  # 7/g
+            self.pk_expected.slice(1, 1),  # 2/b
+            self.pk_expected.slice(5, 1)  # 7/g
         ])
         self.assertEqual(actual, expected)
 
@@ -377,7 +377,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        self.assertEqual(actual, self.expected)
+        self.assertEqual(actual, self.pk_expected)
 
     def test_pk_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema,
@@ -396,8 +396,8 @@ class RESTTableReadWriteTest(RESTBaseTest):
         read_builder = table.new_read_builder().with_filter(g1)
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = pa.concat_tables([
-            self.expected.slice(1, 1),  # 2/b
-            self.expected.slice(5, 1)  # 7/g
+            self.pk_expected.slice(1, 1),  # 2/b
+            self.pk_expected.slice(5, 1)  # 7/g
         ])
         self.assertEqual(actual, expected)
 
@@ -412,7 +412,7 @@ class RESTTableReadWriteTest(RESTBaseTest):
 
         read_builder = table.new_read_builder().with_projection(['dt', 'user_id', 'behavior'])
         actual = self._read_test_table(read_builder).sort_by('user_id')
-        expected = self.expected.select(['dt', 'user_id', 'behavior'])
+        expected = self.pk_expected.select(['dt', 'user_id', 'behavior'])
         self.assertEqual(actual, expected)
 
     def test_write_wrong_schema(self):
