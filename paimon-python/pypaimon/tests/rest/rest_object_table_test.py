@@ -16,16 +16,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import os
-
 import pyarrow as pa
 
-from pypaimon import Schema
+from pypaimon import PaimonVirtualFileSystem, Schema
 from pypaimon.table.object import ObjectTable
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 
 class RESTObjectTableTest(RESTBaseTest):
+
+    def setUp(self):
+        super().setUp()
+        pvfs_options = {
+            'uri': self.options['uri'],
+            'warehouse': self.options['warehouse'],
+            'dlf.region': self.options['dlf.region'],
+            'token.provider': self.options['token.provider'],
+            'token': self.options['token'],
+        }
+        self.pvfs = PaimonVirtualFileSystem(pvfs_options)
 
     def _create_object_table(self, table_name, extra_options=None):
         """Helper to create an object table with the given name.
@@ -41,12 +50,25 @@ class RESTObjectTableTest(RESTBaseTest):
         self.rest_catalog.create_table(table_name, schema, False)
         return self.rest_catalog.get_table(table_name)
 
-    def _get_table_location_dir(self, table_name):
-        """Get the filesystem directory for a table's location."""
-        parts = table_name.split(".")
-        database_name = parts[0]
-        simple_table_name = parts[1]
-        return os.path.join(self.warehouse, database_name, simple_table_name)
+    def _pvfs_table_path(self, table_name, sub_path=None):
+        """Build a pvfs:// path for the given table and optional sub-path."""
+        warehouse = self.options['warehouse']
+        base = "pvfs://{}/{}".format(warehouse, table_name.replace('.', '/'))
+        if sub_path:
+            return "{}/{}".format(base, sub_path)
+        return base
+
+    def _write_file_via_pvfs(self, table_name, filename, content):
+        """Write a file into the table's location using pvfs."""
+        path = self._pvfs_table_path(table_name, filename)
+        # Ensure parent directory exists when filename contains subdirectories
+        if '/' in filename:
+            parent_dir = self._pvfs_table_path(
+                table_name, filename.rsplit('/', 1)[0]
+            )
+            self.pvfs.makedirs(parent_dir, exist_ok=True)
+        with self.pvfs.open(path, 'wb') as f:
+            f.write(content)
 
     def test_get_object_table(self):
         table_name = "default.object_table_basic"
@@ -63,18 +85,13 @@ class RESTObjectTableTest(RESTBaseTest):
         table_name = "default.object_table_read"
         table = self._create_object_table(table_name)
 
-        # Write some test files into the table's location directory
-        location_dir = self._get_table_location_dir(table_name)
-        os.makedirs(location_dir, exist_ok=True)
-
+        # Write some test files into the table's location via pvfs
         test_files = {
             "file_a.txt": b"hello world",
             "file_b.dat": b"some binary data here",
         }
         for filename, content in test_files.items():
-            filepath = os.path.join(location_dir, filename)
-            with open(filepath, "wb") as f:
-                f.write(content)
+            self._write_file_via_pvfs(table_name, filename, content)
 
         # Read the object table
         read_builder = table.new_read_builder()
@@ -116,14 +133,9 @@ class RESTObjectTableTest(RESTBaseTest):
         table_name = "default.object_table_subdir"
         table = self._create_object_table(table_name)
 
-        location_dir = self._get_table_location_dir(table_name)
-        sub_dir = os.path.join(location_dir, "subdir")
-        os.makedirs(sub_dir, exist_ok=True)
-
-        with open(os.path.join(location_dir, "root_file.txt"), "wb") as f:
-            f.write(b"root content")
-        with open(os.path.join(sub_dir, "nested_file.txt"), "wb") as f:
-            f.write(b"nested content")
+        # Write files via pvfs, including a nested subdirectory file
+        self._write_file_via_pvfs(table_name, "root_file.txt", b"root content")
+        self._write_file_via_pvfs(table_name, "subdir/nested_file.txt", b"nested content")
 
         read_builder = table.new_read_builder()
         splits = read_builder.new_scan().plan().splits()
@@ -143,10 +155,7 @@ class RESTObjectTableTest(RESTBaseTest):
         table_name = "default.object_table_projection"
         table = self._create_object_table(table_name)
 
-        location_dir = self._get_table_location_dir(table_name)
-        os.makedirs(location_dir, exist_ok=True)
-        with open(os.path.join(location_dir, "proj_test.txt"), "wb") as f:
-            f.write(b"test data")
+        self._write_file_via_pvfs(table_name, "proj_test.txt", b"test data")
 
         # Test projection with two columns
         read_builder = table.new_read_builder()
@@ -170,11 +179,10 @@ class RESTObjectTableTest(RESTBaseTest):
         table_name = "default.object_table_limit"
         table = self._create_object_table(table_name)
 
-        location_dir = self._get_table_location_dir(table_name)
-        os.makedirs(location_dir, exist_ok=True)
         for i in range(5):
-            with open(os.path.join(location_dir, f"file_{i}.txt"), "wb") as f:
-                f.write(f"content {i}".encode())
+            self._write_file_via_pvfs(
+                table_name, "file_{}.txt".format(i), "content {}".format(i).encode()
+            )
 
         read_builder = table.new_read_builder()
         read_builder.with_limit(2)
@@ -232,10 +240,7 @@ class RESTObjectTableTest(RESTBaseTest):
         table_name = "default.object_table_pandas"
         table = self._create_object_table(table_name)
 
-        location_dir = self._get_table_location_dir(table_name)
-        os.makedirs(location_dir, exist_ok=True)
-        with open(os.path.join(location_dir, "pandas_test.txt"), "wb") as f:
-            f.write(b"pandas data")
+        self._write_file_via_pvfs(table_name, "pandas_test.txt", b"pandas data")
 
         read_builder = table.new_read_builder()
         splits = read_builder.new_scan().plan().splits()
