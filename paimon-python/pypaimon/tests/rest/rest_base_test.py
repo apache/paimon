@@ -106,6 +106,8 @@ class RESTBaseTest(unittest.TestCase):
         # Shutdown server
         self.server.shutdown()
         print("Server stopped")
+        import gc
+        gc.collect()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_rest_catalog(self):
