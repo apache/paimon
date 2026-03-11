@@ -170,7 +170,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         // id should be (beginInclusiveId, endExclusiveId]
         for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete merge tree files not used by snapshot #" + id);
+                LOG.debug("Ready to delete merge tree files not used by snapshot #{}", id);
             }
             Snapshot snapshot;
             try {
@@ -199,7 +199,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (!expireConfig.isChangelogDecoupled()) {
             for (long id = beginInclusiveId; id < endExclusiveId; id++) {
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("Ready to delete changelog files from snapshot #" + id);
+                    LOG.debug("Ready to delete changelog files from snapshot #{}", id);
                 }
                 Snapshot snapshot;
                 try {
@@ -239,7 +239,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (skippingSet != null) {
             for (long id = beginInclusiveId; id < endExclusiveId; id++) {
                 if (LOG.isDebugEnabled()) {
-                    LOG.debug("Ready to delete manifests in snapshot #" + id);
+                    LOG.debug("Ready to delete manifests in snapshot #{}", id);
                 }
 
                 Snapshot snapshot;
