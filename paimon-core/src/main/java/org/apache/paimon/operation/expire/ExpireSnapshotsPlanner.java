@@ -37,7 +37,12 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 
 import static org.apache.paimon.utils.SnapshotManager.findPreviousOrEqualSnapshot;
 import static org.apache.paimon.utils.SnapshotManager.findPreviousSnapshot;
@@ -136,22 +141,37 @@ public class ExpireSnapshotsPlanner {
         // (the maximum number of snapshots allowed to expire at a time)
         endExclusiveId = Math.min(endExclusiveId, earliestId + maxDeletes);
 
+        // collect all snapshots concurrently
+        Map<Long, Snapshot> snapshots = collectSnapshots(earliestId, endExclusiveId);
+
         for (long id = min; id < endExclusiveId; id++) {
             // Early exit the loop for 'snapshot.time-retained'
             // (the maximum time of snapshots to retain)
-            if (snapshotManager.snapshotExists(id)
-                    && olderThanMills <= snapshotManager.snapshot(id).timeMillis()) {
+            Snapshot snapshot = snapshots.get(id);
+            if (snapshot != null && olderThanMills <= snapshot.timeMillis()) {
                 endExclusiveId = id;
                 break;
             }
         }
 
-        return plan(earliestId, endExclusiveId, config.isChangelogDecoupled());
+        return plan(earliestId, endExclusiveId, config.isChangelogDecoupled(), snapshots);
     }
 
     @VisibleForTesting
     public ExpireSnapshotsPlan plan(
             long earliestId, long endExclusiveId, boolean changelogDecoupled) {
+        return plan(
+                earliestId,
+                endExclusiveId,
+                changelogDecoupled,
+                collectSnapshots(earliestId, endExclusiveId));
+    }
+
+    private ExpireSnapshotsPlan plan(
+            long earliestId,
+            long endExclusiveId,
+            boolean changelogDecoupled,
+            Map<Long, Snapshot> snapshots) {
         // Boundary check
         if (endExclusiveId <= earliestId) {
             // No expire happens:
@@ -170,7 +190,7 @@ public class ExpireSnapshotsPlanner {
         // find first snapshot to expire
         long beginInclusiveId = earliestId;
         for (long id = endExclusiveId - 1; id >= earliestId; id--) {
-            if (!snapshotManager.snapshotExists(id)) {
+            if (!snapshots.containsKey(id)) {
                 // only latest snapshots are retained, as we cannot find this snapshot, we can
                 // assume that all snapshots preceding it have been removed
                 beginInclusiveId = id + 1;
@@ -178,11 +198,9 @@ public class ExpireSnapshotsPlanner {
             }
         }
 
-        // Pre-read and cache endSnapshot
-        Snapshot cachedEndSnapshot;
-        try {
-            cachedEndSnapshot = snapshotManager.tryGetSnapshot(endExclusiveId);
-        } catch (FileNotFoundException e) {
+        // Get endSnapshot from cache
+        Snapshot cachedEndSnapshot = snapshots.get(endExclusiveId);
+        if (cachedEndSnapshot == null) {
             // the end exclusive snapshot is gone
             // there is no need to proceed
             LOG.warn("End snapshot {} not found, abort expiration", endExclusiveId);
@@ -239,7 +257,8 @@ public class ExpireSnapshotsPlanner {
                 snapshotFileTasks,
                 protectionSet,
                 beginInclusiveId,
-                endExclusiveId);
+                endExclusiveId,
+                snapshots);
     }
 
     private ProtectionSet buildProtectionSet(
@@ -277,5 +296,31 @@ public class ExpireSnapshotsPlanner {
             }
         }
         return overlappedSnapshots;
+    }
+
+    /** Concurrently collect all snapshots in range [earliestId, endExclusiveId]. */
+    private Map<Long, Snapshot> collectSnapshots(long earliestId, long endExclusiveId) {
+        Executor fileExecutor = snapshotDeletion.fileExecutor();
+        Map<Long, Snapshot> snapshots = new ConcurrentHashMap<>();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        for (long id = earliestId; id <= endExclusiveId; id++) {
+            long snapshotId = id;
+            futures.add(
+                    CompletableFuture.runAsync(
+                            () -> {
+                                try {
+                                    Snapshot snapshot = snapshotManager.tryGetSnapshot(snapshotId);
+                                    snapshots.put(snapshotId, snapshot);
+                                } catch (FileNotFoundException ignored) {
+                                }
+                            },
+                            fileExecutor));
+        }
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).get();
+        } catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        return snapshots;
     }
 }

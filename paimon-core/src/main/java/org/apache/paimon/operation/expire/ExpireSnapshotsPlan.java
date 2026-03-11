@@ -18,6 +18,8 @@
 
 package org.apache.paimon.operation.expire;
 
+import org.apache.paimon.Snapshot;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -49,7 +51,8 @@ public class ExpireSnapshotsPlan implements Serializable {
                     Collections.emptyList(),
                     null,
                     0,
-                    0);
+                    0,
+                    Collections.emptyMap());
 
     private final List<SnapshotExpireTask> dataFileTasks;
     private final List<SnapshotExpireTask> changelogFileTasks;
@@ -59,6 +62,9 @@ public class ExpireSnapshotsPlan implements Serializable {
     private final long beginInclusiveId;
     private final long endExclusiveId;
 
+    /** Pre-collected snapshot cache from planner to avoid redundant snapshot reads. */
+    private final Map<Long, Snapshot> snapshotCache;
+
     public ExpireSnapshotsPlan(
             List<SnapshotExpireTask> dataFileTasks,
             List<SnapshotExpireTask> changelogFileTasks,
@@ -66,7 +72,8 @@ public class ExpireSnapshotsPlan implements Serializable {
             List<SnapshotExpireTask> snapshotFileTasks,
             ProtectionSet protectionSet,
             long beginInclusiveId,
-            long endExclusiveId) {
+            long endExclusiveId,
+            Map<Long, Snapshot> snapshotCache) {
         this.dataFileTasks = dataFileTasks;
         this.changelogFileTasks = changelogFileTasks;
         this.manifestTasks = manifestTasks;
@@ -74,6 +81,7 @@ public class ExpireSnapshotsPlan implements Serializable {
         this.protectionSet = protectionSet;
         this.beginInclusiveId = beginInclusiveId;
         this.endExclusiveId = endExclusiveId;
+        this.snapshotCache = snapshotCache;
     }
 
     public static ExpireSnapshotsPlan empty() {
@@ -194,6 +202,10 @@ public class ExpireSnapshotsPlan implements Serializable {
 
     public long endExclusiveId() {
         return endExclusiveId;
+    }
+
+    public Map<Long, Snapshot> snapshotCache() {
+        return snapshotCache;
     }
 
     @Override

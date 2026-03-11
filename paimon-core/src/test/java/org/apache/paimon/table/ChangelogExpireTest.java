@@ -75,7 +75,7 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
 
         ExpireSnapshotsImpl expireSnapshots =
                 (ExpireSnapshotsImpl) table.newExpireSnapshots().config(expireConfig);
-        expireUntil(expireSnapshots, 1, 7, true);
+        expireSnapshots.expireUntil(1, 7);
         assertThatCode(() -> expire.expireUntil(1, 6)).doesNotThrowAnyException();
     }
 }

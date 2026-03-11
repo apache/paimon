@@ -94,8 +94,23 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     }
 
     @VisibleForTesting
-    public int executeWithPlan(ExpireSnapshotsPlan plan) {
+    public int expireUntil(long earliestId, long endExclusiveId) {
+        ExpireSnapshotsPlan plan =
+                planner.plan(earliestId, endExclusiveId, expireConfig.isChangelogDecoupled());
+        if (plan.isEmpty()) {
+            return 0;
+        }
+
+        return executeWithPlan(plan);
+    }
+
+    private int executeWithPlan(ExpireSnapshotsPlan plan) {
         long startTime = System.currentTimeMillis();
+
+        // Use pre-collected snapshot cache if available
+        if (plan.snapshotCache() != null) {
+            executor.setSnapshotCache(plan.snapshotCache());
+        }
 
         // Phase 1a: Delete all data files
         for (SnapshotExpireTask task : plan.dataFileTasks()) {

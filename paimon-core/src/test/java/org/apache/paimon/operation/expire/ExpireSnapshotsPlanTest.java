@@ -53,7 +53,8 @@ public class ExpireSnapshotsPlanTest {
                         Collections.emptyList(),
                         null,
                         1,
-                        11);
+                        11,
+                        Collections.emptyMap());
 
         List<List<SnapshotExpireTask>> result = plan.partitionTasksBySnapshotRange(3);
         assertThat(result).hasSize(3);
@@ -120,7 +121,8 @@ public class ExpireSnapshotsPlanTest {
                         Collections.emptyList(),
                         null,
                         1,
-                        4);
+                        4,
+                        Collections.emptyMap());
 
         List<List<SnapshotExpireTask>> result = plan.partitionTasksBySnapshotRange(10);
         // Parallelism is 10. Total snapshot range involved is [1, 4] (inclusive).
@@ -166,7 +168,8 @@ public class ExpireSnapshotsPlanTest {
                         Collections.emptyList(),
                         null,
                         1,
-                        2);
+                        2,
+                        Collections.emptyMap());
 
         List<List<SnapshotExpireTask>> result = plan.partitionTasksBySnapshotRange(2);
         // total = 2-1 = 1? or +1?

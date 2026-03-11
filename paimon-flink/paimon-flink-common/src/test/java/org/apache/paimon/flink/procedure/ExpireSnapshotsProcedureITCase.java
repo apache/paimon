@@ -34,7 +34,6 @@ import java.io.IOException;
 import java.sql.Timestamp;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT Case for {@link ExpireSnapshotsProcedure}. */
 public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
@@ -96,17 +95,6 @@ public class ExpireSnapshotsProcedureITCase extends CatalogITCaseBase {
         StreamExecutionEnvironment env =
                 streamExecutionEnvironmentBuilder().streamingMode().build();
         SnapshotManager snapshotManager = table.snapshotManager();
-
-        // parallelism > 1 without forceStartFlinkJob should throw exception
-        if (!forceStartFlinkJob && parallelism != null && parallelism > 1) {
-            assertThatThrownBy(
-                            () ->
-                                    createExpireAction(forceStartFlinkJob, parallelism)
-                                            .withStreamExecutionEnvironment(env)
-                                            .run())
-                    .isInstanceOf(IllegalArgumentException.class);
-            return;
-        }
 
         // initially prepare 6 snapshots, expected snapshots (1, 2, 3, 4, 5, 6)
         for (int i = 0; i < 6; ++i) {

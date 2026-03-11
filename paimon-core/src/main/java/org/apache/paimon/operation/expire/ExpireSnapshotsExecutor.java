@@ -34,6 +34,7 @@ import javax.annotation.Nullable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -62,6 +63,9 @@ public class ExpireSnapshotsExecutor {
     private final SnapshotDeletion snapshotDeletion;
     @Nullable private final ChangelogManager changelogManager;
 
+    /** Pre-collected snapshot cache. Empty map means no cache (read on demand). */
+    private Map<Long, Snapshot> snapshotCache = Collections.emptyMap();
+
     public ExpireSnapshotsExecutor(
             SnapshotManager snapshotManager, SnapshotDeletion snapshotDeletion) {
         this(snapshotManager, snapshotDeletion, null);
@@ -74,6 +78,11 @@ public class ExpireSnapshotsExecutor {
         this.snapshotManager = snapshotManager;
         this.snapshotDeletion = snapshotDeletion;
         this.changelogManager = changelogManager;
+    }
+
+    /** Set pre-collected snapshot cache to avoid redundant reads. */
+    public void setSnapshotCache(Map<Long, Snapshot> snapshotCache) {
+        this.snapshotCache = snapshotCache;
     }
 
     /**
@@ -90,12 +99,14 @@ public class ExpireSnapshotsExecutor {
             @Nullable List<Snapshot> taggedSnapshots,
             @Nullable Set<String> skippingSet) {
 
-        Snapshot snapshot;
-        try {
-            snapshot = snapshotManager.tryGetSnapshot(task.snapshotId());
-        } catch (FileNotFoundException e) {
-            LOG.warn("Snapshot {} not found, skipping task", task.snapshotId());
-            return DeletionReport.skipped(task.snapshotId());
+        Snapshot snapshot = snapshotCache.get(task.snapshotId());
+        if (snapshot == null) {
+            try {
+                snapshot = snapshotManager.tryGetSnapshot(task.snapshotId());
+            } catch (FileNotFoundException e) {
+                LOG.warn("Snapshot {} not found, skipping task", task.snapshotId());
+                return DeletionReport.skipped(task.snapshotId());
+            }
         }
 
         switch (task.taskType()) {
@@ -115,6 +126,11 @@ public class ExpireSnapshotsExecutor {
     private DeletionReport executeDeleteDataFiles(
             SnapshotExpireTask task, Snapshot snapshot, List<Snapshot> taggedSnapshots) {
         checkNotNull(taggedSnapshots);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Ready to delete merge tree files not used by snapshot #{}", task.snapshotId());
+        }
 
         // expire merge tree files and collect changed buckets
         Predicate<ExpireFileEntry> skipper = null;
@@ -138,10 +154,10 @@ public class ExpireSnapshotsExecutor {
     }
 
     private DeletionReport executeDeleteChangelogFiles(SnapshotExpireTask task, Snapshot snapshot) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Ready to delete changelog files from snapshot #{}", task.snapshotId());
+        }
         if (snapshot.changelogManifestList() != null) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Ready to delete changelog files from snapshot #" + task.snapshotId());
-            }
             snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
         }
 
@@ -151,6 +167,10 @@ public class ExpireSnapshotsExecutor {
     private DeletionReport executeDeleteManifests(
             SnapshotExpireTask task, Snapshot snapshot, Set<String> skippingSet) {
         checkNotNull(skippingSet);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Ready to delete manifests in snapshot #{}", task.snapshotId());
+        }
 
         snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
 

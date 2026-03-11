@@ -26,8 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.operation.expire.ExpireSnapshotsPlan;
-import org.apache.paimon.operation.expire.ExpireSnapshotsPlanner;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -66,22 +64,22 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         long indexFileSize = indexFileSize();
         long indexManifestSize = indexManifestSize();
 
-        expireUntil(expire, 1, 2, false);
+        expire.expireUntil(1, 2);
         checkIndexFiles(2);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 1);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 1);
 
-        expireUntil(expire, 2, 3, false);
+        expire.expireUntil(2, 3);
         checkIndexFiles(3);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 1);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 1);
 
-        expireUntil(expire, 3, 5, false);
+        expire.expireUntil(3, 5);
         checkIndexFiles(5);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 2);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 2);
 
-        expireUntil(expire, 5, 7, false);
+        expire.expireUntil(5, 7);
         checkIndexFiles(7);
         assertThat(indexFileSize()).isEqualTo(3);
         assertThat(indexManifestSize()).isEqualTo(1);
@@ -98,12 +96,12 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         long indexFileSize = indexFileSize();
         long indexManifestSize = indexManifestSize();
 
-        expireUntil(expire, 1, 5, false);
+        expire.expireUntil(1, 5);
         checkIndexFiles(5);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 1);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 1);
 
-        expireUntil(expire, 5, 7, false);
+        expire.expireUntil(5, 7);
         checkIndexFiles(7);
         assertThat(indexFileSize()).isEqualTo(5);
         assertThat(indexManifestSize()).isEqualTo(3);
@@ -132,7 +130,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
 
         // test delete tag after expiring snapshots
         table.createTag("tag3", 3);
-        expireUntil(expire, 1, 7, false);
+        expire.expireUntil(1, 7);
         table.deleteTag("tag3");
 
         TagManager tagManager = new TagManager(LocalFileIO.create(), table.location());
@@ -244,15 +242,5 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     private void write(StreamTableWrite write, Pair<GenericRow, Integer> rowWithBucket)
             throws Exception {
         write.write(rowWithBucket.getKey(), rowWithBucket.getValue());
-    }
-
-    protected void expireUntil(
-            ExpireSnapshotsImpl expire,
-            long earliestId,
-            long endExclusiveId,
-            boolean changelogDecoupled) {
-        ExpireSnapshotsPlanner planner = ExpireSnapshotsPlanner.create(table);
-        ExpireSnapshotsPlan plan = planner.plan(earliestId, endExclusiveId, changelogDecoupled);
-        expire.executeWithPlan(plan);
     }
 }
