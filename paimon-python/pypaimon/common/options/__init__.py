@@ -19,10 +19,12 @@ limitations under the License.
 from .config_option import ConfigOption, Description
 from .config_options import ConfigOptions
 from .options import Options
+from .core_options import CoreOptions
 
 __all__ = [
     'ConfigOption',
     'Description',
     'ConfigOptions',
     'Options',
+    'CoreOptions'
 ]

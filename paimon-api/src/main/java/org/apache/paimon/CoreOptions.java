@@ -2965,6 +2965,10 @@ public class CoreOptions implements Serializable {
         return options.get(DISABLE_EXPLICIT_TYPE_CASTING);
     }
 
+    public boolean addColumnBeforePartition() {
+        return options.get(ADD_COLUMN_BEFORE_PARTITION);
+    }
+
     public boolean indexFileInDataFileDir() {
         return options.get(INDEX_FILE_IN_DATA_FILE_DIR);
     }

@@ -172,6 +172,84 @@ class FileSystemCatalogTest(unittest.TestCase):
         table = catalog.get_table(identifier)
         self.assertEqual(len(table.fields), 2)
 
+    def test_add_column_before_partition(self):
+        catalog = CatalogFactory.create({
+            "warehouse": self.warehouse
+        })
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.test_table"
+        schema = Schema(
+            fields=[
+                DataField.from_dict({"id": 0, "name": "col1", "type": "STRING", "description": "field1"}),
+                DataField.from_dict(
+                    {"id": 1, "name": "partition_col", "type": "STRING", "description": "partition field"})
+            ],
+            partition_keys=["partition_col"],
+            primary_keys=[],
+            options={},
+            comment="comment"
+        )
+        catalog.create_table(identifier, schema, False)
+
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 2)
+        self.assertEqual(table.fields[1].name, "partition_col")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.set_option("add-column-before-partition", "true")],
+            False
+        )
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("new_col", AtomicType("INT"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 3)
+        self.assertEqual(table.fields[0].name, "col1")
+        self.assertEqual(table.fields[1].name, "new_col")
+        self.assertEqual(table.fields[2].name, "partition_col")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("col_multi1", AtomicType("INT")),
+             SchemaChange.add_column("col_multi2", AtomicType("STRING")),
+             SchemaChange.add_column("col_multi3", AtomicType("DOUBLE"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 6)
+        self.assertEqual(table.fields[0].name, "col1")
+        self.assertEqual(table.fields[1].name, "new_col")
+        self.assertEqual(table.fields[2].name, "col_multi1")
+        self.assertEqual(table.fields[3].name, "col_multi2")
+        self.assertEqual(table.fields[4].name, "col_multi3")
+        self.assertEqual(table.fields[5].name, "partition_col")
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.set_option("add-column-before-partition", "false")],
+            False
+        )
+
+        catalog.alter_table(
+            identifier,
+            [SchemaChange.add_column("another_col", AtomicType("BIGINT"))],
+            False
+        )
+        table = catalog.get_table(identifier)
+        self.assertEqual(len(table.fields), 7)
+        self.assertEqual(table.fields[0].name, "col1")
+        self.assertEqual(table.fields[1].name, "new_col")
+        self.assertEqual(table.fields[2].name, "col_multi1")
+        self.assertEqual(table.fields[3].name, "col_multi2")
+        self.assertEqual(table.fields[4].name, "col_multi3")
+        self.assertEqual(table.fields[5].name, "partition_col")
+        self.assertEqual(table.fields[6].name, "another_col")
+
     def test_get_database_propagates_exists_error(self):
         catalog = CatalogFactory.create({
             "warehouse": self.warehouse
@@ -186,7 +264,7 @@ class FileSystemCatalogTest(unittest.TestCase):
         from pypaimon.catalog.filesystem_catalog import FileSystemCatalog
         self.assertIsInstance(catalog, FileSystemCatalog)
         filesystem_catalog = catalog  # type: FileSystemCatalog
-        
+
         original_exists = filesystem_catalog.file_io.exists
         filesystem_catalog.file_io.exists = MagicMock(side_effect=OSError("Permission denied"))
 
@@ -195,6 +273,6 @@ class FileSystemCatalogTest(unittest.TestCase):
             catalog.get_database("test_db")
         self.assertIn("Permission denied", str(context.exception))
         self.assertNotIsInstance(context.exception, DatabaseNotExistException)
-        
+
         # Restore original method
         filesystem_catalog.file_io.exists = original_exists

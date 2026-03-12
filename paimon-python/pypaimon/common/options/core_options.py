@@ -376,6 +376,16 @@ class CoreOptions:
         .with_description("Read batch size for any file format if it supports.")
     )
 
+    ADD_COLUMN_BEFORE_PARTITION: ConfigOption[bool] = (
+        ConfigOptions.key("add-column-before-partition")
+        .boolean_type()
+        .default_value(False)
+        .with_description(
+            "When adding a new column, if the table has partition keys, "
+            "insert the new column before the first partition column by default."
+        )
+    )
+
     def __init__(self, options: Options):
         self.options = options
 
@@ -540,3 +550,6 @@ class CoreOptions:
 
     def read_batch_size(self, default=None) -> int:
         return self.options.get(CoreOptions.READ_BATCH_SIZE, default or 1024)
+
+    def add_column_before_partition(self) -> bool:
+        return self.options.get(CoreOptions.ADD_COLUMN_BEFORE_PARTITION, False)
