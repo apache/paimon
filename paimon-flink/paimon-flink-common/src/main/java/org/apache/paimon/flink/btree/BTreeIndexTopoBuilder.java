@@ -242,7 +242,7 @@ public class BTreeIndexTopoBuilder {
                 .setParallelism(parallelism);
     }
 
-    protected static void commit(FileStoreTable table, DataStream<Committable> written) {
+    private static void commit(FileStoreTable table, DataStream<Committable> written) {
         OneInputStreamOperatorFactory<Committable, Committable> committerOperator =
                 new CommitterOperatorFactory<>(
                         false,
