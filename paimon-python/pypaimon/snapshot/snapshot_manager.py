@@ -1,4 +1,3 @@
-################################################################################
 #  Licensed to the Apache Software Foundation (ASF) under one
 #  or more contributor license agreements.  See the NOTICE file
 #  distributed with this work for additional information
@@ -7,16 +6,16 @@
 #  "License"); you may not use this file except in compliance
 #  with the License.  You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#    http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
-################################################################################
+#  Unless required by applicable law or agreed to in writing,
+#  software distributed under the License is distributed on an
+#  "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+#  KIND, either express or implied.  See the License for the
+#  specific language governing permissions and limitations
+#  under the License.
 import logging
-from typing import Optional, Any
+from typing import Optional
 
 from pypaimon.common.file_io import FileIO
 
@@ -41,45 +40,37 @@ class SnapshotManager:
         self.latest_file = f"{self.snapshot_dir}/LATEST"
 
     def get_latest_snapshot(self) -> Optional[Snapshot]:
-        snapshot_json = self.get_latest_snapshot_json()
-        if snapshot_json is None:
-            return None
-        return JSON.from_json(snapshot_json, Snapshot)
-
-    def get_latest_snapshot_json(self) -> Optional[str]:
         """
-        Get the latest snapshot JSON with loader priority and caching.
+        Get the latest snapshot with loader priority.
 
         1. Try to load from snapshotLoader if available
-        2. Fallback to filesystem if loader is not available or throws UnsupportedOperationException
+        2. Fallback to filesystem if loader is not available or throws NotImplementedError`
         3. Return None if no snapshot found
-        
+
         Returns:
             The latest snapshot JSON string, or None if not found
         """
-
         # Try to load from snapshotLoader if available
         if self.snapshot_loader is not None:
             try:
-                snapshot_json = self.snapshot_loader.load()
+                snapshot = self.snapshot_loader.load()
             except NotImplementedError:
                 # Loader not supported, fallback to filesystem
-                snapshot_json = self._get_latest_snapshot_from_filesystem()
+                snapshot = self._get_latest_snapshot_from_filesystem()
             except IOError as e:
                 # IO error, re-raise with context
                 raise RuntimeError(f"Failed to load snapshot from loader: {e}")
         else:
             # No loader, use filesystem directly
-            snapshot_json = self._get_latest_snapshot_from_filesystem()
+            snapshot = self._get_latest_snapshot_from_filesystem()
+        return snapshot
 
-        return snapshot_json
-
-    def _get_latest_snapshot_from_filesystem(self) -> Optional[str]:
+    def _get_latest_snapshot_from_filesystem(self) -> Optional[Snapshot]:
         """
         Get the latest snapshot from filesystem by reading LATEST file.
         
         Returns:
-            The latest snapshot JSON string, or None if not found
+            The latest snapshot, or None if not found
         """
         if not self.file_io.exists(self.latest_file):
             return None
@@ -91,7 +82,7 @@ class SnapshotManager:
         if not self.file_io.exists(snapshot_file):
             return None
 
-        return self.file_io.read_file_utf8(snapshot_file)
+        return JSON.from_json(self.file_io.read_file_utf8(snapshot_file), Snapshot)
 
     def read_latest_file(self, max_retries: int = 5):
         """

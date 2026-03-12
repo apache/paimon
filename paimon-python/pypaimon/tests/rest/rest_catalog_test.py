@@ -373,5 +373,6 @@ class RESTCatalogTest(RESTBaseTest):
         self.assertIsNotNone(table_snapshot)
         self.assertEqual(table_snapshot.id, 3)
 
+
 if __name__ == '__main__':
     unittest.main()

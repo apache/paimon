@@ -122,10 +122,10 @@ class Catalog(ABC):
 
     @abstractmethod
     def alter_table(
-            self,
-            identifier: Union[str, Identifier],
-            changes: List[SchemaChange],
-            ignore_if_not_exists: bool = False
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
     ):
         """Alter table with schema changes."""
 

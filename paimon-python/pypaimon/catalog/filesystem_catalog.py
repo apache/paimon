@@ -253,4 +253,4 @@ class FileSystemCatalog(Catalog):
         Raises:
             NotImplementedError: FileSystemCatalog does not support version management
         """
-        raise NotImplementedError("This catalog does not support load_snapshot")
+        raise NotImplementedError("Filesystem catalog does not support load_snapshot")

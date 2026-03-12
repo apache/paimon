@@ -36,30 +36,3 @@ class TableSnapshot:
     file_size_in_bytes: int = json_field("fileSizeInBytes")
     file_count: int = json_field("fileCount")
     last_file_creation_time: int = json_field("lastFileCreationTime")
-
-    @property
-    def id(self) -> int:
-        """Get the snapshot ID.
-
-        Returns:
-            The snapshot ID
-        """
-        return self.snapshot.id
-
-    @property
-    def schema_id(self) -> int:
-        """Get the schema ID.
-
-        Returns:
-            The schema ID
-        """
-        return self.snapshot.schema_id
-
-    @property
-    def time_millis(self) -> int:
-        """Get the snapshot time in milliseconds.
-
-        Returns:
-            The snapshot time
-        """
-        return self.snapshot.time_millis

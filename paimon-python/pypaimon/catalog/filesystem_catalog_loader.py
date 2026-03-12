@@ -64,4 +64,4 @@ class FileSystemCatalogLoader(CatalogLoader):
         Returns:
             A new FileSystemCatalog instance
         """
-        return FileSystemCatalog(self._context.options())
+        return FileSystemCatalog(self._context.options)

@@ -85,10 +85,7 @@ class FileStoreTable(Table):
         return self.options.branch()
 
     def snapshot_manager(self):
-        """Get the snapshot manager for this table.
-        Returns:
-            SnapshotManager instance
-        """
+        """Get the snapshot manager for this table."""
         from pypaimon.snapshot.snapshot_manager import SnapshotManager
         return SnapshotManager(self)
 
