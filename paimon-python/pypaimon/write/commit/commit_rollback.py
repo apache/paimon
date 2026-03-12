@@ -20,11 +20,7 @@
 Commit rollback to rollback 'COMPACT' commits for resolving conflicts.
 """
 
-import logging
-
 from pypaimon.table.instant import Instant
-
-logger = logging.getLogger(__name__)
 
 
 class CommitRollback:
