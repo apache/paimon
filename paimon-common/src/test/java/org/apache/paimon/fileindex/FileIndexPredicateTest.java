@@ -19,7 +19,6 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
@@ -93,49 +92,4 @@ public class FileIndexPredicateTest {
         assertThat(visitCount.get()).isEqualTo(20);
     }
 
-    /**
-     * Tests that getRequiredNames completes in reasonable time for large OR predicates. Before the
-     * fix, this would hang due to O(2^n) complexity.
-     */
-    @Test
-    public void testGetRequiredNamesPerformance() {
-        RowType rowType = RowType.of(DataTypes.INT());
-        PredicateBuilder builder = new PredicateBuilder(rowType);
-
-        // Build an OR chain of 20 equality predicates
-        List<Predicate> equals = new ArrayList<>();
-        for (int i = 0; i < 20; i++) {
-            equals.add(builder.equal(0, i));
-        }
-        Predicate inPredicate = PredicateBuilder.or(equals);
-
-        long startNanos = System.nanoTime();
-
-        // Use the same visitor pattern as FileIndexPredicate.getRequiredNames
-        Set<String> result =
-                inPredicate.visit(
-                        new PredicateVisitor<Set<String>>() {
-                            @Override
-                            public Set<String> visit(
-                                    org.apache.paimon.predicate.LeafPredicate predicate) {
-                                return new HashSet<>(predicate.fieldNames());
-                            }
-
-                            @Override
-                            public Set<String> visit(CompoundPredicate predicate) {
-                                Set<String> names = new HashSet<>();
-                                for (Predicate child : predicate.children()) {
-                                    names.addAll(child.visit(this));
-                                }
-                                return names;
-                            }
-                        });
-
-        long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
-
-        assertThat(result).containsExactly("f0");
-        // Should complete in under 100ms with linear complexity.
-        // Before the fix with 20 nodes: 2^20 = ~1 million visits, would take seconds+.
-        assertThat(elapsedMs).isLessThan(100);
-    }
 }
