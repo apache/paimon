@@ -1446,8 +1446,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAsyncPartitionRefreshWithMultiPartitionKeys()
-            throws Exception {
+    public void testAsyncPartitionRefreshWithMultiPartitionKeys() throws Exception {
         // Verify async partition refresh works correctly with multi-level partition keys.
         sql(
                 "CREATE TABLE PARTITIONED_DIM (pt1 STRING, pt2 INT, k INT, v INT, PRIMARY KEY (pt1, pt2, k) NOT ENFORCED)"
