@@ -34,9 +34,7 @@ public final class SstFileMetadata {
     private final MemorySlice maxKey;
     private final long fileSize;
     private final long tombstoneCount;
-
-    /** The level this file belongs to in the LSM tree. Mutable because compaction reassigns it. */
-    private int level;
+    private final int level;
 
     public SstFileMetadata(
             File file, MemorySlice minKey, MemorySlice maxKey, long tombstoneCount, int level) {
@@ -78,8 +76,8 @@ public final class SstFileMetadata {
         return level;
     }
 
-    public void setLevel(int level) {
-        this.level = level;
+    public SstFileMetadata withLevel(int newLevel) {
+        return new SstFileMetadata(file, minKey, maxKey, fileSize, tombstoneCount, newLevel);
     }
 
     public boolean hasTombstones() {

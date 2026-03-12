@@ -313,9 +313,9 @@ public class LsmCompactor {
                 SstFileMetadata singleFile = group.get(0);
                 boolean canSkip = !dropTombstones || !singleFile.hasTombstones();
                 if (canSkip) {
-                    singleFile.setLevel(outputLevel);
-                    outputFiles.add(singleFile);
-                    skippedFileSet.add(singleFile.getFile());
+                    SstFileMetadata promoted = singleFile.withLevel(outputLevel);
+                    outputFiles.add(promoted);
+                    skippedFileSet.add(promoted.getFile());
                     skippedGroupCount++;
                     continue;
                 }
