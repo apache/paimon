@@ -314,7 +314,7 @@ class FileStoreCommit:
         start_millis = int(time.time() * 1000)
         if self._is_duplicate_commit(retry_result, latest_snapshot, commit_identifier, commit_kind):
             return SuccessResult()
-        logger.warning("hello commit...")
+
         unique_id = uuid.uuid4()
         base_manifest_list = f"manifest-list-{unique_id}-0"
         delta_manifest_list = f"manifest-list-{unique_id}-1"
@@ -529,8 +529,6 @@ class FileStoreCommit:
         return entries
 
     def _commit_retry_wait(self, retry_count: int):
-        import threading
-        thread_id = threading.get_ident()
 
         retry_wait_ms = min(
             self.commit_min_retry_wait * (2 ** retry_count),
@@ -540,10 +538,6 @@ class FileStoreCommit:
         jitter_ms = random.randint(0, max(1, int(retry_wait_ms * 0.2)))
         total_wait_ms = retry_wait_ms + jitter_ms
 
-        logger.debug(
-            f"Thread {thread_id}: Waiting {total_wait_ms}ms before retry (base: {retry_wait_ms}ms, "
-            f"jitter: {jitter_ms}ms)"
-        )
         time.sleep(total_wait_ms / 1000.0)
 
     def _cleanup_preparation_failure(self,
