@@ -19,21 +19,21 @@
 from typing import List, Optional
 
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
 from pypaimon.table.table import Table
-from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 from pypaimon.write.row_key_extractor import (DynamicBucketRowKeyExtractor,
                                               FixedBucketRowKeyExtractor,
                                               PostponeBucketRowKeyExtractor,
                                               RowKeyExtractor,
                                               UnawareBucketRowKeyExtractor)
+from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
 class FileStoreTable(Table):
@@ -83,6 +83,11 @@ class FileStoreTable(Table):
     def current_branch(self) -> str:
         """Get the current branch name from options."""
         return self.options.branch()
+
+    def consumer_manager(self):
+        """Get the consumer manager for this table."""
+        from pypaimon.consumer.consumer_manager import ConsumerManager
+        return ConsumerManager(self.file_io, self.table_path, self.current_branch())
 
     def snapshot_manager(self):
         """Get the snapshot manager for this table."""

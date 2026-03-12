@@ -18,7 +18,9 @@
 """Consumer dataclass for streaming read progress."""
 
 import json
+import time
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -36,3 +38,39 @@ class Consumer:
         """Deserialize from JSON."""
         data = json.loads(json_str)
         return Consumer(next_snapshot=data["nextSnapshot"])
+
+    @classmethod
+    def from_path(cls, file_io, path: str) -> Optional['Consumer']:
+        """
+        Load consumer from file path with retry mechanism.
+
+        Args:
+            file_io: FileIO instance for reading files
+            path: Path to consumer file
+
+        Returns:
+            Consumer instance if file exists, None otherwise
+
+        Raises:
+            RuntimeError: If retry fails after 10 attempts
+        """
+        retry_number = 0
+        exception = None
+        while retry_number < 10:
+            try:
+                content = file_io.read_file_utf8(path)
+            except FileNotFoundError:
+                return None
+            except Exception as e:
+                exception = e
+                time.sleep(0.2)
+                retry_number += 1
+                continue
+            try:
+                return cls.from_json(content)
+            except Exception as e:
+                exception = e
+                time.sleep(0.2)
+                retry_number += 1
+                continue
+        raise RuntimeError(f"Retry fail after 10 times: {exception}")

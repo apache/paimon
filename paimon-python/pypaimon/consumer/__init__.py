@@ -16,3 +16,21 @@
 # limitations under the License.
 ################################################################################
 """Consumer management for tracking streaming read progress."""
+
+from pypaimon.consumer.consumer import Consumer
+from pypaimon.consumer.consumer_manager import (
+    DEFAULT_MAIN_BRANCH,
+    ConsumerManager,
+    _branch_path,
+    _is_main_branch,
+    _normalize_branch,
+)
+
+__all__ = [
+    'Consumer',
+    'ConsumerManager',
+    'DEFAULT_MAIN_BRANCH',
+    '_branch_path',
+    '_is_main_branch',
+    '_normalize_branch',
+]
