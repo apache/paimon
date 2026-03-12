@@ -33,6 +33,12 @@ under the License.
             <td>Whether to remove the whole row in aggregation engine when -D records are received.</td>
         </tr>
         <tr>
+            <td><h5>add-column-before-partition</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, when adding a new column without specifying a position, the column will be placed before the first partition column instead of at the end of the schema. This only takes effect for partitioned tables.</td>
+        </tr>
+        <tr>
             <td><h5>alter-column-null-to-not-null.disabled</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
