@@ -472,7 +472,7 @@ public class SimpleLsmKvDb implements Closeable {
 
         private final File dataDirectory;
         private long memTableFlushThreshold = 64 * 1024 * 1024; // 64 MB
-        private long maxSstFileSize = 64 * 1024 * 1024; // 64 MB
+        private long maxSstFileSize = 8 * 1024 * 1024; // 8 MB
         private int blockSize = 32 * 1024; // 32 KB
         private long cacheSize = 128 * 1024 * 1024; // 128 MB
         private int level0FileNumCompactTrigger = 4;
