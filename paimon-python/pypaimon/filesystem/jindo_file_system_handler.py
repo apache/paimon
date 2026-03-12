@@ -34,6 +34,7 @@ except ImportError:
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions
 
+
 class JindoInputFile:
     def __init__(self, jindo_stream):
         self._stream = jindo_stream
@@ -116,6 +117,7 @@ class JindoOutputFile:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
+
 
 class JindoFileSystemHandler(FileSystemHandler):
     def __init__(self, root_path: str, catalog_options: Options):
@@ -205,7 +207,7 @@ class JindoFileSystemHandler(FileSystemHandler):
         try:
             items = self._jindo_fs.listdir(normalized, recursive=selector.recursive)
             return [self._convert_file_info(item) for item in items]
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             if selector.allow_not_found:
                 return []
             raise
@@ -256,13 +258,6 @@ class JindoFileSystemHandler(FileSystemHandler):
         src_norm = self._normalize_path(src)
         dst_norm = self._normalize_path(dest)
         self._jindo_fs.copy_file(src_norm, dst_norm)
-        # with self._jindo_fs.open(src_norm, "rb") as src_f:
-        #     with self._jindo_fs.open(dst_norm, "wb") as dst_f:
-        #         while True:
-        #             chunk = src_f.read(1024 * 1024)  # 1 MB
-        #             if not chunk:
-        #                 break
-        #             dst_f.write(chunk)
 
     def open_input_stream(self, path: str):
         normalized = self._normalize_path(path)
@@ -284,4 +279,3 @@ class JindoFileSystemHandler(FileSystemHandler):
 
     def normalize_path(self, path: str) -> str:
         return self._normalize_path(path)
-

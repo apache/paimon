@@ -47,6 +47,7 @@ except ImportError:
     JINDO_AVAILABLE = False
     JindoFileSystemHandler = None
 
+
 def _pyarrow_lt_7():
     return parse(pyarrow.__version__) < parse("7.0.0")
 
@@ -569,7 +570,7 @@ class PyArrowFileIO(FileIO):
             # For JindoFileSystem, pass key only
             path_part = normalized_path.lstrip('/')
             return path_part if path_part else '.'
-        
+
         if isinstance(self.filesystem, S3FileSystem):
             if parsed.scheme:
                 if parsed.netloc:
