@@ -703,15 +703,11 @@ manager.clear_consumers(
 ConsumerManager supports multiple branches:
 
 ```python
-# Main branch (default)
-manager_main = ConsumerManager(file_io, table.location())
-
 # Custom branch
-manager_branch = ConsumerManager(file_io, table.location(), branch='feature_branch')
+branch_manager = manager.with_branch('feature_branch')
 
 # Each branch maintains its own consumers
-print(manager_main.consumers())  # Consumers on main branch
-print(manager_branch.consumers())  # Consumers on feature branch
+print(branch_manager.consumers())  # Consumers on feature branch
 ```
 
 ## Supported Features

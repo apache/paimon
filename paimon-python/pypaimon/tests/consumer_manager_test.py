@@ -263,6 +263,53 @@ class ConsumerManagerTest(unittest.TestCase):
         # Verify test-backup remains
         self.assertIsNotNone(self.manager.consumer("test-backup"))
 
+    def test_with_branch(self):
+        """Test with_branch method."""
+        # Create consumer on main branch
+        self.manager.reset_consumer("main_consumer", Consumer(10))
+        main_consumer = self.manager.consumer("main_consumer")
+        self.assertIsNotNone(main_consumer)
+        self.assertEqual(main_consumer.next_snapshot, 10)
+
+        # Create consumer manager for a different branch using with_branch
+        branch_manager = self.manager.with_branch("feature_branch")
+        self.assertEqual(branch_manager._branch, "feature_branch")
+
+        # Verify main branch consumer doesn't exist on new branch
+        branch_consumer = branch_manager.consumer("main_consumer")
+        self.assertIsNone(branch_consumer)
+
+        # Create consumer on new branch
+        branch_manager.reset_consumer("branch_consumer", Consumer(20))
+        branch_consumer = branch_manager.consumer("branch_consumer")
+        self.assertIsNotNone(branch_consumer)
+        self.assertEqual(branch_consumer.next_snapshot, 20)
+
+        # Verify original manager still operates on main branch
+        self.assertEqual(self.manager._branch, "main")
+        main_consumer = self.manager.consumer("main_consumer")
+        self.assertIsNotNone(main_consumer)
+        self.assertEqual(main_consumer.next_snapshot, 10)
+
+        # Verify branch consumer doesn't exist on main branch
+        main_branch_consumer = self.manager.consumer("branch_consumer")
+        self.assertIsNone(main_branch_consumer)
+
+    def test_with_branch_main(self):
+        """Test with_branch with None returns main branch."""
+        branch_manager = self.manager.with_branch(None)
+        self.assertEqual(branch_manager._branch, "main")
+
+    def test_with_branch_empty(self):
+        """Test with_branch with empty string returns main branch."""
+        branch_manager = self.manager.with_branch("")
+        self.assertEqual(branch_manager._branch, "main")
+
+    def test_with_branch_explicit_main(self):
+        """Test with_branch with explicit 'main' branch."""
+        branch_manager = self.manager.with_branch("main")
+        self.assertEqual(branch_manager._branch, "main")
+
 
 if __name__ == '__main__':
     unittest.main()

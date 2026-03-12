@@ -181,3 +181,15 @@ class ConsumerManager:
 
             if should_delete:
                 self.delete_consumer(consumer_id)
+
+    def with_branch(self, branch: Optional[str]) -> 'ConsumerManager':
+        """
+        Create a new ConsumerManager instance with the specified branch.
+
+        Args:
+            branch: Branch name, or None for main branch
+
+        Returns:
+            A new ConsumerManager instance with the specified branch
+        """
+        return ConsumerManager(self._file_io, self._table_path, branch)
