@@ -87,6 +87,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -459,6 +460,13 @@ public class CompactProcedure extends BaseProcedure {
                                                             ser.deserialize(
                                                                     ser.getVersion(),
                                                                     taskIterator.next());
+                                                    if (coreOptions.rowTrackingEnabled()) {
+                                                        task.compactBefore()
+                                                                .sort(
+                                                                        Comparator.comparingLong(
+                                                                                DataFileMeta
+                                                                                        ::minSequenceNumber));
+                                                    }
                                                     messages.add(
                                                             messageSer.serialize(
                                                                     task.doCompact(table, write)));
