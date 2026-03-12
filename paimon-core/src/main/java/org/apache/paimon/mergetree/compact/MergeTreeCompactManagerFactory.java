@@ -156,7 +156,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
-        CompactRewriter rewriter =
+        MergeTreeCompactRewriter rewriter =
                 createRewriter(
                         partition,
                         bucket,
@@ -164,6 +164,13 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                         userDefinedSeqComparator,
                         levels,
                         dvMaintainer);
+        CompactionMetrics.Reporter metricsReporter =
+                compactionMetrics == null
+                        ? null
+                        : compactionMetrics.createReporter(partition, bucket);
+        if (metricsReporter != null) {
+            rewriter.setMetricsReporter(metricsReporter);
+        }
         return new MergeTreeCompactManager(
                 compactExecutor,
                 levels,
@@ -172,9 +179,7 @@ public class MergeTreeCompactManagerFactory implements KvCompactionManagerFactor
                 options.compactionFileSize(true),
                 options.numSortedRunStopTrigger(),
                 rewriter,
-                compactionMetrics == null
-                        ? null
-                        : compactionMetrics.createReporter(partition, bucket),
+                metricsReporter,
                 dvMaintainer,
                 options.prepareCommitWaitCompaction(),
                 options.needLookup(),
