@@ -78,9 +78,7 @@ public class BTreeIndexTopoBuilder implements GlobalIndexTopologyBuilder {
             throws IOException {
         // 1. read the whole dataset of target partitions
         BTreeGlobalIndexBuilder indexBuilder =
-                new BTreeGlobalIndexBuilder(table)
-                        .withIndexType(indexType)
-                        .withIndexField(indexField.name());
+                new BTreeGlobalIndexBuilder(table).withIndexField(indexField.name());
         if (partitionPredicate != null) {
             indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
         }
