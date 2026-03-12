@@ -128,7 +128,7 @@ class JindoFileSystemHandler(FileSystemHandler):
         self.root_path = root_path
         self.properties = catalog_options
 
-        # 从 catalog_options 构建 jindo 配置
+        # Build jindo config from catalog_options
         config = jutil.Config()
 
         access_key_id = catalog_options.get(OssOptions.OSS_ACCESS_KEY_ID)
