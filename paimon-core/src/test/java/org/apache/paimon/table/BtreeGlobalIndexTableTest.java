@@ -24,7 +24,6 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -167,9 +166,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     private void createIndex(String fieldName) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         BTreeGlobalIndexBuilder builder =
-                new BTreeGlobalIndexBuilder(table)
-                        .withIndexType(BTreeGlobalIndexerFactory.IDENTIFIER)
-                        .withIndexField(fieldName);
+                new BTreeGlobalIndexBuilder(table).withIndexField(fieldName);
         List<DataSplit> dataSplits = builder.scan();
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : dataSplits) {
