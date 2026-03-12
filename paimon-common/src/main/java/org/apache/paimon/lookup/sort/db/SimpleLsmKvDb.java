@@ -484,25 +484,25 @@ public class SimpleLsmKvDb implements Closeable {
             this.dataDirectory = dataDirectory;
         }
 
-        /** Set the MemTable flush threshold in bytes. Default is 4 MB. */
+        /** Set the MemTable flush threshold in bytes. Default is 64 MB. */
         public Builder memTableFlushThreshold(long thresholdBytes) {
             this.memTableFlushThreshold = thresholdBytes;
             return this;
         }
 
-        /** Set the maximum SST file size produced by compaction in bytes. Default is 64 MB. */
+        /** Set the maximum SST file size produced by compaction in bytes. Default is 8 MB. */
         public Builder maxSstFileSize(long maxSstFileSize) {
             this.maxSstFileSize = maxSstFileSize;
             return this;
         }
 
-        /** Set the SST block size in bytes. Default is 4 KB. */
+        /** Set the SST block size in bytes. Default is 32 KB. */
         public Builder blockSize(int blockSize) {
             this.blockSize = blockSize;
             return this;
         }
 
-        /** Set the block cache size in bytes. Default is 8 MB. */
+        /** Set the block cache size in bytes. Default is 128 MB. */
         public Builder cacheSize(long cacheSize) {
             this.cacheSize = cacheSize;
             return this;
