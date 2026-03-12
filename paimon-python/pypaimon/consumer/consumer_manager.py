@@ -157,8 +157,9 @@ class ConsumerManager:
                 consumers[consumer_id] = consumer.next_snapshot
         return consumers
 
-    def clear_consumers(self, including_pattern: str,
-                         excluding_pattern: Optional[str] = None) -> None:
+    def clear_consumers(
+            self, including_pattern: str, excluding_pattern: Optional[str] = None
+    ) -> None:
         """
         Clear consumers matching inclusion pattern but not exclusion pattern.
 
