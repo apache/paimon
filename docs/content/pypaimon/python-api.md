@@ -607,10 +607,7 @@ table = catalog.get_table('database_name.table_name')
 file_io = table.file_io()
 
 # Create consumer manager
-manager = ConsumerManager(file_io, table.location())
-
-# For branch support
-manager_branch = ConsumerManager(file_io, table.location(), branch='my_branch')
+manager = table.consumer_manager
 ```
 
 ### Get Consumer
