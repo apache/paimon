@@ -38,7 +38,7 @@ class ExternalPathStrategy(str, Enum):
 
 class ChangelogProducer(str, Enum):
     """
-    Changelog producer for streaming reads.
+    Available changelog producer modes.
     """
     NONE = "none"
     INPUT = "input"
