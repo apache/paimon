@@ -75,7 +75,7 @@ class CommitTableRequest(RESTRequest):
     FIELD_SNAPSHOT = "snapshot"
     FIELD_STATISTICS = "statistics"
 
-    table_uuid: Optional[str] = json_field(FIELD_TABLE_ID)
+    table_id: Optional[str] = json_field(FIELD_TABLE_ID)
     snapshot: Snapshot = json_field(FIELD_SNAPSHOT)
     statistics: List[PartitionStatistics] = json_field(FIELD_STATISTICS)
 
