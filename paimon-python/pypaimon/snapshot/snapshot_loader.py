@@ -52,48 +52,8 @@ class SnapshotLoader:
             table_snapshot = catalog.load_snapshot(self.identifier)
             if table_snapshot is None:
                 return None
-            # Get the snapshot JSON from TableSnapshot
-            return JSON.to_json(table_snapshot.snapshot)
+            return table_snapshot.snapshot
         except RuntimeError as e:
             raise e
         except Exception as e:
             raise RuntimeError(f"Failed to load snapshot: {e}")
-
-    def rollback(self, instant) -> None:
-        """Rollback to a specific instant.
-        
-        Args:
-            instant: The instant to rollback to
-            
-        Raises:
-            RuntimeError: If there's an error during rollback
-        """
-        try:
-            catalog = self.catalog_loader.load()
-            try:
-                catalog.rollback_to(self.identifier, instant)
-            finally:
-                if hasattr(catalog, 'close'):
-                    catalog.close()
-        except RuntimeError as e:
-            raise e
-        except Exception as e:
-            raise RuntimeError(f"Failed to rollback: {e}")
-
-    def copy_with_branch(self, branch: str) -> 'SnapshotLoader':
-        """Create a copy of this loader with a different branch.
-        
-        Args:
-            branch: The branch name
-            
-        Returns:
-            A new SnapshotLoader instance for the specified branch
-        """
-        from pypaimon.common.identifier import Identifier
-        
-        new_identifier = Identifier(
-            database=self.identifier.get_database_name(),
-            object=self.identifier.get_table_name(),
-            branch=branch
-        )
-        return SnapshotLoader(self.catalog_loader, new_identifier)
