@@ -327,7 +327,6 @@ class RESTCatalog(Catalog):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
-            from pypaimon.snapshot.table_snapshot import TableSnapshot
             return self.rest_api.load_snapshot(identifier)
         except NoSuchResourceException as e:
             if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:

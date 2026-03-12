@@ -18,8 +18,6 @@
 
 from typing import Optional
 
-from pypaimon.common.json_util import JSON
-
 
 class SnapshotLoader:
     """Loader to load latest snapshot from a catalog.
