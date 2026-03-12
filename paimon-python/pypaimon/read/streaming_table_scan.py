@@ -31,6 +31,8 @@ from typing import AsyncGenerator, Callable, Iterator, List, Optional
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.common.predicate import Predicate
+from pypaimon.consumer.consumer import Consumer
+from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.manifest.manifest_file_manager import ManifestFileManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 from pypaimon.read.plan import Plan
@@ -78,6 +80,7 @@ class AsyncStreamingTableScan:
         bucket_filter: Optional[Callable[[int], bool]] = None,
         prefetch_enabled: bool = True,
         diff_threshold: int = 10,
+        consumer_id: Optional[str] = None
     ):
         """Initialize the streaming table scan."""
         self.table = table
@@ -104,6 +107,13 @@ class AsyncStreamingTableScan:
         self._manifest_list_manager = ManifestListManager(table)
         self._manifest_file_manager = ManifestFileManager(table)
 
+        # Consumer management for persisting streaming progress
+        self._consumer_id = consumer_id
+        self._consumer_manager = (
+            ConsumerManager(table.file_io, table.table_path)
+            if consumer_id else None
+        )
+
         # Scanner for determining which snapshots to read
         # Auto-select based on changelog-producer if not explicitly provided
         self.follow_up_scanner = follow_up_scanner or self._create_follow_up_scanner()
@@ -120,11 +130,18 @@ class AsyncStreamingTableScan:
         Yields:
             Plan objects containing splits for reading
         """
+        # Restore from consumer if available
+        if self.next_snapshot_id is None and self._consumer_manager:
+            consumer = self._consumer_manager.consumer(self._consumer_id)
+            if consumer:
+                self.next_snapshot_id = consumer.next_snapshot
+
         # Initial scan
         if self.next_snapshot_id is None:
             latest_snapshot = self._snapshot_manager.get_latest_snapshot()
             if latest_snapshot:
                 self.next_snapshot_id = latest_snapshot.id + 1
+                self._save_consumer()
                 yield self._create_initial_plan(latest_snapshot)
 
         # Check for catch-up scenario: starting from earlier snapshot with large gap.
@@ -140,6 +157,7 @@ class AsyncStreamingTableScan:
                         latest_snapshot
                     )
                     self.next_snapshot_id = latest_snapshot.id + 1
+                    self._save_consumer()
                     yield catch_up_plan
             finally:
                 self._catch_up_in_progress = False
@@ -194,6 +212,7 @@ class AsyncStreamingTableScan:
                 # Start prefetching next scannable snapshot before yielding
                 if self._prefetch_enabled:
                     self._start_prefetch(self.next_snapshot_id)
+                self._save_consumer()
                 yield plan
             elif not snapshot_processed:
                 # No snapshot available yet, wait and poll again
@@ -220,6 +239,14 @@ class AsyncStreamingTableScan:
                     break
         finally:
             loop.close()
+
+    def _save_consumer(self) -> None:
+        """Persist next_snapshot_id to consumer file."""
+        if self._consumer_manager and self._consumer_id and self.next_snapshot_id is not None:
+            self._consumer_manager.reset_consumer(
+                self._consumer_id,
+                Consumer(next_snapshot=self.next_snapshot_id)
+            )
 
     def _start_prefetch(self, snapshot_id: int) -> None:
         """Start prefetching the next scannable snapshot in a background thread."""

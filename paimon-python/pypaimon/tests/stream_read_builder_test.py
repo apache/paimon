@@ -83,6 +83,12 @@ class TestStreamReadBuilderValidation:
         for b in expected_false:
             assert not builder._bucket_filter(b), f"Bucket {b} should be excluded"
 
+    def test_with_consumer_id(self, builder):
+        """Test with_consumer_id() stores consumer_id and returns self."""
+        result = builder.with_consumer_id("my-consumer")
+        assert result is builder
+        assert builder._consumer_id == "my-consumer"
+
     def test_method_chaining(self, builder):
         """Test method chaining works correctly."""
         result = (builder
@@ -114,6 +120,29 @@ class TestAsyncStreamingTableScanFiltering:
         entries = [MockEntry(b) for b in range(8)]
         filtered = scan._filter_entries_for_shard(entries)
         assert [e.bucket for e in filtered] == list(range(8))
+
+
+class TestConsumerIdPassthrough:
+    """Test that consumer_id passes through to AsyncStreamingTableScan."""
+
+    def test_new_streaming_scan_passes_consumer_id(self, mock_scan_table):
+        """new_streaming_scan() should pass consumer_id to AsyncStreamingTableScan."""
+        builder = StreamReadBuilder(mock_scan_table)
+        builder.with_consumer_id("test-consumer")
+
+        scan = builder.new_streaming_scan()
+
+        assert scan._consumer_id == "test-consumer"
+        assert scan._consumer_manager is not None
+
+    def test_new_streaming_scan_no_consumer_by_default(self, mock_scan_table):
+        """Without with_consumer_id(), scan should have no consumer."""
+        builder = StreamReadBuilder(mock_scan_table)
+
+        scan = builder.new_streaming_scan()
+
+        assert scan._consumer_id is None
+        assert scan._consumer_manager is None
 
 
 if __name__ == '__main__':
