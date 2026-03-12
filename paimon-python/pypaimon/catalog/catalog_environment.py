@@ -23,6 +23,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.catalog_snapshot_commit import CatalogSnapshotCommit
 from pypaimon.snapshot.renaming_snapshot_commit import RenamingSnapshotCommit
 from pypaimon.snapshot.snapshot_commit import SnapshotCommit
+from pypaimon.snapshot.snapshot_loader import SnapshotLoader
 
 
 class CatalogEnvironment:
@@ -74,6 +75,16 @@ class CatalogEnvironment:
             from pypaimon.catalog.table_rollback import TableRollback
             catalog = self.catalog_loader.load()
             return TableRollback(catalog, self.identifier)
+        return None
+
+    def snapshot_loader(self) -> Optional[SnapshotLoader]:
+        """Create a SnapshotLoader instance based on the catalog environment.
+
+        Returns:
+            SnapshotLoader instance if catalog_loader is available, None otherwise
+        """
+        if self.catalog_loader is not None:
+            return SnapshotLoader(self.catalog_loader, self.identifier)
         return None
 
     def copy(self, identifier: Identifier) -> 'CatalogEnvironment':

@@ -71,11 +71,11 @@ class CreateTableRequest(RESTRequest):
 
 @dataclass
 class CommitTableRequest(RESTRequest):
-    FIELD_TABLE_UUID = "tableUuid"
+    FIELD_TABLE_ID = "tableId"
     FIELD_SNAPSHOT = "snapshot"
     FIELD_STATISTICS = "statistics"
 
-    table_uuid: Optional[str] = json_field(FIELD_TABLE_UUID)
+    table_id: Optional[str] = json_field(FIELD_TABLE_ID)
     snapshot: Snapshot = json_field(FIELD_SNAPSHOT)
     statistics: List[PartitionStatistics] = json_field(FIELD_STATISTICS)
 

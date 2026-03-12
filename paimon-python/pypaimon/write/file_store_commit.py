@@ -230,12 +230,10 @@ class FileStoreCommit:
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False):
-        import threading
 
         retry_count = 0
         retry_result = None
         start_time_ms = int(time.time() * 1000)
-        thread_id = threading.current_thread().name
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
             commit_entries = commit_entries_plan(latest_snapshot)
@@ -257,12 +255,6 @@ class FileStoreCommit:
 
             if result.is_success():
                 commit_duration_ms = int(time.time() * 1000) - start_time_ms
-                logger.info(
-                    "Thread %s: commit success %d after %d retries",
-                    thread_id,
-                    latest_snapshot.id + 1 if latest_snapshot else 1,
-                    retry_count,
-                )
                 if commit_kind == "OVERWRITE":
                     logger.info(
                         "Finished overwrite to table %s, duration %d ms",
@@ -529,8 +521,6 @@ class FileStoreCommit:
         return entries
 
     def _commit_retry_wait(self, retry_count: int):
-        import threading
-        thread_id = threading.get_ident()
 
         retry_wait_ms = min(
             self.commit_min_retry_wait * (2 ** retry_count),
@@ -540,10 +530,6 @@ class FileStoreCommit:
         jitter_ms = random.randint(0, max(1, int(retry_wait_ms * 0.2)))
         total_wait_ms = retry_wait_ms + jitter_ms
 
-        logger.debug(
-            f"Thread {thread_id}: Waiting {total_wait_ms}ms before retry (base: {retry_wait_ms}ms, "
-            f"jitter: {jitter_ms}ms)"
-        )
         time.sleep(total_wait_ms / 1000.0)
 
     def _cleanup_preparation_failure(self,

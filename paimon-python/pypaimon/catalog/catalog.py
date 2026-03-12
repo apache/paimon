@@ -139,6 +139,21 @@ class Catalog(ABC):
         return False
 
     @abstractmethod
+    def load_snapshot(self, identifier: Identifier):
+        """Load the snapshot of table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+
+        Returns:
+            TableSnapshot instance
+
+        Raises:
+            NotImplementedError: If the catalog does not support version management
+            TableNotExistException: If the table does not exist
+        """
+
+    @abstractmethod
     def commit_snapshot(
             self,
             identifier: Identifier,
@@ -178,9 +193,9 @@ class Catalog(ABC):
         )
 
     def drop_partitions(
-        self,
-        identifier: Union[str, Identifier],
-        partitions: List[Dict[str, str]],
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
     ) -> None:
         raise NotImplementedError(
             "drop_partitions is not supported by this catalog. Use REST catalog for partition drop."

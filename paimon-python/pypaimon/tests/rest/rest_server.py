@@ -21,7 +21,6 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
@@ -35,7 +34,7 @@ from pypaimon.api.api_request import (AlterTableRequest, CreateDatabaseRequest,
 from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        GetTableResponse, ListDatabasesResponse,
                                        ListTablesResponse, PagedList,
-                                       RESTResponse)
+                                       RESTResponse, ErrorResponse)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
@@ -45,44 +44,11 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 TableAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
-from pypaimon.common.json_util import JSON, json_field
+from pypaimon.common.json_util import JSON
 from pypaimon import Schema
 from pypaimon.schema.schema_change import Actions, SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
-
-
-@dataclass
-class ErrorResponse(RESTResponse):
-    """Error response"""
-    RESOURCE_TYPE_DATABASE = "database"
-    RESOURCE_TYPE_TABLE = "table"
-    RESOURCE_TYPE_VIEW = "view"
-    RESOURCE_TYPE_FUNCTION = "function"
-    RESOURCE_TYPE_COLUMN = "column"
-    RESOURCE_TYPE_SNAPSHOT = "snapshot"
-    RESOURCE_TYPE_TAG = "tag"
-    RESOURCE_TYPE_BRANCH = "branch"
-    RESOURCE_TYPE_DEFINITION = "definition"
-    RESOURCE_TYPE_DIALECT = "dialect"
-
-    resource_type: Optional[str] = json_field("resourceType", default=None)
-    resource_name: Optional[str] = json_field("resourceName", default=None)
-    message: Optional[str] = json_field("message", default=None)
-    code: Optional[int] = json_field("code", default=None)
-
-    def __init__(
-        self,
-        resource_type: Optional[str] = None,
-        resource_name: Optional[str] = None,
-        message: Optional[str] = None,
-        code: Optional[int] = None,
-    ):
-        self.resource_type = resource_type
-        self.resource_name = resource_name
-        self.message = message
-        self.code = code
-
 
 # Constants
 DEFAULT_MAX_RESULTS = 100
@@ -486,7 +452,7 @@ class RESTCatalogServer:
             # Basic table operations (GET, DELETE, etc.)
             return self._table_handle(method, data, lookup_identifier)
         elif len(path_parts) == 4:
-            # Extended operations (e.g., commit, token)
+            # Extended operations (e.g., commit, token, snapshot)
             operation = path_parts[3]
             if operation == "commit":
                 return self._table_commit_handle(method, data, lookup_identifier, branch_part)
@@ -494,6 +460,8 @@ class RESTCatalogServer:
                 return self._table_token_handle(method, lookup_identifier)
             elif operation == "rollback":
                 return self._table_rollback_handle(method, data, lookup_identifier)
+            elif operation == "snapshot":
+                return self._table_snapshot_handle(method, lookup_identifier)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
@@ -751,13 +719,65 @@ class RESTCatalogServer:
         table.rollback_to(tag_name)
         return self._mock_response("", 200)
 
+    def _table_snapshot_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
+        """Handle table snapshot operations.
+
+        Args:
+            method: HTTP method
+            identifier: Table identifier
+
+        Returns:
+            Tuple of (response JSON, HTTP status code)
+        """
+        if method != "GET":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        table_metadata = self.table_metadata_store[identifier.get_full_name()]
+        if table_metadata.is_external:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TABLE,
+                identifier.get_full_name(),
+                "external paimon table does not support get table snapshot in rest server",
+                501)
+            return self._mock_response(response, 404)
+
+        # Get the table and snapshot manager to retrieve snapshot
+        table = self._get_file_table(identifier)
+        snapshot_manager = table.snapshot_manager()
+
+        # Get latest snapshot
+        snapshot = snapshot_manager.get_latest_snapshot()
+
+        if snapshot is None:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                identifier.get_database_name(),
+                "No Snapshot",
+                404)
+            return self._mock_response(response, 404)
+
+        from pypaimon.api.api_response import GetTableSnapshotResponse
+        from pypaimon.snapshot.table_snapshot import TableSnapshot
+
+        table_snapshot = TableSnapshot(
+            snapshot=snapshot,
+            record_count=snapshot.total_record_count,
+            file_size_in_bytes=0,
+            file_count=0,
+            last_file_creation_time=snapshot.time_millis
+        )
+        response = GetTableSnapshotResponse(table_snapshot)
+        return self._mock_response(response, 200)
+
     def _get_file_table(self, identifier: Identifier):
         """Construct a FileStoreTable from the metadata store.
 
-        Mirrors Java RESTCatalogServer.getFileTable(): loads the schema from
-        the metadata store, builds a CatalogEnvironment (without catalog
-        loader so rollback goes through local file cleanup), and returns a
-        FileStoreTable.
+        loads the schema from the metadata store, builds a CatalogEnvironment
+        (without catalog loader so rollback goes through local file cleanup),
+        and returns a FileStoreTable.
         """
         from pypaimon.catalog.catalog_environment import CatalogEnvironment
         from pypaimon.common.file_io import FileIO

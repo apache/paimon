@@ -17,7 +17,7 @@ limitations under the License.
 """
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from pypaimon.api.api_response import GetTableResponse, PagedList
+from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
 from pypaimon.catalog.catalog import Catalog
@@ -301,12 +301,36 @@ class RESTCatalog(Catalog):
         try:
             self.rest_api.rollback_to(identifier, instant, from_snapshot)
         except NoSuchResourceException as e:
-            if e.resource_type == "snapshot":
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
                 raise ValueError(
                     "Rollback snapshot '{}' doesn't exist.".format(e.resource_name)) from e
-            elif e.resource_type == "tag":
+            elif e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
                 raise ValueError(
                     "Rollback tag '{}' doesn't exist.".format(e.resource_name)) from e
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional['TableSnapshot']:
+        """Load the latest snapshot for table.
+
+        Args:
+            identifier: Path of the table (Identifier or string).
+
+        Returns:
+            TableSnapshot instance or None if snapshot not found.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            TableNoPermissionException: If no permission to access this table.
+        """
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.load_snapshot(identifier)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
+                return None
             raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e

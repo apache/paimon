@@ -27,7 +27,7 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetTableTokenResponse,
                                        ListDatabasesResponse,
                                        ListTablesResponse, PagedList,
-                                       PagedResponse)
+                                       PagedResponse, GetTableSnapshotResponse)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
@@ -379,6 +379,25 @@ class RESTApi:
             request,
             self.rest_auth_function
         )
+
+    def load_snapshot(self, identifier: Identifier) -> Optional['TableSnapshot']:
+        """Load latest snapshot for table.
+
+        Args:
+            identifier: Database name and table name.
+
+        Returns:
+            TableSnapshot instance or None if snapshot not found.
+        """
+        database_name, table_name = self.__validate_identifier(identifier)
+        response = self.client.get(
+            self.resource_paths.table_snapshot(database_name, table_name),
+            GetTableSnapshotResponse,
+            self.rest_auth_function
+        )
+        if response is None:
+            return None
+        return response.get_snapshot()
 
     @staticmethod
     def __validate_identifier(identifier: Identifier):

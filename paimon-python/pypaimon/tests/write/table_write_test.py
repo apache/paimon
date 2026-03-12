@@ -27,6 +27,8 @@ from pypaimon import CatalogFactory, Schema
 import pyarrow as pa
 from parameterized import parameterized
 
+from pypaimon.common.json_util import JSON
+
 
 class TableWriteTest(unittest.TestCase):
     @classmethod
@@ -89,7 +91,7 @@ class TableWriteTest(unittest.TestCase):
         self.assertEqual(self.expected, actual)
 
         # snapshot
-        snapshot_json: str = table.snapshot_manager().get_latest_snapshot_json()
+        snapshot_json: str = JSON.to_json(table.snapshot_manager().get_latest_snapshot())
         self.assertEquals(True, snapshot_json.__contains__("baseManifestList"))
         self.assertEquals(False, snapshot_json.__contains__("nextRowId"))
 

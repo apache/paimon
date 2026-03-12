@@ -169,13 +169,13 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
         from pypaimon.api.api_request import CommitTableRequest
 
         request = CommitTableRequest(
-            table_uuid="test-uuid",
+            table_id="test-uuid",
             snapshot=self.test_snapshot,
             statistics=self.test_statistics
         )
 
         # Verify request fields
-        self.assertEqual(request.table_uuid, "test-uuid")
+        self.assertEqual(request.table_id, "test-uuid")
         self.assertEqual(request.snapshot, self.test_snapshot)
         self.assertEqual(request.statistics, self.test_statistics)
 
