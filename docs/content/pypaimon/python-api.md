@@ -599,7 +599,6 @@ Consumer management allows you to track consumption progress, prevent snapshot e
 
 ```python
 from pypaimon import CatalogFactory
-from pypaimon.consumer.consumer_manager import ConsumerManager
 
 # Get table and file_io
 catalog = CatalogFactory.create({'warehouse': 'file:///path/to/warehouse'})
@@ -607,7 +606,7 @@ table = catalog.get_table('database_name.table_name')
 file_io = table.file_io()
 
 # Create consumer manager
-manager = table.consumer_manager
+manager = table.consumer_manager()
 ```
 
 ### Get Consumer
