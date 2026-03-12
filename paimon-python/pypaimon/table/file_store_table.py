@@ -23,7 +23,6 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
-from pypaimon.consumer.consumer_manager import ConsumerManager
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
@@ -62,7 +61,6 @@ class FileStoreTable(Table):
         self.total_buckets = self.options.bucket()
 
         self.schema_manager = SchemaManager(file_io, table_path)
-        self.consumer_manager = ConsumerManager(file_io, table_path, self.current_branch())
 
     @classmethod
     def from_path(cls, table_path: str) -> 'FileStoreTable':
@@ -85,6 +83,11 @@ class FileStoreTable(Table):
     def current_branch(self) -> str:
         """Get the current branch name from options."""
         return self.options.branch()
+
+    def consumer_manager(self):
+        """Get the consumer manager for this table."""
+        from pypaimon.consumer.consumer_manager import ConsumerManager
+        return ConsumerManager(self.file_io, self.table_path, self.current_branch())
 
     def snapshot_manager(self):
         """Get the snapshot manager for this table."""
