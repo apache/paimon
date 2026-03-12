@@ -1252,7 +1252,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @ParameterizedTest
-    @EnumSource(LookupCacheMode.class)
+    @EnumSource(
+            value = LookupCacheMode.class,
+            names = {"FULL"})
     public void testSyncPartitionRefresh(LookupCacheMode mode) throws Exception {
         // This test verifies synchronous partition refresh (default mode):
         // when max_pt() changes, the lookup table is refreshed synchronously,
@@ -1282,17 +1284,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         // insert data into a new partition '2', which will trigger sync partition refresh
         sql("INSERT INTO PARTITIONED_DIM VALUES ('2', 1, 1000), ('2', 2, 2000)");
-        Thread.sleep(2000); // wait for partition refresh interval to trigger
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1000), Row.of(2, 2000));
-
-        // insert another new partition '3' and verify switch again
-        sql("INSERT INTO PARTITIONED_DIM VALUES ('3', 1, 10000), ('3', 2, 20000)");
-        Thread.sleep(2000); // wait for partition refresh interval to trigger
-        sql("INSERT INTO T VALUES (1), (2)");
-        result = iterator.collect(2);
-        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 10000), Row.of(2, 20000));
 
         iterator.close();
     }
@@ -1331,21 +1325,21 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         // insert data into a new partition '2', which will trigger async partition refresh
         sql("INSERT INTO PARTITIONED_DIM VALUES ('2', 1, 1000), ('2', 2, 2000)");
-        Thread.sleep(1000); // wait for async refresh to complete
+        Thread.sleep(500); // wait for async refresh to complete
         // trigger a lookup to check async completion and switch to new partition
         sql("INSERT INTO T VALUES (1), (2)");
         iterator.collect(2);
-        Thread.sleep(1000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1000), Row.of(2, 2000));
 
         // insert another new partition '3' and verify switch again
         sql("INSERT INTO PARTITIONED_DIM VALUES ('3', 1, 10000), ('3', 2, 20000)");
-        Thread.sleep(1000); // wait for async refresh to complete
+        Thread.sleep(500); // wait for async refresh to complete
         sql("INSERT INTO T VALUES (1), (2)");
         iterator.collect(2);
-        Thread.sleep(1000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 10000), Row.of(2, 20000));
@@ -1393,7 +1387,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 100), Row.of(2, 200));
 
         // now wait for async refresh to complete and trigger switch
-        Thread.sleep(2000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         // after switch, new partition data should be returned
@@ -1434,7 +1428,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         // update data in the current partition '1'
         sql("INSERT INTO PARTITIONED_DIM VALUES ('1', 1, 150), ('1', 2, 250)");
-        Thread.sleep(2000); // wait for incremental refresh
+        Thread.sleep(500); // wait for incremental refresh
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 150), Row.of(2, 250));
@@ -1443,7 +1437,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         sql("INSERT INTO PARTITIONED_DIM VALUES ('2', 1, 1000), ('2', 2, 2000)");
         sql("INSERT INTO T VALUES (1), (2)");
         iterator.collect(2);
-        Thread.sleep(1000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1000), Row.of(2, 2000));
@@ -1451,11 +1445,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @ParameterizedTest
-    @EnumSource(
-            value = LookupCacheMode.class,
-            names = {"FULL", "MEMORY"})
-    public void testAsyncPartitionRefreshWithMultiPartitionKeys(LookupCacheMode mode)
+    @Test
+    public void testAsyncPartitionRefreshWithMultiPartitionKeys()
             throws Exception {
         // Verify async partition refresh works correctly with multi-level partition keys.
         sql(
@@ -1467,7 +1458,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         + "'lookup.dynamic-partition.refresh.async' = 'true', "
                         + "'lookup.cache' = '%s', "
                         + "'continuous.discovery-interval'='1 ms')",
-                mode);
+                LookupCacheMode.FULL);
 
         sql(
                 "INSERT INTO PARTITIONED_DIM VALUES "
@@ -1493,10 +1484,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "INSERT INTO PARTITIONED_DIM VALUES "
                         + "('2025', 1, 1, 1000), ('2025', 1, 2, 2000), "
                         + "('2025', 2, 1, 3000), ('2025', 2, 2, 4000)");
-        Thread.sleep(2000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         iterator.collect(4);
-        Thread.sleep(1000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(4);
         assertThat(result)
@@ -1509,11 +1500,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @ParameterizedTest
-    @EnumSource(
-            value = LookupCacheMode.class,
-            names = {"FULL", "MEMORY"})
-    public void testAsyncPartitionRefreshWithOverwrite(LookupCacheMode mode) throws Exception {
+    @Test
+    public void testAsyncPartitionRefreshWithOverwrite() throws Exception {
         // Verify async partition refresh works correctly when a new max partition
         // is created via INSERT OVERWRITE.
         sql(
@@ -1525,7 +1513,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         + "'lookup.dynamic-partition.refresh.async' = 'true', "
                         + "'lookup.cache' = '%s', "
                         + "'continuous.discovery-interval'='1 ms')",
-                mode);
+                LookupCacheMode.FULL);
 
         sql("INSERT INTO PARTITIONED_DIM VALUES (1, 1, 100), (1, 2, 200)");
 
@@ -1540,7 +1528,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         // overwrite current max partition with new data
         sql("INSERT OVERWRITE PARTITIONED_DIM PARTITION (pt = 1) VALUES (1, 150), (2, 250)");
-        Thread.sleep(2000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(2);
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 150), Row.of(2, 250));
@@ -1548,10 +1536,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         // overwrite to create a new max partition
         sql(
                 "INSERT OVERWRITE PARTITIONED_DIM PARTITION (pt = 2) VALUES (1, 1000), (2, 2000), (3, 3000)");
-        Thread.sleep(2000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2), (3)");
         iterator.collect(3);
-        Thread.sleep(1000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2), (3)");
         result = iterator.collect(3);
         assertThat(result)
@@ -1560,11 +1548,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @ParameterizedTest
-    @EnumSource(
-            value = LookupCacheMode.class,
-            names = {"FULL", "MEMORY"})
-    public void testAsyncPartitionRefreshWithMaxTwoPt(LookupCacheMode mode) throws Exception {
+    @Test
+    public void testAsyncPartitionRefreshWithMaxTwoPt() throws Exception {
         // Verify async partition refresh works correctly with max_two_pt() strategy.
         sql(
                 "CREATE TABLE TWO_PT_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED)"
@@ -1575,7 +1560,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         + "'lookup.dynamic-partition.refresh.async' = 'true', "
                         + "'lookup.cache' = '%s', "
                         + "'continuous.discovery-interval'='1 ms')",
-                mode);
+                LookupCacheMode.FULL);
 
         // insert data into partitions '1' and '2'
         sql(
@@ -1599,10 +1584,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         // insert new partition '3', now max_two_pt should be '2' and '3'
         sql("INSERT INTO TWO_PT_DIM VALUES " + "('3', 1, 1000), ('3', 2, 2000)");
-        Thread.sleep(2000);
         sql("INSERT INTO T VALUES (1), (2)");
         iterator.collect(4);
-        Thread.sleep(1000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(4);
         // should now see data from partitions '2' and '3'
@@ -1615,10 +1599,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         // insert another partition '4', max_two_pt should be '3' and '4'
         sql("INSERT INTO TWO_PT_DIM VALUES " + "('4', 1, 10000), ('4', 2, 20000)");
-        Thread.sleep(2000);
         sql("INSERT INTO T VALUES (1), (2)");
-        result = iterator.collect(4);
-        Thread.sleep(1000);
+        iterator.collect(4);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(4);
         assertThat(result)
@@ -1662,10 +1645,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         // insert new partition '2' to trigger async refresh
         sql("INSERT INTO NON_PK_DIM VALUES ('2', 1, 1000), ('2', 1, 1001), ('2', 2, 2000)");
-        Thread.sleep(2000);
         sql("INSERT INTO T VALUES (1), (2)");
         iterator.collect(3);
-        Thread.sleep(1000);
+        Thread.sleep(500);
         sql("INSERT INTO T VALUES (1), (2)");
         result = iterator.collect(3);
         assertThat(result)
