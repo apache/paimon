@@ -106,16 +106,13 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
 
     @Override
     public void run() throws Exception {
-        if (parallelism > 1) {
-            // Parallel mode: build and execute Flink job (multi parallelism)
+        if (forceStartFlinkJob) {
+            // Parallel mode: build custom multi-parallelism Flink pipeline
             build();
             execute(this.getClass().getSimpleName());
-        } else if (forceStartFlinkJob) {
-            // Serial mode but forced to run as Flink job (single parallelism)
-            super.run();
         } else {
-            // Serial mode: execute locally
-            executeLocally();
+            // Default: ActionBase handles LocalAction → executeLocally()
+            super.run();
         }
     }
 
@@ -129,11 +126,6 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
 
     @Override
     public void build() throws Exception {
-        if (parallelism <= 1) {
-            // Not in parallel mode, nothing to build
-            return;
-        }
-
         Identifier identifier = new Identifier(database, table);
 
         // Prepare table with dynamic options
