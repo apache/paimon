@@ -30,10 +30,14 @@ import org.apache.paimon.types.FloatType;
 import org.aliyun.lumina.LuminaDataset;
 import org.aliyun.lumina.LuminaFileOutput;
 
-import java.io.BufferedOutputStream;
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
+import java.io.RandomAccessFile;
+import java.lang.reflect.Field;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -41,32 +45,33 @@ import java.util.Map;
 /**
  * Vector global index writer using Lumina. Builds a single index file per shard.
  *
- * <p>Vectors are accumulated in chunked float buffers and then streamed to the Lumina builder via
- * the {@link LuminaDataset} callback API. The chunked design avoids the 2 GB single Java array
- * limit and supports up to 1 billion+ vectors regardless of dimension.
+ * <p>Vectors are spilled to a temporary file on disk as they arrive via {@link #write(Object)},
+ * keeping Java heap usage constant (~8 MB buffer) regardless of dataset size. During index build,
+ * the Lumina builder streams vectors from the temp file via the {@link LuminaDataset} callback API.
+ *
+ * <p><b>Thread safety:</b> This class is <b>not</b> thread-safe. The underlying {@code
+ * LuminaBuilder} must be used from a single thread or the caller must provide external
+ * synchronization. The internal Lumina executor thread pool size is controlled globally by the
+ * {@code LUMINA_EXECUTOR_THREAD_COUNT} environment variable and cannot be configured per-instance.
  */
 public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "lumina";
 
-    /** Buffer size for wrapping PositionOutputStream when dumping index (8 MB). */
-    private static final int DUMP_BUFFER_SIZE = 8 * 1024 * 1024;
-
-    /** Target chunk size in floats (~64 MB of float data). */
-    private static final int TARGET_CHUNK_FLOATS = 16 * 1024 * 1024;
+    /** I/O buffer size for reading/writing the temp vector file (~8 MB). */
+    private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
 
     private final GlobalIndexFileWriter fileWriter;
     private final LuminaVectorIndexOptions options;
     private final int dim;
 
-    /** Number of vectors each chunk can hold. */
-    private final int chunkVectors;
+    /** Temporary file storing vectors as raw native-order floats. */
+    private File tempVectorFile;
 
-    /** Chunked float buffer to break the 2 GB single-array limit. */
-    private List<float[]> chunks;
+    private FileChannel writeChannel;
+    private ByteBuffer writeBuf;
 
     private int count;
-    private boolean finished;
     private boolean closed;
 
     public LuminaVectorGlobalIndexWriter(
@@ -76,13 +81,22 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         this.fileWriter = fileWriter;
         this.options = options;
         this.dim = options.dimension();
-        this.chunkVectors = Math.max(1, TARGET_CHUNK_FLOATS / dim);
-        this.chunks = new ArrayList<>();
         this.count = 0;
-        this.finished = false;
         this.closed = false;
 
         validateFieldType(fieldType);
+
+        try {
+            this.tempVectorFile = File.createTempFile("lumina-vectors-", ".bin");
+            this.tempVectorFile.deleteOnExit();
+            @SuppressWarnings("resource")
+            RandomAccessFile raf = new RandomAccessFile(tempVectorFile, "rw");
+            this.writeChannel = raf.getChannel();
+            this.writeBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
+            this.writeBuf.order(ByteOrder.nativeOrder());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to create temp vector file", e);
+        }
     }
 
     private void validateFieldType(DataType dataType) {
@@ -112,25 +126,40 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                     "Unsupported vector type: " + fieldData.getClass().getName());
         }
         checkDimension(vector);
-        int chunkIndex = count / chunkVectors;
-        int offsetInChunk = count % chunkVectors;
-        if (chunkIndex >= chunks.size()) {
-            chunks.add(new float[chunkVectors * dim]);
+
+        int bytesNeeded = dim * Float.BYTES;
+        if (writeBuf.remaining() < bytesNeeded) {
+            flushWriteBuffer();
         }
-        System.arraycopy(vector, 0, chunks.get(chunkIndex), offsetInChunk * dim, dim);
+        for (int i = 0; i < dim; i++) {
+            writeBuf.putFloat(vector[i]);
+        }
         count++;
+    }
+
+    private void flushWriteBuffer() {
+        try {
+            writeBuf.flip();
+            while (writeBuf.hasRemaining()) {
+                writeChannel.write(writeBuf);
+            }
+            writeBuf.clear();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to flush vector buffer to disk", e);
+        }
     }
 
     @Override
     public List<ResultEntry> finish() {
-        if (finished) {
-            throw new IllegalStateException("finish() has already been called");
-        }
-        finished = true;
         try {
             if (count == 0) {
                 return Collections.emptyList();
             }
+            // Flush remaining data and close the write channel
+            flushWriteBuffer();
+            writeChannel.close();
+            writeChannel = null;
+            writeBuf = null;
             return Collections.singletonList(buildIndex());
         } catch (IOException e) {
             throw new RuntimeException("Failed to write Lumina vector global index", e);
@@ -138,29 +167,59 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     }
 
     private ResultEntry buildIndex() throws IOException {
-        Map<String, String> luminaOptions = options.toLuminaOptions();
-        boolean needsPretrain = !"rawf32".equalsIgnoreCase(luminaOptions.get("encoding.type"));
+        configureExecutorThreadCount();
+        try (LuminaIndex index =
+                LuminaIndex.createForBuild(dim, options.metric(), options.toLuminaOptions())) {
 
-        try (LuminaIndex index = LuminaIndex.createForBuild(dim, options.metric(), luminaOptions)) {
-
-            if (needsPretrain) {
-                index.pretrainFrom(new ChunkedDataset(chunks, dim, chunkVectors, count));
+            // Pretrain and insert via streaming file-backed Dataset API
+            try (FileBackedDataset ds = new FileBackedDataset(tempVectorFile, dim, count)) {
+                index.pretrainFrom(ds);
             }
-            index.insertFrom(new ChunkedDataset(chunks, dim, chunkVectors, count));
-
-            // Free vector memory after insertion
-            chunks = null;
+            try (FileBackedDataset ds = new FileBackedDataset(tempVectorFile, dim, count)) {
+                index.insertFrom(ds);
+            }
 
             String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
-                BufferedFileOutput bufferedOut = new BufferedFileOutput(out, DUMP_BUFFER_SIZE);
-                index.dump(bufferedOut);
-                bufferedOut.flush();
+                index.dump(new OutputStreamFileOutput(out));
                 out.flush();
             }
 
-            LuminaIndexMeta meta = new LuminaIndexMeta(luminaOptions);
+            LuminaIndexMeta meta = new LuminaIndexMeta(options.toLuminaOptions());
             return new ResultEntry(fileName, count, meta.serialize());
+        }
+    }
+
+    /**
+     * Sets the {@code LUMINA_EXECUTOR_THREAD_COUNT} environment variable from the {@link
+     * LuminaVectorIndexOptions#DISKANN_BUILD_THREAD_COUNT} option so the native Lumina executor
+     * thread pool is sized correctly before the builder is created.
+     */
+    private void configureExecutorThreadCount() {
+        Map<String, String> luminaOpts = options.toLuminaOptions();
+        String threadCountKey =
+                LuminaVectorIndexOptions.toLuminaKey(
+                        LuminaVectorIndexOptions.DISKANN_BUILD_THREAD_COUNT);
+        String threadCount = luminaOpts.get(threadCountKey);
+        if (threadCount != null && !threadCount.isEmpty()) {
+            setEnv("LUMINA_EXECUTOR_THREAD_COUNT", threadCount);
+        }
+    }
+
+    /**
+     * Best-effort attempt to set an environment variable in the current process. Uses reflection to
+     * modify the JVM's process environment map. This is necessary because Lumina's native executor
+     * thread pool reads {@code LUMINA_EXECUTOR_THREAD_COUNT} from the OS environment.
+     */
+    @SuppressWarnings("unchecked")
+    private static void setEnv(String key, String value) {
+        try {
+            Map<String, String> env = System.getenv();
+            Field field = env.getClass().getDeclaredField("m");
+            field.setAccessible(true);
+            ((Map<String, String>) field.get(env)).put(key, value);
+        } catch (Exception e) {
+            // Fall back: the environment variable may already be set externally.
         }
     }
 
@@ -177,27 +236,41 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     public void close() {
         if (!closed) {
             closed = true;
-            chunks = null;
+            try {
+                if (writeChannel != null) {
+                    writeChannel.close();
+                }
+            } catch (IOException ignored) {
+            }
+            writeBuf = null;
+            if (tempVectorFile != null) {
+                tempVectorFile.delete();
+                tempVectorFile = null;
+            }
         }
     }
 
     /**
-     * A {@link LuminaDataset} backed by chunked float arrays. Supports vector counts beyond the 2
-     * GB single-array limit by splitting data across multiple chunks.
+     * A {@link LuminaDataset} that streams vectors from a temporary file. Reads are sequential and
+     * buffered for efficiency. Each instance reads the file from the beginning independently.
      */
-    static class ChunkedDataset implements LuminaDataset {
-        private final List<float[]> chunks;
+    static class FileBackedDataset implements LuminaDataset, Closeable {
+        private final RandomAccessFile raf;
+        private final FileChannel channel;
         private final int dim;
-        private final int chunkVectors;
         private final int totalCount;
         private int cursor;
+        private final ByteBuffer readBuf;
 
-        ChunkedDataset(List<float[]> chunks, int dim, int chunkVectors, int totalCount) {
-            this.chunks = chunks;
+        FileBackedDataset(File file, int dim, int totalCount) throws IOException {
+            this.raf = new RandomAccessFile(file, "r");
+            this.channel = raf.getChannel();
             this.dim = dim;
-            this.chunkVectors = chunkVectors;
             this.totalCount = totalCount;
             this.cursor = 0;
+            this.readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
+            this.readBuf.order(ByteOrder.nativeOrder());
+            this.readBuf.limit(0); // empty initially
         }
 
         @Override
@@ -216,64 +289,69 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                 return 0;
             }
             int remaining = totalCount - cursor;
-            int batchSize = Math.min(idBuf.length, remaining);
+            int maxByVectorBuf = vectorBuf.length / dim;
+            int batchSize = Math.min(Math.min(maxByVectorBuf, idBuf.length), remaining);
+
+            int floatsNeeded = batchSize * dim;
             int destOffset = 0;
-            int copied = 0;
-            while (copied < batchSize) {
-                int chunkIndex = (cursor + copied) / chunkVectors;
-                int offsetInChunk = (cursor + copied) % chunkVectors;
-                int availableInChunk = chunkVectors - offsetInChunk;
-                int toCopy = Math.min(batchSize - copied, availableInChunk);
-                System.arraycopy(
-                        chunks.get(chunkIndex),
-                        offsetInChunk * dim,
-                        vectorBuf,
-                        destOffset,
-                        toCopy * dim);
-                destOffset += toCopy * dim;
-                copied += toCopy;
+            try {
+                while (destOffset < floatsNeeded) {
+                    if (readBuf.remaining() < Float.BYTES) {
+                        // Compact any partial float bytes and refill
+                        readBuf.compact();
+                        channel.read(readBuf);
+                        readBuf.flip();
+                    }
+                    int availableFloats = readBuf.remaining() / Float.BYTES;
+                    int toRead = Math.min(availableFloats, floatsNeeded - destOffset);
+                    readBuf.asFloatBuffer().get(vectorBuf, destOffset, toRead);
+                    readBuf.position(readBuf.position() + toRead * Float.BYTES);
+                    destOffset += toRead;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read vectors from temp file", e);
             }
+
             for (int i = 0; i < batchSize; i++) {
                 idBuf[i] = cursor + i;
             }
             cursor += batchSize;
             return batchSize;
         }
+
+        @Override
+        public void close() throws IOException {
+            channel.close();
+            raf.close();
+        }
     }
 
-    /**
-     * Adapts a {@link PositionOutputStream} to the {@link LuminaFileOutput} JNI callback API with
-     * buffering for better I/O throughput (especially important for OSS writes).
-     */
-    static class BufferedFileOutput implements LuminaFileOutput {
-        private final PositionOutputStream posOut;
-        private final BufferedOutputStream bufOut;
+    /** Adapts a {@link PositionOutputStream} to the {@link LuminaFileOutput} JNI callback API. */
+    static class OutputStreamFileOutput implements LuminaFileOutput {
+        private final PositionOutputStream out;
 
-        BufferedFileOutput(PositionOutputStream posOut, int bufferSize) {
-            this.posOut = posOut;
-            this.bufOut = new BufferedOutputStream(posOut, bufferSize);
+        OutputStreamFileOutput(PositionOutputStream out) {
+            this.out = out;
         }
 
         @Override
         public void write(byte[] b, int off, int len) throws IOException {
-            bufOut.write(b, off, len);
+            out.write(b, off, len);
         }
 
         @Override
         public void flush() throws IOException {
-            bufOut.flush();
+            out.flush();
         }
 
         @Override
         public long getPos() throws IOException {
-            bufOut.flush();
-            return posOut.getPos();
+            return out.getPos();
         }
 
         @Override
-        public void close() throws IOException {
-            // Flush buffered data before the caller closes the underlying stream.
-            bufOut.flush();
+        public void close() {
+            // Lifecycle managed by the caller's try-with-resources.
         }
     }
 }

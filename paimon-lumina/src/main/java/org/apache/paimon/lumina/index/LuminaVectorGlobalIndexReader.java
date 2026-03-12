@@ -103,7 +103,14 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         long[] labels;
 
         if (includeRowIds != null) {
-            long[] scopedIds = new long[(int) includeRowIds.getLongCardinality()];
+            long cardinality = includeRowIds.getLongCardinality();
+            if (cardinality > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        "includeRowIds cardinality ("
+                                + cardinality
+                                + ") exceeds Integer.MAX_VALUE");
+            }
+            long[] scopedIds = new long[(int) cardinality];
             Iterator<Long> iter = includeRowIds.iterator();
             for (int i = 0; i < scopedIds.length; i++) {
                 scopedIds[i] = iter.next();
@@ -117,6 +124,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             Map<String, String> searchOptions = options.toLuminaOptions();
             searchOptions.putAll(indexMeta.options());
             searchOptions.put("search.thread_safe_filter", "true");
+            ensureSearchListSize(searchOptions, effectiveK);
             index.searchWithFilter(
                     queryVector, 1, effectiveK, distances, labels, scopedIds, searchOptions);
         } else {
@@ -124,6 +132,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             labels = new long[effectiveK];
             Map<String, String> searchOptions = options.toLuminaOptions();
             searchOptions.putAll(indexMeta.options());
+            ensureSearchListSize(searchOptions, effectiveK);
             index.search(queryVector, 1, effectiveK, distances, labels, searchOptions);
         }
 
@@ -139,6 +148,13 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             id2scores.put(row.rowId, row.score);
         }
         return new LuminaScoredGlobalIndexResult(roaringBitmap64, id2scores);
+    }
+
+    /** Sets {@code diskann.search.list_size} to 1.5x topK when not explicitly configured. */
+    private static void ensureSearchListSize(Map<String, String> searchOptions, int topK) {
+        if (!searchOptions.containsKey("diskann.search.list_size")) {
+            searchOptions.put("diskann.search.list_size", String.valueOf((int) (topK * 1.5)));
+        }
     }
 
     private static void collectResults(

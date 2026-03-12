@@ -97,14 +97,16 @@ public class LuminaVectorIndexOptions {
     public static final ConfigOption<Integer> DISKANN_BUILD_THREAD_COUNT =
             ConfigOptions.key("lumina.diskann.build.thread_count")
                     .intType()
-                    .defaultValue(64)
+                    .defaultValue(32)
                     .withDescription("Number of threads used for DiskANN index building.");
 
     public static final ConfigOption<Integer> DISKANN_SEARCH_LIST_SIZE =
             ConfigOptions.key("lumina.diskann.search.list_size")
                     .intType()
-                    .defaultValue(1024)
-                    .withDescription("The search list size for DiskANN search.");
+                    .noDefaultValue()
+                    .withDescription(
+                            "The search list size for DiskANN search. "
+                                    + "If not set, defaults to 1.5x topK.");
 
     public static final ConfigOption<Integer> DISKANN_SEARCH_BEAM_WIDTH =
             ConfigOptions.key("lumina.diskann.search.beam_width")
@@ -117,13 +119,6 @@ public class LuminaVectorIndexOptions {
                     .intType()
                     .defaultValue(64)
                     .withDescription("Number of sub-quantizers for PQ encoding.");
-
-    public static final ConfigOption<Integer> DISKANN_DISK_ENCODING_PQ_THREAD_COUNT =
-            ConfigOptions.key("lumina.diskann.disk_encoding.encoding.pq.thread_count")
-                    .intType()
-                    .defaultValue(64)
-                    .withDescription(
-                            "Number of threads used for PQ training when DiskANN disk encoding type is PQ.");
 
     public static final ConfigOption<Integer> SEARCH_PARALLEL_NUMBER =
             ConfigOptions.key("lumina.search.parallel_number")
@@ -183,10 +178,8 @@ public class LuminaVectorIndexOptions {
                     DISKANN_BUILD_EF_CONSTRUCTION,
                     DISKANN_BUILD_NEIGHBOR_COUNT,
                     DISKANN_BUILD_THREAD_COUNT,
-                    DISKANN_SEARCH_LIST_SIZE,
                     DISKANN_SEARCH_BEAM_WIDTH,
                     ENCODING_PQ_M,
-                    DISKANN_DISK_ENCODING_PQ_THREAD_COUNT,
                     SEARCH_PARALLEL_NUMBER);
 
     /**

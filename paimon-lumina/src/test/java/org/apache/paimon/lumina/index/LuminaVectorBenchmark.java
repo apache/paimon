@@ -36,18 +36,13 @@ import org.apache.paimon.types.FloatType;
 
 import org.aliyun.lumina.Lumina;
 import org.aliyun.lumina.LuminaException;
+import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
@@ -65,12 +60,12 @@ import java.util.UUID;
  * <h3>Parameters:</h3>
  *
  * <ul>
- *   <li>{@code BENCHMARK_PATH} (required) — base path for index files (local or oss://).
+ *   <li>{@code BENCHMARK_PATH} (required) — base path for index files (local, oss://, or pvfs://).
  *   <li>{@code BENCHMARK_NUM_VECTORS} — number of vectors (default 10,000,000).
  *   <li>{@code BENCHMARK_DIMENSION} — vector dimension (default 1024).
  *   <li>{@code BENCHMARK_ENCODING_TYPE} — encoding type: rawf32, pq, sq8 (default pq).
  *   <li>{@code BENCHMARK_DISTANCE_METRIC} — distance metric: l2, cosine, inner_product (default
- *       l2).
+ *       inner_product).
  *   <li>{@code BENCHMARK_NUM_QUERIES} — number of queries (default 1000).
  *   <li>{@code BENCHMARK_BUILD_THREADS} — DiskANN build thread count (default CPU cores).
  *   <li>{@code BENCHMARK_EF_CONSTRUCTION} — DiskANN ef_construction (default 128).
@@ -78,24 +73,27 @@ import java.util.UUID;
  *   <li>{@code BENCHMARK_PQ_M} — PQ sub-quantizer count (default 64).
  *   <li>{@code BENCHMARK_PQ_MAX_EPOCH} — PQ training max epoch.
  *   <li>{@code BENCHMARK_PQ_THREAD_COUNT} — PQ training thread count.
- *   <li>{@code BENCHMARK_SEARCH_LIST_SIZE} — DiskANN search list size.
+ *   <li>{@code BENCHMARK_TOP_K} — number of nearest neighbors to return (default 10). Search list
+ *       size is automatically set to 1.5x TOP_K.
  *   <li>{@code BENCHMARK_INDEX_FILE} — existing index file path (required for benchmarkQuery).
  *   <li>{@code BENCHMARK_KEEP_INDEX} — {@code true} to keep index file after build benchmark.
  *   <li>{@code OSS_ENDPOINT}, {@code OSS_ACCESS_KEY_ID}, {@code OSS_ACCESS_KEY_SECRET} — for OSS.
+ *   <li>{@code PVFS_URI}, {@code PVFS_ACCESS_KEY_ID}, {@code PVFS_ACCESS_KEY_SECRET} — for PVFS.
+ *   <li>{@code PVFS_REGION} — (optional) PVFS region.
  * </ul>
  *
  * <h3>Example: Build (Local)</h3>
  *
  * <pre>{@code
  * mvn test -pl paimon-lumina -Dtest=LuminaVectorBenchmark#benchmarkBuild \
- *   -DextraJavaTestArgs='-Xmx64g -DBENCHMARK_PATH=/tmp/lumina-benchmark -DBENCHMARK_NUM_VECTORS=100000 -DBENCHMARK_DIMENSION=128 -DBENCHMARK_ENCODING_TYPE=rawf32 -DBENCHMARK_EF_CONSTRUCTION=32 -DBENCHMARK_NEIGHBOR_COUNT=16 -DBENCHMARK_BUILD_THREADS=16 -DBENCHMARK_KEEP_INDEX=true'
+ *   -DextraJavaTestArgs='-Xmx64g -DBENCHMARK_PATH=/tmp/lumina-benchmark -DBENCHMARK_NUM_VECTORS=100000 -DBENCHMARK_DIMENSION=128 -DBENCHMARK_ENCODING_TYPE=pq -DBENCHMARK_EF_CONSTRUCTION=32 -DBENCHMARK_NEIGHBOR_COUNT=16 -DBENCHMARK_BUILD_THREADS=16 -DBENCHMARK_KEEP_INDEX=true'
  * }</pre>
  *
  * <h3>Example: Query (Local, using index from build)</h3>
  *
  * <pre>{@code
  * mvn test -pl paimon-lumina -Dtest=LuminaVectorBenchmark#benchmarkQuery \
- *   -DextraJavaTestArgs='-Xmx64g -DBENCHMARK_PATH=/tmp/lumina-benchmark -DBENCHMARK_INDEX_FILE=/tmp/lumina-benchmark/<uuid>/lumina-<uuid> -DBENCHMARK_DIMENSION=128 -DBENCHMARK_ENCODING_TYPE=rawf32 -DBENCHMARK_NUM_QUERIES=1000'
+ *   -DextraJavaTestArgs='-Xmx64g -DBENCHMARK_PATH=/tmp/lumina-benchmark -DBENCHMARK_INDEX_FILE=/tmp/lumina-benchmark/<uuid>/lumina-<uuid> -DBENCHMARK_DIMENSION=128 -DBENCHMARK_ENCODING_TYPE=pq -DBENCHMARK_NUM_QUERIES=1000'
  * }</pre>
  *
  * <h3>Example: Build (OSS)</h3>
@@ -111,41 +109,26 @@ import java.util.UUID;
  * mvn test -pl paimon-lumina -Dtest=LuminaVectorBenchmark#benchmarkQuery \
  *   -DextraJavaTestArgs='-Xmx64g -DBENCHMARK_PATH=oss://your-bucket/lumina-benchmark -DOSS_ENDPOINT=oss-cn-hangzhou-internal.aliyuncs.com -DOSS_ACCESS_KEY_ID=your-access-key-id -DOSS_ACCESS_KEY_SECRET=your-access-key-secret -DBENCHMARK_INDEX_FILE=oss://your-bucket/lumina-benchmark/<uuid>/lumina-<uuid> -DBENCHMARK_DIMENSION=128 -DBENCHMARK_ENCODING_TYPE=pq -DBENCHMARK_NUM_QUERIES=1000'
  * }</pre>
+ *
+ * <h3>Example: Build (PVFS)</h3>
+ *
+ * <pre>{@code
+ * mvn test -pl paimon-lumina -Dtest=LuminaVectorBenchmark#benchmarkBuild \
+ *   -DextraJavaTestArgs='-Xmx64g -DBENCHMARK_PATH=pvfs://your-bucket/lumina-benchmark -DPVFS_URI=pvfs://your-uri -DPVFS_ACCESS_KEY_ID=your-access-key-id -DPVFS_ACCESS_KEY_SECRET=your-access-key-secret -DPVFS_REGION=cn-hangzhou -DBENCHMARK_NUM_VECTORS=100000 -DBENCHMARK_DIMENSION=128 -DBENCHMARK_ENCODING_TYPE=pq -DBENCHMARK_EF_CONSTRUCTION=32 -DBENCHMARK_NEIGHBOR_COUNT=16 -DBENCHMARK_BUILD_THREADS=16 -DBENCHMARK_KEEP_INDEX=true'
+ * }</pre>
+ *
+ * <h3>Example: Query (PVFS)</h3>
+ *
+ * <pre>{@code
+ * mvn test -pl paimon-lumina -Dtest=LuminaVectorBenchmark#benchmarkQuery \
+ *   -DextraJavaTestArgs='-Xmx64g -DBENCHMARK_PATH=pvfs://your-bucket/lumina-benchmark -DPVFS_URI=pvfs://your-uri -DPVFS_ACCESS_KEY_ID=your-access-key-id -DPVFS_ACCESS_KEY_SECRET=your-access-key-secret -DPVFS_REGION=cn-hangzhou -DBENCHMARK_INDEX_FILE=pvfs://your-bucket/lumina-benchmark/<uuid>/lumina-<uuid> -DBENCHMARK_DIMENSION=128 -DBENCHMARK_ENCODING_TYPE=pq -DBENCHMARK_NUM_QUERIES=1000'
+ * }</pre>
  */
 public class LuminaVectorBenchmark {
 
     private static final int DEFAULT_NUM_VECTORS = 10_000_000;
     private static final int DEFAULT_DIMENSION = 1024;
-    private static final int TOP_K = 10;
-
-    /** Returns the RSS (Resident Set Size) of the current process in MB, or -1 if unavailable. */
-    private static long getRssMb() {
-        // Read from /proc/self/status (Linux) — works on JDK 8+.
-        try (BufferedReader reader =
-                new BufferedReader(
-                        new InputStreamReader(new java.io.FileInputStream("/proc/self/status")))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.startsWith("VmRSS:")) {
-                    // Format: "VmRSS:   123456 kB"
-                    String[] parts = line.split("\\s+");
-                    return Long.parseLong(parts[1]) / 1024; // kB -> MB
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return -1;
-    }
-
-    private static void printMemory(String label) {
-        Runtime rt = Runtime.getRuntime();
-        long heapUsedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024);
-        long heapMaxMb = rt.maxMemory() / (1024 * 1024);
-        long rssMb = getRssMb();
-        System.out.printf(
-                "[Memory] %-30s  Heap: %,d / %,d MB  RSS: %s%n",
-                label, heapUsedMb, heapMaxMb, rssMb >= 0 ? rssMb + " MB" : "N/A");
-    }
+    private static final int DEFAULT_TOP_K = 10;
 
     /** Reads a config value: system property first, then environment variable. */
     private static String getEnv(String key) {
@@ -187,6 +170,16 @@ public class LuminaVectorBenchmark {
         }
     }
 
+    private static String getStorageMode(String path) {
+        if (path.startsWith("oss://")) {
+            return "OSS (Jindo)";
+        } else if (path.startsWith("pvfs://")) {
+            return "PVFS";
+        } else {
+            return "Local";
+        }
+    }
+
     private static FileIO createFileIO(String benchmarkPath) throws IOException {
         if (benchmarkPath.startsWith("oss://")) {
             String endpoint = getEnv("OSS_ENDPOINT");
@@ -202,6 +195,36 @@ public class LuminaVectorBenchmark {
             fsOptions.setString("fs.oss.accessKeySecret", accessKeySecret);
             CatalogContext context = CatalogContext.create(fsOptions);
             return FileIO.get(new Path(benchmarkPath), context);
+        } else if (benchmarkPath.startsWith("pvfs://")) {
+            String pvfsUri = getEnv("PVFS_URI");
+            String pvfsAccessKeyId = getEnv("PVFS_ACCESS_KEY_ID");
+            String pvfsAccessKeySecret = getEnv("PVFS_ACCESS_KEY_SECRET");
+            Assumptions.assumeTrue(
+                    pvfsUri != null && pvfsAccessKeyId != null && pvfsAccessKeySecret != null,
+                    "PVFS mode requires PVFS_URI, PVFS_ACCESS_KEY_ID, PVFS_ACCESS_KEY_SECRET.");
+
+            Options fsOptions = new Options();
+            fsOptions.setString(
+                    "fs.pvfs.impl", "org.apache.paimon.vfs.hadoop.PaimonVirtualFileSystem");
+            fsOptions.setString(
+                    "fs.AbstractFileSystem.pvfs.impl", "org.apache.paimon.vfs.hadoop.Pvfs");
+            fsOptions.setString("fs.pvfs.uri", pvfsUri);
+            fsOptions.setString("fs.pvfs.token.provider", "dlf");
+            fsOptions.setString("fs.pvfs.dlf.access-key-id", pvfsAccessKeyId);
+            fsOptions.setString("fs.pvfs.dlf.access-key-secret", pvfsAccessKeySecret);
+            fsOptions.setString("fs.pvfs.io-cache.enabled", "true");
+            fsOptions.setString("fs.pvfs.io-cache.whitelist-path", "*");
+            String pvfsRegion = getEnv("PVFS_REGION");
+            if (pvfsRegion != null) {
+                fsOptions.setString("fs.pvfs.dlf.region", pvfsRegion);
+            }
+
+            Configuration hadoopConf = new Configuration();
+            for (Map.Entry<String, String> entry : fsOptions.toMap().entrySet()) {
+                hadoopConf.set(entry.getKey(), entry.getValue());
+            }
+            CatalogContext context = CatalogContext.create(fsOptions, hadoopConf);
+            return FileIO.get(new Path(benchmarkPath), context);
         } else {
             return new LocalFileIO();
         }
@@ -216,7 +239,6 @@ public class LuminaVectorBenchmark {
         int pqMaxEpoch = getEnvInt("BENCHMARK_PQ_MAX_EPOCH", 0);
         int pqThreadCount = getEnvInt("BENCHMARK_PQ_THREAD_COUNT", 0);
         int pqM = getEnvInt("BENCHMARK_PQ_M", 64);
-        int searchListSize = getEnvInt("BENCHMARK_SEARCH_LIST_SIZE", 0);
 
         Options luminaOpts = new Options();
         luminaOpts.setInteger(LuminaVectorIndexOptions.DIMENSION.key(), dimension);
@@ -232,59 +254,10 @@ public class LuminaVectorBenchmark {
             luminaOpts.setString("lumina.encoding.pq.max_epoch", String.valueOf(pqMaxEpoch));
         }
         if (pqThreadCount > 0) {
-            luminaOpts.setInteger(
-                    LuminaVectorIndexOptions.DISKANN_DISK_ENCODING_PQ_THREAD_COUNT.key(),
-                    pqThreadCount);
+            luminaOpts.setString("lumina.encoding.pq.thread_count", String.valueOf(pqThreadCount));
         }
         luminaOpts.setInteger(LuminaVectorIndexOptions.ENCODING_PQ_M.key(), pqM);
-        if (searchListSize > 0) {
-            luminaOpts.setString(
-                    LuminaVectorIndexOptions.DISKANN_SEARCH_LIST_SIZE.key(),
-                    String.valueOf(searchListSize));
-        }
         return new LuminaVectorIndexOptions(luminaOpts);
-    }
-
-    private static final String BUILD_PARAMS_FILE = "build_params.json";
-
-    /**
-     * Writes build parameters to a JSON file in the index directory so that query benchmarks can
-     * reference the exact configuration used during build.
-     */
-    private static void writeBuildParams(
-            FileIO fileIO,
-            Path indexDir,
-            int numVectors,
-            int dimension,
-            String distanceMetric,
-            String encodingType,
-            LuminaVectorIndexOptions indexOptions)
-            throws IOException {
-        Map<String, String> params = new LinkedHashMap<>();
-        params.put("num_vectors", String.valueOf(numVectors));
-        params.put("dimension", String.valueOf(dimension));
-        params.put("distance_metric", distanceMetric);
-        params.put("encoding_type", encodingType);
-        params.putAll(indexOptions.toLuminaOptions());
-
-        Path paramsPath = new Path(indexDir, BUILD_PARAMS_FILE);
-        try (Writer writer =
-                new OutputStreamWriter(
-                        fileIO.newOutputStream(paramsPath, false), StandardCharsets.UTF_8)) {
-            writer.write("{\n");
-            int i = 0;
-            for (Map.Entry<String, String> entry : params.entrySet()) {
-                writer.write(
-                        String.format(
-                                "  \"%s\": \"%s\"%s\n",
-                                entry.getKey(),
-                                entry.getValue(),
-                                i < params.size() - 1 ? "," : ""));
-                i++;
-            }
-            writer.write("}\n");
-        }
-        System.out.printf("Build params written to: %s%n", paramsPath);
     }
 
     private static void printBuildConfig(
@@ -341,15 +314,16 @@ public class LuminaVectorBenchmark {
                         ? getEnv("BENCHMARK_ENCODING_TYPE")
                         : "pq";
 
-        boolean isOss = benchmarkPath.startsWith("oss://");
-        String storageMode = isOss ? "OSS (Jindo)" : "Local";
+        boolean isRemote =
+                benchmarkPath.startsWith("oss://") || benchmarkPath.startsWith("pvfs://");
+        String storageMode = getStorageMode(benchmarkPath);
         FileIO fileIO = createFileIO(benchmarkPath);
         LuminaVectorIndexOptions indexOptions =
                 createIndexOptions(dimension, distanceMetric, encodingType);
         DataType vectorType = new ArrayType(new FloatType());
 
         Path indexDir = new Path(benchmarkPath, UUID.randomUUID().toString());
-        if (!isOss) {
+        if (!isRemote) {
             fileIO.mkdirs(indexDir);
         }
 
@@ -362,16 +336,6 @@ public class LuminaVectorBenchmark {
                 encodingType,
                 keepIndex);
 
-        writeBuildParams(
-                fileIO,
-                indexDir,
-                numVectors,
-                dimension,
-                distanceMetric,
-                encodingType,
-                indexOptions);
-
-        printMemory("Before build");
         long buildStartTime = System.currentTimeMillis();
 
         // When targeting OSS, build to a local temp dir first, then upload
@@ -379,7 +343,7 @@ public class LuminaVectorBenchmark {
         FileIO localFileIO = new LocalFileIO();
         final FileIO buildFileIO;
         final Path buildDir;
-        if (isOss) {
+        if (isRemote) {
             localTempDir =
                     new Path(
                             System.getProperty("java.io.tmpdir"),
@@ -429,7 +393,6 @@ public class LuminaVectorBenchmark {
                         "Write done in %.2f s (%.0f vectors/s)%n",
                         (writeEnd - writeStart) / 1000.0,
                         numVectors / ((writeEnd - writeStart) / 1000.0));
-                printMemory("After vector write");
 
                 System.out.println("Building index (pretrain + insert + dump)...");
                 long finishStart = System.currentTimeMillis();
@@ -437,13 +400,12 @@ public class LuminaVectorBenchmark {
                 long finishEnd = System.currentTimeMillis();
                 System.out.printf(
                         "Index build done in %.2f s%n", (finishEnd - finishStart) / 1000.0);
-                printMemory("After index build");
             }
 
             indexFileName = results.get(0).fileName();
 
             // Upload to OSS if needed
-            if (isOss) {
+            if (isRemote) {
                 Path localFile = new Path(buildDir, indexFileName);
                 Path remoteFile = new Path(indexDir, indexFileName);
                 long localSize = localFileIO.getFileSize(localFile);
@@ -474,7 +436,6 @@ public class LuminaVectorBenchmark {
                     "%nUse this for query benchmark:%n  -DBENCHMARK_INDEX_FILE=%s%n",
                     indexFilePath);
             System.out.println("===============================");
-
         } finally {
             if (localTempDir != null) {
                 localFileIO.delete(localTempDir, true);
@@ -514,9 +475,8 @@ public class LuminaVectorBenchmark {
                         ? getEnv("BENCHMARK_ENCODING_TYPE")
                         : "pq";
         int numQueries = getEnvInt("BENCHMARK_NUM_QUERIES", 1000);
-
-        boolean isOss = benchmarkPath.startsWith("oss://");
-        String storageMode = isOss ? "OSS (Jindo)" : "Local";
+        int topK = getEnvInt("BENCHMARK_TOP_K", DEFAULT_TOP_K);
+        String storageMode = getStorageMode(benchmarkPath);
         FileIO fileIO = createFileIO(benchmarkPath);
         LuminaVectorIndexOptions indexOptions =
                 createIndexOptions(dimension, distanceMetric, encodingType);
@@ -534,13 +494,10 @@ public class LuminaVectorBenchmark {
         System.out.printf("Index file:   %s%n", indexFilePath);
         System.out.printf(
                 "Index size:   %,d bytes (%.2f MB)%n", fileSize, fileSize / (1024.0 * 1024));
-        System.out.printf("Dimension:    %d  TopK: %d%n", dimension, TOP_K);
+        System.out.printf("Dimension:    %d  TopK: %d%n", dimension, topK);
         System.out.printf("Queries:      %,d%n", numQueries);
         System.out.printf("Metric:       %s  Encoding: %s%n", distanceMetric, encodingType);
-        int searchListSize = getEnvInt("BENCHMARK_SEARCH_LIST_SIZE", 0);
-        if (searchListSize > 0) {
-            System.out.printf("Search:       list_size=%d%n", searchListSize);
-        }
+        System.out.printf("Search:       list_size=%d%n", (int) (topK * 1.5));
         System.out.println();
 
         // Generate random query vectors
@@ -560,15 +517,14 @@ public class LuminaVectorBenchmark {
         final FileIO benchFileIO = fileIO;
         final Path benchIndexDir = indexDir;
 
-        printMemory("Before queries");
         System.out.printf(
-                "Running %,d queries (top-%d), each with fresh index load...%n", numQueries, TOP_K);
+                "Running %,d queries (top-%d), each with fresh index load...%n", numQueries, topK);
 
         long[] queryLatencies = new long[numQueries];
         long totalQueryStart = System.currentTimeMillis();
 
         for (int i = 0; i < numQueries; i++) {
-            VectorSearch vs = new VectorSearch(queryVectors[i], TOP_K, fieldName);
+            VectorSearch vs = new VectorSearch(queryVectors[i], topK, fieldName);
             long queryStart = System.nanoTime();
 
             GlobalIndexFileReader gFileReader =
@@ -602,8 +558,6 @@ public class LuminaVectorBenchmark {
         double minMs = queryLatencies[0] / 1_000_000.0;
         double maxMs = queryLatencies[numQueries - 1] / 1_000_000.0;
         double rps = numQueries / totalQueryTimeSec;
-
-        printMemory("After queries");
 
         System.out.println();
         System.out.println("=== Query Benchmark Results ===");

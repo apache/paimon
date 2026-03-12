@@ -128,6 +128,20 @@ under the License.
             <version>6.9.1</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-vfs-hadoop</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-vfs-common</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -139,6 +153,12 @@ under the License.
                     <excludes>
                         <exclude>**/*Benchmark*</exclude>
                     </excludes>
+                    <!-- Native Lumina library writes directly to stdout, which
+                         can corrupt Surefire's fork protocol. Redirect test
+                         output to file so native stdout does not interfere. -->
+                    <forkCount>1</forkCount>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <parallel>none</parallel>
                 </configuration>
             </plugin>
         </plugins>
