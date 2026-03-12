@@ -328,13 +328,7 @@ public class LsmCompactor {
             outputFiles.addAll(groupMerged);
         }
 
-        outputFiles.sort(
-                new Comparator<SstFileMetadata>() {
-                    @Override
-                    public int compare(SstFileMetadata a, SstFileMetadata b) {
-                        return keyComparator.compare(a.getMinKey(), b.getMinKey());
-                    }
-                });
+        outputFiles.sort((a, b) -> keyComparator.compare(a.getMinKey(), b.getMinKey()));
 
         long mergeElapsedMs = System.currentTimeMillis() - mergeStartTime;
         long totalOutputSize = 0;
@@ -362,13 +356,7 @@ public class LsmCompactor {
      */
     private List<List<SstFileMetadata>> groupFilesByKeyOverlap(List<SstFileMetadata> allFiles) {
         List<SstFileMetadata> sortedFiles = new ArrayList<>(allFiles);
-        sortedFiles.sort(
-                new Comparator<SstFileMetadata>() {
-                    @Override
-                    public int compare(SstFileMetadata a, SstFileMetadata b) {
-                        return keyComparator.compare(a.getMinKey(), b.getMinKey());
-                    }
-                });
+        sortedFiles.sort((a, b) -> keyComparator.compare(a.getMinKey(), b.getMinKey()));
 
         List<List<SstFileMetadata>> groups = new ArrayList<>();
         List<SstFileMetadata> currentGroup = new ArrayList<>();
@@ -471,28 +459,22 @@ public class LsmCompactor {
         // Sort files by run sequence (older first) for correct dedup ordering
         List<SstFileMetadata> orderedFiles = new ArrayList<>(group);
         orderedFiles.sort(
-                new Comparator<SstFileMetadata>() {
-                    @Override
-                    public int compare(SstFileMetadata a, SstFileMetadata b) {
-                        int seqA = fileToRunSequence.getOrDefault(a.getFile(), 0);
-                        int seqB = fileToRunSequence.getOrDefault(b.getFile(), 0);
-                        return Integer.compare(seqA, seqB);
-                    }
+                (a, b) -> {
+                    int seqA = fileToRunSequence.getOrDefault(a.getFile(), 0);
+                    int seqB = fileToRunSequence.getOrDefault(b.getFile(), 0);
+                    return Integer.compare(seqA, seqB);
                 });
 
         List<SstFileMetadata> result = new ArrayList<>();
         List<SortLookupStoreReader> openReaders = new ArrayList<>();
         PriorityQueue<MergeEntry> minHeap =
                 new PriorityQueue<>(
-                        new Comparator<MergeEntry>() {
-                            @Override
-                            public int compare(MergeEntry a, MergeEntry b) {
-                                int keyCompare = keyComparator.compare(a.key, b.key);
-                                if (keyCompare != 0) {
-                                    return keyCompare;
-                                }
-                                return Integer.compare(b.sequence, a.sequence);
+                        (a, b) -> {
+                            int keyCompare = keyComparator.compare(a.key, b.key);
+                            if (keyCompare != 0) {
+                                return keyCompare;
                             }
+                            return Integer.compare(b.sequence, a.sequence);
                         });
 
         SortLookupStoreWriter currentWriter = null;

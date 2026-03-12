@@ -143,12 +143,7 @@ public class SimpleLsmKvDb implements Closeable {
                         maxSstFileSize,
                         level0FileNumCompactTrigger,
                         sizeRatio,
-                        new LsmCompactor.FileDeleter() {
-                            @Override
-                            public void deleteFile(File file) {
-                                closeAndDeleteSstFile(file);
-                            }
-                        });
+                        this::closeAndDeleteSstFile);
     }
 
     /**
@@ -476,14 +471,14 @@ public class SimpleLsmKvDb implements Closeable {
     public static class Builder {
 
         private final File dataDirectory;
-        private long memTableFlushThreshold = 4 * 1024 * 1024; // 4 MB
+        private long memTableFlushThreshold = 64 * 1024 * 1024; // 64 MB
         private long maxSstFileSize = 64 * 1024 * 1024; // 64 MB
-        private int blockSize = 4 * 1024; // 4 KB
-        private long cacheSize = 8 * 1024 * 1024; // 8 MB
+        private int blockSize = 32 * 1024; // 32 KB
+        private long cacheSize = 128 * 1024 * 1024; // 128 MB
         private int level0FileNumCompactTrigger = 4;
         private int sizeRatio = 10;
         private CompressOptions compressOptions = CompressOptions.defaultOptions();
-        private Comparator<MemorySlice> keyComparator = defaultKeyComparator();
+        private Comparator<MemorySlice> keyComparator = MemorySlice::compareTo;
 
         Builder(File dataDirectory) {
             this.dataDirectory = dataDirectory;
@@ -569,15 +564,6 @@ public class SimpleLsmKvDb implements Closeable {
                     maxSstFileSize,
                     level0FileNumCompactTrigger,
                     sizeRatio);
-        }
-
-        private static Comparator<MemorySlice> defaultKeyComparator() {
-            return new Comparator<MemorySlice>() {
-                @Override
-                public int compare(MemorySlice a, MemorySlice b) {
-                    return a.compareTo(b);
-                }
-            };
         }
     }
 
