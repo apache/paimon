@@ -230,12 +230,10 @@ class FileStoreCommit:
 
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False):
-        import threading
 
         retry_count = 0
         retry_result = None
         start_time_ms = int(time.time() * 1000)
-        thread_id = threading.current_thread().name
         while True:
             latest_snapshot = self.snapshot_manager.get_latest_snapshot()
             commit_entries = commit_entries_plan(latest_snapshot)
@@ -257,12 +255,6 @@ class FileStoreCommit:
 
             if result.is_success():
                 commit_duration_ms = int(time.time() * 1000) - start_time_ms
-                logger.info(
-                    "Thread %s: commit success %d after %d retries",
-                    thread_id,
-                    latest_snapshot.id + 1 if latest_snapshot else 1,
-                    retry_count,
-                )
                 if commit_kind == "OVERWRITE":
                     logger.info(
                         "Finished overwrite to table %s, duration %d ms",
