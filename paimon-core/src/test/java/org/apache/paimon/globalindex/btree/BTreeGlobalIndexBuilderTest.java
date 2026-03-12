@@ -106,7 +106,6 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
 
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
         builder.withIndexField("f0");
-        builder.withIndexType("btree");
         builder.withPartitionPredicate(partitionPredicate);
         List<DataSplit> dataSplits = builder.scan();
         List<CommitMessage> commitMessages = new ArrayList<>();

@@ -419,7 +419,7 @@ class RayDataTest(unittest.TestCase):
     def test_ray_data_primary_key_basic(self):
         """Test Ray Data read from PrimaryKey table."""
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('name', pa.string()),
             ('value', pa.int64()),
         ])
@@ -464,7 +464,7 @@ class RayDataTest(unittest.TestCase):
     def test_ray_data_primary_key_update(self):
         """Test Ray Data read from PrimaryKey table with updates (upsert behavior)."""
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('name', pa.string()),
             ('value', pa.int64()),
         ])
@@ -524,10 +524,10 @@ class RayDataTest(unittest.TestCase):
     def test_ray_data_primary_key_with_predicate(self):
         """Test Ray Data read from PrimaryKey table with predicate filtering."""
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('category', pa.string()),
             ('amount', pa.int64()),
-            ('dt', pa.string()),
+            pa.field('dt', pa.string(), nullable=False),
         ])
 
         schema = Schema.from_pyarrow_schema(
@@ -592,7 +592,7 @@ class RayDataTest(unittest.TestCase):
         """Test Ray Data read from PrimaryKey table with small target_split_size."""
 
         pa_schema = pa.schema([
-            ('id', pa.int32()),
+            pa.field('id', pa.int32(), nullable=False),
             ('name', pa.string()),
             ('value', pa.int64()),
         ])

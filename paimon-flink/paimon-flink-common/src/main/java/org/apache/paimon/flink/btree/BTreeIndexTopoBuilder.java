@@ -60,9 +60,11 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
 import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
@@ -72,83 +74,86 @@ public class BTreeIndexTopoBuilder {
 
     public static void buildIndex(
             StreamExecutionEnvironment env,
+            Supplier<BTreeGlobalIndexBuilder> indexBuilderSupplier,
             FileStoreTable table,
-            String indexColumn,
+            List<String> indexColumns,
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        // 1. Create BTree index builder and scan splits
-        BTreeGlobalIndexBuilder indexBuilder =
-                new BTreeGlobalIndexBuilder(table)
-                        .withIndexType("btree")
-                        .withIndexField(indexColumn);
-        if (partitionPredicate != null) {
-            indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
-        }
-
-        List<DataSplit> splits = splitByContiguousRowRange(indexBuilder.scan());
-        if (splits.isEmpty()) {
-            return;
-        }
-        Map<BinaryRow, Map<Range, List<DataSplit>>> partitionRangeSplits =
-                groupSplitsByRange(splits);
-        if (partitionRangeSplits.isEmpty()) {
-            return;
-        }
-
-        // 2. Select necessary columns (index field + ROW_ID)
-        List<String> selectedColumns = new ArrayList<>();
-        selectedColumns.add(indexColumn);
-
-        RowType readType = SpecialFields.rowTypeWithRowId(table.rowType().project(selectedColumns));
-        int indexFieldPos = readType.getFieldIndex(indexColumn);
-        int rowIdPos = readType.getFieldIndex(SpecialFields.ROW_ID.name());
-        DataType indexFieldType = readType.getTypeAt(indexFieldPos);
-
-        // 3. Calculate maximum parallelism bound
-        long recordsPerRange = userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
-        int maxParallelism = userOptions.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
-
-        // 4. Build one topology per contiguous row range
-        CoreOptions coreOptions = table.coreOptions();
-        ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
-        List<String> sortColumns = new ArrayList<>();
-        sortColumns.add(indexColumn);
         DataStream<Committable> allCommitMessages = null;
-        int partitionFieldSize = table.partitionKeys().size();
-        BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
-        for (Map.Entry<BinaryRow, Map<Range, List<DataSplit>>> partitionEntry :
-                partitionRangeSplits.entrySet()) {
-            BinaryRow partition = partitionEntry.getKey();
-            for (Map.Entry<Range, List<DataSplit>> entry : partitionEntry.getValue().entrySet()) {
-                Range range = entry.getKey();
-                List<DataSplit> rangeSplits = entry.getValue();
-                if (rangeSplits.isEmpty()) {
-                    continue;
+        for (String indexColumn : indexColumns) {
+            BTreeGlobalIndexBuilder indexBuilder =
+                    indexBuilderSupplier.get().withIndexField(indexColumn);
+            if (partitionPredicate != null) {
+                indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
+            }
+
+            List<DataSplit> splits = splitByContiguousRowRange(indexBuilder.scan());
+            if (splits.isEmpty()) {
+                return;
+            }
+            Map<BinaryRow, Map<Range, List<DataSplit>>> partitionRangeSplits =
+                    groupSplitsByRange(splits);
+            if (partitionRangeSplits.isEmpty()) {
+                return;
+            }
+
+            // 2. Select necessary columns (index field + ROW_ID)
+            List<String> selectedColumns = new ArrayList<>();
+            selectedColumns.add(indexColumn);
+
+            RowType readType =
+                    SpecialFields.rowTypeWithRowId(table.rowType().project(selectedColumns));
+            int indexFieldPos = readType.getFieldIndex(indexColumn);
+            int rowIdPos = readType.getFieldIndex(SpecialFields.ROW_ID.name());
+            DataType indexFieldType = readType.getTypeAt(indexFieldPos);
+
+            // 3. Calculate maximum parallelism bound
+            long recordsPerRange = userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
+            int maxParallelism =
+                    userOptions.get(BTreeIndexOptions.BTREE_INDEX_BUILD_MAX_PARALLELISM);
+
+            // 4. Build one topology per contiguous row range
+            CoreOptions coreOptions = table.coreOptions();
+            ReadBuilder readBuilder = table.newReadBuilder().withReadType(readType);
+            List<String> sortColumns = new ArrayList<>();
+            sortColumns.add(indexColumn);
+            int partitionFieldSize = table.partitionKeys().size();
+            BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
+            for (Map.Entry<BinaryRow, Map<Range, List<DataSplit>>> partitionEntry :
+                    partitionRangeSplits.entrySet()) {
+                BinaryRow partition = partitionEntry.getKey();
+                for (Map.Entry<Range, List<DataSplit>> entry :
+                        partitionEntry.getValue().entrySet()) {
+                    Range range = entry.getKey();
+                    List<DataSplit> rangeSplits = entry.getValue();
+                    if (rangeSplits.isEmpty()) {
+                        continue;
+                    }
+
+                    DataStream<Committable> commitMessages =
+                            executeForPartitionRange(
+                                    env,
+                                    range,
+                                    rangeSplits,
+                                    readBuilder,
+                                    indexBuilder,
+                                    partitionFieldSize,
+                                    binaryRowSerializer.serializeToBytes(partition),
+                                    indexFieldPos,
+                                    rowIdPos,
+                                    indexFieldType,
+                                    sortColumns,
+                                    coreOptions,
+                                    readType,
+                                    recordsPerRange,
+                                    maxParallelism);
+
+                    allCommitMessages =
+                            allCommitMessages == null
+                                    ? commitMessages
+                                    : allCommitMessages.union(commitMessages);
                 }
-
-                DataStream<Committable> commitMessages =
-                        executeForPartitionRange(
-                                env,
-                                range,
-                                rangeSplits,
-                                readBuilder,
-                                indexBuilder,
-                                partitionFieldSize,
-                                binaryRowSerializer.serializeToBytes(partition),
-                                indexFieldPos,
-                                rowIdPos,
-                                indexFieldType,
-                                sortColumns,
-                                coreOptions,
-                                readType,
-                                recordsPerRange,
-                                maxParallelism);
-
-                allCommitMessages =
-                        allCommitMessages == null
-                                ? commitMessages
-                                : allCommitMessages.union(commitMessages);
             }
         }
         if (allCommitMessages != null) {
@@ -158,7 +163,23 @@ public class BTreeIndexTopoBuilder {
         env.execute("Create btree global index for table: " + table.name());
     }
 
-    private static DataStream<Committable> executeForPartitionRange(
+    public static void buildIndex(
+            StreamExecutionEnvironment env,
+            FileStoreTable table,
+            String indexColumn,
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
+        buildIndex(
+                env,
+                () -> new BTreeGlobalIndexBuilder(table),
+                table,
+                Collections.singletonList(indexColumn),
+                partitionPredicate,
+                userOptions);
+    }
+
+    protected static DataStream<Committable> executeForPartitionRange(
             StreamExecutionEnvironment env,
             Range range,
             List<DataSplit> rangeSplits,

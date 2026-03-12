@@ -48,7 +48,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIteratorAdapter;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -76,15 +75,14 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BTreeGlobalIndexBuilder implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
     private static final double FLOATING = 1.2;
+    private static final String INDEX_TYPE = "btree";
 
     private final FileStoreTable table;
     private final RowType rowType;
     private final Options options;
     private final long recordsPerRange;
 
-    private String indexType;
     private DataField indexField;
 
     // readRowType is composed by partition fields, indexed field and _ROW_ID field
@@ -98,15 +96,6 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         this.options = this.table.coreOptions().toConfiguration();
         this.recordsPerRange =
                 (long) (options.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE) * FLOATING);
-    }
-
-    public BTreeGlobalIndexBuilder withIndexType(String indexType) {
-        this.indexType = indexType;
-        Preconditions.checkArgument(
-                BTreeGlobalIndexerFactory.IDENTIFIER.equals(indexType),
-                "BTreeGlobalInderBuilder only supports %s index type",
-                BTreeGlobalIndexerFactory.IDENTIFIER);
-        return this;
     }
 
     public BTreeGlobalIndexBuilder withIndexField(String indexField) {
@@ -216,7 +205,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     public GlobalIndexParallelWriter createWriter() throws IOException {
         GlobalIndexParallelWriter currentWriter;
-        GlobalIndexWriter indexWriter = createIndexWriter(table, indexType, indexField, options);
+        GlobalIndexWriter indexWriter = createIndexWriter(table, INDEX_TYPE, indexField, options);
         if (!(indexWriter instanceof GlobalIndexParallelWriter)) {
             throw new RuntimeException(
                     "Unexpected implementation, the index writer of BTree should be an instance of GlobalIndexParallelWriter, but found: "
@@ -236,7 +225,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                         table.coreOptions(),
                         rowRange,
                         indexField.id(),
-                        indexType,
+                        INDEX_TYPE,
                         resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
