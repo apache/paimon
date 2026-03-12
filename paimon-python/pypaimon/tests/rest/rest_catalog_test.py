@@ -297,12 +297,7 @@ class RESTCatalogTest(RESTBaseTest):
             table_commit.close()
 
         # Load snapshot should return the latest (snapshot 3)
-        table_snapshot = self.rest_catalog.load_snapshot(identifier)
-        self.assertIsNotNone(table_snapshot)
-        self.assertEqual(table_snapshot.id, 3)
-
-        # Verify snapshot properties
-        snapshot = table_snapshot.snapshot
+        snapshot = self.rest_catalog.load_snapshot(identifier).snapshot
         self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot.id, 3)
         self.assertEqual(snapshot.schema_id, 0)
@@ -329,7 +324,7 @@ class RESTCatalogTest(RESTBaseTest):
         # Use string identifier directly
         table_snapshot = self.rest_catalog.load_snapshot(table_name)
         self.assertIsNotNone(table_snapshot)
-        self.assertEqual(table_snapshot.id, 2)
+        self.assertEqual(table_snapshot.snapshot.id, 2)
 
     def test_catalog_load_snapshot_nonexistent_table(self):
         """Test that load_snapshot on a non-existent table raises an error."""
@@ -362,7 +357,7 @@ class RESTCatalogTest(RESTBaseTest):
 
         # Verify latest snapshot is 5
         table_snapshot = self.rest_catalog.load_snapshot(identifier)
-        self.assertEqual(table_snapshot.id, 5)
+        self.assertEqual(table_snapshot.snapshot.id, 5)
 
         # Rollback to snapshot 3
         from pypaimon.table.instant import Instant
@@ -371,7 +366,7 @@ class RESTCatalogTest(RESTBaseTest):
         # Load snapshot should now return snapshot 3
         table_snapshot = self.rest_catalog.load_snapshot(identifier)
         self.assertIsNotNone(table_snapshot)
-        self.assertEqual(table_snapshot.id, 3)
+        self.assertEqual(table_snapshot.snapshot.id, 3)
 
 
 if __name__ == '__main__':
