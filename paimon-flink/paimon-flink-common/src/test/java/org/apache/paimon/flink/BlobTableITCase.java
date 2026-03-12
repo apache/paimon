@@ -21,11 +21,13 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
+import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.UriReader;
 import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.types.Row;
@@ -252,6 +254,26 @@ public class BlobTableITCase extends CatalogITCaseBase {
                     stream.filter(p -> p.getFileName().toString().endsWith(".blob")).count();
             assertThat(externalStorageFiles).isGreaterThanOrEqualTo(2);
         }
+    }
+
+    @Test
+    public void testDynamicOptions() throws Exception {
+        batchSql("INSERT INTO blob_table VALUES (1, 'paimon', X'48656C6C6F')");
+        assertThat(batchSql("SELECT * FROM blob_table"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "paimon", new byte[] {72, 101, 108, 108, 111}));
+
+        // set blob-as-descriptor to true
+        tEnv.getConfig().set("paimon.*.*.blob_table.blob-as-descriptor", "true");
+        List<Row> result = batchSql("SELECT * FROM blob_table$row_tracking");
+        assertThat(result).size().isEqualTo(1);
+
+        byte[] descriptorBytes = result.get(0).getFieldAs(2);
+        BlobDescriptor descriptor = BlobDescriptor.deserialize(descriptorBytes);
+
+        UriReader reader = UriReader.fromFile(LocalFileIO.INSTANCE);
+        Blob blob = new BlobRef(reader, descriptor);
+        assertThat(blob.toData()).isEqualTo(new byte[] {72, 101, 108, 108, 111});
     }
 
     @Test
