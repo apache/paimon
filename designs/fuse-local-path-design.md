@@ -20,7 +20,7 @@ limitations under the License.
 
 ## Background
 
-When using Paimon RESTCatalog with remote object storage (e.g., OSS, S3, HDFS), data access typically requires authentication tokens obtained from the REST server via `getTableToken` API. However, in scenarios where remote storage paths are mounted locally via FUSE (Filesystem in Userspace), users can access data through local file system paths directly, bypassing remote storage SDKs and achieving better performance.
+When using Paimon RESTCatalog with remote object storage (e.g., OSS, S3, HDFS), data access typically goes through remote storage SDKs. However, in scenarios where remote storage paths are mounted locally via FUSE (Filesystem in Userspace), users can access data through local file system paths directly, achieving better performance.
 
 This design introduces configuration parameters to support FUSE-mounted remote storage paths, allowing users to specify local path mappings at catalog, database, and table levels.
 
@@ -28,7 +28,7 @@ This design introduces configuration parameters to support FUSE-mounted remote s
 
 1. Enable local file system access for FUSE-mounted remote storage paths
 2. Support hierarchical path mapping: catalog root > database > table
-3. Use local FileIO for data read/write when FUSE local path is applicable (still need `getTableToken` for validation)
+3. Use local FileIO for data read/write when FUSE local path is applicable
 4. Maintain backward compatibility with existing RESTCatalog behavior
 
 ## Configuration Parameters
@@ -139,7 +139,7 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 
 | Configuration | Path Match | Behavior |
 |---------------|------------|----------|
-| `fuse.local-path.enabled=true` | Yes | Local FileIO for data read/write, `getTableToken` still used for validation |
+| `fuse.local-path.enabled=true` | Yes | Local FileIO for data read/write |
 | `fuse.local-path.enabled=true` | No | Fallback to original logic |
 | `fuse.local-path.enabled=false` | N/A | Original logic (data token or ResolvingFileIO) |
 
