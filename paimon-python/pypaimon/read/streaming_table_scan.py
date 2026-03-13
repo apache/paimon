@@ -140,8 +140,7 @@ class AsyncStreamingTableScan:
                         latest_snapshot
                     )
                     self.next_snapshot_id = latest_snapshot.id + 1
-                    if catch_up_plan.splits():
-                        yield catch_up_plan
+                    yield catch_up_plan
             finally:
                 self._catch_up_in_progress = False
 
