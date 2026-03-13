@@ -792,8 +792,9 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
 
   test("Paimon MergeInto: concurrent merge and compact") {
     for (dvEnabled <- Seq("true", "false")) {
-      val source = s"mc_s_$dvEnabled" + "_" + createPositiveRandomInt()
-      val target = s"mc_t_$dvEnabled" + "_" + createPositiveRandomInt()
+      val className = getClass.getSimpleName
+      val source = s"mc_s_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      val target = s"mc_t_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
       withTable(source, target) {
         sql(s"CREATE TABLE $source (id INT, b INT, c INT)")
         sql(s"INSERT INTO $source VALUES (1, 1, 1)")
@@ -843,8 +844,9 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
 
   test("Paimon MergeInto: concurrent two merge") {
     for (dvEnabled <- Seq("true", "false")) {
-      val source = s"tm_s_$dvEnabled" + "_" + createPositiveRandomInt()
-      val target = s"tm_t_$dvEnabled" + "_" + createPositiveRandomInt()
+      val className = getClass.getSimpleName
+      val source = s"tm_s_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      val target = s"tm_t_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
       withTable(source, target) {
         sql(s"CREATE TABLE $source (id INT, b INT, c INT)")
         sql(
