@@ -670,3 +670,249 @@ CREATE CATALOG paimon_rest_catalog WITH (
 3. Write operations require proper permissions on the local FUSE mount
 4. Windows platform has limited FUSE support (requires third-party tools like WinFsp)
 
+## FUSE Error Handling
+
+### Error Categories
+
+When using FUSE local paths, errors may occur in different scenarios. Below are common error types and handling strategies.
+
+#### 1. Permission/Authentication Errors
+
+| Error Type | Scenario | Cause | Handling Strategy |
+|------------|----------|-------|-------------------|
+| `NotAuthorizedException` (HTTP 401) | REST API call | Token expired or invalid | Refresh token and retry, or fail |
+| `ForbiddenException` (HTTP 403) | REST API call | No permission for resource | Log error, fail operation |
+| `AccessDeniedException` | Local file access | No read/write permission on FUSE mount | Log error, check mount permissions |
+| `FileNotFoundException` | Local file access | FUSE not mounted or path incorrect | Log error, check mount status |
+
+#### 2. Network Errors
+
+| Error Type | Scenario | Cause | Handling Strategy |
+|------------|----------|-------|-------------------|
+| `SocketTimeoutException` | Remote read/write | Network timeout | Retry with exponential backoff |
+| `ConnectException` | Connection attempt | Connection refused | Retry or fail after max attempts |
+| `ConnectionClosedException` | Data transfer | Connection closed unexpectedly | Retry once, then fail |
+| `NoRouteToHostException` | Connection attempt | Network unreachable | Log error, fail immediately |
+| `UnknownHostException` | DNS resolution | DNS resolution failure | Log error, fail immediately |
+| `InterruptedIOException` | I/O operation | Thread interrupted | Propagate interruption |
+
+#### 3. Service Errors
+
+| Error Type | Scenario | Cause | Handling Strategy |
+|------------|----------|-------|-------------------|
+| `ServiceUnavailableException` (HTTP 503) | REST API call | Service temporarily unavailable | Retry with backoff, respect `Retry-After` header |
+| HTTP 429 Too Many Requests | REST API call | Rate limiting | Retry after delay from `Retry-After` header |
+
+#### 4. FUSE-Specific Errors
+
+| Error Type | Scenario | Cause | Handling Strategy |
+|------------|----------|-------|-------------------|
+| `IOException` (transport failed) | Local file read/write | FUSE mount disconnected | Retry once, fallback to remote |
+| `IOException` (stale file handle) | File operation | File deleted/modified by another process | Reopen file or fail |
+
+### Error Handling Strategy
+
+#### Read Operation Error Handling
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Read Operation Flow                        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Attempt to read from FUSE local path                │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ Success ?                             │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+    ┌─────────────┐  ┌─────────────────────────────────────┐
+    │ Return data │  │ Classify error type                 │
+    └─────────────┘  └─────────────────────────────────────┘
+                                  │
+                                  ▼
+        ┌───────────────────────────────────────┐
+        │ Retryable error ?                     │
+        │ (Network timeout, transient errors)   │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+┌─────────────────────┐  ┌─────────────────────────────────────┐
+│ Retry with backoff  │  │ Log error and fail                  │
+│ (max 3 retries)     │  │ Throw IOException with details      │
+└─────────────────────┘  └─────────────────────────────────────┘
+           │
+           ▼
+        ┌───────────────────────────────────────┐
+        │ Retry succeeded ?                     │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+    ┌─────────────┐  ┌─────────────────────────────────────┐
+    │ Return data │  │ Log error and fail                  │
+    └─────────────┘  └─────────────────────────────────────┘
+```
+
+#### Write Operation Error Handling
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Write Operation Flow                       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Attempt to write to FUSE local path                 │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ Success ?                             │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+    ┌─────────────┐  ┌─────────────────────────────────────┐
+    │ Commit write│  │ Classify error type                 │
+    └─────────────┘  └─────────────────────────────────────┘
+                                  │
+                                  ▼
+        ┌───────────────────────────────────────┐
+        │ Permission error ?                    │
+        │ (AccessDenied, Forbidden)             │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+┌─────────────────────┐  ┌─────────────────────────────────────┐
+│ Fail immediately    │  │ Transient error ?                   │
+│ Throw exception     │  │ (Timeout, connection reset)         │
+└─────────────────────┘  └─────────────────────────────────────┘
+                                     │                    │
+                                    Yes                   No
+                                     │                    │
+                                     ▼                    ▼
+                          ┌─────────────────────┐  ┌─────────────────────┐
+                          │ Retry with backoff  │  │ Fail immediately    │
+                          │ (max 3 retries)     │  │ Throw exception     │
+                          └─────────────────────┘  └─────────────────────┘
+```
+
+### Error Handling Configuration
+
+Add the following configuration options:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fuse.local-path.retry-enabled` | Boolean | `true` | Enable retry on transient errors |
+| `fuse.local-path.max-retries` | Integer | `3` | Maximum number of retries |
+| `fuse.local-path.retry-interval` | Duration | `1s` | Initial retry interval (exponential backoff) |
+| `fuse.local-path.retry-max-interval` | Duration | `10s` | Maximum retry interval |
+
+### Implementation Example
+
+```java
+/**
+ * Execute file operation with retry support for transient errors
+ */
+private <T> T executeWithRetry(SupplierWithIOException<T> operation, String operationName) throws IOException {
+    if (!fuseConfig.retryEnabled()) {
+        return operation.get();
+    }
+
+    int attempt = 0;
+    IOException lastException = null;
+    long intervalMs = fuseConfig.retryIntervalMs();
+
+    while (attempt <= fuseConfig.maxRetries()) {
+        try {
+            return operation.get();
+        } catch (IOException e) {
+            lastException = e;
+            attempt++;
+
+            if (!isRetryableError(e) || attempt > fuseConfig.maxRetries()) {
+                throw e;
+            }
+
+            LOG.warn("{} failed (attempt {}), retrying in {} ms: {}",
+                operationName, attempt, intervalMs, e.getMessage());
+
+            try {
+                Thread.sleep(intervalMs);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Operation interrupted during retry", ie);
+            }
+
+            // Exponential backoff
+            intervalMs = Math.min(intervalMs * 2, fuseConfig.retryMaxIntervalMs());
+        }
+    }
+
+    throw lastException;
+}
+
+/**
+ * Determine if error is retryable
+ */
+private boolean isRetryableError(IOException e) {
+    // Transient network errors - retry
+    if (e instanceof SocketTimeoutException) return true;
+    if (e instanceof ConnectException) return true;
+    if (e instanceof ConnectionClosedException) return true;
+
+    // Permission errors - do not retry
+    if (e instanceof AccessDeniedException) return false;
+    if (e instanceof FileNotFoundException) return false;
+
+    // Check for FUSE-specific transport errors
+    String message = e.getMessage();
+    if (message != null) {
+        // FUSE transport failure (mount disconnected)
+        if (message.contains("Transport endpoint is not connected")) return false;
+        if (message.contains("Stale file handle")) return true;
+    }
+
+    // Default: retry unknown I/O errors (may be transient)
+    return true;
+}
+
+@FunctionalInterface
+interface SupplierWithIOException<T> {
+    T get() throws IOException;
+}
+```
+
+### Error Logging and Metrics
+
+#### Logging Guidelines
+
+| Log Level | Scenario | Example |
+|-----------|----------|---------|
+| ERROR | Operation failed after all retries | `FUSE read failed after 3 retries: /mnt/fuse/db/table/snapshot-1` |
+| WARN | Transient error, will retry | `FUSE read timeout, retrying (attempt 1/3): /mnt/fuse/...` |
+| INFO | Fallback to remote | `FUSE path unavailable, falling back to remote FileIO` |
+| DEBUG | Retry details | `Retry interval: 2000ms, next attempt: 2` |
+
+#### Metrics (Optional)
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `fuse.read.errors` | Counter | Total read errors by type |
+| `fuse.write.errors` | Counter | Total write errors by type |
+| `fuse.retry.count` | Counter | Total retry attempts |
+| `fuse.fallback.count` | Counter | Times fallback to remote FileIO |
+
