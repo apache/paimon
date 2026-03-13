@@ -521,7 +521,16 @@ public class LuminaVectorBenchmark {
                 "Running %,d queries (top-%d), each with fresh index load...%n", numQueries, topK);
 
         long[] queryLatencies = new long[numQueries];
-        long[] queryBytesRead = new long[numQueries];
+        long[] openBytesArr = new long[numQueries];
+        long[] openSeekArr = new long[numQueries];
+        long[] openReadArr = new long[numQueries];
+        long[] openReadTimeArr = new long[numQueries];
+        long[] openSeekTimeArr = new long[numQueries];
+        long[] searchBytesArr = new long[numQueries];
+        long[] searchSeekArr = new long[numQueries];
+        long[] searchReadArr = new long[numQueries];
+        long[] searchReadTimeArr = new long[numQueries];
+        long[] searchSeekTimeArr = new long[numQueries];
         long totalQueryStart = System.currentTimeMillis();
 
         for (int i = 0; i < numQueries; i++) {
@@ -536,7 +545,16 @@ public class LuminaVectorBenchmark {
                     new LuminaVectorGlobalIndexReader(
                             gFileReader, ioMetas, vectorType, indexOptions)) {
                 reader.visitVectorSearch(vs);
-                queryBytesRead[i] = reader.getTotalBytesRead();
+                openBytesArr[i] = reader.getOpenBytesRead();
+                openSeekArr[i] = reader.getOpenSeekCount();
+                openReadArr[i] = reader.getOpenReadCount();
+                openReadTimeArr[i] = reader.getOpenReadTimeNanos();
+                openSeekTimeArr[i] = reader.getOpenSeekTimeNanos();
+                searchBytesArr[i] = reader.getSearchBytesRead();
+                searchSeekArr[i] = reader.getSearchSeekCount();
+                searchReadArr[i] = reader.getSearchReadCount();
+                searchReadTimeArr[i] = reader.getSearchReadTimeNanos();
+                searchSeekTimeArr[i] = reader.getSearchSeekTimeNanos();
             }
 
             long queryEnd = System.nanoTime();
@@ -545,16 +563,6 @@ public class LuminaVectorBenchmark {
 
         long totalQueryEnd = System.currentTimeMillis();
         double totalQueryTimeSec = (totalQueryEnd - totalQueryStart) / 1000.0;
-
-        long totalBytesRead = 0;
-        long minBytesRead = Long.MAX_VALUE;
-        long maxBytesRead = Long.MIN_VALUE;
-        for (long b : queryBytesRead) {
-            totalBytesRead += b;
-            minBytesRead = Math.min(minBytesRead, b);
-            maxBytesRead = Math.max(maxBytesRead, b);
-        }
-        double avgBytesRead = totalBytesRead / (double) numQueries;
 
         Arrays.sort(queryLatencies);
         double avgLatencyMs = 0;
@@ -589,16 +597,35 @@ public class LuminaVectorBenchmark {
         System.out.printf("  P99:    %.3f%n", p99Ms);
         System.out.printf("  Max:    %.3f%n", maxMs);
         System.out.println();
-        System.out.println("Bytes read per query (InputStreamFileInput):");
+        System.out.println("Open-phase I/O (per query avg):");
         System.out.printf(
-                "  Min:    %,d (%.2f MB)%n", minBytesRead, minBytesRead / (1024.0 * 1024));
+                "  Bytes read: %,.0f (%.2f MB)%n",
+                avg(openBytesArr), avg(openBytesArr) / (1024.0 * 1024));
+        System.out.printf("  Read count: %,.0f%n", avg(openReadArr));
+        System.out.printf("  Seek count: %,.0f%n", avg(openSeekArr));
+        System.out.printf("  Read time:  %.3f ms%n", avgNanosToMs(openReadTimeArr));
+        System.out.printf("  Seek time:  %.3f ms%n", avgNanosToMs(openSeekTimeArr));
+        System.out.println();
+        System.out.println("Search-phase I/O (per query avg):");
         System.out.printf(
-                "  Avg:    %,.0f (%.2f MB)%n", avgBytesRead, avgBytesRead / (1024.0 * 1024));
-        System.out.printf(
-                "  Max:    %,d (%.2f MB)%n", maxBytesRead, maxBytesRead / (1024.0 * 1024));
-        System.out.printf(
-                "  Total:  %,d (%.2f GB)%n",
-                totalBytesRead, totalBytesRead / (1024.0 * 1024 * 1024));
+                "  Bytes read: %,.0f (%.2f KB)%n",
+                avg(searchBytesArr), avg(searchBytesArr) / 1024.0);
+        System.out.printf("  Read count: %,.0f%n", avg(searchReadArr));
+        System.out.printf("  Seek count: %,.0f%n", avg(searchSeekArr));
+        System.out.printf("  Read time:  %.3f ms%n", avgNanosToMs(searchReadTimeArr));
+        System.out.printf("  Seek time:  %.3f ms%n", avgNanosToMs(searchSeekTimeArr));
         System.out.println("===============================");
+    }
+
+    private static double avg(long[] arr) {
+        long sum = 0;
+        for (long v : arr) {
+            sum += v;
+        }
+        return sum / (double) arr.length;
+    }
+
+    private static double avgNanosToMs(long[] arr) {
+        return avg(arr) / 1_000_000.0;
     }
 }

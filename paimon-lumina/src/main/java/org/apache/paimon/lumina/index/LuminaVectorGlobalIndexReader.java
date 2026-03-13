@@ -52,6 +52,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
+    /**
+     * Sets {@code diskann.search.list_size} when not explicitly configured. The list size is set to
+     * at least {@code MIN_SEARCH_LIST_SIZE} to ensure sufficient recall for DiskANN, even when topK
+     * is very small.
+     */
+    private static final int MIN_SEARCH_LIST_SIZE = 16;
+
     private final GlobalIndexIOMeta ioMeta;
     private final GlobalIndexFileReader fileReader;
     private final DataType fieldType;
@@ -151,10 +158,10 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         return new LuminaScoredGlobalIndexResult(roaringBitmap64, id2scores);
     }
 
-    /** Sets {@code diskann.search.list_size} to 1.5x topK when not explicitly configured. */
     private static void ensureSearchListSize(Map<String, String> searchOptions, int topK) {
         if (!searchOptions.containsKey("diskann.search.list_size")) {
-            searchOptions.put("diskann.search.list_size", String.valueOf((int) (topK * 1.5)));
+            int listSize = Math.max((int) (topK * 1.5), MIN_SEARCH_LIST_SIZE);
+            searchOptions.put("diskann.search.list_size", String.valueOf(listSize));
         }
     }
 
@@ -227,6 +234,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                                         indexMeta.dim(),
                                         indexMeta.metric(),
                                         searcherOptions);
+                        fileInput.markOpenPhaseDone();
                         openStream = in;
                         inputStreamFileInput = fileInput;
                     } catch (Exception e) {
@@ -241,6 +249,50 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     /** Returns the total bytes read by the underlying {@link InputStreamFileInput}, or 0. */
     public long getTotalBytesRead() {
         return inputStreamFileInput != null ? inputStreamFileInput.getTotalBytesRead() : 0;
+    }
+
+    // =================== open-phase I/O stats =====================
+
+    public long getOpenBytesRead() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getOpenBytesRead() : 0;
+    }
+
+    public long getOpenSeekCount() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getOpenSeekCount() : 0;
+    }
+
+    public long getOpenReadCount() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getOpenReadCount() : 0;
+    }
+
+    public long getOpenReadTimeNanos() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getOpenReadTimeNanos() : 0;
+    }
+
+    public long getOpenSeekTimeNanos() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getOpenSeekTimeNanos() : 0;
+    }
+
+    // =================== search-phase I/O stats =====================
+
+    public long getSearchBytesRead() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getSearchBytesRead() : 0;
+    }
+
+    public long getSearchSeekCount() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getSearchSeekCount() : 0;
+    }
+
+    public long getSearchReadCount() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getSearchReadCount() : 0;
+    }
+
+    public long getSearchReadTimeNanos() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getSearchReadTimeNanos() : 0;
+    }
+
+    public long getSearchSeekTimeNanos() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getSearchSeekTimeNanos() : 0;
     }
 
     @Override
@@ -363,15 +415,29 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     static class InputStreamFileInput implements LuminaFileInput {
         private final SeekableInputStream in;
         private long totalBytesRead;
+        private long totalSeekCount;
+        private long totalReadCount;
+        private long totalReadTimeNanos;
+        private long totalSeekTimeNanos;
+
+        // Snapshot captured after open() phase.
+        private long openBytesRead;
+        private long openSeekCount;
+        private long openReadCount;
+        private long openReadTimeNanos;
+        private long openSeekTimeNanos;
+        private boolean openPhaseRecorded;
 
         InputStreamFileInput(SeekableInputStream in) {
             this.in = in;
-            this.totalBytesRead = 0;
         }
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
+            long start = System.nanoTime();
             int bytesRead = in.read(b, off, len);
+            totalReadTimeNanos += System.nanoTime() - start;
+            totalReadCount++;
             if (bytesRead > 0) {
                 totalBytesRead += bytesRead;
             }
@@ -380,7 +446,10 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
         @Override
         public void seek(long position) throws IOException {
+            long start = System.nanoTime();
             in.seek(position);
+            totalSeekTimeNanos += System.nanoTime() - start;
+            totalSeekCount++;
         }
 
         @Override
@@ -388,8 +457,62 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             return in.getPos();
         }
 
+        /** Snapshot current counters as the open-phase baseline. */
+        void markOpenPhaseDone() {
+            openBytesRead = totalBytesRead;
+            openSeekCount = totalSeekCount;
+            openReadCount = totalReadCount;
+            openReadTimeNanos = totalReadTimeNanos;
+            openSeekTimeNanos = totalSeekTimeNanos;
+            openPhaseRecorded = true;
+        }
+
         long getTotalBytesRead() {
             return totalBytesRead;
+        }
+
+        long getOpenBytesRead() {
+            return openBytesRead;
+        }
+
+        long getOpenSeekCount() {
+            return openSeekCount;
+        }
+
+        long getOpenReadCount() {
+            return openReadCount;
+        }
+
+        long getOpenReadTimeNanos() {
+            return openReadTimeNanos;
+        }
+
+        long getOpenSeekTimeNanos() {
+            return openSeekTimeNanos;
+        }
+
+        long getSearchBytesRead() {
+            return totalBytesRead - openBytesRead;
+        }
+
+        long getSearchSeekCount() {
+            return totalSeekCount - openSeekCount;
+        }
+
+        long getSearchReadCount() {
+            return totalReadCount - openReadCount;
+        }
+
+        long getSearchReadTimeNanos() {
+            return totalReadTimeNanos - openReadTimeNanos;
+        }
+
+        long getSearchSeekTimeNanos() {
+            return totalSeekTimeNanos - openSeekTimeNanos;
+        }
+
+        boolean isOpenPhaseRecorded() {
+            return openPhaseRecorded;
         }
 
         @Override
