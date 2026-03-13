@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -37,8 +38,11 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -298,6 +302,291 @@ public class JdbcCatalogTest extends CatalogTestBase {
             assertThat(catalogDatabases).contains(dbName);
             assertThat(catalog.listTables(dbName)).contains("test_table");
         }
+    }
+
+    private JdbcCatalog initCatalogWithSync(boolean syncAllProperties) {
+        Map<String, String> props = Maps.newHashMap();
+        props.put(CatalogOptions.SYNC_ALL_PROPERTIES.key(), String.valueOf(syncAllProperties));
+        return initCatalog(props);
+    }
+
+    private Map<String, String> fetchTableProperties(
+            JdbcCatalog jdbcCatalog, String databaseName, String tableName) {
+        try {
+            return jdbcCatalog
+                    .getConnections()
+                    .run(
+                            conn -> {
+                                Map<String, String> result = new HashMap<>();
+                                try (PreparedStatement ps =
+                                        conn.prepareStatement(
+                                                JdbcUtils.GET_ALL_TABLE_PROPERTIES_SQL)) {
+                                    ps.setString(1, jdbcCatalog.getCatalogKey());
+                                    ps.setString(2, databaseName);
+                                    ps.setString(3, tableName);
+                                    try (ResultSet rs = ps.executeQuery()) {
+                                        while (rs.next()) {
+                                            result.put(
+                                                    rs.getString(JdbcUtils.TABLE_PROPERTY_KEY),
+                                                    rs.getString(JdbcUtils.TABLE_PROPERTY_VALUE));
+                                        }
+                                    }
+                                }
+                                return result;
+                            });
+        } catch (SQLException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    public void testTablePropertiesSyncOnCreate() throws Exception {
+        JdbcCatalog syncCatalog = initCatalogWithSync(true);
+        syncCatalog.createDatabase("test_db", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "4");
+        options.put("file.format", "parquet");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "pt", DataTypes.STRING()),
+                                new DataField(2, "col1", DataTypes.STRING())),
+                        Lists.newArrayList("pt"),
+                        Lists.newArrayList("pk", "pt"),
+                        options,
+                        "");
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        syncCatalog.createTable(identifier, schema, false);
+
+        Map<String, String> storedProps =
+                fetchTableProperties(syncCatalog, "test_db", "test_table");
+        assertThat(storedProps).containsEntry("bucket", "4");
+        assertThat(storedProps).containsEntry("file.format", "parquet");
+        assertThat(storedProps).containsEntry("primary-key", "pk,pt");
+        assertThat(storedProps).containsEntry("partition", "pt");
+    }
+
+    @Test
+    public void testTablePropertiesSyncOnAlter() throws Exception {
+        JdbcCatalog syncCatalog = initCatalogWithSync(true);
+        syncCatalog.createDatabase("test_db", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "pt", DataTypes.STRING()),
+                                new DataField(2, "col1", DataTypes.STRING())),
+                        Lists.newArrayList("pt"),
+                        Lists.newArrayList("pk", "pt"),
+                        options,
+                        "");
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        syncCatalog.createTable(identifier, schema, false);
+
+        // Alter table: set a new option
+        syncCatalog.alterTable(
+                identifier,
+                Lists.newArrayList(SchemaChange.setOption("file.format", "orc")),
+                false);
+
+        Map<String, String> storedProps =
+                fetchTableProperties(syncCatalog, "test_db", "test_table");
+        assertThat(storedProps).containsEntry("file.format", "orc");
+        assertThat(storedProps).containsEntry("bucket", "4");
+
+        // Alter table: remove an option
+        syncCatalog.alterTable(
+                identifier, Lists.newArrayList(SchemaChange.removeOption("file.format")), false);
+
+        storedProps = fetchTableProperties(syncCatalog, "test_db", "test_table");
+        assertThat(storedProps).doesNotContainKey("file.format");
+        assertThat(storedProps).containsEntry("bucket", "4");
+    }
+
+    @Test
+    public void testTablePropertiesSyncOnDrop() throws Exception {
+        JdbcCatalog syncCatalog = initCatalogWithSync(true);
+        syncCatalog.createDatabase("test_db", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "pt", DataTypes.STRING()),
+                                new DataField(2, "col1", DataTypes.STRING())),
+                        Lists.newArrayList("pt"),
+                        Lists.newArrayList("pk", "pt"),
+                        options,
+                        "");
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        syncCatalog.createTable(identifier, schema, false);
+
+        // Verify properties exist
+        Map<String, String> storedProps =
+                fetchTableProperties(syncCatalog, "test_db", "test_table");
+        assertThat(storedProps).isNotEmpty();
+
+        // Drop the table
+        syncCatalog.dropTable(identifier, false);
+
+        // Verify properties are cleaned up
+        storedProps = fetchTableProperties(syncCatalog, "test_db", "test_table");
+        assertThat(storedProps).isEmpty();
+    }
+
+    @Test
+    public void testTablePropertiesSyncOnRename() throws Exception {
+        JdbcCatalog syncCatalog = initCatalogWithSync(true);
+        syncCatalog.createDatabase("test_db", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "pt", DataTypes.STRING()),
+                                new DataField(2, "col1", DataTypes.STRING())),
+                        Lists.newArrayList("pt"),
+                        Lists.newArrayList("pk", "pt"),
+                        options,
+                        "");
+
+        Identifier fromTable = Identifier.create("test_db", "old_table");
+        syncCatalog.createTable(fromTable, schema, false);
+
+        // Verify properties exist under old name
+        Map<String, String> storedProps = fetchTableProperties(syncCatalog, "test_db", "old_table");
+        assertThat(storedProps).containsEntry("bucket", "4");
+
+        // Rename the table
+        Identifier toTable = Identifier.create("test_db", "new_table");
+        syncCatalog.renameTable(fromTable, toTable, false);
+
+        // Verify properties moved to new name
+        storedProps = fetchTableProperties(syncCatalog, "test_db", "new_table");
+        assertThat(storedProps).containsEntry("bucket", "4");
+
+        // Verify old name has no properties
+        storedProps = fetchTableProperties(syncCatalog, "test_db", "old_table");
+        assertThat(storedProps).isEmpty();
+    }
+
+    @Test
+    public void testTablePropertiesSyncOnDropDatabase() throws Exception {
+        JdbcCatalog syncCatalog = initCatalogWithSync(true);
+        syncCatalog.createDatabase("test_db", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "pt", DataTypes.STRING()),
+                                new DataField(2, "col1", DataTypes.STRING())),
+                        Lists.newArrayList("pt"),
+                        Lists.newArrayList("pk", "pt"),
+                        options,
+                        "");
+
+        syncCatalog.createTable(Identifier.create("test_db", "table1"), schema, false);
+        syncCatalog.createTable(Identifier.create("test_db", "table2"), schema, false);
+
+        // Verify properties exist
+        assertThat(fetchTableProperties(syncCatalog, "test_db", "table1")).isNotEmpty();
+        assertThat(fetchTableProperties(syncCatalog, "test_db", "table2")).isNotEmpty();
+
+        // Drop the database cascade
+        syncCatalog.dropDatabase("test_db", false, true);
+
+        // Verify all table properties are cleaned up
+        assertThat(fetchTableProperties(syncCatalog, "test_db", "table1")).isEmpty();
+        assertThat(fetchTableProperties(syncCatalog, "test_db", "table2")).isEmpty();
+    }
+
+    @Test
+    public void testTablePropertiesSyncDisabled() throws Exception {
+        JdbcCatalog syncCatalog = initCatalogWithSync(false);
+        syncCatalog.createDatabase("test_db", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "pt", DataTypes.STRING()),
+                                new DataField(2, "col1", DataTypes.STRING())),
+                        Lists.newArrayList("pt"),
+                        Lists.newArrayList("pk", "pt"),
+                        options,
+                        "");
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        syncCatalog.createTable(identifier, schema, false);
+
+        // Verify no properties are stored when sync is disabled
+        Map<String, String> storedProps =
+                fetchTableProperties(syncCatalog, "test_db", "test_table");
+        assertThat(storedProps).isEmpty();
+    }
+
+    @Test
+    public void testTablePropertiesSyncOnRepair() throws Exception {
+        JdbcCatalog syncCatalog = initCatalogWithSync(true);
+        syncCatalog.createDatabase("test_db", false);
+
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "4");
+        Schema schema =
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "pk", DataTypes.INT()),
+                                new DataField(1, "pt", DataTypes.STRING()),
+                                new DataField(2, "col1", DataTypes.STRING())),
+                        Lists.newArrayList("pt"),
+                        Lists.newArrayList("pk", "pt"),
+                        options,
+                        "");
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        syncCatalog.createTable(identifier, schema, false);
+
+        // Delete the JDBC table row and properties (simulating corruption)
+        JdbcUtils.execute(
+                syncCatalog.getConnections(),
+                JdbcUtils.DROP_TABLE_SQL,
+                syncCatalog.getCatalogKey(),
+                "test_db",
+                "test_table");
+        JdbcUtils.execute(
+                syncCatalog.getConnections(),
+                JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
+                syncCatalog.getCatalogKey(),
+                "test_db",
+                "test_table");
+
+        // Verify properties are gone
+        assertThat(fetchTableProperties(syncCatalog, "test_db", "test_table")).isEmpty();
+
+        // Repair the table
+        syncCatalog.repairTable(identifier);
+
+        // Verify properties are restored
+        Map<String, String> storedProps =
+                fetchTableProperties(syncCatalog, "test_db", "test_table");
+        assertThat(storedProps).containsEntry("bucket", "4");
     }
 
     @Test
