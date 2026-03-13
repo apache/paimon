@@ -234,8 +234,6 @@ Each table directory contains a `.paimon-identifier` file for quick validation:
 
 **File Format**:
 ```
-database=db1
-table=table1
 table-uuid=xxx-xxx-xxx-xxx
 created-at=2026-03-13T00:00:00Z
 ```
@@ -244,6 +242,7 @@ created-at=2026-03-13T00:00:00Z
 - Compare table UUID between local and remote paths
 - Quick validation before expensive data comparison
 - Automatically generated when table is created
+- Only UUID is needed (database/table names can change via rename)
 
 ### Security Validation Implementation
 
@@ -352,16 +351,13 @@ private ValidationResult validateByIdentifierFile(
 
 /**
  * Read .paimon-identifier file content
- * Format: database=db1\ntable=table1\ntable-uuid=xxx-xxx-xxx
+ * Format: table-uuid=xxx-xxx-xxx-xxx
  */
 private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
     try (InputStream in = fileIO.newInputStream(identifierFile)) {
         Properties props = new Properties();
         props.load(in);
-        String database = props.getProperty("database");
-        String table = props.getProperty("table");
-        String uuid = props.getProperty("table-uuid");
-        return database + "." + table + "@" + uuid;
+        return props.getProperty("table-uuid");
     }
 }
 

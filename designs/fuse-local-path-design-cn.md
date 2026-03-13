@@ -232,8 +232,6 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 
 **文件格式**：
 ```
-database=db1
-table=table1
 table-uuid=xxx-xxx-xxx-xxx
 created-at=2026-03-13T00:00:00Z
 ```
@@ -242,6 +240,7 @@ created-at=2026-03-13T00:00:00Z
 - 比对本地和远端路径的表 UUID
 - 在昂贵的文件内容比对前进行快速校验
 - 创建表时自动生成
+- 仅需 UUID（database/table 名称可能因重命名而变化）
 
 ### 安全校验实现
 
@@ -350,16 +349,13 @@ private ValidationResult validateByIdentifierFile(
 
 /**
  * 读取 .paimon-identifier 文件内容
- * 格式：database=db1\ntable=table1\ntable-uuid=xxx-xxx-xxx
+ * 格式：table-uuid=xxx-xxx-xxx-xxx
  */
 private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
     try (InputStream in = fileIO.newInputStream(identifierFile)) {
         Properties props = new Properties();
         props.load(in);
-        String database = props.getProperty("database");
-        String table = props.getProperty("table");
-        String uuid = props.getProperty("table-uuid");
-        return database + "." + table + "@" + uuid;
+        return props.getProperty("table-uuid");
     }
 }
 
