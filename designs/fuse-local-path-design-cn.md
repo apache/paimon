@@ -20,7 +20,7 @@ limitations under the License.
 
 ## 背景
 
-在使用 Paimon RESTCatalog 访问远端对象存储（如 OSS、S3、HDFS）时，数据访问通常需要通过 `getTableToken` API 从 REST 服务器获取认证令牌。然而，在远端存储路径通过 FUSE（用户空间文件系统）挂载到本地的场景下，用户可以直接通过本地文件系统路径访问数据，无需认证令牌。
+在使用 Paimon RESTCatalog 访问远端对象存储（如 OSS、S3、HDFS）时，数据访问通常需要通过 `getTableToken` API 从 REST 服务器获取认证令牌。然而，在远端存储路径通过 FUSE（用户空间文件系统）挂载到本地的场景下，用户可以直接通过本地文件系统路径访问数据，绕过远端存储 SDK，获得更好的性能。
 
 本设计引入配置参数以支持 FUSE 挂载的远端存储路径，允许用户在 Catalog、Database 和 Table 三个层级指定本地路径映射。
 
@@ -28,7 +28,7 @@ limitations under the License.
 
 1. 支持通过本地文件系统访问 FUSE 挂载的远端存储路径
 2. 支持分层路径映射：Catalog 根路径 > Database > Table
-3. 当 FUSE 本地路径适用时，跳过 `getTableToken` API 调用
+3. 当 FUSE 本地路径适用时，使用本地 FileIO 进行数据读写（仍需 `getTableToken` 用于校验）
 4. 保持与现有 RESTCatalog 行为的向后兼容性
 
 ## 配置参数
@@ -139,16 +139,15 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 
 | 配置 | 路径匹配 | 行为 |
 |-----|---------|------|
-| `fuse.local-path.enabled=true` | 是 | 本地 FileIO，**无需调用 `getTableToken`** |
+| `fuse.local-path.enabled=true` | 是 | 本地 FileIO 进行数据读写，`getTableToken` 仍用于校验 |
 | `fuse.local-path.enabled=true` | 否 | 回退到原有逻辑 |
 | `fuse.local-path.enabled=false` | 不适用 | 原有逻辑（data token 或 ResolvingFileIO） |
 
 ## 优势
 
 1. **性能提升**：本地文件系统访问通常比基于网络的远端存储访问更快
-2. **降低成本**：无需调用 `getTableToken` API，减少 REST 服务器负载
-3. **灵活性**：支持为不同的数据库/表配置不同的本地路径
-4. **向后兼容**：默认禁用，现有行为不变
+2. **灵活性**：支持为不同的数据库/表配置不同的本地路径
+3. **向后兼容**：默认禁用，现有行为不变
 
 ## 安全校验机制
 

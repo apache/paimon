@@ -20,7 +20,7 @@ limitations under the License.
 
 ## Background
 
-When using Paimon RESTCatalog with remote object storage (e.g., OSS, S3, HDFS), data access typically requires authentication tokens obtained from the REST server via `getTableToken` API. However, in scenarios where remote storage paths are mounted locally via FUSE (Filesystem in Userspace), users can access data through local file system paths without needing authentication tokens.
+When using Paimon RESTCatalog with remote object storage (e.g., OSS, S3, HDFS), data access typically requires authentication tokens obtained from the REST server via `getTableToken` API. However, in scenarios where remote storage paths are mounted locally via FUSE (Filesystem in Userspace), users can access data through local file system paths directly, bypassing remote storage SDKs and achieving better performance.
 
 This design introduces configuration parameters to support FUSE-mounted remote storage paths, allowing users to specify local path mappings at catalog, database, and table levels.
 
@@ -28,7 +28,7 @@ This design introduces configuration parameters to support FUSE-mounted remote s
 
 1. Enable local file system access for FUSE-mounted remote storage paths
 2. Support hierarchical path mapping: catalog root > database > table
-3. Skip `getTableToken` API calls when FUSE local path is applicable
+3. Use local FileIO for data read/write when FUSE local path is applicable (still need `getTableToken` for validation)
 4. Maintain backward compatibility with existing RESTCatalog behavior
 
 ## Configuration Parameters
@@ -139,16 +139,15 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 
 | Configuration | Path Match | Behavior |
 |---------------|------------|----------|
-| `fuse.local-path.enabled=true` | Yes | Local FileIO, **no `getTableToken` call** |
+| `fuse.local-path.enabled=true` | Yes | Local FileIO for data read/write, `getTableToken` still used for validation |
 | `fuse.local-path.enabled=true` | No | Fallback to original logic |
 | `fuse.local-path.enabled=false` | N/A | Original logic (data token or ResolvingFileIO) |
 
 ## Benefits
 
 1. **Performance**: Local file system access is typically faster than network-based remote storage access
-2. **Cost Reduction**: No need to call `getTableToken` API, reducing REST server load
-3. **Flexibility**: Supports different local paths for different databases/tables
-4. **Backward Compatibility**: Disabled by default, existing behavior unchanged
+2. **Flexibility**: Supports different local paths for different databases/tables
+3. **Backward Compatibility**: Disabled by default, existing behavior unchanged
 
 ## Security Validation Mechanism
 
