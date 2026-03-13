@@ -19,6 +19,7 @@
 package org.apache.paimon.globalindex.btree;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -31,6 +32,7 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
@@ -48,6 +50,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.MutableObjectIteratorAdapter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
 
@@ -119,13 +122,56 @@ public class BTreeGlobalIndexBuilder implements Serializable {
     }
 
     public List<DataSplit> scan() {
-        // 1. read the whole dataset of target partitions
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
             snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
         }
 
         return snapshotReader.read().dataSplits();
+    }
+
+    public List<DataSplit> incrementalScan() {
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        if (partitionPredicate != null) {
+            snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
+        }
+        Snapshot latestSnapshot = snapshotReader.snapshotManager().latestSnapshot();
+        if (latestSnapshot == null) {
+            return Collections.emptyList();
+        }
+        snapshotReader = snapshotReader.withSnapshot(latestSnapshot);
+
+        Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
+
+        Range dataRange = new Range(0, latestSnapshot.nextRowId() - 1);
+        List<Range> indexedRanges = indexedRowRanges(latestSnapshot);
+        List<Range> nonIndexedRanges = dataRange.exclude(indexedRanges);
+        if (nonIndexedRanges.isEmpty()) {
+            return Collections.emptyList();
+        }
+        snapshotReader = snapshotReader.withRowRanges(nonIndexedRanges);
+        return snapshotReader.read().dataSplits();
+    }
+
+    private List<Range> indexedRowRanges(Snapshot snapshot) {
+        List<Range> ranges = new ArrayList<>();
+        for (IndexManifestEntry entry :
+                table.store().newIndexFileHandler().scan(snapshot, "btree")) {
+            if (partitionPredicate != null && !partitionPredicate.test(entry.partition())) {
+                continue;
+            }
+            if (entry.indexFile().globalIndexMeta() == null) {
+                continue;
+            }
+            if (entry.indexFile().globalIndexMeta().indexFieldId() != indexField.id()) {
+                continue;
+            }
+            ranges.add(
+                    new Range(
+                            entry.indexFile().globalIndexMeta().rowRangeStart(),
+                            entry.indexFile().globalIndexMeta().rowRangeEnd()));
+        }
+        return Range.sortAndMergeOverlap(ranges, true);
     }
 
     @VisibleForTesting

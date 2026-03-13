@@ -152,6 +152,133 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         metasByParts.forEach(this::assertFilesNonOverlapping);
     }
 
+    @Test
+    public void testIncrementalScanNoData() throws Exception {
+        createTableDefault();
+
+        FileStoreTable table = getTableDefault();
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        builder.withIndexField("f0");
+
+        List<DataSplit> splits = builder.incrementalScan();
+        Assertions.assertTrue(
+                splits.isEmpty(), "incrementalScan on empty table should return empty");
+    }
+
+    @Test
+    public void testIncrementalScanAllIndexed() throws Exception {
+        write();
+        createIndex(null);
+
+        FileStoreTable table = getTableDefault();
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        builder.withIndexField("f0");
+
+        List<DataSplit> splits = builder.incrementalScan();
+        Assertions.assertTrue(
+                splits.isEmpty(),
+                "incrementalScan should return empty when all data is already indexed");
+    }
+
+    @Test
+    public void testIncrementalScanWithNewData() throws Exception {
+        write();
+        createIndex(null);
+
+        // Write additional data to partition p0
+        FileStoreTable table = getTableDefault();
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite batchWrite = writeBuilder.newWrite()) {
+            for (int i = (int) PART_ROW_NUM; i < PART_ROW_NUM + 500; i++) {
+                batchWrite.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p0"),
+                                i,
+                                BinaryString.fromString("f1_" + i)));
+            }
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(batchWrite.prepareCommit());
+            }
+        }
+
+        table = getTableDefault();
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        builder.withIndexField("f0");
+
+        List<DataSplit> splits = builder.incrementalScan();
+        Assertions.assertFalse(
+                splits.isEmpty(),
+                "incrementalScan should return non-empty splits for newly written data");
+
+        long totalRowCount = 0;
+        for (DataSplit split : splits) {
+            totalRowCount += split.rowCount();
+        }
+        Assertions.assertEquals(
+                500, totalRowCount, "incrementalScan should only return the newly written rows");
+    }
+
+    @Test
+    public void testIncrementalScanWithPartitionPredicate() throws Exception {
+        write();
+
+        // Only index partition p0
+        FileStoreTable table = getTableDefault();
+        RowType partType = table.rowType().project("dt");
+        Predicate predicate =
+                PartitionPredicate.createPartitionPredicate(
+                        partType, Collections.singletonMap("dt", BinaryString.fromString("p0")));
+        createIndex(PartitionPredicate.fromPredicate(partType, predicate));
+
+        // Write new data to both partitions
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite batchWrite = writeBuilder.newWrite()) {
+            for (int i = (int) PART_ROW_NUM; i < PART_ROW_NUM + 200; i++) {
+                batchWrite.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p0"),
+                                i,
+                                BinaryString.fromString("f1_" + i)));
+                batchWrite.write(
+                        GenericRow.of(
+                                BinaryString.fromString("p1"),
+                                i,
+                                BinaryString.fromString("f1_" + i)));
+            }
+            try (BatchTableCommit commit = writeBuilder.newCommit()) {
+                commit.commit(batchWrite.prepareCommit());
+            }
+        }
+
+        // incrementalScan with p0 filter: should return only the new p0 data
+        table = getTableDefault();
+        predicate =
+                PartitionPredicate.createPartitionPredicate(
+                        partType, Collections.singletonMap("dt", BinaryString.fromString("p0")));
+        BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
+        builder.withIndexField("f0");
+        builder.withPartitionPredicate(PartitionPredicate.fromPredicate(partType, predicate));
+
+        List<DataSplit> splits = builder.incrementalScan();
+        Assertions.assertFalse(splits.isEmpty());
+
+        for (DataSplit split : splits) {
+            Assertions.assertEquals(
+                    BinaryString.fromString("p0"),
+                    split.partition().getString(0),
+                    "incrementalScan with partition predicate should only return matching partition");
+        }
+
+        long totalRowCount = 0;
+        for (DataSplit split : splits) {
+            totalRowCount += split.rowCount();
+        }
+        Assertions.assertEquals(
+                200,
+                totalRowCount,
+                "incrementalScan should only return the new rows in partition p0");
+    }
+
     private Map<BinaryRow, List<Pair<String, FileStats>>> gatherIndexMetas(FileStoreTable table) {
         IndexFileHandler handler = table.store().newIndexFileHandler();
 
