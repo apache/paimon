@@ -406,11 +406,16 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private <T extends FileEntry> Iterator<T> readAndMergeFileEntries(
             List<ManifestFileMeta> manifests,
-            Function<List<ManifestEntry>, List<T>> converter,
+            Function<ManifestEntry, T> converter,
             boolean useSequential) {
         Set<Identifier> deletedEntries =
                 FileEntry.readDeletedEntries(
-                        manifest -> readManifest(manifest, FileEntry.deletedFilter(), null),
+                        manifest ->
+                                readManifest(
+                                        manifest,
+                                        SimpleFileEntry::from,
+                                        FileEntry.deletedFilter(),
+                                        null),
                         manifests,
                         parallelism);
 
@@ -421,11 +426,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
         Function<ManifestFileMeta, List<T>> processor =
                 manifest ->
-                        converter.apply(
-                                readManifest(
-                                        manifest,
-                                        FileEntry.addFilter(),
-                                        entry -> !deletedEntries.contains(entry.identifier())));
+                        readManifest(
+                                manifest,
+                                converter,
+                                FileEntry.addFilter(),
+                                entry -> !deletedEntries.contains(entry.identifier()));
         if (useSequential) {
             return sequentialBatchedExecute(processor, manifests, parallelism).iterator();
         } else {
@@ -475,14 +480,20 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     public List<ManifestEntry> readManifest(ManifestFileMeta manifest) {
-        return readManifest(manifest, null, null);
+        return readManifest(manifest, Function.identity(), null, null);
     }
 
-    private List<ManifestEntry> readManifest(
+    private <T> List<T> readManifest(
             ManifestFileMeta manifest,
+            Function<ManifestEntry, T> converter,
             @Nullable Filter<InternalRow> additionalFilter,
             @Nullable Filter<ManifestEntry> additionalTFilter) {
-        List<ManifestEntry> entries =
+        Function<ManifestEntry, T> finalConverter =
+                dropStats ? e -> converter.apply(dropStats(e)) : converter;
+
+        Filter<InternalRow> entryRowFilter = createEntryRowFilter();
+
+        List<T> entries =
                 manifestFileFactory
                         .create()
                         .withCacheMetrics(
@@ -490,21 +501,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .read(
                                 manifest.fileName(),
                                 manifest.fileSize(),
-                                manifestsReader.partitionFilter(),
-                                createBucketFilter(),
-                                createEntryRowFilter().and(additionalFilter),
+                                entryRowFilter,
+                                entryRowFilter.and(additionalFilter),
                                 entry ->
                                         (additionalTFilter == null || additionalTFilter.test(entry))
                                                 && (manifestEntryFilter == null
                                                         || manifestEntryFilter.test(entry))
-                                                && filterByStats(entry));
-        if (dropStats) {
-            List<ManifestEntry> copied = new ArrayList<>(entries.size());
-            for (ManifestEntry entry : entries) {
-                copied.add(dropStats(entry));
-            }
-            entries = copied;
-        }
+                                                && filterByStats(entry),
+                                finalConverter);
+        LOG.info("Read {} manifest entries from {}", entries.size(), manifest.fileName());
         return entries;
     }
 

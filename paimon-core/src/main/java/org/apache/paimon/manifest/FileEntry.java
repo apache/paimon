@@ -240,7 +240,12 @@ public interface FileEntry {
         return readDeletedEntries(
                 m ->
                         manifestFile.read(
-                                m.fileName(), m.fileSize(), deletedFilter(), Filter.alwaysTrue()),
+                                m.fileName(),
+                                m.fileSize(),
+                                Filter.alwaysTrue(),
+                                deletedFilter(),
+                                Filter.alwaysTrue(),
+                                SimpleFileEntry::from),
                 manifestFiles,
                 manifestReadParallelism);
     }
