@@ -302,7 +302,7 @@ private ValidationResult validateByRemoteData(
             SchemaManager schemaManager = new SchemaManager(remoteFileIO, remotePath);
             Optional<TableSchema> latestSchema = schemaManager.latest();
             if (!latestSchema.isPresent()) {
-                // Table is completely empty (no schema, shouldn't happen theoretically)
+                // No schema (e.g., format table, object table), skip validation
                 LOG.info("No snapshot or schema found for table: {}, skip validation", identifier);
                 return ValidationResult.success();
             }

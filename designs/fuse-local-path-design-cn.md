@@ -300,7 +300,7 @@ private ValidationResult validateByRemoteData(
             SchemaManager schemaManager = new SchemaManager(remoteFileIO, remotePath);
             Optional<TableSchema> latestSchema = schemaManager.latest();
             if (!latestSchema.isPresent()) {
-                // 表完全为空（连 schema 都没有，理论上不应该发生）
+                // 无 schema（如 format 表、object 表），跳过验证
                 LOG.info("未找到表 {} 的 snapshot 或 schema，跳过验证", identifier);
                 return ValidationResult.success();
             }
