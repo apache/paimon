@@ -468,13 +468,10 @@ private void handleValidationError(ValidationResult result, ValidationMode mode)
 }
 
 /**
- * Create local FileIO
+ * Create local FileIO using existing context
  */
 private FileIO createLocalFileIO(Path localPath) {
-    return FileIO.get(localPath, CatalogContext.create(
-        new Options(),
-        context.hadoopConf()
-    ));
+    return FileIO.get(localPath, context);
 }
 
 /**

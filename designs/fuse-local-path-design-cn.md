@@ -466,13 +466,10 @@ private void handleValidationError(ValidationResult result, ValidationMode mode)
 }
 
 /**
- * 创建本地 FileIO
+ * 使用现有 context 创建本地 FileIO
  */
 private FileIO createLocalFileIO(Path localPath) {
-    return FileIO.get(localPath, CatalogContext.create(
-        new Options(),
-        context.hadoopConf()
-    ));
+    return FileIO.get(localPath, context);
 }
 
 /**
