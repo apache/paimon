@@ -38,6 +38,7 @@ import java.io.OutputStreamWriter;
 import java.io.Serializable;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.security.InvalidParameterException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -211,9 +212,22 @@ public interface FileIO extends Serializable, Closeable {
     /**
      * Check if exists.
      *
-     * @param path source file
+     * @param path source file or dir
      */
     boolean exists(Path path) throws IOException;
+
+    /**
+     * Check if exists.
+     *
+     * @param path source file
+     */
+    default boolean fileExists(Path path) throws IOException {
+        try {
+            return !getFileStatus(path).isDir();
+        } catch (FileNotFoundException e) {
+            return false;
+        }
+    }
 
     /**
      * Delete a file.
@@ -237,6 +251,35 @@ public interface FileIO extends Serializable, Closeable {
      */
     boolean mkdirs(Path path) throws IOException;
 
+    default boolean rename(Path src, Path dst) throws IOException {
+        // Cannot rename root of file system
+        if (src.getParent() == null) {
+            return false;
+        }
+
+        // Cannot rename to a subdirectory of the source
+        Path parent = dst.getParent();
+        while (parent != null && !src.equals(parent)) {
+            parent = parent.getParent();
+        }
+        if (parent != null) {
+            return false;
+        }
+
+        // Rename a file to the same name, return true
+        if (dst.equals(src) || dst.equals(src.getParent())) {
+            return true;
+        }
+
+        if (dst.getParent().equals(src.getParent()) || dst.equals(src.getParent())) {
+            return renameImpl(src, dst);
+        }
+        if (fileExists(src)) {
+            return renameImpl(src, dst);
+        }
+        throw new InvalidParameterException("src: " + src + ", dst: " + dst);
+    }
+
     /**
      * Renames the file/directory src to dst.
      *
@@ -244,7 +287,7 @@ public interface FileIO extends Serializable, Closeable {
      * @param dst the new name of the file/directory
      * @return <code>true</code> if the renaming was successful, <code>false</code> otherwise
      */
-    boolean rename(Path src, Path dst) throws IOException;
+    boolean renameImpl(Path src, Path dst) throws IOException;
 
     /**
      * Override this method to empty, many FileIO implementation classes rely on static variables

@@ -162,7 +162,7 @@ public class CompactedChangelogFormatReaderFactory implements FormatReaderFactor
         }
 
         @Override
-        public boolean rename(Path src, Path dst) throws IOException {
+        public boolean renameImpl(Path src, Path dst) throws IOException {
             throw new UnsupportedOperationException();
         }
     }
