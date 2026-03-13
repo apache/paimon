@@ -235,7 +235,6 @@ Each table directory contains a `.identifier` file for quick validation:
 **File Format**:
 ```
 table-uuid=xxx-xxx-xxx-xxx
-created-at=2026-03-13T00:00:00Z
 ```
 
 **Usage**:

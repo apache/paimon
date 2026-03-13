@@ -233,7 +233,6 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 **文件格式**：
 ```
 table-uuid=xxx-xxx-xxx-xxx
-created-at=2026-03-13T00:00:00Z
 ```
 
 **用途**：
