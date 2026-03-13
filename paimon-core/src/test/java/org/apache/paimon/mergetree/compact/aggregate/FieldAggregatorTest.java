@@ -82,6 +82,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.ThetaSketch.sketchOf;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -479,6 +480,57 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.agg((double) 1, (double) 10)).isEqualTo((double) 11);
         assertThat(fieldSumAgg.retract((double) 10, (double) 5)).isEqualTo((double) 5);
         assertThat(fieldSumAgg.retract(null, (double) 5)).isEqualTo((double) -5);
+    }
+
+    @Test
+    public void testFieldSumByteOverflow() {
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new TinyIntType(), null, null);
+        // Normal case still works
+        assertThat(fieldSumAgg.agg((byte) 1, (byte) 2)).isEqualTo((byte) 3);
+        // Overflow should throw ArithmeticException instead of silently wrapping
+        assertThatThrownBy(() -> fieldSumAgg.agg(Byte.MAX_VALUE, (byte) 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Byte.MIN_VALUE, (byte) -1))
+                .isInstanceOf(ArithmeticException.class);
+        // Retract overflow
+        assertThatThrownBy(() -> fieldSumAgg.retract(Byte.MIN_VALUE, (byte) 1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumShortOverflow() {
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new SmallIntType(), null, null);
+        assertThat(fieldSumAgg.agg((short) 1, (short) 2)).isEqualTo((short) 3);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Short.MAX_VALUE, (short) 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Short.MIN_VALUE, (short) -1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(Short.MIN_VALUE, (short) 1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumIntOverflow() {
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new IntType(), null, null);
+        assertThat(fieldSumAgg.agg(1, 2)).isEqualTo(3);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Integer.MAX_VALUE, 1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Integer.MIN_VALUE, -1))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(Integer.MIN_VALUE, 1))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    public void testFieldSumLongOverflow() {
+        FieldSumAgg fieldSumAgg = new FieldSumAggFactory().create(new BigIntType(), null, null);
+        assertThat(fieldSumAgg.agg(1L, 2L)).isEqualTo(3L);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Long.MAX_VALUE, 1L))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.agg(Long.MIN_VALUE, -1L))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatThrownBy(() -> fieldSumAgg.retract(Long.MIN_VALUE, 1L))
+                .isInstanceOf(ArithmeticException.class);
     }
 
     @Test
