@@ -316,8 +316,10 @@ class FileStoreTable(Table):
         if not self.options.global_index_enabled():
             return None
 
-        from pypaimon.globalindex.global_index_scan_builder_impl import \
+        from pypaimon.globalindex.global_index_scan_builder_impl import (
             GlobalIndexScanBuilderImpl
+        )
+
         from pypaimon.index.index_file_handler import IndexFileHandler
 
         return GlobalIndexScanBuilderImpl(
@@ -392,7 +394,6 @@ class FileStoreTable(Table):
 
     def _create_external_paths(self) -> List[str]:
         from urllib.parse import urlparse
-
         from pypaimon.common.options.core_options import ExternalPathStrategy
 
         external_paths_str = self.options.data_file_external_paths()

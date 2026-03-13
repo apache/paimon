@@ -16,23 +16,21 @@
 #  limitations under the License.
 ################################################################################
 
-"""
-Test cases for StreamReadBuilder bucket filtering functionality.
-
-Tests the with_bucket_filter() and with_buckets() methods
-that enable parallel consumption across multiple consumer processes.
-"""
+"""Tests for StreamReadBuilder."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
 from pypaimon.read.stream_read_builder import StreamReadBuilder
+from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
 
 
-# -----------------------------------------------------------------------------
-# Fixtures
-# -----------------------------------------------------------------------------
+class MockEntry:
+    """Mock manifest entry for testing bucket filtering."""
+
+    def __init__(self, bucket):
+        self.bucket = bucket
 
 
 @pytest.fixture
@@ -50,16 +48,17 @@ def builder(mock_table):
     return StreamReadBuilder(mock_table)
 
 
-class MockEntry:
-    """Mock manifest entry for testing bucket filtering."""
+@pytest.fixture
+def mock_scan_table():
+    """Create mock table for AsyncStreamingTableScan."""
+    table = MagicMock()
+    table.options.changelog_producer.return_value = MagicMock()
+    table.file_io = MagicMock()
+    table.table_path = "/tmp/test"
+    table.fields = []
+    table.options.row_tracking_enabled.return_value = False
+    return table
 
-    def __init__(self, bucket):
-        self.bucket = bucket
-
-
-# -----------------------------------------------------------------------------
-# Unit Tests: StreamReadBuilder Validation
-# -----------------------------------------------------------------------------
 
 class TestStreamReadBuilderValidation:
     """Unit tests for StreamReadBuilder method validation."""
@@ -96,61 +95,11 @@ class TestStreamReadBuilderValidation:
         assert builder._include_row_kind is True
 
 
-# -----------------------------------------------------------------------------
-# Unit Tests: Bucket Filtering Logic
-# -----------------------------------------------------------------------------
-
-class TestBucketFilteringLogic:
-    """Test bucket filtering logic used in scans."""
-
-    @pytest.mark.parametrize("shard_idx,shard_count,expected_buckets", [
-        (0, 4, [0, 4]),
-        (1, 4, [1, 5]),
-        (2, 4, [2, 6]),
-        (3, 4, [3, 7]),
-        (0, 2, [0, 2, 4, 6]),
-        (1, 2, [1, 3, 5, 7]),
-    ])
-    def test_shard_filtering(self, shard_idx, shard_count, expected_buckets):
-        """Test shard-based bucket filtering."""
-        entries = [MockEntry(b) for b in range(8)]
-        filtered = [e for e in entries if e.bucket % shard_count == shard_idx]
-        assert [e.bucket for e in filtered] == expected_buckets
-
-    @pytest.mark.parametrize("num_buckets,num_consumers", [(8, 4), (7, 3), (10, 3), (5, 5)])
-    def test_shards_cover_all_buckets(self, num_buckets, num_consumers):
-        """Test that all shards together cover all buckets exactly once."""
-        all_buckets = set()
-        for shard_idx in range(num_consumers):
-            shard_buckets = {b for b in range(num_buckets) if b % num_consumers == shard_idx}
-            assert not (all_buckets & shard_buckets), "Shards should not overlap"
-            all_buckets.update(shard_buckets)
-        assert all_buckets == set(range(num_buckets)), "All buckets should be covered"
-
-
-# -----------------------------------------------------------------------------
-# Unit Tests: AsyncStreamingTableScan
-# -----------------------------------------------------------------------------
-
-@pytest.fixture
-def mock_scan_table():
-    """Create mock table for AsyncStreamingTableScan."""
-    table = MagicMock()
-    table.options.changelog_producer.return_value = MagicMock()
-    table.file_io = MagicMock()
-    table.table_path = "/tmp/test"
-    table.fields = []
-    table.options.row_tracking_enabled.return_value = False
-    return table
-
-
 class TestAsyncStreamingTableScanFiltering:
     """Test AsyncStreamingTableScan._filter_entries_for_shard()."""
 
     def test_filter_with_bucket_filter(self, mock_scan_table):
         """Test _filter_entries_for_shard with custom bucket filter."""
-        from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
-
         scan = AsyncStreamingTableScan(
             table=mock_scan_table,
             bucket_filter=lambda b: b % 2 == 0
@@ -161,8 +110,6 @@ class TestAsyncStreamingTableScanFiltering:
 
     def test_filter_no_filter_returns_all(self, mock_scan_table):
         """Test _filter_entries_for_shard with no filter returns all entries."""
-        from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
-
         scan = AsyncStreamingTableScan(table=mock_scan_table)
         entries = [MockEntry(b) for b in range(8)]
         filtered = scan._filter_entries_for_shard(entries)

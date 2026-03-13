@@ -24,9 +24,10 @@ of Java's DataTableStreamScan.
 """
 
 import asyncio
+import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import AsyncIterator, Callable, Iterator, List, Optional
+from typing import AsyncGenerator, Callable, Iterator, List, Optional
 
 from pypaimon.common.options.core_options import ChangelogProducer
 from pypaimon.common.predicate import Predicate
@@ -94,12 +95,9 @@ class AsyncStreamingTableScan:
         self._prefetch_enabled = prefetch_enabled
         self._prefetch_future: Optional[Future] = None
         self._prefetch_snapshot_id: Optional[int] = None
-        self._prefetch_hits = 0
-        self._prefetch_misses = 0
-        self._lookahead_skips = 0  # Track how many snapshots were skipped via lookahead
+        self._lookahead_skips = 0
         self._prefetch_executor = ThreadPoolExecutor(max_workers=1) if prefetch_enabled else None
         self._lookahead_size = 10  # How many snapshots to look ahead
-        self._diff_catch_up_used = False  # Track if diff-based catch-up was used
 
         # Initialize managers
         self._snapshot_manager = SnapshotManager(table)
@@ -112,9 +110,8 @@ class AsyncStreamingTableScan:
 
         # State tracking
         self.next_snapshot_id: Optional[int] = None
-        self._initialized = False
 
-    async def stream(self) -> AsyncIterator[Plan]:
+    async def stream(self) -> AsyncGenerator[Plan, None]:
         """Yield Plans as new snapshots appear.
 
         On first call, performs an initial full scan of the latest snapshot.
@@ -129,13 +126,12 @@ class AsyncStreamingTableScan:
             if latest_snapshot:
                 self.next_snapshot_id = latest_snapshot.id + 1
                 yield self._create_initial_plan(latest_snapshot)
-                self._initialized = True
 
-        # Check for catch-up scenario: starting from earlier snapshot with large gap
-        # This handles --from earliest or --from snapshot:X with many snapshots to process
+        # Check for catch-up scenario: starting from earlier snapshot with large gap.
+        # This block only executes once per stream() call (before the while True loop).
+        # Handles --from snapshot:X with many snapshots to process.
         if self._should_use_diff_catch_up():
             self._catch_up_in_progress = True
-            self._diff_catch_up_used = True
             try:
                 latest_snapshot = self._snapshot_manager.get_latest_snapshot()
                 if latest_snapshot and self.next_snapshot_id:
@@ -144,7 +140,6 @@ class AsyncStreamingTableScan:
                         latest_snapshot
                     )
                     self.next_snapshot_id = latest_snapshot.id + 1
-                    self._initialized = True
                     if catch_up_plan.splits():
                         yield catch_up_plan
             finally:
@@ -172,7 +167,6 @@ class AsyncStreamingTableScan:
 
                         if prefetch_plan is not None:
                             plan = prefetch_plan
-                            self._prefetch_hits += 1
                 except Exception:
                     # Prefetch failed, fall back to synchronous
                     prefetch_used = False
@@ -182,7 +176,6 @@ class AsyncStreamingTableScan:
 
             # If prefetch wasn't available or failed, use lookahead to find next scannable
             if not prefetch_used:
-                self._prefetch_misses += 1
                 # Use batch lookahead to find the next scannable snapshot
                 snapshot, next_id, skipped_count = self._snapshot_manager.find_next_scannable(
                     self.next_snapshot_id,
@@ -256,6 +249,7 @@ class AsyncStreamingTableScan:
             plan = self._create_follow_up_plan(snapshot)
             return (plan, next_id, skipped_count)
         except Exception:
+            logging.exception("Prefetch failed for snapshot_id=%d; falling back to synchronous", start_id)
             return None
 
     def _create_follow_up_plan(self, snapshot: Snapshot) -> Plan:
@@ -364,28 +358,13 @@ class AsyncStreamingTableScan:
 
     def _create_catch_up_plan(self, start_id: int, end_snapshot: Snapshot) -> Plan:
         """Create a catch-up plan using diff-based scanning between start and end snapshots."""
-        # Get start snapshot (one before where we want to start reading)
-        # If start_id is 0 or 1, use None to indicate "from beginning"
+        # Get start snapshot (one before where we want to start reading).
+        # If start_id is 0 or 1, fall back to a full scan of end_snapshot.
         start_snapshot = None
         if start_id > 1:
             start_snapshot = self._snapshot_manager.get_snapshot_by_id(start_id - 1)
 
-        # Create diff scanner
-        diff_scanner = IncrementalDiffScanner(self.table)
-
         if start_snapshot is None:
-            # No start snapshot - return all files from end snapshot
-            # This is equivalent to a full scan of end snapshot
-            def end_snapshot_manifests():
-                return self._manifest_list_manager.read_all(end_snapshot)
+            return self._create_initial_plan(end_snapshot)
 
-            starting_scanner = FileScanner(
-                self.table,
-                end_snapshot_manifests,
-                predicate=self.predicate,
-                limit=None
-            )
-            return starting_scanner.scan()
-        else:
-            # Use diff scanner for efficient catch-up
-            return diff_scanner.scan(start_snapshot, end_snapshot)
+        return IncrementalDiffScanner(self.table).scan(start_snapshot, end_snapshot)

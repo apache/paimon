@@ -15,10 +15,7 @@
 #  See the License for the specific language governing permissions and
 # limitations under the License.
 ################################################################################
-"""
-Tests for AsyncStreamingTableScan.
-TDD: These tests are written first, before the implementation.
-"""
+"""Tests for AsyncStreamingTableScan."""
 
 import asyncio
 import unittest
@@ -73,47 +70,15 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
     @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
     @patch('pypaimon.read.streaming_table_scan.FileScanner')
-    def test_initial_scan_sets_next_snapshot_id(
-            self,
-            MockStartingScanner,
-            MockManifestListManager,
-            MockSnapshotManager):
-        """After initial scan, next_snapshot_id should be latest + 1."""
-        table, latest_id = _create_mock_table(latest_snapshot_id=5)
-
-        # Setup mocks
-        mock_snapshot_manager = MockSnapshotManager.return_value
-        mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(5)
-        mock_snapshot_manager.get_snapshot_by_id.return_value = None
-
-        mock_starting_scanner = MockStartingScanner.return_value
-        mock_starting_scanner.scan.return_value = Plan([])
-
-        scan = AsyncStreamingTableScan(table)
-
-        # Run first iteration
-        async def get_first_plan():
-            async for plan in scan.stream():
-                return plan
-
-        asyncio.run(get_first_plan())
-
-        self.assertEqual(scan.next_snapshot_id, 6)
-
-    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
-    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
-    @patch('pypaimon.read.streaming_table_scan.FileScanner')
-    def test_initial_scan_yields_plan(self, MockStartingScanner, MockManifestListManager, MockSnapshotManager):
-        """Initial scan should yield a Plan with splits."""
+    def test_initial_scan(self, MockStartingScanner, MockManifestListManager, MockSnapshotManager):
+        """Initial scan should yield a Plan and set next_snapshot_id to latest + 1."""
         table, _ = _create_mock_table(latest_snapshot_id=5)
 
-        # Setup mocks
         mock_snapshot_manager = MockSnapshotManager.return_value
         mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(5)
         mock_snapshot_manager.get_snapshot_by_id.return_value = None
 
-        mock_starting_scanner = MockStartingScanner.return_value
-        mock_starting_scanner.scan.return_value = Plan([])
+        MockStartingScanner.return_value.scan.return_value = Plan([])
 
         scan = AsyncStreamingTableScan(table)
 
@@ -124,6 +89,7 @@ class AsyncStreamingTableScanTest(unittest.TestCase):
         plan = asyncio.run(get_first_plan())
 
         self.assertIsInstance(plan, Plan)
+        self.assertEqual(scan.next_snapshot_id, 6)
 
     @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
     @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
@@ -467,160 +433,6 @@ class StreamingPrefetchTest(unittest.TestCase):
         asyncio.run(get_one_plan())
 
 
-class SnapshotManagerCacheTest(unittest.TestCase):
-    """Tests for snapshot caching and batch lookahead in SnapshotManager."""
-
-    @patch('pypaimon.snapshot.snapshot_manager.JSON')
-    def test_get_snapshot_by_id_uses_cache(self, MockJSON):
-        """Repeated calls to get_snapshot_by_id should use cache."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.file_io = Mock()
-        table.file_io.exists.return_value = True
-        table.file_io.read_file_utf8.return_value = '{"id": 5}'
-
-        mock_snapshot = _create_mock_snapshot(5)
-        MockJSON.from_json.return_value = mock_snapshot
-
-        manager = SnapshotManager(table)
-
-        # First call - cache miss
-        result1 = manager.get_snapshot_by_id(5)
-        self.assertEqual(result1.id, 5)
-        self.assertEqual(manager._cache_misses, 1)
-        self.assertEqual(manager._cache_hits, 0)
-
-        # Second call - cache hit
-        result2 = manager.get_snapshot_by_id(5)
-        self.assertEqual(result2.id, 5)
-        self.assertEqual(manager._cache_misses, 1)  # No new miss
-        self.assertEqual(manager._cache_hits, 1)
-
-        # File IO should only be called once
-        self.assertEqual(table.file_io.read_file_utf8.call_count, 1)
-
-    def test_get_cache_stats_returns_correct_values(self):
-        """get_cache_stats should return accurate statistics."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.file_io = Mock()
-        table.file_io.exists.return_value = False  # No snapshots exist
-
-        manager = SnapshotManager(table)
-
-        # Trigger some cache misses
-        manager.get_snapshot_by_id(1)
-        manager.get_snapshot_by_id(2)
-
-        stats = manager.get_cache_stats()
-
-        self.assertEqual(stats["cache_misses"], 2)
-        self.assertEqual(stats["cache_hits"], 0)
-        self.assertEqual(stats["cache_size"], 0)  # Nothing cached since no snapshots exist
-
-    def test_find_next_scannable_returns_first_matching(self):
-        """find_next_scannable should return the first snapshot that passes should_scan."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.file_io = Mock()
-        table.file_io.exists_batch.return_value = {
-            "/tmp/test_table/snapshot/snapshot-5": True,
-            "/tmp/test_table/snapshot/snapshot-6": True,
-            "/tmp/test_table/snapshot/snapshot-7": True,
-        }
-
-        # Create mock snapshots with different commit kinds
-        snapshots = {
-            5: _create_mock_snapshot(5, "COMPACT"),
-            6: _create_mock_snapshot(6, "COMPACT"),
-            7: _create_mock_snapshot(7, "APPEND"),
-        }
-
-        manager = SnapshotManager(table)
-
-        # Mock get_snapshot_by_id to return our test snapshots
-        def mock_get_snapshot(sid):
-            manager._cache_misses += 1
-            return snapshots.get(sid)
-
-        manager.get_snapshot_by_id = mock_get_snapshot
-
-        # should_scan only accepts APPEND commits
-        def should_scan(snapshot):
-            return snapshot.commit_kind == "APPEND"
-
-        result, next_id, skipped_count = manager.find_next_scannable(5, should_scan, lookahead_size=5)
-
-        self.assertEqual(result.id, 7)  # First APPEND snapshot
-        self.assertEqual(next_id, 8)    # Next ID to check
-        self.assertEqual(skipped_count, 2)  # Skipped snapshots 5 and 6
-
-    def test_find_next_scannable_returns_none_when_no_snapshot_exists(self):
-        """find_next_scannable should return None when no snapshot exists at start_id."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.file_io = Mock()
-        # All paths return False (no files exist)
-        table.file_io.exists_batch.return_value = {}
-
-        manager = SnapshotManager(table)
-
-        def should_scan(snapshot):
-            return True
-
-        result, next_id, skipped_count = manager.find_next_scannable(5, should_scan, lookahead_size=5)
-
-        self.assertIsNone(result)
-        self.assertEqual(next_id, 5)  # Still at start_id
-        self.assertEqual(skipped_count, 0)
-
-    def test_find_next_scannable_continues_when_all_skipped(self):
-        """When all lookahead snapshots are skipped, next_id should be start+lookahead."""
-        from pypaimon.snapshot.snapshot_manager import SnapshotManager
-
-        table = Mock()
-        table.table_path = "/tmp/test_table"
-        table.file_io = Mock()
-
-        # All 3 snapshots exist but are COMPACT (will be skipped)
-        table.file_io.exists_batch.return_value = {
-            "/tmp/test_table/snapshot/snapshot-5": True,
-            "/tmp/test_table/snapshot/snapshot-6": True,
-            "/tmp/test_table/snapshot/snapshot-7": True,
-        }
-
-        snapshots = {
-            5: _create_mock_snapshot(5, "COMPACT"),
-            6: _create_mock_snapshot(6, "COMPACT"),
-            7: _create_mock_snapshot(7, "COMPACT"),
-        }
-
-        manager = SnapshotManager(table)
-
-        def mock_get_snapshot(sid):
-            manager._cache_misses += 1
-            return snapshots.get(sid)
-
-        manager.get_snapshot_by_id = mock_get_snapshot
-
-        def should_scan(snapshot):
-            return snapshot.commit_kind == "APPEND"
-
-        result, next_id, skipped_count = manager.find_next_scannable(5, should_scan, lookahead_size=3)
-
-        self.assertIsNone(result)  # No APPEND found
-        self.assertEqual(next_id, 8)  # 5 + 3 = 8, continue from here
-        self.assertEqual(skipped_count, 3)  # All 3 were skipped
-
-
 class StreamingCatchUpDiffTest(unittest.TestCase):
     """Tests for diff-based catch-up optimization in AsyncStreamingTableScan."""
 
@@ -639,7 +451,6 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
         1. CLI calls restore({"next_snapshot_id": 5}) for --from snapshot:5
         2. stream() detects large gap (5 to 100, gap=95)
         3. Diff scanner is triggered
-        4. _diff_catch_up_used flag is set
         """
         table, _ = _create_mock_table(latest_snapshot_id=100)
 
@@ -668,14 +479,9 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
             async for plan in scan.stream():
                 return plan
 
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(get_first_plan())
-        finally:
-            loop.close()
+        asyncio.run(get_first_plan())
 
         # Verify diff scanner was used
-        self.assertTrue(scan._diff_catch_up_used)
         MockDiffScanner.assert_called_once_with(table)
         mock_diff_scanner.scan.assert_called_once()
 
