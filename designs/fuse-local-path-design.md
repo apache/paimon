@@ -334,21 +334,24 @@ private FileIO fileIOForData(Path path, Identifier identifier) {
  * Validate FUSE local path
  */
 private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
-    // 1. Check if local path exists
-    java.nio.file.Path localNioPath = java.nio.file.Paths.get(localPath.toUri());
-    if (!Files.exists(localNioPath)) {
+    // 1. Create LocalFileIO for local path
+    LocalFileIO localFileIO = LocalFileIO.create();
+
+    // 2. Check if local path exists
+    if (!localFileIO.exists(localPath)) {
         return ValidationResult.fail("Local path does not exist: " + localPath);
     }
 
-    // 2. OSS data validation
-    return validateByOSSData(localPath, ossPath, identifier);
+    // 3. OSS data validation
+    return validateByOSSData(localFileIO, localPath, ossPath, identifier);
 }
 
 /**
  * Validate FUSE path correctness by comparing OSS and local file data
  * Uses existing FileIO (RESTTokenFileIO or ResolvingFileIO) to read OSS files
  */
-private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identifier identifier) {
+private ValidationResult validateByOSSData(
+        LocalFileIO localFileIO, Path localPath, Path ossPath, Identifier identifier) {
     try {
         // 1. Get OSS FileIO (using existing logic, can access OSS)
         FileIO ossFileIO = createDefaultFileIO(ossPath, identifier);
@@ -377,18 +380,17 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
         FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile);
         String ossHash = computeFileHash(ossFileIO, checksumFile);
 
-        // 4. Read local file and compute hash
+        // 4. Build local file path and compute hash
         Path localChecksumFile = new Path(localPath, ossPath.toUri().getPath());
-        java.nio.file.Path localNioPath = java.nio.file.Paths.get(localChecksumFile.toUri());
 
-        if (!Files.exists(localNioPath)) {
+        if (!localFileIO.exists(localChecksumFile)) {
             return ValidationResult.fail(
                 "Local file not found: " + localChecksumFile +
                 ". The FUSE path may not be mounted correctly.");
         }
 
-        long localSize = Files.size(localNioPath);
-        String localHash = computeLocalFileHash(localNioPath);
+        long localSize = localFileIO.getFileSize(localChecksumFile);
+        String localHash = computeFileHash(localFileIO, localChecksumFile);
 
         // 5. Compare file features
         if (localSize != ossStatus.getLen()) {
@@ -412,7 +414,7 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
 }
 
 /**
- * Compute FileIO file content hash
+ * Compute file content hash using FileIO
  */
 private String computeFileHash(FileIO fileIO, Path file) throws IOException {
     MessageDigest md;
@@ -423,27 +425,6 @@ private String computeFileHash(FileIO fileIO, Path file) throws IOException {
     }
 
     try (InputStream is = fileIO.newInputStream(file)) {
-        byte[] buffer = new byte[4096];
-        int bytesRead;
-        while ((bytesRead = is.read(buffer)) != -1) {
-            md.update(buffer, 0, bytesRead);
-        }
-    }
-    return Hex.encodeHexString(md.digest());
-}
-
-/**
- * Compute local file content hash
- */
-private String computeLocalFileHash(java.nio.file.Path file) throws IOException {
-    MessageDigest md;
-    try {
-        md = MessageDigest.getInstance("MD5");
-    } catch (NoSuchAlgorithmException e) {
-        throw new IOException("MD5 algorithm not available", e);
-    }
-
-    try (InputStream is = Files.newInputStream(file)) {
         byte[] buffer = new byte[4096];
         int bytesRead;
         while ((bytesRead = is.read(buffer)) != -1) {

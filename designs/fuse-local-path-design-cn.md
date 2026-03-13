@@ -332,21 +332,24 @@ private FileIO fileIOForData(Path path, Identifier identifier) {
  * 校验 FUSE 本地路径
  */
 private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
-    // 1. 检查本地路径是否存在
-    java.nio.file.Path localNioPath = java.nio.file.Paths.get(localPath.toUri());
-    if (!Files.exists(localNioPath)) {
-        return ValidationResult.fail("Local path does not exist: " + localPath);
+    // 1. 创建 LocalFileIO 用于本地路径操作
+    LocalFileIO localFileIO = LocalFileIO.create();
+
+    // 2. 检查本地路径是否存在
+    if (!localFileIO.exists(localPath)) {
+        return ValidationResult.fail("本地路径不存在: " + localPath);
     }
 
-    // 2. OSS 数据校验
-    return validateByOSSData(localPath, ossPath, identifier);
+    // 3. OSS 数据校验
+    return validateByOSSData(localFileIO, localPath, ossPath, identifier);
 }
 
 /**
  * 通过比对 OSS 和本地文件验证 FUSE 路径正确性
  * 使用现有 FileIO（RESTTokenFileIO 或 ResolvingFileIO）读取 OSS 文件
  */
-private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identifier identifier) {
+private ValidationResult validateByOSSData(
+        LocalFileIO localFileIO, Path localPath, Path ossPath, Identifier identifier) {
     try {
         // 1. 获取 OSS FileIO（使用现有逻辑，可访问 OSS）
         FileIO ossFileIO = createDefaultFileIO(ossPath, identifier);
@@ -365,7 +368,7 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
             Optional<TableSchema> latestSchema = schemaManager.latest();
             if (!latestSchema.isPresent()) {
                 // 表完全为空（连 schema 都没有，理论上不应该发生）
-                LOG.info("No snapshot or schema found for table: {}, skip validation", identifier);
+                LOG.info("未找到表 {} 的 snapshot 或 schema，跳过验证", identifier);
                 return ValidationResult.success();
             }
             checksumFile = schemaManager.toSchemaPath(latestSchema.get().id());
@@ -375,73 +378,51 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
         FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile);
         String ossHash = computeFileHash(ossFileIO, checksumFile);
 
-        // 4. 读取本地文件并计算 hash
+        // 4. 构建本地文件路径并计算 hash
         Path localChecksumFile = new Path(localPath, ossPath.toUri().getPath());
-        java.nio.file.Path localNioPath = java.nio.file.Paths.get(localChecksumFile.toUri());
 
-        if (!Files.exists(localNioPath)) {
+        if (!localFileIO.exists(localChecksumFile)) {
             return ValidationResult.fail(
-                "Local file not found: " + localChecksumFile +
-                ". The FUSE path may not be mounted correctly.");
+                "本地文件未找到: " + localChecksumFile +
+                "。FUSE 路径可能未正确挂载。");
         }
 
-        long localSize = Files.size(localNioPath);
-        String localHash = computeLocalFileHash(localNioPath);
+        long localSize = localFileIO.getFileSize(localChecksumFile);
+        String localHash = computeFileHash(localFileIO, localChecksumFile);
 
         // 5. 比对文件特征
         if (localSize != ossStatus.getLen()) {
             return ValidationResult.fail(String.format(
-                "File size mismatch! Local: %d bytes, OSS: %d bytes.",
+                "文件大小不匹配！本地: %d 字节, OSS: %d 字节。",
                 localSize, ossStatus.getLen()));
         }
 
         if (!localHash.equalsIgnoreCase(ossHash)) {
             return ValidationResult.fail(String.format(
-                "File content hash mismatch! Local: %s, OSS: %s.",
+                "文件内容哈希不匹配！本地: %s, OSS: %s。",
                 localHash, ossHash));
         }
 
         return ValidationResult.success();
 
     } catch (Exception e) {
-        LOG.warn("Failed to validate FUSE path by OSS data for: {}", identifier, e);
-        return ValidationResult.fail("OSS data validation failed: " + e.getMessage());
+        LOG.warn("通过 OSS 数据验证 FUSE 路径失败: {}", identifier, e);
+        return ValidationResult.fail("OSS 数据验证失败: " + e.getMessage());
     }
 }
 
 /**
- * 计算 FileIO 文件内容哈希
+ * 使用 FileIO 计算文件内容哈希
  */
 private String computeFileHash(FileIO fileIO, Path file) throws IOException {
     MessageDigest md;
     try {
         md = MessageDigest.getInstance("MD5");
     } catch (NoSuchAlgorithmException e) {
-        throw new IOException("MD5 algorithm not available", e);
+        throw new IOException("MD5 算法不可用", e);
     }
 
     try (InputStream is = fileIO.newInputStream(file)) {
-        byte[] buffer = new byte[4096];
-        int bytesRead;
-        while ((bytesRead = is.read(buffer)) != -1) {
-            md.update(buffer, 0, bytesRead);
-        }
-    }
-    return Hex.encodeHexString(md.digest());
-}
-
-/**
- * 计算本地文件内容哈希
- */
-private String computeLocalFileHash(java.nio.file.Path file) throws IOException {
-    MessageDigest md;
-    try {
-        md = MessageDigest.getInstance("MD5");
-    } catch (NoSuchAlgorithmException e) {
-        throw new IOException("MD5 algorithm not available", e);
-    }
-
-    try (InputStream is = Files.newInputStream(file)) {
         byte[] buffer = new byte[4096];
         int bytesRead;
         while ((bytesRead = is.read(buffer)) != -1) {
