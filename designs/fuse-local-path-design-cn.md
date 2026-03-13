@@ -41,6 +41,10 @@ limitations under the License.
 | `fuse.local-path.root` | String | (无) | FUSE 挂载的本地根路径，如 `/mnt/fuse` |
 | `fuse.local-path.database` | Map<String, String> | `{}` | Database 级别的本地路径映射。格式：`db1:/local/path1,db2:/local/path2` |
 | `fuse.local-path.table` | Map<String, String> | `{}` | Table 级别的本地路径映射。格式：`db1.table1:/local/path1,db2.table2:/local/path2` |
+| `fuse.local-path.validation-mode` | String | `strict` | 校验模式：`strict`、`warn` 或 `none` |
+| `fuse.local-path.retry.max-attempts` | Integer | `3` | FUSE 特有错误的最大重试次数（如 stale file handle） |
+| `fuse.local-path.retry.initial-delay-ms` | Integer | `100` | 初始重试延迟（毫秒） |
+| `fuse.local-path.retry.max-delay-ms` | Integer | `5000` | 最大重试延迟（毫秒） |
 
 ## 使用示例
 
@@ -761,61 +765,193 @@ CREATE CATALOG paimon_rest_catalog WITH (
 
 ```java
 /**
- * 检查是否为 FUSE 挂载断开错误
+ * FUSE 错误处理器，支持可配置的重试和指数退避。
  */
-private boolean isFuseMountDisconnected(IOException e) {
-    String message = e.getMessage();
-    return message != null && 
-           message.contains("Transport endpoint is not connected");
-}
+public class FuseErrorHandler {
+    private final int maxAttempts;
+    private final long initialDelayMs;
+    private final long maxDelayMs;
 
-/**
- * 检查是否为 Stale file handle 错误
- */
-private boolean isStaleFileHandle(IOException e) {
-    String message = e.getMessage();
-    return message != null && 
-           message.contains("Stale file handle");
-}
+    public FuseErrorHandler(int maxAttempts, long initialDelayMs, long maxDelayMs) {
+        this.maxAttempts = maxAttempts;
+        this.initialDelayMs = initialDelayMs;
+        this.maxDelayMs = maxDelayMs;
+    }
 
-/**
- * 执行文件操作，处理 FUSE 特有错误
- */
-private <T> T executeWithFuseErrorHandling(
-        SupplierWithIOException<T> operation, 
-        Path path, 
-        String operationName) throws IOException {
-    
-    try {
-        return operation.get();
-    } catch (IOException e) {
-        // FUSE 挂载断开 - 立即失败
-        if (isFuseMountDisconnected(e)) {
-            LOG.error("FUSE 挂载断开，路径: {}。请检查: 1) FUSE 进程是否运行, " +
-                "2) 挂载点是否存在, 3) 如需重新挂载", path);
-            throw new IOException("FUSE 挂载断开: " + path, e);
-        }
-        
-        // Stale file handle - 重试一次
-        if (isStaleFileHandle(e)) {
-            LOG.warn("Stale file handle: {}, 重试一次...", path);
+    /**
+     * 检查是否为 FUSE 挂载断开错误
+     */
+    public boolean isFuseMountDisconnected(IOException e) {
+        String message = e.getMessage();
+        return message != null &&
+               message.contains("Transport endpoint is not connected");
+    }
+
+    /**
+     * 检查是否为 Stale file handle 错误
+     */
+    public boolean isStaleFileHandle(IOException e) {
+        String message = e.getMessage();
+        return message != null &&
+               message.contains("Stale file handle");
+    }
+
+    /**
+     * 检查是否为 Device or resource busy 错误
+     */
+    public boolean isDeviceBusy(IOException e) {
+        String message = e.getMessage();
+        return message != null &&
+               message.contains("Device or resource busy");
+    }
+
+    /**
+     * 计算指数退避延迟。
+     * 公式: min(initialDelay * 2^attempt, maxDelay)
+     */
+    private long calculateDelay(int attempt) {
+        long delay = initialDelayMs * (1L << attempt);  // 2^attempt
+        return Math.min(delay, maxDelayMs);
+    }
+
+    /**
+     * 执行文件操作，处理 FUSE 特有错误。
+     * 对可重试错误使用指数退避策略。
+     */
+    public <T> T executeWithFuseErrorHandling(
+            SupplierWithIOException<T> operation,
+            Path path,
+            String operationName) throws IOException {
+
+        IOException lastException = null;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
             try {
                 return operation.get();
-            } catch (IOException retryError) {
-                throw new IOException("Stale file handle (重试失败): " + path, retryError);
+            } catch (IOException e) {
+                lastException = e;
+
+                // FUSE 挂载断开 - 立即失败，不重试
+                if (isFuseMountDisconnected(e)) {
+                    LOG.error("FUSE 挂载断开，路径: {}。请检查: 1) FUSE 进程是否运行, " +
+                        "2) 挂载点是否存在, 3) 如需重新挂载", path);
+                    throw new IOException("FUSE 挂载断开: " + path, e);
+                }
+
+                // 可重试错误: stale file handle, device busy
+                if (isStaleFileHandle(e) || isDeviceBusy(e)) {
+                    if (attempt < maxAttempts - 1) {
+                        long delay = calculateDelay(attempt);
+                        LOG.warn("FUSE 错误 ({}) 路径: {}, {}ms 后重试 (第 {}/{} 次)",
+                            e.getMessage(), path, delay, attempt + 1, maxAttempts);
+                        try {
+                            Thread.sleep(delay);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException("重试被中断", ie);
+                        }
+                        continue;
+                    }
+                }
+
+                // 不可重试错误或达到最大重试次数
+                throw e;
             }
         }
-        
-        // 其他错误 - 直接抛出（由现有机制处理）
-        throw e;
+
+        // 不应到达这里，但以防万一
+        throw new IOException("FUSE 操作失败，已重试 " + maxAttempts + " 次: " + path,
+            lastException);
+    }
+
+    @FunctionalInterface
+    interface SupplierWithIOException<T> {
+        T get() throws IOException;
     }
 }
+```
 
-@FunctionalInterface
-interface SupplierWithIOException<T> {
-    T get() throws IOException;
+### FuseAwareFileIO 包装器
+
+```java
+/**
+ * FileIO 包装器，处理 FUSE 特有错误，支持可配置重试。
+ * 委托给 LocalFileIO 执行实际文件操作。
+ */
+public class FuseAwareFileIO implements FileIO {
+    private final FileIO delegate;
+    private final FuseErrorHandler errorHandler;
+
+    public FuseAwareFileIO(Path fusePath, CatalogContext context) {
+        this.delegate = FileIO.get(fusePath, context);  // LocalFileIO
+
+        Options options = context.options();
+        this.errorHandler = new FuseErrorHandler(
+            options.getInteger(FUSE_LOCAL_PATH_RETRY_MAX_ATTEMPTS, 3),
+            options.getLong(FUSE_LOCAL_PATH_RETRY_INITIAL_DELAY_MS, 100),
+            options.getLong(FUSE_LOCAL_PATH_RETRY_MAX_DELAY_MS, 5000)
+        );
+    }
+
+    @Override
+    public SeekableInputStream newInputStream(Path path) throws IOException {
+        return errorHandler.executeWithFuseErrorHandling(
+            () -> delegate.newInputStream(path), path, "newInputStream");
+    }
+
+    @Override
+    public FileStatus getFileStatus(Path path) throws IOException {
+        return errorHandler.executeWithFuseErrorHandling(
+            () -> delegate.getFileStatus(path), path, "getFileStatus");
+    }
+
+    @Override
+    public boolean exists(Path path) throws IOException {
+        return errorHandler.executeWithFuseErrorHandling(
+            () -> delegate.exists(path), path, "exists");
+    }
+
+    // ... 其他方法类似包装
 }
 ```
+
+### RESTCatalog 集成
+
+```java
+private FileIO fileIOForData(Path path, Identifier identifier) {
+    // 1. 尝试解析 FUSE 本地路径
+    if (fuseLocalPathEnabled) {
+        Path localPath = resolveFUSELocalPath(path, identifier);
+        if (localPath != null) {
+            // 2. 如果需要，执行校验（参见校验章节）
+            if (validationMode != ValidationMode.NONE) {
+                ValidationResult result = validateFUSEPath(localPath, path, identifier);
+                if (!result.isValid()) {
+                    handleValidationError(result, validationMode);
+                    return createDefaultFileIO(path, identifier);
+                }
+            }
+
+            // 3. 返回带错误处理的 FuseAwareFileIO
+            return new FuseAwareFileIO(localPath, context);
+        }
+    }
+
+    // 4. 回退到原有逻辑
+    return dataTokenEnabled
+            ? new RESTTokenFileIO(context, api, identifier, path)
+            : fileIOFromOptions(path);
+}
+```
+
+### 重试行为示例
+
+| 错误类型 | 是否重试 | 延迟模式（默认设置） |
+|----------|----------|---------------------|
+| `Transport endpoint is not connected` | ❌ 否 | 立即失败 |
+| `Stale file handle` | ✅ 是 | 100ms → 200ms → 400ms → 失败 |
+| `Device or resource busy` | ✅ 是 | 100ms → 200ms → 400ms → 失败 |
+| 其他 IOException | ❌ 否 | 直接抛出 |
 
 ### 日志规范
 

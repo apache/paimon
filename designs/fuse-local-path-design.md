@@ -41,6 +41,10 @@ All parameters are defined in `RESTCatalogOptions.java`:
 | `fuse.local-path.root` | String | (none) | The root local path for FUSE-mounted storage, e.g., `/mnt/fuse` |
 | `fuse.local-path.database` | Map<String, String> | `{}` | Database-level local path mapping. Format: `db1:/local/path1,db2:/local/path2` |
 | `fuse.local-path.table` | Map<String, String> | `{}` | Table-level local path mapping. Format: `db1.table1:/local/path1,db2.table2:/local/path2` |
+| `fuse.local-path.validation-mode` | String | `strict` | Validation mode: `strict`, `warn`, or `none` |
+| `fuse.local-path.retry.max-attempts` | Integer | `3` | Maximum retry attempts for FUSE-specific errors (e.g., stale file handle) |
+| `fuse.local-path.retry.initial-delay-ms` | Integer | `100` | Initial retry delay in milliseconds |
+| `fuse.local-path.retry.max-delay-ms` | Integer | `5000` | Maximum retry delay in milliseconds |
 
 ## Usage Example
 
@@ -763,63 +767,197 @@ This error occurs when a file is deleted or modified by another process while we
 ### Implementation Example
 
 ```java
-/**
- * Check if error is FUSE mount disconnection
- */
-private boolean isFuseMountDisconnected(IOException e) {
-    String message = e.getMessage();
-    return message != null && 
-           message.contains("Transport endpoint is not connected");
-}
+import org.apache.paimon.utils.RetryUtils;
 
 /**
- * Check if error is stale file handle
+ * FUSE error handler with configurable retry and exponential backoff.
  */
-private boolean isStaleFileHandle(IOException e) {
-    String message = e.getMessage();
-    return message != null && 
-           message.contains("Stale file handle");
-}
+public class FuseErrorHandler {
+    private final int maxAttempts;
+    private final long initialDelayMs;
+    private final long maxDelayMs;
 
-/**
- * Execute file operation with FUSE-specific error handling
- */
-private <T> T executeWithFuseErrorHandling(
-        SupplierWithIOException<T> operation, 
-        Path path, 
-        String operationName) throws IOException {
-    
-    try {
-        return operation.get();
-    } catch (IOException e) {
-        // FUSE mount disconnected - fail immediately
-        if (isFuseMountDisconnected(e)) {
-            LOG.error("FUSE mount disconnected for path: {}. " +
-                "Please check: 1) FUSE process is running, " +
-                "2) Mount point exists, 3) Remount if needed.", path);
-            throw new IOException("FUSE mount disconnected: " + path, e);
-        }
-        
-        // Stale file handle - retry once
-        if (isStaleFileHandle(e)) {
-            LOG.warn("Stale file handle for {}, retrying once...", path);
+    public FuseErrorHandler(int maxAttempts, long initialDelayMs, long maxDelayMs) {
+        this.maxAttempts = maxAttempts;
+        this.initialDelayMs = initialDelayMs;
+        this.maxDelayMs = maxDelayMs;
+    }
+
+    /**
+     * Check if error is FUSE mount disconnection
+     */
+    public boolean isFuseMountDisconnected(IOException e) {
+        String message = e.getMessage();
+        return message != null &&
+               message.contains("Transport endpoint is not connected");
+    }
+
+    /**
+     * Check if error is stale file handle
+     */
+    public boolean isStaleFileHandle(IOException e) {
+        String message = e.getMessage();
+        return message != null &&
+               message.contains("Stale file handle");
+    }
+
+    /**
+     * Check if error is device or resource busy
+     */
+    public boolean isDeviceBusy(IOException e) {
+        String message = e.getMessage();
+        return message != null &&
+               message.contains("Device or resource busy");
+    }
+
+    /**
+     * Calculate exponential backoff delay.
+     * Formula: min(initialDelay * 2^attempt, maxDelay)
+     */
+    private long calculateDelay(int attempt) {
+        long delay = initialDelayMs * (1L << attempt);  // 2^attempt
+        return Math.min(delay, maxDelayMs);
+    }
+
+    /**
+     * Execute file operation with FUSE-specific error handling.
+     * Uses exponential backoff for retryable errors.
+     */
+    public <T> T executeWithFuseErrorHandling(
+            SupplierWithIOException<T> operation,
+            Path path,
+            String operationName) throws IOException {
+
+        IOException lastException = null;
+
+        for (int attempt = 0; attempt < maxAttempts; attempt++) {
             try {
                 return operation.get();
-            } catch (IOException retryError) {
-                throw new IOException("Stale file handle (retry failed): " + path, retryError);
+            } catch (IOException e) {
+                lastException = e;
+
+                // FUSE mount disconnected - fail immediately, no retry
+                if (isFuseMountDisconnected(e)) {
+                    LOG.error("FUSE mount disconnected for path: {}. " +
+                        "Please check: 1) FUSE process is running, " +
+                        "2) Mount point exists, 3) Remount if needed.", path);
+                    throw new IOException("FUSE mount disconnected: " + path, e);
+                }
+
+                // Retryable errors: stale file handle, device busy
+                if (isStaleFileHandle(e) || isDeviceBusy(e)) {
+                    if (attempt < maxAttempts - 1) {
+                        long delay = calculateDelay(attempt);
+                        LOG.warn("FUSE error ({}) for {}, retrying in {}ms (attempt {}/{})",
+                            e.getMessage(), path, delay, attempt + 1, maxAttempts);
+                        try {
+                            Thread.sleep(delay);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new IOException("Retry interrupted", ie);
+                        }
+                        continue;
+                    }
+                }
+
+                // Non-retryable errors or max attempts reached
+                throw e;
             }
         }
-        
-        // Other errors - propagate as-is (handled by existing mechanisms)
-        throw e;
+
+        // Should not reach here, but just in case
+        throw new IOException("FUSE operation failed after " + maxAttempts + " attempts: " + path,
+            lastException);
+    }
+
+    @FunctionalInterface
+    interface SupplierWithIOException<T> {
+        T get() throws IOException;
     }
 }
+```
 
-@FunctionalInterface
-interface SupplierWithIOException<T> {
-    T get() throws IOException;
+### FuseAwareFileIO Wrapper
+
+```java
+/**
+ * FileIO wrapper that handles FUSE-specific errors with configurable retry.
+ * Delegates to LocalFileIO for actual file operations.
+ */
+public class FuseAwareFileIO implements FileIO {
+    private final FileIO delegate;
+    private final FuseErrorHandler errorHandler;
+
+    public FuseAwareFileIO(Path fusePath, CatalogContext context) {
+        this.delegate = FileIO.get(fusePath, context);  // LocalFileIO
+
+        Options options = context.options();
+        this.errorHandler = new FuseErrorHandler(
+            options.getInteger(FUSE_LOCAL_PATH_RETRY_MAX_ATTEMPTS, 3),
+            options.getLong(FUSE_LOCAL_PATH_RETRY_INITIAL_DELAY_MS, 100),
+            options.getLong(FUSE_LOCAL_PATH_RETRY_MAX_DELAY_MS, 5000)
+        );
+    }
+
+    @Override
+    public SeekableInputStream newInputStream(Path path) throws IOException {
+        return errorHandler.executeWithFuseErrorHandling(
+            () -> delegate.newInputStream(path), path, "newInputStream");
+    }
+
+    @Override
+    public FileStatus getFileStatus(Path path) throws IOException {
+        return errorHandler.executeWithFuseErrorHandling(
+            () -> delegate.getFileStatus(path), path, "getFileStatus");
+    }
+
+    @Override
+    public boolean exists(Path path) throws IOException {
+        return errorHandler.executeWithFuseErrorHandling(
+            () -> delegate.exists(path), path, "exists");
+    }
+
+    // ... other methods similarly wrapped
 }
 ```
+
+### RESTCatalog Integration
+
+```java
+private FileIO fileIOForData(Path path, Identifier identifier) {
+    // 1. Try to resolve FUSE local path
+    if (fuseLocalPathEnabled) {
+        Path localPath = resolveFUSELocalPath(path, identifier);
+        if (localPath != null) {
+            // 2. Validate if needed (see validation section)
+            if (validationMode != ValidationMode.NONE) {
+                ValidationResult result = validateFUSEPath(localPath, path, identifier);
+                if (!result.isValid()) {
+                    handleValidationError(result, validationMode);
+                    return createDefaultFileIO(path, identifier);
+                }
+            }
+
+            // 3. Return FuseAwareFileIO with error handling
+            return new FuseAwareFileIO(localPath, context);
+        }
+    }
+
+    // 4. Fallback to original logic
+    return dataTokenEnabled
+            ? new RESTTokenFileIO(context, api, identifier, path)
+            : fileIOFromOptions(path);
+}
+```
+
+### Retry Behavior Examples
+
+| Error Type | Retry? | Delay Pattern (default settings) |
+|------------|--------|----------------------------------|
+| `Transport endpoint is not connected` | ❌ No | Fail immediately |
+| `Stale file handle` | ✅ Yes | 100ms → 200ms → 400ms → fail |
+| `Device or resource busy` | ✅ Yes | 100ms → 200ms → 400ms → fail |
+| Other IOException | ❌ No | Propagate immediately |
 
 ### Logging Guidelines
 
