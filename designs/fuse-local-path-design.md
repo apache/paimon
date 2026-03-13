@@ -160,73 +160,7 @@ Incorrect FUSE local path configuration can lead to serious data consistency iss
 | **Local path not mounted** | User's configured `/local/table` is not actually FUSE-mounted | Data is written only to local disk, not synced to remote storage, causing data loss |
 | **Remote path mismatch** | Local path points to a different table's remote storage path | Data is written to the wrong table, causing data pollution |
 
-### Validation Scheme
-
-#### 1. Path Consistency Validation (Strong Validation)
-
-Validate consistency between local path and remote storage path when first accessing a table:
-
-```java
-/**
- * Validate consistency between FUSE local path and remote storage path
- * @throws IllegalArgumentException if paths are inconsistent
- */
-private void validateFUSEPath(Path localPath, Path remotePath, Identifier identifier) {
-    // 1. Check if local path exists and is a FUSE mount point
-    if (!isFUSEMountPoint(localPath)) {
-        throw new IllegalArgumentException(
-            String.format("FUSE local path '%s' is not a valid FUSE mount point. " +
-                "Data would be written to local disk instead of remote storage!", localPath));
-    }
-
-    // 2. Validate path identifier consistency: read .paimon table identifier file
-    Path localIdentifierFile = new Path(localPath, ".paimon-identifier");
-    if (fileIO.exists(localIdentifierFile)) {
-        String storedIdentifier = readIdentifier(localIdentifierFile);
-        String expectedIdentifier = identifier.getDatabaseName() + "." + identifier.getTableName();
-
-        if (!expectedIdentifier.equals(storedIdentifier)) {
-            throw new IllegalArgumentException(
-                String.format("FUSE path mismatch! Local path '%s' belongs to table '%s', " +
-                    "but current table is '%s'.",
-                    localPath, storedIdentifier, expectedIdentifier));
-        }
-    }
-}
-
-/**
- * Check if path is a FUSE mount point
- * Can be determined by checking /proc/mounts (Linux) or using stat system call
- */
-private boolean isFUSEMountPoint(Path path) {
-    // Option 1: Check /proc/mounts for FUSE mount of this path
-    // Option 2: Check if filesystem type is fuse.*
-    // Option 3: Read /etc/mtab or use jnr-posix library
-    return checkFUSEMount(path);
-}
-```
-
-#### 2. Table Identifier File Mechanism
-
-When creating a table, automatically generate a `.paimon-identifier` file in the table directory:
-
-```
-/mnt/fuse/warehouse/db1/table1/
-├── .paimon-identifier    # Content: "db1.table1"
-├── data-xxx.parquet
-├── manifest-xxx
-└── snapshot-xxx
-```
-
-Identifier file content:
-```
-database=db1
-table=table1
-table-uuid=xxx-xxx-xxx
-created-at=2026-03-13T00:00:00Z
-```
-
-#### 3. Validation Mode Configuration
+### Validation Mode Configuration
 
 New configuration parameter to control validation behavior:
 
@@ -271,10 +205,10 @@ New configuration parameter to control validation behavior:
                     │                    │
                     ▼                    ▼
         ┌───────────────────┐    ┌───────────────────┐
-        │ Validate FUSE     │    │ Skip validation   │
-        │ mount point       │    │ Use local path    │
-        │ Validate path     │    │ directly          │
-        │ consistency       │    │                   │
+        │ Validate local    │    │ Skip validation   │
+        │ path exists       │    │ Use local path    │
+        │ Compare with      │    │ directly          │
+        │ remote data       │    │                   │
         └───────────────────┘    └───────────────────┘
                     │
                     ▼

@@ -160,73 +160,7 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 | **本地路径未挂载** | 用户配置的 `/local/table` 实际没有 FUSE 挂载 | 数据仅写入本地磁盘，未同步到远端存储，导致数据丢失 |
 | **远端路径错误** | 本地路径指向了其他库表的远端存储路径 | 数据写入错误的表，导致数据污染 |
 
-### 校验方案
-
-#### 1. 路径一致性校验（强校验）
-
-在首次访问表时，校验本地路径与远端存储路径的一致性：
-
-```java
-/**
- * 校验 FUSE 本地路径与远端存储路径的一致性
- * @throws IllegalArgumentException 如果路径不一致
- */
-private void validateFUSEPath(Path localPath, Path remotePath, Identifier identifier) {
-    // 1. 检查本地路径是否存在且为 FUSE 挂载点
-    if (!isFUSEMountPoint(localPath)) {
-        throw new IllegalArgumentException(
-            String.format("FUSE local path '%s' is not a valid FUSE mount point. " +
-                "Data would be written to local disk instead of remote storage!", localPath));
-    }
-
-    // 2. 校验路径标识一致性：通过读取本地路径下的 .paimon 表标识文件
-    Path localIdentifierFile = new Path(localPath, ".paimon-identifier");
-    if (fileIO.exists(localIdentifierFile)) {
-        String storedIdentifier = readIdentifier(localIdentifierFile);
-        String expectedIdentifier = identifier.getDatabaseName() + "." + identifier.getTableName();
-
-        if (!expectedIdentifier.equals(storedIdentifier)) {
-            throw new IllegalArgumentException(
-                String.format("FUSE path mismatch! Local path '%s' belongs to table '%s', " +
-                    "but current table is '%s'.",
-                    localPath, storedIdentifier, expectedIdentifier));
-        }
-    }
-}
-
-/**
- * 检查路径是否为 FUSE 挂载点
- * 可通过检查 /proc/mounts (Linux) 或使用 stat 系统调用判断
- */
-private boolean isFUSEMountPoint(Path path) {
-    // 方案1: 检查 /proc/mounts 中是否包含该路径的 FUSE 挂载
-    // 方案2: 检查路径的文件系统类型是否为 fuse.*
-    // 方案3: 通过读取 /etc/mtab 或使用 jnr-posix 库
-    return checkFUSEMount(path);
-}
-```
-
-#### 2. 表标识文件机制
-
-在创建表时，自动在表目录下生成 `.paimon-identifier` 文件：
-
-```
-/mnt/fuse/warehouse/db1/table1/
-├── .paimon-identifier    # 内容: "db1.table1"
-├── data-xxx.parquet
-├── manifest-xxx
-└── snapshot-xxx
-```
-
-标识文件内容：
-```
-database=db1
-table=table1
-table-uuid=xxx-xxx-xxx
-created-at=2026-03-13T00:00:00Z
-```
-
-#### 3. 校验模式配置
+### 校验模式配置
 
 新增配置参数控制校验行为：
 
@@ -271,8 +205,8 @@ created-at=2026-03-13T00:00:00Z
                     │                    │
                     ▼                    ▼
         ┌───────────────────┐    ┌───────────────────┐
-        │ 校验 FUSE 挂载点   │    │ 跳过校验           │
-        │ 校验路径一致性      │    │ 直接使用本地路径    │
+        │ 校验本地路径存在    │    │ 跳过校验           │
+        │ 与远端数据比对      │    │ 直接使用本地路径    │
         └───────────────────┘    └───────────────────┘
                     │
                     ▼
