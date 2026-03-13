@@ -226,6 +226,25 @@ New configuration parameter to control validation behavior:
     └─────────────┘    └─────────────────────┘
 ```
 
+### .paimon-identifier File
+
+Each table directory contains a `.paimon-identifier` file for quick validation:
+
+**File Location**: `<table-path>/.paimon-identifier`
+
+**File Format**:
+```
+database=db1
+table=table1
+table-uuid=xxx-xxx-xxx-xxx
+created-at=2026-03-13T00:00:00Z
+```
+
+**Usage**:
+- Compare table UUID between local and remote paths
+- Quick validation before expensive data comparison
+- Automatically generated when table is created
+
 ### Security Validation Implementation
 
 Use remote data validation to verify FUSE path correctness: read remote storage files via existing FileIO and compare with local files.
@@ -275,12 +294,79 @@ private ValidationResult validateFUSEPath(Path localPath, Path remotePath, Ident
         return ValidationResult.fail("Local path does not exist: " + localPath);
     }
 
-    // 3. Remote data validation
+    // 3. First validation: Table identifier file
+    ValidationResult identifierResult = validateByIdentifierFile(localFileIO, localPath, remotePath, identifier);
+    if (!identifierResult.isSuccess()) {
+        return identifierResult;
+    }
+
+    // 4. Second validation: Remote data validation
     return validateByRemoteData(localFileIO, localPath, remotePath, identifier);
 }
 
 /**
- * Validate FUSE path correctness by comparing remote and local file data
+ * First validation: Check .paimon-identifier file
+ * Compare table UUID between local and remote to ensure path correctness
+ */
+private ValidationResult validateByIdentifierFile(
+        LocalFileIO localFileIO, Path localPath, Path remotePath, Identifier identifier) {
+    try {
+        // 1. Get remote FileIO
+        FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
+
+        // 2. Read remote identifier file
+        Path remoteIdentifierFile = new Path(remotePath, ".paimon-identifier");
+        if (!remoteFileIO.exists(remoteIdentifierFile)) {
+            // No identifier file, skip this validation
+            LOG.debug("No .paimon-identifier file found for table: {}, skip identifier validation", identifier);
+            return ValidationResult.success();
+        }
+
+        String remoteIdentifier = readIdentifierFile(remoteFileIO, remoteIdentifierFile);
+
+        // 3. Read local identifier file
+        Path localIdentifierFile = new Path(localPath, ".paimon-identifier");
+        if (!localFileIO.exists(localIdentifierFile)) {
+            return ValidationResult.fail(
+                "Local .paimon-identifier file not found: " + localIdentifierFile +
+                ". The FUSE path may not be mounted correctly.");
+        }
+
+        String localIdentifier = readIdentifierFile(localFileIO, localIdentifierFile);
+
+        // 4. Compare identifiers
+        if (!remoteIdentifier.equals(localIdentifier)) {
+            return ValidationResult.fail(String.format(
+                "Table identifier mismatch! Local: %s, Remote: %s. " +
+                "The local path may point to a different table.",
+                localIdentifier, remoteIdentifier));
+        }
+
+        return ValidationResult.success();
+
+    } catch (Exception e) {
+        LOG.warn("Failed to validate by identifier file for: {}", identifier, e);
+        return ValidationResult.fail("Identifier validation failed: " + e.getMessage());
+    }
+}
+
+/**
+ * Read .paimon-identifier file content
+ * Format: database=db1\ntable=table1\ntable-uuid=xxx-xxx-xxx
+ */
+private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
+    try (InputStream in = fileIO.newInputStream(identifierFile)) {
+        Properties props = new Properties();
+        props.load(in);
+        String database = props.getProperty("database");
+        String table = props.getProperty("table");
+        String uuid = props.getProperty("table-uuid");
+        return database + "." + table + "@" + uuid;
+    }
+}
+
+/**
+ * Second validation: Validate FUSE path correctness by comparing remote and local file data
  * Uses existing FileIO (RESTTokenFileIO or ResolvingFileIO) to read remote files
  */
 private ValidationResult validateByRemoteData(
@@ -452,11 +538,48 @@ class ValidationResult {
 | No snapshot (new table) | Latest schema file via `SchemaManager.latest()` |
 | No schema (e.g., format table, object table) | Skip validation |
 
+**Two-Step Validation**:
+
+| Step | Validation | Description |
+|------|------------|-------------|
+| 1 | `.paimon-identifier` file | Compare table UUID between local and remote |
+| 2 | Remote data validation | Compare snapshot/schema file content |
+
 **Complete Validation Flow**:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│               Remote Data Validation Flow                   │
+│                    Validation Flow                          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Step 1: .paimon-identifier Validation              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ .paimon-identifier exists remotely ?  │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+┌─────────────────────┐  ┌─────────────────────────────────────┐
+│ Compare UUID        │  │ Skip to Step 2 (remote data         │
+│ local vs remote     │  │ validation)                          │
+└─────────────────────┘  └─────────────────────────────────────┘
+           │
+           ▼
+        ┌───────────────────────────────────────┐
+        │ UUID matches ?                        │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No → FAIL: Table identifier mismatch
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Step 2: Remote Data Validation                      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -488,7 +611,7 @@ class ValidationResult {
         │ Schema exists ?                       │
         └───────────────────────────────────────┘
            │                    │
-          Yes                   No → Skip validation (empty table)
+          Yes                   No → Skip validation (format/object table)
            │
            ▼
 ┌─────────────────────────────────────────────────────────────┐

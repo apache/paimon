@@ -224,6 +224,25 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
                        └─────────────────────┘
 ```
 
+### .paimon-identifier 文件
+
+每个表目录下都包含一个 `.paimon-identifier` 文件用于快速校验：
+
+**文件位置**：`<表路径>/.paimon-identifier`
+
+**文件格式**：
+```
+database=db1
+table=table1
+table-uuid=xxx-xxx-xxx-xxx
+created-at=2026-03-13T00:00:00Z
+```
+
+**用途**：
+- 比对本地和远端路径的表 UUID
+- 在昂贵的文件内容比对前进行快速校验
+- 创建表时自动生成
+
 ### 安全校验实现
 
 使用远端数据校验验证 FUSE 路径正确性：通过现有 FileIO 读取远端存储文件，与本地文件比对。
@@ -273,12 +292,79 @@ private ValidationResult validateFUSEPath(Path localPath, Path remotePath, Ident
         return ValidationResult.fail("本地路径不存在: " + localPath);
     }
 
-    // 3. 远端数据校验
+    // 3. 第一次校验：表标识文件
+    ValidationResult identifierResult = validateByIdentifierFile(localFileIO, localPath, remotePath, identifier);
+    if (!identifierResult.isSuccess()) {
+        return identifierResult;
+    }
+
+    // 4. 第二次校验：远端数据校验
     return validateByRemoteData(localFileIO, localPath, remotePath, identifier);
 }
 
 /**
- * 通过比对远端存储和本地文件验证 FUSE 路径正确性
+ * 第一次校验：检查 .paimon-identifier 文件
+ * 比对本地和远端的表 UUID 确保路径正确性
+ */
+private ValidationResult validateByIdentifierFile(
+        LocalFileIO localFileIO, Path localPath, Path remotePath, Identifier identifier) {
+    try {
+        // 1. 获取远端存储 FileIO
+        FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
+
+        // 2. 读取远端标识文件
+        Path remoteIdentifierFile = new Path(remotePath, ".paimon-identifier");
+        if (!remoteFileIO.exists(remoteIdentifierFile)) {
+            // 无标识文件，跳过此次校验
+            LOG.debug("未找到表 {} 的 .paimon-identifier 文件，跳过标识校验", identifier);
+            return ValidationResult.success();
+        }
+
+        String remoteIdentifier = readIdentifierFile(remoteFileIO, remoteIdentifierFile);
+
+        // 3. 读取本地标识文件
+        Path localIdentifierFile = new Path(localPath, ".paimon-identifier");
+        if (!localFileIO.exists(localIdentifierFile)) {
+            return ValidationResult.fail(
+                "本地 .paimon-identifier 文件未找到: " + localIdentifierFile +
+                "。FUSE 路径可能未正确挂载。");
+        }
+
+        String localIdentifier = readIdentifierFile(localFileIO, localIdentifierFile);
+
+        // 4. 比对标识符
+        if (!remoteIdentifier.equals(localIdentifier)) {
+            return ValidationResult.fail(String.format(
+                "表标识不匹配！本地: %s，远端: %s。" +
+                "本地路径可能指向了其他表。",
+                localIdentifier, remoteIdentifier));
+        }
+
+        return ValidationResult.success();
+
+    } catch (Exception e) {
+        LOG.warn("标识文件校验失败: {}", identifier, e);
+        return ValidationResult.fail("标识文件校验失败: " + e.getMessage());
+    }
+}
+
+/**
+ * 读取 .paimon-identifier 文件内容
+ * 格式：database=db1\ntable=table1\ntable-uuid=xxx-xxx-xxx
+ */
+private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
+    try (InputStream in = fileIO.newInputStream(identifierFile)) {
+        Properties props = new Properties();
+        props.load(in);
+        String database = props.getProperty("database");
+        String table = props.getProperty("table");
+        String uuid = props.getProperty("table-uuid");
+        return database + "." + table + "@" + uuid;
+    }
+}
+
+/**
+ * 第二次校验：通过比对远端存储和本地文件验证 FUSE 路径正确性
  * 使用现有 FileIO（RESTTokenFileIO 或 ResolvingFileIO）读取远端存储文件
  */
 private ValidationResult validateByRemoteData(
@@ -450,11 +536,48 @@ class ValidationResult {
 | 无 snapshot（新表）| 使用 `SchemaManager.latest()` 获取的最新 schema 文件 |
 | 无 schema（如 format 表、object 表）| 跳过校验 |
 
+**两步校验**：
+
+| 步骤 | 校验方式 | 描述 |
+|------|----------|------|
+| 1 | `.paimon-identifier` 文件 | 比对本地和远端的表 UUID |
+| 2 | 远端数据校验 | 比对 snapshot/schema 文件内容 |
+
 **完整校验流程**：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    远端数据校验流程                          │
+│                       校验流程                               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│           第一步：.paimon-identifier 校验                    │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ 远端存在 .paimon-identifier ?          │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+┌─────────────────────┐  ┌─────────────────────────────────────┐
+│ 比对 UUID           │  │ 跳过第一步，进入第二步               │
+│ 本地 vs 远端        │  │ （远端数据校验）                     │
+└─────────────────────┘  └─────────────────────────────────────┘
+           │
+           ▼
+        ┌───────────────────────────────────────┐
+        │ UUID 匹配 ?                            │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No → 失败：表标识不匹配
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────┐
+│           第二步：远端数据校验                                │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -486,7 +609,7 @@ class ValidationResult {
         │ Schema 存在 ?                          │
         └───────────────────────────────────────┘
            │                    │
-          Yes                   No → 跳过校验（空表）
+          Yes                   No → 跳过校验（format/object 表）
            │
            ▼
 ┌─────────────────────────────────────────────────────────────┐
