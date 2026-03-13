@@ -55,10 +55,10 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = addExactByte((byte) accumulator, (byte) inputField);
+                sum = toExactByte((byte) accumulator + (byte) inputField);
                 break;
             case SMALLINT:
-                sum = addExactShort((short) accumulator, (short) inputField);
+                sum = toExactShort((short) accumulator + (short) inputField);
                 break;
             case INTEGER:
                 sum = Math.addExact((int) accumulator, (int) inputField);
@@ -105,10 +105,10 @@ public class FieldSumAgg extends FieldAggregator {
                                 mergeFieldDD.scale());
                 break;
             case TINYINT:
-                sum = subtractExactByte((byte) accumulator, (byte) inputField);
+                sum = toExactByte((byte) accumulator - (byte) inputField);
                 break;
             case SMALLINT:
-                sum = subtractExactShort((short) accumulator, (short) inputField);
+                sum = toExactShort((short) accumulator - (short) inputField);
                 break;
             case INTEGER:
                 sum = Math.subtractExact((int) accumulator, (int) inputField);
@@ -142,9 +142,9 @@ public class FieldSumAgg extends FieldAggregator {
                 return Decimal.fromBigDecimal(
                         decimal.toBigDecimal().negate(), decimal.precision(), decimal.scale());
             case TINYINT:
-                return subtractExactByte((byte) 0, (byte) value);
+                return toExactByte(-(byte) value);
             case SMALLINT:
-                return subtractExactShort((short) 0, (short) value);
+                return toExactShort(-(short) value);
             case INTEGER:
                 return Math.negateExact((int) value);
             case BIGINT:
@@ -162,32 +162,14 @@ public class FieldSumAgg extends FieldAggregator {
         }
     }
 
-    private static byte addExactByte(byte a, byte b) {
-        int result = a + b;
+    private static byte toExactByte(int result) {
         if (result > Byte.MAX_VALUE || result < Byte.MIN_VALUE) {
             throw new ArithmeticException("byte overflow");
         }
         return (byte) result;
     }
 
-    private static short addExactShort(short a, short b) {
-        int result = a + b;
-        if (result > Short.MAX_VALUE || result < Short.MIN_VALUE) {
-            throw new ArithmeticException("short overflow");
-        }
-        return (short) result;
-    }
-
-    private static byte subtractExactByte(byte a, byte b) {
-        int result = a - b;
-        if (result > Byte.MAX_VALUE || result < Byte.MIN_VALUE) {
-            throw new ArithmeticException("byte overflow");
-        }
-        return (byte) result;
-    }
-
-    private static short subtractExactShort(short a, short b) {
-        int result = a - b;
+    private static short toExactShort(int result) {
         if (result > Short.MAX_VALUE || result < Short.MIN_VALUE) {
             throw new ArithmeticException("short overflow");
         }
