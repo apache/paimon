@@ -234,7 +234,7 @@ Each table directory contains a `.identifier` file for quick validation:
 
 **File Format**:
 ```json
-{"table-uuid":"xxx-xxx-xxx-xxx"}
+{"uuid":"xxx-xxx-xxx-xxx"}
 ```
 
 **Usage**:
@@ -350,13 +350,13 @@ private ValidationResult validateByIdentifierFile(
 
 /**
  * Read .identifier file content
- * Format: {"table-uuid":"xxx-xxx-xxx-xxx"}
+ * Format: {"uuid":"xxx-xxx-xxx-xxx"}
  */
 private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
     try (InputStream in = fileIO.newInputStream(identifierFile)) {
         String json = IOUtils.readUTF8Fully(in);
         JsonNode node = JsonSerdeUtil.fromJson(json, JsonNode.class);
-        return node.get("table-uuid").asText();
+        return node.get("uuid").asText();
     }
 }
 
