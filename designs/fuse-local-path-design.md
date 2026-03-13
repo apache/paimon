@@ -226,11 +226,11 @@ New configuration parameter to control validation behavior:
     └─────────────┘    └─────────────────────┘
 ```
 
-### .paimon-identifier File
+### .identifier File
 
-Each table directory contains a `.paimon-identifier` file for quick validation:
+Each table directory contains a `.identifier` file for quick validation:
 
-**File Location**: `<table-path>/.paimon-identifier`
+**File Location**: `<table-path>/.identifier`
 
 **File Format**:
 ```
@@ -304,7 +304,7 @@ private ValidationResult validateFUSEPath(Path localPath, Path remotePath, Ident
 }
 
 /**
- * First validation: Check .paimon-identifier file
+ * First validation: Check .identifier file
  * Compare table UUID between local and remote to ensure path correctness
  */
 private ValidationResult validateByIdentifierFile(
@@ -314,20 +314,20 @@ private ValidationResult validateByIdentifierFile(
         FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
 
         // 2. Read remote identifier file
-        Path remoteIdentifierFile = new Path(remotePath, ".paimon-identifier");
+        Path remoteIdentifierFile = new Path(remotePath, ".identifier");
         if (!remoteFileIO.exists(remoteIdentifierFile)) {
             // No identifier file, skip this validation
-            LOG.debug("No .paimon-identifier file found for table: {}, skip identifier validation", identifier);
+            LOG.debug("No .identifier file found for table: {}, skip identifier validation", identifier);
             return ValidationResult.success();
         }
 
         String remoteIdentifier = readIdentifierFile(remoteFileIO, remoteIdentifierFile);
 
         // 3. Read local identifier file
-        Path localIdentifierFile = new Path(localPath, ".paimon-identifier");
+        Path localIdentifierFile = new Path(localPath, ".identifier");
         if (!localFileIO.exists(localIdentifierFile)) {
             return ValidationResult.fail(
-                "Local .paimon-identifier file not found: " + localIdentifierFile +
+                "Local .identifier file not found: " + localIdentifierFile +
                 ". The FUSE path may not be mounted correctly.");
         }
 
@@ -350,7 +350,7 @@ private ValidationResult validateByIdentifierFile(
 }
 
 /**
- * Read .paimon-identifier file content
+ * Read .identifier file content
  * Format: table-uuid=xxx-xxx-xxx-xxx
  */
 private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
@@ -535,7 +535,7 @@ class ValidationResult {
 
 | Step | Validation | Description |
 |------|------------|-------------|
-| 1 | `.paimon-identifier` file | Compare table UUID between local and remote |
+| 1 | `.identifier` file | Compare table UUID between local and remote |
 | 2 | Remote data validation | Compare snapshot/schema file content |
 
 **Complete Validation Flow**:
@@ -547,12 +547,12 @@ class ValidationResult {
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│         Step 1: .paimon-identifier Validation              │
+│         Step 1: .identifier Validation              │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ .paimon-identifier exists remotely ?  │
+        │ .identifier exists remotely ?  │
         └───────────────────────────────────────┘
            │                    │
           Yes                   No

@@ -224,11 +224,11 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
                        └─────────────────────┘
 ```
 
-### .paimon-identifier 文件
+### .identifier 文件
 
-每个表目录下都包含一个 `.paimon-identifier` 文件用于快速校验：
+每个表目录下都包含一个 `.identifier` 文件用于快速校验：
 
-**文件位置**：`<表路径>/.paimon-identifier`
+**文件位置**：`<表路径>/.identifier`
 
 **文件格式**：
 ```
@@ -302,7 +302,7 @@ private ValidationResult validateFUSEPath(Path localPath, Path remotePath, Ident
 }
 
 /**
- * 第一次校验：检查 .paimon-identifier 文件
+ * 第一次校验：检查 .identifier 文件
  * 比对本地和远端的表 UUID 确保路径正确性
  */
 private ValidationResult validateByIdentifierFile(
@@ -312,20 +312,20 @@ private ValidationResult validateByIdentifierFile(
         FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
 
         // 2. 读取远端标识文件
-        Path remoteIdentifierFile = new Path(remotePath, ".paimon-identifier");
+        Path remoteIdentifierFile = new Path(remotePath, ".identifier");
         if (!remoteFileIO.exists(remoteIdentifierFile)) {
             // 无标识文件，跳过此次校验
-            LOG.debug("未找到表 {} 的 .paimon-identifier 文件，跳过标识校验", identifier);
+            LOG.debug("未找到表 {} 的 .identifier 文件，跳过标识校验", identifier);
             return ValidationResult.success();
         }
 
         String remoteIdentifier = readIdentifierFile(remoteFileIO, remoteIdentifierFile);
 
         // 3. 读取本地标识文件
-        Path localIdentifierFile = new Path(localPath, ".paimon-identifier");
+        Path localIdentifierFile = new Path(localPath, ".identifier");
         if (!localFileIO.exists(localIdentifierFile)) {
             return ValidationResult.fail(
-                "本地 .paimon-identifier 文件未找到: " + localIdentifierFile +
+                "本地 .identifier 文件未找到: " + localIdentifierFile +
                 "。FUSE 路径可能未正确挂载。");
         }
 
@@ -348,7 +348,7 @@ private ValidationResult validateByIdentifierFile(
 }
 
 /**
- * 读取 .paimon-identifier 文件内容
+ * 读取 .identifier 文件内容
  * 格式：table-uuid=xxx-xxx-xxx-xxx
  */
 private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
@@ -533,7 +533,7 @@ class ValidationResult {
 
 | 步骤 | 校验方式 | 描述 |
 |------|----------|------|
-| 1 | `.paimon-identifier` 文件 | 比对本地和远端的表 UUID |
+| 1 | `.identifier` 文件 | 比对本地和远端的表 UUID |
 | 2 | 远端数据校验 | 比对 snapshot/schema 文件内容 |
 
 **完整校验流程**：
@@ -545,12 +545,12 @@ class ValidationResult {
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│           第一步：.paimon-identifier 校验                    │
+│           第一步：.identifier 校验                    │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ 远端存在 .paimon-identifier ?          │
+        │ 远端存在 .identifier ?          │
         └───────────────────────────────────────┘
            │                    │
           Yes                   No
