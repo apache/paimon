@@ -231,8 +231,8 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 **文件位置**：`<表路径>/.identifier`
 
 **文件格式**：
-```
-table-uuid=xxx-xxx-xxx-xxx
+```json
+{"table-uuid":"xxx-xxx-xxx-xxx"}
 ```
 
 **用途**：
@@ -348,13 +348,13 @@ private ValidationResult validateByIdentifierFile(
 
 /**
  * 读取 .identifier 文件内容
- * 格式：table-uuid=xxx-xxx-xxx-xxx
+ * 格式：{"table-uuid":"xxx-xxx-xxx-xxx"}
  */
 private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
     try (InputStream in = fileIO.newInputStream(identifierFile)) {
-        Properties props = new Properties();
-        props.load(in);
-        return props.getProperty("table-uuid");
+        String json = IOUtils.readUTF8Fully(in);
+        JsonNode node = JsonSerdeUtil.fromJson(json, JsonNode.class);
+        return node.get("table-uuid").asText();
     }
 }
 
