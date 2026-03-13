@@ -669,222 +669,146 @@ CREATE CATALOG paimon_rest_catalog WITH (
 
 ## FUSE 错误处理
 
-### 错误分类
+本节仅涵盖 FUSE 特有的错误。其他错误（网络、REST API、权限）已由 Paimon 现有机制处理。
 
-使用 FUSE 本地路径时，不同场景可能发生不同类型的错误。以下是常见错误类型及处理策略。
-
-#### 1. 权限/认证错误
+### FUSE 特有错误
 
 | 错误类型 | 场景 | 原因 | 处理策略 |
 |----------|------|------|----------|
-| `NotAuthorizedException` (HTTP 401) | REST API 调用 | Token 过期或无效 | 刷新 Token 重试，或失败 |
-| `ForbiddenException` (HTTP 403) | REST API 调用 | 无资源访问权限 | 记录错误，操作失败 |
-| `AccessDeniedException` | 本地文件访问 | FUSE 挂载点无读写权限 | 记录错误，检查挂载权限 |
-| `FileNotFoundException` | 本地文件访问 | FUSE 未挂载或路径错误 | 记录错误，检查挂载状态 |
-
-#### 2. 网络错误
-
-| 错误类型 | 场景 | 原因 | 处理策略 |
-|----------|------|------|----------|
-| `SocketTimeoutException` | 远程读写 | 网络超时 | 指数退避重试 |
-| `ConnectException` | 连接尝试 | 连接被拒绝 | 重试或达到最大次数后失败 |
-| `ConnectionClosedException` | 数据传输 | 连接意外关闭 | 重试一次，然后失败 |
-| `NoRouteToHostException` | 连接尝试 | 网络不可达 | 记录错误，立即失败 |
-| `UnknownHostException` | DNS 解析 | DNS 解析失败 | 记录错误，立即失败 |
-| `InterruptedIOException` | I/O 操作 | 线程被中断 | 传播中断状态 |
-
-#### 3. 服务错误
-
-| 错误类型 | 场景 | 原因 | 处理策略 |
-|----------|------|------|----------|
-| `ServiceUnavailableException` (HTTP 503) | REST API 调用 | 服务暂时不可用 | 退避重试，遵循 `Retry-After` 响应头 |
-| HTTP 429 Too Many Requests | REST API 调用 | 限流 | 根据 `Retry-After` 延迟重试 |
-
-#### 4. FUSE 特有错误
-
-| 错误类型 | 场景 | 原因 | 处理策略 |
-|----------|------|------|----------|
-| `IOException` (transport failed) | 本地文件读写 | FUSE 挂载断开 | 重试一次，回退到远程 |
-| `IOException` (stale file handle) | 文件操作 | 文件被其他进程删除/修改 | 重新打开文件或失败 |
+| `Transport endpoint is not connected` | 本地文件读写 | FUSE 挂载断开或崩溃 | 立即失败，记录错误并提示检查挂载状态 |
+| `Stale file handle` | 文件操作 | 文件被其他进程删除/修改 | 重试一次（重新打开文件） |
+| `Device or resource busy` | 删除/重命名操作 | 文件仍被其他进程占用 | 退避重试 |
+| `Input/output error` | 任意文件操作 | FUSE 后端故障（远端存储问题） | 失败并给出明确错误信息 |
+| `No such file or directory`（意外） | 文件操作 | FUSE 挂载点未就绪 | 检查挂载状态，失败 |
 
 ### 错误处理策略
 
-#### 读操作错误处理
+#### FUSE 挂载断开（最关键）
+
+最关键的 FUSE 特有错误是挂载断开（`Transport endpoint is not connected`）。该错误表示：
+- FUSE 进程崩溃
+- 网络问题导致 FUSE 与远端存储断开连接
+- FUSE 挂载被手动卸载
+
+**处理方式**：立即失败并给出明确错误信息。不要重试，因为必须先恢复挂载。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      读操作流程                              │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│           尝试从 FUSE 本地路径读取                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-        ┌───────────────────────────────────────┐
-        │ 成功 ?                                 │
-        └───────────────────────────────────────┘
-           │                    │
-          Yes                   No
-           │                    │
-           ▼                    ▼
-    ┌─────────────┐  ┌─────────────────────────────────────┐
-    │ 返回数据     │  │ 分类错误类型                         │
-    └─────────────┘  └─────────────────────────────────────┘
-                                  │
-                                  ▼
-        ┌───────────────────────────────────────┐
-        │ 可重试错误 ?                           │
-        │ (网络超时、临时性错误)                  │
-        └───────────────────────────────────────┘
-           │                    │
-          Yes                   No
-           │                    │
-           ▼                    ▼
-┌─────────────────────┐  ┌─────────────────────────────────────┐
-│ 退避重试             │  │ 记录错误并失败                       │
-│ (最多 3 次)          │  │ 抛出 IOException 及详细信息          │
-└─────────────────────┘  └─────────────────────────────────────┘
-           │
-           ▼
-        ┌───────────────────────────────────────┐
-        │ 重试成功 ?                             │
-        └───────────────────────────────────────┘
-           │                    │
-          Yes                   No
-           │                    │
-           ▼                    ▼
-    ┌─────────────┐  ┌─────────────────────────────────────┐
-    │ 返回数据     │  │ 记录错误并失败                       │
-    └─────────────┘  └─────────────────────────────────────┘
-```
-
-#### 写操作错误处理
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      写操作流程                              │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│           尝试写入 FUSE 本地路径                             │
+│                FUSE 挂载断开处理                             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ 成功 ?                                 │
+        │ IOException: "Transport endpoint is   │
+        │ not connected" ?                      │
         └───────────────────────────────────────┘
-           │                    │
-          Yes                   No
-           │                    │
-           ▼                    ▼
-    ┌─────────────┐  ┌─────────────────────────────────────┐
-    │ 提交写入     │  │ 分类错误类型                         │
-    └─────────────┘  └─────────────────────────────────────┘
-                                  │
-                                  ▼
+                              │
+                             Yes
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│ LOG.error("FUSE 挂载断开，路径: {}。请检查:                  │
+│   1. FUSE 进程是否运行                                      │
+│   2. 挂载点是否存在: ls -la /mnt/fuse/...                   │
+│   3. 如需重新挂载: fusermount -u /mnt/fuse && ...")         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
         ┌───────────────────────────────────────┐
-        │ 权限错误 ?                             │
-        │ (AccessDenied, Forbidden)             │
+        │ 抛出 IOException 并附带明确信息        │
         └───────────────────────────────────────┘
-           │                    │
-          Yes                   No
-           │                    │
-           ▼                    ▼
-┌─────────────────────┐  ┌─────────────────────────────────────┐
-│ 立即失败             │  │ 临时性错误 ?                         │
-│ 抛出异常             │  │ (超时、连接重置)                     │
-└─────────────────────┘  └─────────────────────────────────────┘
-                                     │                    │
-                                    Yes                   No
-                                     │                    │
-                                     ▼                    ▼
-                          ┌─────────────────────┐  ┌─────────────────────┐
-                          │ 退避重试             │  │ 立即失败             │
-                          │ (最多 3 次)          │  │ 抛出异常             │
-                          └─────────────────────┘  └─────────────────────┘
 ```
 
-### 错误处理配置
+#### Stale File Handle（过期文件句柄）
 
-新增以下配置选项：
+当文件在我们持有打开句柄时被其他进程删除或修改，会触发此错误。
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `fuse.local-path.retry-enabled` | Boolean | `true` | 是否启用临时性错误重试 |
-| `fuse.local-path.max-retries` | Integer | `3` | 最大重试次数 |
-| `fuse.local-path.retry-interval` | Duration | `1s` | 初始重试间隔（指数退避） |
-| `fuse.local-path.retry-max-interval` | Duration | `10s` | 最大重试间隔 |
+**处理方式**：重试一次，重新打开文件。
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                Stale File Handle 处理                       │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ IOException: "Stale file handle" ?    │
+        └───────────────────────────────────────┘
+                              │
+                             Yes
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│ LOG.warn("Stale file handle: {}, 重试中...", path)         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ 重试一次: 重新打开文件                 │
+        └───────────────────────────────────────┘
+                              │
+                    ┌─────────┴─────────┐
+                   成功                失败
+                    │                   │
+                    ▼                   ▼
+            ┌─────────────┐  ┌─────────────────────┐
+            │ 继续操作     │  │ 抛出 IOException     │
+            │             │  │ 并附带详细信息        │
+            └─────────────┘  └─────────────────────┘
+```
 
 ### 实现示例
 
 ```java
 /**
- * 执行文件操作，支持临时性错误重试
+ * 检查是否为 FUSE 挂载断开错误
  */
-private <T> T executeWithRetry(SupplierWithIOException<T> operation, String operationName) throws IOException {
-    if (!fuseConfig.retryEnabled()) {
-        return operation.get();
-    }
-
-    int attempt = 0;
-    IOException lastException = null;
-    long intervalMs = fuseConfig.retryIntervalMs();
-
-    while (attempt <= fuseConfig.maxRetries()) {
-        try {
-            return operation.get();
-        } catch (IOException e) {
-            lastException = e;
-            attempt++;
-
-            if (!isRetryableError(e) || attempt > fuseConfig.maxRetries()) {
-                throw e;
-            }
-
-            LOG.warn("{} 失败 (第 {} 次尝试), {} ms 后重试: {}",
-                operationName, attempt, intervalMs, e.getMessage());
-
-            try {
-                Thread.sleep(intervalMs);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw new IOException("重试期间操作被中断", ie);
-            }
-
-            // 指数退避
-            intervalMs = Math.min(intervalMs * 2, fuseConfig.retryMaxIntervalMs());
-        }
-    }
-
-    throw lastException;
+private boolean isFuseMountDisconnected(IOException e) {
+    String message = e.getMessage();
+    return message != null && 
+           message.contains("Transport endpoint is not connected");
 }
 
 /**
- * 判断错误是否可重试
+ * 检查是否为 Stale file handle 错误
  */
-private boolean isRetryableError(IOException e) {
-    // 临时性网络错误 - 重试
-    if (e instanceof SocketTimeoutException) return true;
-    if (e instanceof ConnectException) return true;
-    if (e instanceof ConnectionClosedException) return true;
-
-    // 权限错误 - 不重试
-    if (e instanceof AccessDeniedException) return false;
-    if (e instanceof FileNotFoundException) return false;
-
-    // 检查 FUSE 特有传输错误
+private boolean isStaleFileHandle(IOException e) {
     String message = e.getMessage();
-    if (message != null) {
-        // FUSE 传输失败（挂载断开）
-        if (message.contains("Transport endpoint is not connected")) return false;
-        if (message.contains("Stale file handle")) return true;
-    }
+    return message != null && 
+           message.contains("Stale file handle");
+}
 
-    // 默认：重试未知 I/O 错误（可能是临时性的）
-    return true;
+/**
+ * 执行文件操作，处理 FUSE 特有错误
+ */
+private <T> T executeWithFuseErrorHandling(
+        SupplierWithIOException<T> operation, 
+        Path path, 
+        String operationName) throws IOException {
+    
+    try {
+        return operation.get();
+    } catch (IOException e) {
+        // FUSE 挂载断开 - 立即失败
+        if (isFuseMountDisconnected(e)) {
+            LOG.error("FUSE 挂载断开，路径: {}。请检查: 1) FUSE 进程是否运行, " +
+                "2) 挂载点是否存在, 3) 如需重新挂载", path);
+            throw new IOException("FUSE 挂载断开: " + path, e);
+        }
+        
+        // Stale file handle - 重试一次
+        if (isStaleFileHandle(e)) {
+            LOG.warn("Stale file handle: {}, 重试一次...", path);
+            try {
+                return operation.get();
+            } catch (IOException retryError) {
+                throw new IOException("Stale file handle (重试失败): " + path, retryError);
+            }
+        }
+        
+        // 其他错误 - 直接抛出（由现有机制处理）
+        throw e;
+    }
 }
 
 @FunctionalInterface
@@ -893,22 +817,18 @@ interface SupplierWithIOException<T> {
 }
 ```
 
-### 错误日志与指标
-
-#### 日志规范
+### 日志规范
 
 | 日志级别 | 场景 | 示例 |
 |----------|------|------|
-| ERROR | 所有重试后操作失败 | `FUSE 读取在 3 次重试后失败: /mnt/fuse/db/table/snapshot-1` |
-| WARN | 临时性错误，将重试 | `FUSE 读取超时，重试中 (第 1/3 次): /mnt/fuse/...` |
-| INFO | 回退到远程 | `FUSE 路径不可用，回退到远程 FileIO` |
-| DEBUG | 重试详情 | `重试间隔: 2000ms, 下次尝试: 2` |
+| ERROR | FUSE 挂载断开 | `FUSE 挂载断开，路径: /mnt/fuse/db/table/snapshot-1` |
+| WARN | Stale file handle | `Stale file handle: /mnt/fuse/..., 重试一次...` |
+| INFO | 正常 FUSE 操作 | （可选，用于调试） |
 
-#### 指标（可选）
+### FUSE 用户最佳实践
 
-| 指标 | 类型 | 说明 |
-|------|------|------|
-| `fuse.read.errors` | Counter | 按类型统计的读取错误总数 |
-| `fuse.write.errors` | Counter | 按类型统计的写入错误总数 |
-| `fuse.retry.count` | Counter | 重试尝试总数 |
-| `fuse.fallback.count` | Counter | 回退到远程 FileIO 的次数 |
+1. **监控 FUSE 进程**：使用 `ps aux | grep fusermount` 或 FUSE 工具的监控功能
+2. **健康检查**：定期使用 `ls` 或 `stat` 检查挂载点
+3. **自动重启**：考虑使用 systemd 或 supervisor 在崩溃时自动重启 FUSE
+4. **日志分析**：查看 `dmesg` 或 FUSE 日志进行根因分析
+
