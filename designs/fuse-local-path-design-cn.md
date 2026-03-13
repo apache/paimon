@@ -291,50 +291,9 @@ created-at=2026-03-13T00:00:00Z
                        └─────────────────────┘
 ```
 
-### FUSE 挂载点检测实现
+### 安全校验实现
 
-#### 方案一：Java NIO FileStore API
-
-```java
-import java.nio.file.FileStore;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-/**
- * 检测路径是否为 FUSE 挂载点（跨平台）
- * 通过检查文件系统类型名称判断
- */
-private boolean isFUSEMountPoint(Path path) throws IOException {
-    FileStore store = Files.getFileStore(path);
-
-    // 获取文件系统类型名称
-    String type = store.type();
-    String name = store.name();
-
-    // FUSE 文件系统类型通常包含 "fuse" 或特定标识
-    // Linux: fuse.sshfs, fuseblk, fuse
-    // macOS: macfuse, sshfs, osxfuse
-    // 通用: fuse, FUSE
-    return type != null && (
-        type.toLowerCase().contains("fuse") ||
-        type.equalsIgnoreCase("sshfs") ||
-        type.equalsIgnoreCase("nfs4") ||
-        name.toLowerCase().contains("fuse")
-    );
-}
-```
-
-**平台兼容性**：
-
-| 平台 | FileStore.type() 示例 |
-|------|----------------------|
-| Linux | `fuse.sshfs`, `fuseblk`, `fuse` |
-| macOS | `macfuse`, `osxfuse`, `sshfs` |
-| Windows | `NTFS`, `FAT32` (不支持 FUSE，需第三方工具) |
-
-#### 方案二：OSS 数据校验（推荐）
-
-使用现有 FileIO 读取 OSS 文件，与本地文件比对验证路径正确性。
+使用 OSS 数据校验验证 FUSE 路径正确性：通过现有 FileIO 读取 OSS 文件，与本地文件比对。
 
 **完整实现**：
 
@@ -371,20 +330,15 @@ private FileIO fileIOForData(Path path, Identifier identifier) {
 
 /**
  * 校验 FUSE 本地路径
- * 结合文件系统检测和 OSS 数据校验
  */
 private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
     // 1. 检查本地路径是否存在
-    if (!Files.exists(localPath)) {
+    java.nio.file.Path localNioPath = java.nio.file.Paths.get(localPath.toUri());
+    if (!Files.exists(localNioPath)) {
         return ValidationResult.fail("Local path does not exist: " + localPath);
     }
 
-    // 2. 检查是否为 FUSE 挂载点（方案一）
-    if (!isFUSEMountPoint(localPath)) {
-        return ValidationResult.fail("Local path is not a FUSE mount point: " + localPath);
-    }
-
-    // 3. OSS 数据校验（方案二，推荐）
+    // 2. OSS 数据校验
     return validateByOSSData(localPath, ossPath, identifier);
 }
 
@@ -397,44 +351,53 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
         // 1. 获取 OSS FileIO（使用现有逻辑，可访问 OSS）
         FileIO ossFileIO = createDefaultFileIO(ossPath, identifier);
 
-        // 2. 选择一个用于校验的文件（优先级：snapshot > schema > manifest）
-        ChecksumFile checksumFile = findChecksumFile(ossPath, ossFileIO);
-        if (checksumFile == null) {
-            // 表可能为空（新创建的表），跳过内容校验
-            LOG.info("No checksum file found for table: {}, skip content validation", identifier);
-            return ValidationResult.success();
+        // 2. 使用 SnapshotManager 获取最新 snapshot
+        SnapshotManager snapshotManager = new SnapshotManager(ossFileIO, ossPath);
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+
+        Path checksumFile;
+        if (latestSnapshot != null) {
+            // 有 snapshot，使用 snapshot 文件校验
+            checksumFile = snapshotManager.snapshotPath(latestSnapshot.id());
+        } else {
+            // 无 snapshot（新表），使用 schema 文件校验
+            SchemaManager schemaManager = new SchemaManager(ossFileIO, ossPath);
+            Optional<TableSchema> latestSchema = schemaManager.latest();
+            if (!latestSchema.isPresent()) {
+                // 表完全为空（连 schema 都没有，理论上不应该发生）
+                LOG.info("No snapshot or schema found for table: {}, skip validation", identifier);
+                return ValidationResult.success();
+            }
+            checksumFile = schemaManager.toSchemaPath(latestSchema.get().id());
         }
 
-        // 3. 读取 OSS 文件内容（仅读取前 N 字节计算 hash）
-        FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile.getFullPath());
-        String ossHash = computeFileHash(ossFileIO, checksumFile.getFullPath(), HASH_CHECK_LENGTH);
+        // 3. 读取 OSS 文件内容并计算 hash
+        FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile);
+        String ossHash = computeFileHash(ossFileIO, checksumFile);
 
-        // 4. 构建本地文件路径并读取
-        Path localChecksumFile = new Path(localPath, checksumFile.getRelativePath());
+        // 4. 读取本地文件并计算 hash
+        Path localChecksumFile = new Path(localPath, ossPath.toUri().getPath());
         java.nio.file.Path localNioPath = java.nio.file.Paths.get(localChecksumFile.toUri());
 
         if (!Files.exists(localNioPath)) {
             return ValidationResult.fail(
                 "Local file not found: " + localChecksumFile +
-                ". The FUSE path may not be mounted correctly or points to wrong location.");
+                ". The FUSE path may not be mounted correctly.");
         }
 
-        // 5. 读取本地文件内容
         long localSize = Files.size(localNioPath);
-        String localHash = computeLocalFileHash(localNioPath, HASH_CHECK_LENGTH);
+        String localHash = computeLocalFileHash(localNioPath);
 
-        // 6. 比对文件特征
+        // 5. 比对文件特征
         if (localSize != ossStatus.getLen()) {
             return ValidationResult.fail(String.format(
-                "File size mismatch! Local: %d bytes, OSS: %d bytes. " +
-                "The local path may point to a different table.",
+                "File size mismatch! Local: %d bytes, OSS: %d bytes.",
                 localSize, ossStatus.getLen()));
         }
 
         if (!localHash.equalsIgnoreCase(ossHash)) {
             return ValidationResult.fail(String.format(
-                "File content hash mismatch! Local: %s, OSS: %s. " +
-                "The local path points to a different table.",
+                "File content hash mismatch! Local: %s, OSS: %s.",
                 localHash, ossHash));
         }
 
@@ -447,66 +410,45 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
 }
 
 /**
- * 查找可用于校验的文件
+ * 计算 FileIO 文件内容哈希
  */
-private ChecksumFile findChecksumFile(Path tablePath, FileIO fileIO) {
-    // 优先级 1: snapshot 文件
-    Path snapshotDir = new Path(tablePath, "snapshot");
-    if (fileIO.exists(snapshotDir)) {
-        FileStatus[] snapshots = fileIO.listStatus(snapshotDir);
-        if (snapshots != null && snapshots.length > 0) {
-            // 返回最新的 snapshot 文件（按文件名排序）
-            Arrays.sort(snapshots, (a, b) -> b.getPath().getName().compareTo(a.getPath().getName()));
-            return new ChecksumFile(tablePath, snapshots[0].getPath());
-        }
-    }
-
-    // 优先级 2: schema 文件
-    Path schemaFile = new Path(tablePath, "schema/schema-0");
-    if (fileIO.exists(schemaFile)) {
-        return new ChecksumFile(tablePath, schemaFile);
-    }
-
-    // 优先级 3: manifest 文件
-    Path manifestDir = new Path(tablePath, "manifest");
-    if (fileIO.exists(manifestDir)) {
-        FileStatus[] manifests = fileIO.listStatus(manifestDir);
-        if (manifests != null && manifests.length > 0) {
-            return new ChecksumFile(tablePath, manifests[0].getPath());
-        }
-    }
-
-    return null;
-}
-
-/**
- * 计算 OSS 文件内容哈希（仅读取前 N 字节）
- */
-private String computeFileHash(FileIO fileIO, Path file, int length) throws IOException {
-    try (InputStream is = fileIO.newInputStream(file);
-         DigestInputStream dis = new DigestInputStream(is, MessageDigest.getInstance("MD5"))) {
-        byte[] buffer = new byte[length];
-        dis.read(buffer);
-        byte[] hash = dis.getMessageDigest().digest();
-        return Hex.encodeHexString(hash);
+private String computeFileHash(FileIO fileIO, Path file) throws IOException {
+    MessageDigest md;
+    try {
+        md = MessageDigest.getInstance("MD5");
     } catch (NoSuchAlgorithmException e) {
         throw new IOException("MD5 algorithm not available", e);
     }
+
+    try (InputStream is = fileIO.newInputStream(file)) {
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        while ((bytesRead = is.read(buffer)) != -1) {
+            md.update(buffer, 0, bytesRead);
+        }
+    }
+    return Hex.encodeHexString(md.digest());
 }
 
 /**
- * 计算本地文件内容哈希（仅读取前 N 字节）
+ * 计算本地文件内容哈希
  */
-private String computeLocalFileHash(java.nio.file.Path file, int length) throws IOException {
-    try (InputStream is = Files.newInputStream(file);
-         DigestInputStream dis = new DigestInputStream(is, MessageDigest.getInstance("MD5"))) {
-        byte[] buffer = new byte[length];
-        dis.read(buffer);
-        byte[] hash = dis.getMessageDigest().digest();
-        return Hex.encodeHexString(hash);
+private String computeLocalFileHash(java.nio.file.Path file) throws IOException {
+    MessageDigest md;
+    try {
+        md = MessageDigest.getInstance("MD5");
     } catch (NoSuchAlgorithmException e) {
         throw new IOException("MD5 algorithm not available", e);
     }
+
+    try (InputStream is = Files.newInputStream(file)) {
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        while ((bytesRead = is.read(buffer)) != -1) {
+            md.update(buffer, 0, bytesRead);
+        }
+    }
+    return Hex.encodeHexString(md.digest());
 }
 
 /**
@@ -546,8 +488,6 @@ private FileIO createDefaultFileIO(Path path, Identifier identifier) {
         : fileIOFromOptions(path);
 }
 
-private static final int HASH_CHECK_LENGTH = 4096;  // 校验前 4KB
-
 // ========== 辅助类 ==========
 
 enum ValidationMode {
@@ -576,33 +516,25 @@ class ValidationResult {
     boolean isValid() { return valid; }
     String getErrorMessage() { return errorMessage; }
 }
-
-class ChecksumFile {
-    private final Path tablePath;
-    private final Path fullPath;
-
-    ChecksumFile(Path tablePath, Path fullPath) {
-        this.tablePath = tablePath;
-        this.fullPath = fullPath;
-    }
-
-    Path getFullPath() { return fullPath; }
-
-    String getRelativePath() {
-        return new Path(tablePath, fullPath.getName()).toString();
-    }
-}
 ```
 
 **方案优势**：
 
 | 优势 | 说明 |
 |------|------|
-| **无需扩展 API** | 使用现有 FileIO 读取 OSS 文件 |
-| **准确性最高** | 直接验证数据一致性，100% 确保路径正确 |
-| **双重保障** | FUSE 挂载检测 + OSS 数据比对 |
-| **防止数据污染** | 可检测路径指向错误表的情况 |
+| **无需扩展 API** | 使用现有 FileIO 和 SnapshotManager/SchemaManager |
+| **使用 LATEST snapshot** | 通过 `SnapshotManager.latestSnapshot()` 直接获取，无需遍历 |
+| **新表支持** | 无 snapshot 时自动回退到 schema 文件校验 |
+| **准确性最高** | 直接验证数据一致性，确保路径正确 |
 | **优雅降级** | 校验失败可回退到默认 FileIO |
+
+**校验文件选择逻辑**：
+
+| 场景 | 校验文件 |
+|------|----------|
+| 有 snapshot | 使用 `SnapshotManager.latestSnapshot()` 获取的最新 snapshot 文件 |
+| 无 snapshot（新表）| 使用 `SchemaManager.latest()` 获取的最新 schema 文件 |
+| 无 schema（理论上不存在）| 跳过校验 |
 
 **完整校验流程**：
 
@@ -613,22 +545,44 @@ class ChecksumFile {
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│        1. 通过 REST API 获取表的 OSS 路径信息                │
+│     1. 获取 OSS FileIO（RESTTokenFileIO 或 ResolvingFileIO） │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│        2. 选择校验文件（snapshot/manifest/schema）           │
+│     2. 通过 SnapshotManager 获取最新 snapshot               │
+│        snapshotManager.latestSnapshot()                     │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ Snapshot 存在 ?                        │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+┌─────────────────────┐  ┌─────────────────────────────────────┐
+│ 使用 snapshot 文件  │  │ 通过 SchemaManager 获取最新 schema   │
+│ 进行校验            │  │ schemaManager.latest()              │
+└─────────────────────┘  └─────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ Schema 存在 ?                          │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No → 跳过校验（空表）
+           │
+           ▼
+┌─────────────────────────────────────────────────────────────┐
+│     3. 获取 OSS 文件元数据（大小）                           │
+│        计算 OSS 文件 hash                                   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│        3. 获取 OSS 文件元数据（大小、修改时间、hash）         │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│        4. 读取本地对应文件                                   │
+│     4. 读取本地对应文件                                      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼

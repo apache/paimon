@@ -293,50 +293,9 @@ New configuration parameter to control validation behavior:
     └─────────────┘    └─────────────────────┘
 ```
 
-### FUSE Mount Point Detection Implementation
+### Security Validation Implementation
 
-#### Option 1: Java NIO FileStore API
-
-```java
-import java.nio.file.FileStore;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-/**
- * Detect if path is a FUSE mount point (cross-platform)
- * Check filesystem type name
- */
-private boolean isFUSEMountPoint(Path path) throws IOException {
-    FileStore store = Files.getFileStore(path);
-
-    // Get filesystem type name
-    String type = store.type();
-    String name = store.name();
-
-    // FUSE filesystem types typically contain "fuse" or specific identifiers
-    // Linux: fuse.sshfs, fuseblk, fuse
-    // macOS: macfuse, sshfs, osxfuse
-    // Generic: fuse, FUSE
-    return type != null && (
-        type.toLowerCase().contains("fuse") ||
-        type.equalsIgnoreCase("sshfs") ||
-        type.equalsIgnoreCase("nfs4") ||
-        name.toLowerCase().contains("fuse")
-    );
-}
-```
-
-**Platform Compatibility**:
-
-| Platform | FileStore.type() Examples |
-|----------|---------------------------|
-| Linux | `fuse.sshfs`, `fuseblk`, `fuse` |
-| macOS | `macfuse`, `osxfuse`, `sshfs` |
-| Windows | `NTFS`, `FAT32` (FUSE not natively supported, requires third-party tools) |
-
-#### Option 2: OSS Data Validation (Recommended)
-
-Use existing FileIO to read OSS files and compare with local files to validate path correctness.
+Use OSS data validation to verify FUSE path correctness: read OSS files via existing FileIO and compare with local files.
 
 **Complete Implementation**:
 
@@ -373,20 +332,15 @@ private FileIO fileIOForData(Path path, Identifier identifier) {
 
 /**
  * Validate FUSE local path
- * Combining filesystem detection and OSS data validation
  */
 private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
     // 1. Check if local path exists
-    if (!Files.exists(localPath)) {
+    java.nio.file.Path localNioPath = java.nio.file.Paths.get(localPath.toUri());
+    if (!Files.exists(localNioPath)) {
         return ValidationResult.fail("Local path does not exist: " + localPath);
     }
 
-    // 2. Check if it's a FUSE mount point (Option 1)
-    if (!isFUSEMountPoint(localPath)) {
-        return ValidationResult.fail("Local path is not a FUSE mount point: " + localPath);
-    }
-
-    // 3. OSS data validation (Option 2, recommended)
+    // 2. OSS data validation
     return validateByOSSData(localPath, ossPath, identifier);
 }
 
@@ -399,44 +353,53 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
         // 1. Get OSS FileIO (using existing logic, can access OSS)
         FileIO ossFileIO = createDefaultFileIO(ossPath, identifier);
 
-        // 2. Select a file for validation (priority: snapshot > schema > manifest)
-        ChecksumFile checksumFile = findChecksumFile(ossPath, ossFileIO);
-        if (checksumFile == null) {
-            // Table may be empty (newly created), skip content validation
-            LOG.info("No checksum file found for table: {}, skip content validation", identifier);
-            return ValidationResult.success();
+        // 2. Get latest snapshot via SnapshotManager
+        SnapshotManager snapshotManager = new SnapshotManager(ossFileIO, ossPath);
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+
+        Path checksumFile;
+        if (latestSnapshot != null) {
+            // Has snapshot, use snapshot file for validation
+            checksumFile = snapshotManager.snapshotPath(latestSnapshot.id());
+        } else {
+            // No snapshot (new table), use schema file for validation
+            SchemaManager schemaManager = new SchemaManager(ossFileIO, ossPath);
+            Optional<TableSchema> latestSchema = schemaManager.latest();
+            if (!latestSchema.isPresent()) {
+                // Table is completely empty (no schema, shouldn't happen theoretically)
+                LOG.info("No snapshot or schema found for table: {}, skip validation", identifier);
+                return ValidationResult.success();
+            }
+            checksumFile = schemaManager.toSchemaPath(latestSchema.get().id());
         }
 
-        // 3. Read OSS file content (only read first N bytes for hash)
-        FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile.getFullPath());
-        String ossHash = computeFileHash(ossFileIO, checksumFile.getFullPath(), HASH_CHECK_LENGTH);
+        // 3. Read OSS file content and compute hash
+        FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile);
+        String ossHash = computeFileHash(ossFileIO, checksumFile);
 
-        // 4. Build local file path and read
-        Path localChecksumFile = new Path(localPath, checksumFile.getRelativePath());
+        // 4. Read local file and compute hash
+        Path localChecksumFile = new Path(localPath, ossPath.toUri().getPath());
         java.nio.file.Path localNioPath = java.nio.file.Paths.get(localChecksumFile.toUri());
 
         if (!Files.exists(localNioPath)) {
             return ValidationResult.fail(
                 "Local file not found: " + localChecksumFile +
-                ". The FUSE path may not be mounted correctly or points to wrong location.");
+                ". The FUSE path may not be mounted correctly.");
         }
 
-        // 5. Read local file content
         long localSize = Files.size(localNioPath);
-        String localHash = computeLocalFileHash(localNioPath, HASH_CHECK_LENGTH);
+        String localHash = computeLocalFileHash(localNioPath);
 
-        // 6. Compare file features
+        // 5. Compare file features
         if (localSize != ossStatus.getLen()) {
             return ValidationResult.fail(String.format(
-                "File size mismatch! Local: %d bytes, OSS: %d bytes. " +
-                "The local path may point to a different table.",
+                "File size mismatch! Local: %d bytes, OSS: %d bytes.",
                 localSize, ossStatus.getLen()));
         }
 
         if (!localHash.equalsIgnoreCase(ossHash)) {
             return ValidationResult.fail(String.format(
-                "File content hash mismatch! Local: %s, OSS: %s. " +
-                "The local path points to a different table.",
+                "File content hash mismatch! Local: %s, OSS: %s.",
                 localHash, ossHash));
         }
 
@@ -449,66 +412,45 @@ private ValidationResult validateByOSSData(Path localPath, Path ossPath, Identif
 }
 
 /**
- * Find a file suitable for validation
+ * Compute FileIO file content hash
  */
-private ChecksumFile findChecksumFile(Path tablePath, FileIO fileIO) {
-    // Priority 1: snapshot file
-    Path snapshotDir = new Path(tablePath, "snapshot");
-    if (fileIO.exists(snapshotDir)) {
-        FileStatus[] snapshots = fileIO.listStatus(snapshotDir);
-        if (snapshots != null && snapshots.length > 0) {
-            // Return latest snapshot file (sorted by filename)
-            Arrays.sort(snapshots, (a, b) -> b.getPath().getName().compareTo(a.getPath().getName()));
-            return new ChecksumFile(tablePath, snapshots[0].getPath());
-        }
-    }
-
-    // Priority 2: schema file
-    Path schemaFile = new Path(tablePath, "schema/schema-0");
-    if (fileIO.exists(schemaFile)) {
-        return new ChecksumFile(tablePath, schemaFile);
-    }
-
-    // Priority 3: manifest file
-    Path manifestDir = new Path(tablePath, "manifest");
-    if (fileIO.exists(manifestDir)) {
-        FileStatus[] manifests = fileIO.listStatus(manifestDir);
-        if (manifests != null && manifests.length > 0) {
-            return new ChecksumFile(tablePath, manifests[0].getPath());
-        }
-    }
-
-    return null;
-}
-
-/**
- * Compute OSS file content hash (only read first N bytes)
- */
-private String computeFileHash(FileIO fileIO, Path file, int length) throws IOException {
-    try (InputStream is = fileIO.newInputStream(file);
-         DigestInputStream dis = new DigestInputStream(is, MessageDigest.getInstance("MD5"))) {
-        byte[] buffer = new byte[length];
-        dis.read(buffer);
-        byte[] hash = dis.getMessageDigest().digest();
-        return Hex.encodeHexString(hash);
+private String computeFileHash(FileIO fileIO, Path file) throws IOException {
+    MessageDigest md;
+    try {
+        md = MessageDigest.getInstance("MD5");
     } catch (NoSuchAlgorithmException e) {
         throw new IOException("MD5 algorithm not available", e);
     }
+
+    try (InputStream is = fileIO.newInputStream(file)) {
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        while ((bytesRead = is.read(buffer)) != -1) {
+            md.update(buffer, 0, bytesRead);
+        }
+    }
+    return Hex.encodeHexString(md.digest());
 }
 
 /**
- * Compute local file content hash (only read first N bytes)
+ * Compute local file content hash
  */
-private String computeLocalFileHash(java.nio.file.Path file, int length) throws IOException {
-    try (InputStream is = Files.newInputStream(file);
-         DigestInputStream dis = new DigestInputStream(is, MessageDigest.getInstance("MD5"))) {
-        byte[] buffer = new byte[length];
-        dis.read(buffer);
-        byte[] hash = dis.getMessageDigest().digest();
-        return Hex.encodeHexString(hash);
+private String computeLocalFileHash(java.nio.file.Path file) throws IOException {
+    MessageDigest md;
+    try {
+        md = MessageDigest.getInstance("MD5");
     } catch (NoSuchAlgorithmException e) {
         throw new IOException("MD5 algorithm not available", e);
     }
+
+    try (InputStream is = Files.newInputStream(file)) {
+        byte[] buffer = new byte[4096];
+        int bytesRead;
+        while ((bytesRead = is.read(buffer)) != -1) {
+            md.update(buffer, 0, bytesRead);
+        }
+    }
+    return Hex.encodeHexString(md.digest());
 }
 
 /**
@@ -548,8 +490,6 @@ private FileIO createDefaultFileIO(Path path, Identifier identifier) {
         : fileIOFromOptions(path);
 }
 
-private static final int HASH_CHECK_LENGTH = 4096;  // Check first 4KB
-
 // ========== Helper Classes ==========
 
 enum ValidationMode {
@@ -578,33 +518,25 @@ class ValidationResult {
     boolean isValid() { return valid; }
     String getErrorMessage() { return errorMessage; }
 }
-
-class ChecksumFile {
-    private final Path tablePath;
-    private final Path fullPath;
-
-    ChecksumFile(Path tablePath, Path fullPath) {
-        this.tablePath = tablePath;
-        this.fullPath = fullPath;
-    }
-
-    Path getFullPath() { return fullPath; }
-
-    String getRelativePath() {
-        return new Path(tablePath, fullPath.getName()).toString();
-    }
-}
 ```
 
 **Advantages**:
 
 | Advantage | Description |
 |-----------|-------------|
-| **No API Extension Needed** | Uses existing FileIO to read OSS files |
-| **Most Accurate** | Directly validates data consistency, 100% ensures path correctness |
-| **Dual Protection** | FUSE mount detection + OSS data comparison |
-| **Prevent Data Pollution** | Can detect when path points to wrong table |
+| **No API Extension Needed** | Uses existing FileIO and SnapshotManager/SchemaManager |
+| **Uses LATEST snapshot** | Gets via `SnapshotManager.latestSnapshot()`, no traversal needed |
+| **New Table Support** | Falls back to schema file validation when no snapshot |
+| **Most Accurate** | Directly validates data consistency, ensures path correctness |
 | **Graceful Degradation** | Validation failure falls back to default FileIO |
+
+**Validation File Selection Logic**:
+
+| Scenario | Validation File |
+|----------|-----------------|
+| Has snapshot | Latest snapshot file via `SnapshotManager.latestSnapshot()` |
+| No snapshot (new table) | Latest schema file via `SchemaManager.latest()` |
+| No schema (theoretically impossible) | Skip validation |
 
 **Complete Validation Flow**:
 
@@ -615,17 +547,39 @@ class ChecksumFile {
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     1. Get table's OSS path info via REST API               │
+│     1. Get OSS FileIO (RESTTokenFileIO or ResolvingFileIO)  │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     2. Select validation file (snapshot/manifest/schema)    │
+│     2. Get latest snapshot via SnapshotManager              │
+│        snapshotManager.latestSnapshot()                     │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
+        ┌───────────────────────────────────────┐
+        │ Snapshot exists ?                     │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No
+           │                    │
+           ▼                    ▼
+┌─────────────────────┐  ┌─────────────────────────────────────┐
+│ Use snapshot file   │  │ Get latest schema via SchemaManager │
+│ for validation      │  │ schemaManager.latest()              │
+└─────────────────────┘  └─────────────────────────────────────┘
+                              │
+                              ▼
+        ┌───────────────────────────────────────┐
+        │ Schema exists ?                       │
+        └───────────────────────────────────────┘
+           │                    │
+          Yes                   No → Skip validation (empty table)
+           │
+           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     3. Get OSS file metadata (size, mtime, hash)            │
+│     3. Get OSS file metadata (size)                         │
+│        Compute OSS file hash                                │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
