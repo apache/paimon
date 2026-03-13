@@ -21,6 +21,7 @@ package org.apache.paimon.hive;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogHadoopContext;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -186,6 +187,6 @@ public class PaimonMetaHook implements HiveMetaHook {
         Options options = HiveUtils.extractCatalogConfig(conf);
         options.set(CoreOptions.PATH, location);
         table.getParameters().forEach(options::set);
-        return CatalogContext.create(options, conf);
+        return CatalogHadoopContext.create(options, conf);
     }
 }
