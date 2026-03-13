@@ -448,7 +448,7 @@ class ValidationResult {
 |------|----------|
 | 有 snapshot | 使用 `SnapshotManager.latestSnapshot()` 获取的最新 snapshot 文件 |
 | 无 snapshot（新表）| 使用 `SchemaManager.latest()` 获取的最新 schema 文件 |
-| 无 schema（理论上不存在）| 跳过校验 |
+| 无 schema（如 format 表、object 表）| 跳过校验 |
 
 **完整校验流程**：
 

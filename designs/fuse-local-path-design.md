@@ -450,7 +450,7 @@ class ValidationResult {
 |----------|-----------------|
 | Has snapshot | Latest snapshot file via `SnapshotManager.latestSnapshot()` |
 | No snapshot (new table) | Latest schema file via `SchemaManager.latest()` |
-| No schema (theoretically impossible) | Skip validation |
+| No schema (e.g., format table, object table) | Skip validation |
 
 **Complete Validation Flow**:
 
