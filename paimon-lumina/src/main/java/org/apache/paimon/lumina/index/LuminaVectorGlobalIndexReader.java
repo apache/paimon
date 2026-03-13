@@ -60,6 +60,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     private volatile LuminaIndexMeta indexMeta;
     private volatile LuminaIndex index;
     private SeekableInputStream openStream;
+    private InputStreamFileInput inputStreamFileInput;
 
     public LuminaVectorGlobalIndexReader(
             GlobalIndexFileReader fileReader,
@@ -216,7 +217,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                     indexMeta = LuminaIndexMeta.deserialize(ioMeta.metadata());
                     SeekableInputStream in = fileReader.getInputStream(ioMeta);
                     try {
-                        LuminaFileInput fileInput = new InputStreamFileInput(in);
+                        InputStreamFileInput fileInput = new InputStreamFileInput(in);
                         Map<String, String> searcherOptions = options.toLuminaOptions();
                         searcherOptions.putAll(indexMeta.options());
                         index =
@@ -227,6 +228,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                                         indexMeta.metric(),
                                         searcherOptions);
                         openStream = in;
+                        inputStreamFileInput = fileInput;
                     } catch (Exception e) {
                         IOUtils.closeQuietly(in);
                         throw e;
@@ -234,6 +236,11 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                 }
             }
         }
+    }
+
+    /** Returns the total bytes read by the underlying {@link InputStreamFileInput}, or 0. */
+    public long getTotalBytesRead() {
+        return inputStreamFileInput != null ? inputStreamFileInput.getTotalBytesRead() : 0;
     }
 
     @Override
@@ -355,14 +362,20 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
      */
     static class InputStreamFileInput implements LuminaFileInput {
         private final SeekableInputStream in;
+        private long totalBytesRead;
 
         InputStreamFileInput(SeekableInputStream in) {
             this.in = in;
+            this.totalBytesRead = 0;
         }
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
-            return in.read(b, off, len);
+            int bytesRead = in.read(b, off, len);
+            if (bytesRead > 0) {
+                totalBytesRead += bytesRead;
+            }
+            return bytesRead;
         }
 
         @Override
@@ -373,6 +386,10 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         @Override
         public long getPos() throws IOException {
             return in.getPos();
+        }
+
+        long getTotalBytesRead() {
+            return totalBytesRead;
         }
 
         @Override

@@ -521,6 +521,7 @@ public class LuminaVectorBenchmark {
                 "Running %,d queries (top-%d), each with fresh index load...%n", numQueries, topK);
 
         long[] queryLatencies = new long[numQueries];
+        long[] queryBytesRead = new long[numQueries];
         long totalQueryStart = System.currentTimeMillis();
 
         for (int i = 0; i < numQueries; i++) {
@@ -535,6 +536,7 @@ public class LuminaVectorBenchmark {
                     new LuminaVectorGlobalIndexReader(
                             gFileReader, ioMetas, vectorType, indexOptions)) {
                 reader.visitVectorSearch(vs);
+                queryBytesRead[i] = reader.getTotalBytesRead();
             }
 
             long queryEnd = System.nanoTime();
@@ -543,6 +545,16 @@ public class LuminaVectorBenchmark {
 
         long totalQueryEnd = System.currentTimeMillis();
         double totalQueryTimeSec = (totalQueryEnd - totalQueryStart) / 1000.0;
+
+        long totalBytesRead = 0;
+        long minBytesRead = Long.MAX_VALUE;
+        long maxBytesRead = Long.MIN_VALUE;
+        for (long b : queryBytesRead) {
+            totalBytesRead += b;
+            minBytesRead = Math.min(minBytesRead, b);
+            maxBytesRead = Math.max(maxBytesRead, b);
+        }
+        double avgBytesRead = totalBytesRead / (double) numQueries;
 
         Arrays.sort(queryLatencies);
         double avgLatencyMs = 0;
@@ -576,6 +588,17 @@ public class LuminaVectorBenchmark {
         System.out.printf("  P95:    %.3f%n", p95Ms);
         System.out.printf("  P99:    %.3f%n", p99Ms);
         System.out.printf("  Max:    %.3f%n", maxMs);
+        System.out.println();
+        System.out.println("Bytes read per query (InputStreamFileInput):");
+        System.out.printf(
+                "  Min:    %,d (%.2f MB)%n", minBytesRead, minBytesRead / (1024.0 * 1024));
+        System.out.printf(
+                "  Avg:    %,.0f (%.2f MB)%n", avgBytesRead, avgBytesRead / (1024.0 * 1024));
+        System.out.printf(
+                "  Max:    %,d (%.2f MB)%n", maxBytesRead, maxBytesRead / (1024.0 * 1024));
+        System.out.printf(
+                "  Total:  %,d (%.2f GB)%n",
+                totalBytesRead, totalBytesRead / (1024.0 * 1024 * 1024));
         System.out.println("===============================");
     }
 }
