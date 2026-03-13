@@ -548,7 +548,12 @@ class StreamingConsumerTest(unittest.TestCase):
         self, MockFileScanner, MockManifestListManager,
         MockSnapshotManager, MockConsumerManager
     ):
-        """After yielding a plan, consumer progress should be saved."""
+        """Consumer progress is flushed on the next __anext__() call after yielding a plan.
+
+        The save is deferred until the caller asks for the next plan (i.e. after the caller's
+        loop body has completed), giving at-least-once semantics: the consumer file only
+        advances once the caller has finished processing the previous plan.
+        """
         table, _ = _create_mock_table(latest_snapshot_id=5)
 
         mock_snapshot_manager = MockSnapshotManager.return_value
@@ -560,6 +565,8 @@ class StreamingConsumerTest(unittest.TestCase):
         # Latest snapshot is 5
         mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(5)
         mock_snapshot_manager.get_snapshot_by_id.return_value = None
+        # No follow-up snapshots available (so the polling loop sleeps and we break out)
+        mock_snapshot_manager.find_next_scannable.return_value = (None, 6, 0)
 
         mock_file_scanner = MockFileScanner.return_value
         mock_file_scanner.scan.return_value = Plan([])
@@ -569,13 +576,22 @@ class StreamingConsumerTest(unittest.TestCase):
             consumer_id="save-test"
         )
 
-        async def get_first_plan():
-            async for plan in scan.stream():
-                return plan
+        async def get_first_plan_then_resume():
+            gen = scan.stream()
+            plan = await gen.__anext__()        # yields initial plan; save is staged but not flushed
+            # Consumer not yet saved — save is pending until the next __anext__() call
+            mock_consumer_manager.reset_consumer.assert_not_called()
+            # Drive the generator one more step (enters polling loop, flushes pending save,
+            # then finds no snapshot and sleeps — we cancel via timeout)
+            try:
+                await asyncio.wait_for(gen.__anext__(), timeout=0.05)
+            except (asyncio.TimeoutError, StopAsyncIteration):
+                pass
+            return plan
 
-        asyncio.run(get_first_plan())
+        asyncio.run(get_first_plan_then_resume())
 
-        # Consumer should have been saved with next_snapshot_id = 6
+        # Consumer should now have been saved with next_snapshot_id = 6
         mock_consumer_manager.reset_consumer.assert_called_once()
         call_args = mock_consumer_manager.reset_consumer.call_args
         self.assertEqual(call_args[0][0], "save-test")
