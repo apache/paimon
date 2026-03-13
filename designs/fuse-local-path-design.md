@@ -20,13 +20,13 @@ limitations under the License.
 
 ## Background
 
-When using Paimon RESTCatalog with OSS (Object Storage Service), data access typically requires authentication tokens obtained from the REST server via `getTableToken` API. However, in scenarios where OSS paths are mounted locally via FUSE (Filesystem in Userspace), users can access data through local file system paths without needing OSS tokens.
+When using Paimon RESTCatalog with remote object storage (e.g., OSS, S3, HDFS), data access typically requires authentication tokens obtained from the REST server via `getTableToken` API. However, in scenarios where remote storage paths are mounted locally via FUSE (Filesystem in Userspace), users can access data through local file system paths without needing authentication tokens.
 
-This design introduces configuration parameters to support FUSE-mounted OSS paths, allowing users to specify local path mappings at catalog, database, and table levels.
+This design introduces configuration parameters to support FUSE-mounted remote storage paths, allowing users to specify local path mappings at catalog, database, and table levels.
 
 ## Goals
 
-1. Enable local file system access for FUSE-mounted OSS paths
+1. Enable local file system access for FUSE-mounted remote storage paths
 2. Support hierarchical path mapping: catalog root > database > table
 3. Skip `getTableToken` API calls when FUSE local path is applicable
 4. Maintain backward compatibility with existing RESTCatalog behavior
@@ -37,8 +37,8 @@ All parameters are defined in `RESTCatalogOptions.java`:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `fuse.local-path.enabled` | Boolean | `false` | Whether to enable FUSE local path mapping for OSS paths |
-| `fuse.local-path.root` | String | (none) | The root local path for FUSE-mounted OSS, e.g., `/mnt/oss` |
+| `fuse.local-path.enabled` | Boolean | `false` | Whether to enable FUSE local path mapping for remote storage paths |
+| `fuse.local-path.root` | String | (none) | The root local path for FUSE-mounted storage, e.g., `/mnt/fuse` |
 | `fuse.local-path.database` | Map<String, String> | `{}` | Database-level local path mapping. Format: `db1:/local/path1,db2:/local/path2` |
 | `fuse.local-path.table` | Map<String, String> | `{}` | Table-level local path mapping. Format: `db1.table1:/local/path1,db2.table2:/local/path2` |
 
@@ -52,10 +52,10 @@ CREATE CATALOG paimon_rest_catalog WITH (
     'metastore' = 'rest',
     'uri' = 'http://rest-server:8080',
     'token' = 'xxx',
-    
+
     -- FUSE local path configuration
     'fuse.local-path.enabled' = 'true',
-    'fuse.local-path.root' = '/mnt/oss/warehouse',
+    'fuse.local-path.root' = '/mnt/fuse/warehouse',
     'fuse.local-path.database' = 'db1:/mnt/custom/db1,db2:/mnt/custom/db2',
     'fuse.local-path.table' = 'db1.table1:/mnt/special/t1'
 );
@@ -72,7 +72,7 @@ When resolving a path, the system checks in the following order (higher priority
 Example: For table `db1.table1`:
 - If `fuse.local-path.table` contains `db1.table1:/mnt/special/t1`, use `/mnt/special/t1`
 - Else if `fuse.local-path.database` contains `db1:/mnt/custom/db1`, use `/mnt/custom/db1`
-- Else use `fuse.local-path.root` (e.g., `/mnt/oss/warehouse`)
+- Else use `fuse.local-path.root` (e.g., `/mnt/fuse/warehouse`)
 
 ## Implementation
 
@@ -129,8 +129,8 @@ private Path resolveFUSELocalPath(Path originalPath, Identifier identifier) {
 }
 
 private Path convertToLocalPath(String originalPath, String localRoot) {
-    // Convert OSS path to local FUSE path
-    // Example: oss://bucket/warehouse/db1/table1 -> /mnt/oss/warehouse/db1/table1
+    // Convert remote storage path to local FUSE path
+    // Example: oss://bucket/warehouse/db1/table1 -> /mnt/fuse/warehouse/db1/table1
     // Implementation depends on path structure
 }
 ```
@@ -145,7 +145,7 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 
 ## Benefits
 
-1. **Performance**: Local file system access is typically faster than network-based OSS access
+1. **Performance**: Local file system access is typically faster than network-based remote storage access
 2. **Cost Reduction**: No need to call `getTableToken` API, reducing REST server load
 3. **Flexibility**: Supports different local paths for different databases/tables
 4. **Backward Compatibility**: Disabled by default, existing behavior unchanged
@@ -158,26 +158,26 @@ Incorrect FUSE local path configuration can lead to serious data consistency iss
 
 | Scenario | Description | Consequence |
 |----------|-------------|-------------|
-| **Local path not mounted** | User's configured `/local/table` is not actually FUSE-mounted | Data is written only to local disk, not synced to OSS, causing data loss |
-| **OSS path mismatch** | Local path points to a different table's OSS path | Data is written to the wrong table, causing data pollution |
+| **Local path not mounted** | User's configured `/local/table` is not actually FUSE-mounted | Data is written only to local disk, not synced to remote storage, causing data loss |
+| **Remote path mismatch** | Local path points to a different table's remote storage path | Data is written to the wrong table, causing data pollution |
 
 ### Validation Scheme
 
 #### 1. Path Consistency Validation (Strong Validation)
 
-Validate consistency between local path and OSS path when first accessing a table:
+Validate consistency between local path and remote storage path when first accessing a table:
 
 ```java
 /**
- * Validate consistency between FUSE local path and OSS path
+ * Validate consistency between FUSE local path and remote storage path
  * @throws IllegalArgumentException if paths are inconsistent
  */
-private void validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
+private void validateFUSEPath(Path localPath, Path remotePath, Identifier identifier) {
     // 1. Check if local path exists and is a FUSE mount point
     if (!isFUSEMountPoint(localPath)) {
         throw new IllegalArgumentException(
             String.format("FUSE local path '%s' is not a valid FUSE mount point. " +
-                "Data would be written to local disk instead of OSS!", localPath));
+                "Data would be written to local disk instead of remote storage!", localPath));
     }
 
     // 2. Validate path identifier consistency: read .paimon table identifier file
@@ -212,7 +212,7 @@ private boolean isFUSEMountPoint(Path path) {
 When creating a table, automatically generate a `.paimon-identifier` file in the table directory:
 
 ```
-/mnt/oss/warehouse/db1/table1/
+/mnt/fuse/warehouse/db1/table1/
 ├── .paimon-identifier    # Content: "db1.table1"
 ├── data-xxx.parquet
 ├── manifest-xxx
@@ -295,14 +295,14 @@ New configuration parameter to control validation behavior:
 
 ### Security Validation Implementation
 
-Use OSS data validation to verify FUSE path correctness: read OSS files via existing FileIO and compare with local files.
+Use remote data validation to verify FUSE path correctness: read remote storage files via existing FileIO and compare with local files.
 
 **Complete Implementation**:
 
 ```java
 /**
  * Complete implementation of fileIOForData in RESTCatalog
- * Combining FUSE local path validation with OSS data validation
+ * Combining FUSE local path validation with remote data validation
  */
 private FileIO fileIOForData(Path path, Identifier identifier) {
     // If FUSE local path is enabled, try using local path
@@ -333,7 +333,7 @@ private FileIO fileIOForData(Path path, Identifier identifier) {
 /**
  * Validate FUSE local path
  */
-private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
+private ValidationResult validateFUSEPath(Path localPath, Path remotePath, Identifier identifier) {
     // 1. Create LocalFileIO for local path
     LocalFileIO localFileIO = LocalFileIO.create();
 
@@ -342,22 +342,22 @@ private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifi
         return ValidationResult.fail("Local path does not exist: " + localPath);
     }
 
-    // 3. OSS data validation
-    return validateByOSSData(localFileIO, localPath, ossPath, identifier);
+    // 3. Remote data validation
+    return validateByRemoteData(localFileIO, localPath, remotePath, identifier);
 }
 
 /**
- * Validate FUSE path correctness by comparing OSS and local file data
- * Uses existing FileIO (RESTTokenFileIO or ResolvingFileIO) to read OSS files
+ * Validate FUSE path correctness by comparing remote and local file data
+ * Uses existing FileIO (RESTTokenFileIO or ResolvingFileIO) to read remote files
  */
-private ValidationResult validateByOSSData(
-        LocalFileIO localFileIO, Path localPath, Path ossPath, Identifier identifier) {
+private ValidationResult validateByRemoteData(
+        LocalFileIO localFileIO, Path localPath, Path remotePath, Identifier identifier) {
     try {
-        // 1. Get OSS FileIO (using existing logic, can access OSS)
-        FileIO ossFileIO = createDefaultFileIO(ossPath, identifier);
+        // 1. Get remote FileIO (using existing logic, can access remote storage)
+        FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
 
         // 2. Get latest snapshot via SnapshotManager
-        SnapshotManager snapshotManager = new SnapshotManager(ossFileIO, ossPath);
+        SnapshotManager snapshotManager = new SnapshotManager(remoteFileIO, remotePath);
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         Path checksumFile;
@@ -366,7 +366,7 @@ private ValidationResult validateByOSSData(
             checksumFile = snapshotManager.snapshotPath(latestSnapshot.id());
         } else {
             // No snapshot (new table), use schema file for validation
-            SchemaManager schemaManager = new SchemaManager(ossFileIO, ossPath);
+            SchemaManager schemaManager = new SchemaManager(remoteFileIO, remotePath);
             Optional<TableSchema> latestSchema = schemaManager.latest();
             if (!latestSchema.isPresent()) {
                 // Table is completely empty (no schema, shouldn't happen theoretically)
@@ -376,12 +376,12 @@ private ValidationResult validateByOSSData(
             checksumFile = schemaManager.toSchemaPath(latestSchema.get().id());
         }
 
-        // 3. Read OSS file content and compute hash
-        FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile);
-        String ossHash = computeFileHash(ossFileIO, checksumFile);
+        // 3. Read remote file content and compute hash
+        FileStatus remoteStatus = remoteFileIO.getFileStatus(checksumFile);
+        String remoteHash = computeFileHash(remoteFileIO, checksumFile);
 
         // 4. Build local file path and compute hash
-        Path localChecksumFile = new Path(localPath, ossPath.toUri().getPath());
+        Path localChecksumFile = new Path(localPath, remotePath.toUri().getPath());
 
         if (!localFileIO.exists(localChecksumFile)) {
             return ValidationResult.fail(
@@ -393,23 +393,23 @@ private ValidationResult validateByOSSData(
         String localHash = computeFileHash(localFileIO, localChecksumFile);
 
         // 5. Compare file features
-        if (localSize != ossStatus.getLen()) {
+        if (localSize != remoteStatus.getLen()) {
             return ValidationResult.fail(String.format(
-                "File size mismatch! Local: %d bytes, OSS: %d bytes.",
-                localSize, ossStatus.getLen()));
+                "File size mismatch! Local: %d bytes, Remote: %d bytes.",
+                localSize, remoteStatus.getLen()));
         }
 
-        if (!localHash.equalsIgnoreCase(ossHash)) {
+        if (!localHash.equalsIgnoreCase(remoteHash)) {
             return ValidationResult.fail(String.format(
-                "File content hash mismatch! Local: %s, OSS: %s.",
-                localHash, ossHash));
+                "File content hash mismatch! Local: %s, Remote: %s.",
+                localHash, remoteHash));
         }
 
         return ValidationResult.success();
 
     } catch (Exception e) {
-        LOG.warn("Failed to validate FUSE path by OSS data for: {}", identifier, e);
-        return ValidationResult.fail("OSS data validation failed: " + e.getMessage());
+        LOG.warn("Failed to validate FUSE path by remote data for: {}", identifier, e);
+        return ValidationResult.fail("Remote data validation failed: " + e.getMessage());
     }
 }
 
@@ -523,12 +523,12 @@ class ValidationResult {
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                  OSS Data Validation Flow                   │
+│               Remote Data Validation Flow                   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     1. Get OSS FileIO (RESTTokenFileIO or ResolvingFileIO)  │
+│   1. Get remote FileIO (RESTTokenFileIO or ResolvingFileIO) │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -559,8 +559,8 @@ class ValidationResult {
            │
            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     3. Get OSS file metadata (size)                         │
-│        Compute OSS file hash                                │
+│     3. Get remote file metadata (size)                      │
+│        Compute remote file hash                             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -608,7 +608,7 @@ CREATE CATALOG paimon_rest_catalog WITH (
 
     -- FUSE local path configuration
     'fuse.local-path.enabled' = 'true',
-    'fuse.local-path.root' = '/mnt/oss/warehouse',
+    'fuse.local-path.root' = '/mnt/fuse/warehouse',
 
     -- Security validation configuration (optional, default: strict)
     'fuse.local-path.validation-mode' = 'strict'  -- strict/warn/none
@@ -618,7 +618,7 @@ CREATE CATALOG paimon_rest_catalog WITH (
 ## Limitations
 
 1. FUSE mount must be properly configured and accessible
-2. Local path must have the same directory structure as the OSS path
+2. Local path must have the same directory structure as the remote storage path
 3. Write operations require proper permissions on the local FUSE mount
 4. Windows platform has limited FUSE support (requires third-party tools like WinFsp)
 

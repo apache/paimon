@@ -20,13 +20,13 @@ limitations under the License.
 
 ## 背景
 
-在使用 Paimon RESTCatalog 访问 OSS（对象存储服务）时，数据访问通常需要通过 `getTableToken` API 从 REST 服务器获取认证令牌。然而，在 OSS 路径通过 FUSE（用户空间文件系统）挂载到本地的场景下，用户可以直接通过本地文件系统路径访问数据，无需 OSS 令牌。
+在使用 Paimon RESTCatalog 访问远端对象存储（如 OSS、S3、HDFS）时，数据访问通常需要通过 `getTableToken` API 从 REST 服务器获取认证令牌。然而，在远端存储路径通过 FUSE（用户空间文件系统）挂载到本地的场景下，用户可以直接通过本地文件系统路径访问数据，无需认证令牌。
 
-本设计引入配置参数以支持 FUSE 挂载的 OSS 路径，允许用户在 Catalog、Database 和 Table 三个层级指定本地路径映射。
+本设计引入配置参数以支持 FUSE 挂载的远端存储路径，允许用户在 Catalog、Database 和 Table 三个层级指定本地路径映射。
 
 ## 目标
 
-1. 支持通过本地文件系统访问 FUSE 挂载的 OSS 路径
+1. 支持通过本地文件系统访问 FUSE 挂载的远端存储路径
 2. 支持分层路径映射：Catalog 根路径 > Database > Table
 3. 当 FUSE 本地路径适用时，跳过 `getTableToken` API 调用
 4. 保持与现有 RESTCatalog 行为的向后兼容性
@@ -38,7 +38,7 @@ limitations under the License.
 | 参数 | 类型 | 默认值 | 描述 |
 |-----|------|--------|------|
 | `fuse.local-path.enabled` | Boolean | `false` | 是否启用 FUSE 本地路径映射 |
-| `fuse.local-path.root` | String | (无) | FUSE 挂载的本地根路径，如 `/mnt/oss` |
+| `fuse.local-path.root` | String | (无) | FUSE 挂载的本地根路径，如 `/mnt/fuse` |
 | `fuse.local-path.database` | Map<String, String> | `{}` | Database 级别的本地路径映射。格式：`db1:/local/path1,db2:/local/path2` |
 | `fuse.local-path.table` | Map<String, String> | `{}` | Table 级别的本地路径映射。格式：`db1.table1:/local/path1,db2.table2:/local/path2` |
 
@@ -52,10 +52,10 @@ CREATE CATALOG paimon_rest_catalog WITH (
     'metastore' = 'rest',
     'uri' = 'http://rest-server:8080',
     'token' = 'xxx',
-    
+
     -- FUSE 本地路径配置
     'fuse.local-path.enabled' = 'true',
-    'fuse.local-path.root' = '/mnt/oss/warehouse',
+    'fuse.local-path.root' = '/mnt/fuse/warehouse',
     'fuse.local-path.database' = 'db1:/mnt/custom/db1,db2:/mnt/custom/db2',
     'fuse.local-path.table' = 'db1.table1:/mnt/special/t1'
 );
@@ -72,7 +72,7 @@ CREATE CATALOG paimon_rest_catalog WITH (
 示例：对于表 `db1.table1`：
 - 如果 `fuse.local-path.table` 包含 `db1.table1:/mnt/special/t1`，使用 `/mnt/special/t1`
 - 否则，如果 `fuse.local-path.database` 包含 `db1:/mnt/custom/db1`，使用 `/mnt/custom/db1`
-- 否则，使用 `fuse.local-path.root`（如 `/mnt/oss/warehouse`）
+- 否则，使用 `fuse.local-path.root`（如 `/mnt/fuse/warehouse`）
 
 ## 实现方案
 
@@ -129,8 +129,8 @@ private Path resolveFUSELocalPath(Path originalPath, Identifier identifier) {
 }
 
 private Path convertToLocalPath(String originalPath, String localRoot) {
-    // 将 OSS 路径转换为本地 FUSE 路径
-    // 示例：oss://bucket/warehouse/db1/table1 -> /mnt/oss/warehouse/db1/table1
+    // 将远端存储路径转换为本地 FUSE 路径
+    // 示例：oss://bucket/warehouse/db1/table1 -> /mnt/fuse/warehouse/db1/table1
     // 具体实现取决于路径结构
 }
 ```
@@ -145,7 +145,7 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 
 ## 优势
 
-1. **性能提升**：本地文件系统访问通常比基于网络的 OSS 访问更快
+1. **性能提升**：本地文件系统访问通常比基于网络的远端存储访问更快
 2. **降低成本**：无需调用 `getTableToken` API，减少 REST 服务器负载
 3. **灵活性**：支持为不同的数据库/表配置不同的本地路径
 4. **向后兼容**：默认禁用，现有行为不变
@@ -158,26 +158,26 @@ private Path convertToLocalPath(String originalPath, String localRoot) {
 
 | 场景 | 描述 | 后果 |
 |-----|------|------|
-| **本地路径未挂载** | 用户配置的 `/local/table` 实际没有 FUSE 挂载 | 数据仅写入本地磁盘，未同步到 OSS，导致数据丢失 |
-| **OSS 路径错误** | 本地路径指向了其他库表的 OSS 路径 | 数据写入错误的表，导致数据污染 |
+| **本地路径未挂载** | 用户配置的 `/local/table` 实际没有 FUSE 挂载 | 数据仅写入本地磁盘，未同步到远端存储，导致数据丢失 |
+| **远端路径错误** | 本地路径指向了其他库表的远端存储路径 | 数据写入错误的表，导致数据污染 |
 
 ### 校验方案
 
 #### 1. 路径一致性校验（强校验）
 
-在首次访问表时，校验本地路径与 OSS 路径的一致性：
+在首次访问表时，校验本地路径与远端存储路径的一致性：
 
 ```java
 /**
- * 校验 FUSE 本地路径与 OSS 路径的一致性
+ * 校验 FUSE 本地路径与远端存储路径的一致性
  * @throws IllegalArgumentException 如果路径不一致
  */
-private void validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
+private void validateFUSEPath(Path localPath, Path remotePath, Identifier identifier) {
     // 1. 检查本地路径是否存在且为 FUSE 挂载点
     if (!isFUSEMountPoint(localPath)) {
         throw new IllegalArgumentException(
             String.format("FUSE local path '%s' is not a valid FUSE mount point. " +
-                "Data would be written to local disk instead of OSS!", localPath));
+                "Data would be written to local disk instead of remote storage!", localPath));
     }
 
     // 2. 校验路径标识一致性：通过读取本地路径下的 .paimon 表标识文件
@@ -212,7 +212,7 @@ private boolean isFUSEMountPoint(Path path) {
 在创建表时，自动在表目录下生成 `.paimon-identifier` 文件：
 
 ```
-/mnt/oss/warehouse/db1/table1/
+/mnt/fuse/warehouse/db1/table1/
 ├── .paimon-identifier    # 内容: "db1.table1"
 ├── data-xxx.parquet
 ├── manifest-xxx
@@ -293,14 +293,14 @@ created-at=2026-03-13T00:00:00Z
 
 ### 安全校验实现
 
-使用 OSS 数据校验验证 FUSE 路径正确性：通过现有 FileIO 读取 OSS 文件，与本地文件比对。
+使用远端数据校验验证 FUSE 路径正确性：通过现有 FileIO 读取远端存储文件，与本地文件比对。
 
 **完整实现**：
 
 ```java
 /**
  * RESTCatalog 中 fileIOForData 的完整实现
- * 结合 FUSE 本地路径校验与 OSS 数据校验
+ * 结合 FUSE 本地路径校验与远端数据校验
  */
 private FileIO fileIOForData(Path path, Identifier identifier) {
     // 如果 FUSE 本地路径启用，尝试使用本地路径
@@ -331,7 +331,7 @@ private FileIO fileIOForData(Path path, Identifier identifier) {
 /**
  * 校验 FUSE 本地路径
  */
-private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifier identifier) {
+private ValidationResult validateFUSEPath(Path localPath, Path remotePath, Identifier identifier) {
     // 1. 创建 LocalFileIO 用于本地路径操作
     LocalFileIO localFileIO = LocalFileIO.create();
 
@@ -340,22 +340,22 @@ private ValidationResult validateFUSEPath(Path localPath, Path ossPath, Identifi
         return ValidationResult.fail("本地路径不存在: " + localPath);
     }
 
-    // 3. OSS 数据校验
-    return validateByOSSData(localFileIO, localPath, ossPath, identifier);
+    // 3. 远端数据校验
+    return validateByRemoteData(localFileIO, localPath, remotePath, identifier);
 }
 
 /**
- * 通过比对 OSS 和本地文件验证 FUSE 路径正确性
- * 使用现有 FileIO（RESTTokenFileIO 或 ResolvingFileIO）读取 OSS 文件
+ * 通过比对远端存储和本地文件验证 FUSE 路径正确性
+ * 使用现有 FileIO（RESTTokenFileIO 或 ResolvingFileIO）读取远端存储文件
  */
-private ValidationResult validateByOSSData(
-        LocalFileIO localFileIO, Path localPath, Path ossPath, Identifier identifier) {
+private ValidationResult validateByRemoteData(
+        LocalFileIO localFileIO, Path localPath, Path remotePath, Identifier identifier) {
     try {
-        // 1. 获取 OSS FileIO（使用现有逻辑，可访问 OSS）
-        FileIO ossFileIO = createDefaultFileIO(ossPath, identifier);
+        // 1. 获取远端存储 FileIO（使用现有逻辑，可访问远端存储）
+        FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
 
         // 2. 使用 SnapshotManager 获取最新 snapshot
-        SnapshotManager snapshotManager = new SnapshotManager(ossFileIO, ossPath);
+        SnapshotManager snapshotManager = new SnapshotManager(remoteFileIO, remotePath);
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         Path checksumFile;
@@ -364,7 +364,7 @@ private ValidationResult validateByOSSData(
             checksumFile = snapshotManager.snapshotPath(latestSnapshot.id());
         } else {
             // 无 snapshot（新表），使用 schema 文件校验
-            SchemaManager schemaManager = new SchemaManager(ossFileIO, ossPath);
+            SchemaManager schemaManager = new SchemaManager(remoteFileIO, remotePath);
             Optional<TableSchema> latestSchema = schemaManager.latest();
             if (!latestSchema.isPresent()) {
                 // 表完全为空（连 schema 都没有，理论上不应该发生）
@@ -374,12 +374,12 @@ private ValidationResult validateByOSSData(
             checksumFile = schemaManager.toSchemaPath(latestSchema.get().id());
         }
 
-        // 3. 读取 OSS 文件内容并计算 hash
-        FileStatus ossStatus = ossFileIO.getFileStatus(checksumFile);
-        String ossHash = computeFileHash(ossFileIO, checksumFile);
+        // 3. 读取远端文件内容并计算 hash
+        FileStatus remoteStatus = remoteFileIO.getFileStatus(checksumFile);
+        String remoteHash = computeFileHash(remoteFileIO, checksumFile);
 
         // 4. 构建本地文件路径并计算 hash
-        Path localChecksumFile = new Path(localPath, ossPath.toUri().getPath());
+        Path localChecksumFile = new Path(localPath, remotePath.toUri().getPath());
 
         if (!localFileIO.exists(localChecksumFile)) {
             return ValidationResult.fail(
@@ -391,23 +391,23 @@ private ValidationResult validateByOSSData(
         String localHash = computeFileHash(localFileIO, localChecksumFile);
 
         // 5. 比对文件特征
-        if (localSize != ossStatus.getLen()) {
+        if (localSize != remoteStatus.getLen()) {
             return ValidationResult.fail(String.format(
-                "文件大小不匹配！本地: %d 字节, OSS: %d 字节。",
-                localSize, ossStatus.getLen()));
+                "文件大小不匹配！本地: %d 字节, 远端: %d 字节。",
+                localSize, remoteStatus.getLen()));
         }
 
-        if (!localHash.equalsIgnoreCase(ossHash)) {
+        if (!localHash.equalsIgnoreCase(remoteHash)) {
             return ValidationResult.fail(String.format(
-                "文件内容哈希不匹配！本地: %s, OSS: %s。",
-                localHash, ossHash));
+                "文件内容哈希不匹配！本地: %s, 远端: %s。",
+                localHash, remoteHash));
         }
 
         return ValidationResult.success();
 
     } catch (Exception e) {
-        LOG.warn("通过 OSS 数据验证 FUSE 路径失败: {}", identifier, e);
-        return ValidationResult.fail("OSS 数据验证失败: " + e.getMessage());
+        LOG.warn("通过远端数据验证 FUSE 路径失败: {}", identifier, e);
+        return ValidationResult.fail("远端数据验证失败: " + e.getMessage());
     }
 }
 
@@ -521,12 +521,12 @@ class ValidationResult {
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    OSS 数据校验流程                          │
+│                    远端数据校验流程                          │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     1. 获取 OSS FileIO（RESTTokenFileIO 或 ResolvingFileIO） │
+│  1. 获取远端存储 FileIO（RESTTokenFileIO 或 ResolvingFileIO）│
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -557,8 +557,8 @@ class ValidationResult {
            │
            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     3. 获取 OSS 文件元数据（大小）                           │
-│        计算 OSS 文件 hash                                   │
+│     3. 获取远端文件元数据（大小）                            │
+│        计算远端文件 hash                                    │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -605,7 +605,7 @@ CREATE CATALOG paimon_rest_catalog WITH (
 
     -- FUSE 本地路径配置
     'fuse.local-path.enabled' = 'true',
-    'fuse.local-path.root' = '/mnt/oss/warehouse',
+    'fuse.local-path.root' = '/mnt/fuse/warehouse',
 
     -- 安全校验配置（可选，默认 strict）
     'fuse.local-path.validation-mode' = 'strict'  -- strict/warn/none
@@ -615,6 +615,6 @@ CREATE CATALOG paimon_rest_catalog WITH (
 ## 限制
 
 1. FUSE 挂载必须正确配置且可访问
-2. 本地路径必须与 OSS 路径具有相同的目录结构
+2. 本地路径必须与远端存储路径具有相同的目录结构
 3. 写操作需要本地 FUSE 挂载点具有适当的权限
 4. Windows 平台 FUSE 支持有限（需第三方工具如 WinFsp）
