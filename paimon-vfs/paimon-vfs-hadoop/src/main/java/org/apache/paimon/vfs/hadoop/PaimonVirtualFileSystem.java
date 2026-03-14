@@ -59,6 +59,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
     private Configuration conf;
 
     private static final String USER_AGENT = "HadoopPVFS";
+    private static final long DEFAULT_BLOCK_SIZE = 128 * 1024 * 1024L;
 
     @Override
     public void initialize(URI uri, Configuration conf) throws IOException {
@@ -299,7 +300,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
     public FileStatus getFileStatus(Path f) throws IOException {
         VFSIdentifier vfsIdentifier = vfsOperations.getVFSIdentifier(getVirtualPath(f));
         if (vfsIdentifier instanceof VFSCatalogIdentifier) {
-            return new FileStatus(0, true, 1, 1, 0, new Path(this.uri));
+            return new FileStatus(0, true, 1, 0, 0, new Path(this.uri));
         } else if (vfsIdentifier instanceof VFSDatabaseIdentifier) {
             String databaseName = ((VFSDatabaseIdentifier) vfsIdentifier).databaseName();
             GetDatabaseResponse database = vfsOperations.getDatabase(databaseName);
@@ -318,7 +319,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
     }
 
     private FileStatus convertDatabase(GetDatabaseResponse database) {
-        return new FileStatus(0, true, 1, 1, 0, new Path(new Path(this.uri), database.getName()));
+        return new FileStatus(0, true, 1, 0, 0, new Path(new Path(this.uri), database.getName()));
     }
 
     private FileStatus convertFileStatus(
@@ -338,11 +339,12 @@ public class PaimonVirtualFileSystem extends FileSystem {
             childPath = "/" + childPath;
         }
         Path virtualPath = new Path(new Path(this.uri), databaseName + "/" + tableName + childPath);
+        long blockSize = fileStatus.isDir() ? 0 : DEFAULT_BLOCK_SIZE;
         return new FileStatus(
                 fileStatus.getLen(),
                 fileStatus.isDir(),
                 1,
-                1,
+                blockSize,
                 fileStatus.getModificationTime(),
                 virtualPath);
     }
@@ -375,7 +377,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
         for (int i = 0; i < databases.size(); i++) {
             String database = databases.get(i);
             FileStatus fileStatus =
-                    new FileStatus(0, true, 1, 1, 0, new Path(new Path(this.uri), database));
+                    new FileStatus(0, true, 1, 0, 0, new Path(new Path(this.uri), database));
             fileStatuses[i] = fileStatus;
         }
         return fileStatuses;
@@ -387,7 +389,7 @@ public class PaimonVirtualFileSystem extends FileSystem {
             String table = tables.get(i);
             FileStatus fileStatus =
                     new FileStatus(
-                            0, true, 1, 1, 0, new Path(new Path(this.uri), database + "/" + table));
+                            0, true, 1, 0, 0, new Path(new Path(this.uri), database + "/" + table));
             fileStatuses[i] = fileStatus;
         }
         return fileStatuses;

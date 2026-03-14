@@ -64,4 +64,38 @@ public abstract class SeekableInputStream extends InputStream {
      * @exception IOException if an I/O error occurs.
      */
     public abstract void close() throws IOException;
+
+    /**
+     * Wrap a normal {@link InputStream} to a {@link SeekableInputStream}. The returned {@link
+     * SeekableInputStream} does not support seek operations.
+     */
+    public static SeekableInputStream wrap(InputStream inputStream) {
+        final InputStream in = inputStream;
+        return new SeekableInputStream() {
+            @Override
+            public void seek(long desired) {
+                throw new UnsupportedOperationException("Seek not supported");
+            }
+
+            @Override
+            public long getPos() {
+                throw new UnsupportedOperationException("getPos not supported");
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                return in.read(b, off, len);
+            }
+
+            @Override
+            public void close() throws IOException {
+                in.close();
+            }
+
+            @Override
+            public int read() throws IOException {
+                return in.read();
+            }
+        };
+    }
 }

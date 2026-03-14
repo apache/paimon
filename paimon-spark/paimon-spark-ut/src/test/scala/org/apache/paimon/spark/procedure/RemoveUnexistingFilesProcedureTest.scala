@@ -46,7 +46,8 @@ class RemoveUnexistingFilesProcedureTest extends PaimonSparkTestBase {
       tableName,
       bucket,
       numFiles,
-      numDeletes)
+      numDeletes,
+      false)
 
     val actual = new Array[Int](numPartitions)
     val pattern = "pt=(\\d+?)/".r

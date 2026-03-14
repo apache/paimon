@@ -59,7 +59,7 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
         StartingScanner.ScannedResult result =
                 (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
         assertThat(result.currentSnapshotId()).isEqualTo(3);
-        assertThat(getResult(table.newRead(), toSplits(result.splits())))
+        assertThat(getResult(table.newRead(), result.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
 
         write.close();

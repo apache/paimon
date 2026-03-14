@@ -19,10 +19,11 @@
 package org.apache.paimon.iceberg.metadata;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonValue;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -38,22 +39,38 @@ public class IcebergSnapshotSummary {
     public static final IcebergSnapshotSummary APPEND = new IcebergSnapshotSummary("append");
     public static final IcebergSnapshotSummary OVERWRITE = new IcebergSnapshotSummary("overwrite");
 
-    @JsonProperty(FIELD_OPERATION)
-    private final String operation;
+    private final Map<String, String> summary;
 
     @JsonCreator
-    public IcebergSnapshotSummary(@JsonProperty(FIELD_OPERATION) String operation) {
-        this.operation = operation;
+    public IcebergSnapshotSummary(Map<String, String> summary) {
+        this.summary = summary != null ? new HashMap<>(summary) : new HashMap<>();
     }
 
-    @JsonGetter(FIELD_OPERATION)
+    public IcebergSnapshotSummary(String operation) {
+        this.summary = new HashMap<>();
+        this.summary.put(FIELD_OPERATION, operation);
+    }
+
+    @JsonValue
+    public Map<String, String> getSummary() {
+        return new HashMap<>(summary);
+    }
+
     public String operation() {
-        return operation;
+        return summary.get(FIELD_OPERATION);
+    }
+
+    public String get(String key) {
+        return summary.get(key);
+    }
+
+    public void put(String key, String value) {
+        summary.put(key, value);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(operation);
+        return Objects.hash(summary);
     }
 
     @Override
@@ -66,6 +83,6 @@ public class IcebergSnapshotSummary {
         }
 
         IcebergSnapshotSummary that = (IcebergSnapshotSummary) o;
-        return Objects.equals(operation, that.operation);
+        return Objects.equals(summary, that.summary);
     }
 }

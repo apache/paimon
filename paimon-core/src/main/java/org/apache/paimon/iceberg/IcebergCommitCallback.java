@@ -48,7 +48,6 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -221,16 +220,12 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
     public void close() throws Exception {}
 
     @Override
-    public void call(
-            List<SimpleFileEntry> baseFiles,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+    public void call(Context context) {
         createMetadata(
-                snapshot,
+                context.snapshot,
                 (removedFiles, addedFiles) ->
-                        collectFileChanges(deltaFiles, removedFiles, addedFiles),
-                indexFiles);
+                        collectFileChanges(context.deltaFiles, removedFiles, addedFiles),
+                context.indexFiles);
     }
 
     @Override
@@ -348,7 +343,7 @@ public class IcebergCommitCallback implements CommitCallback, TagCallback {
                         null);
 
         // Tags can only be included in Iceberg if they point to an Iceberg snapshot that
-        // exists. Otherwise an Iceberg client fails to parse the metadata and all reads fail.
+        // exists. Otherwise, an Iceberg client fails to parse the metadata and all reads fail.
         // Only the latest snapshot ID is added to Iceberg in this code path. Since this snapshot
         // has just been committed to Paimon, it is not possible for any Paimon tag to reference it
         // yet.

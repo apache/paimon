@@ -267,4 +267,44 @@ class PushDownAggregatesTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
           })
       })
   }
+
+  test("Push down aggregate: group by partial partition of a multi partition table") {
+    sql(s"""
+           |CREATE TABLE T (
+           |c1 STRING,
+           |c2 STRING,
+           |c3 STRING,
+           |c4 STRING,
+           |c5 DATE)
+           |PARTITIONED BY (c5, c1)
+           |TBLPROPERTIES ('primary-key' = 'c5, c1, c3')
+           |""".stripMargin)
+
+    sql("INSERT INTO T VALUES ('t1', 'k1', 'v1', 'r1', '2025-01-01')")
+    checkAnswer(
+      sql("SELECT COUNT(*) FROM T GROUP BY c1"),
+      Seq(Row(1))
+    )
+    checkAnswer(
+      sql("SELECT c1, COUNT(*) FROM T GROUP BY c1"),
+      Seq(Row("t1", 1))
+    )
+    checkAnswer(
+      sql("SELECT COUNT(*), c1 FROM T GROUP BY c1"),
+      Seq(Row(1, "t1"))
+    )
+  }
+
+  // https://github.com/apache/paimon/issues/6610
+  test("Push down aggregate: aggregate a column in one partition is all null and another is not") {
+    withTable("T") {
+      spark.sql("CREATE TABLE T (c1 INT, c2 LONG) PARTITIONED BY(day STRING)")
+
+      spark.sql("INSERT INTO T VALUES (1, 2, '2025-11-10')")
+      spark.sql("INSERT INTO T VALUES (null, 2, '2025-11-11')")
+
+      runAndCheckAggregate("SELECT MIN(c1) FROM T", Row(1) :: Nil, 0)
+      runAndCheckAggregate("SELECT MAX(c1) FROM T", Row(1) :: Nil, 0)
+    }
+  }
 }

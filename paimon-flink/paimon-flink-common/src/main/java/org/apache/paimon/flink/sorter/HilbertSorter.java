@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.sort.hilbert.HilbertIndexer;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -53,15 +53,16 @@ public class HilbertSorter extends TableSorter {
     public HilbertSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
-            FileStoreTable table,
+            CoreOptions options,
+            RowType rowType,
             TableSortInfo tableSortInfo) {
-        super(batchTEnv, origin, table, tableSortInfo.getSortColumns());
+        super(batchTEnv, origin, options, rowType, tableSortInfo.getSortColumns());
         this.tableSortInfo = tableSortInfo;
     }
 
     @Override
     public DataStream<RowData> sort() {
-        return sortStreamByHilbert(origin, table);
+        return sortStreamByHilbert(origin, options, rowType);
     }
 
     /**
@@ -71,11 +72,12 @@ public class HilbertSorter extends TableSorter {
      * @return the sorted data stream
      */
     private DataStream<RowData> sortStreamByHilbert(
-            DataStream<RowData> inputStream, FileStoreTable table) {
-        final HilbertIndexer hilbertIndexer = new HilbertIndexer(table.rowType(), orderColNames);
+            DataStream<RowData> inputStream, CoreOptions options, RowType rowType) {
+        final HilbertIndexer hilbertIndexer = new HilbertIndexer(rowType, orderColNames);
         return SortUtils.sortStreamByKey(
                 inputStream,
-                table,
+                options,
+                rowType,
                 KEY_TYPE,
                 TypeInformation.of(byte[].class),
                 () ->

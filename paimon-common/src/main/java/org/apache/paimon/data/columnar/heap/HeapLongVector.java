@@ -85,6 +85,13 @@ public class HeapLongVector extends AbstractHeapVector implements WritableLongVe
     }
 
     @Override
+    public void appendLong(long v) {
+        reserve(elementsAppended + 1);
+        setLong(elementsAppended, v);
+        elementsAppended++;
+    }
+
+    @Override
     public void fill(long value) {
         Arrays.fill(vector, value);
     }

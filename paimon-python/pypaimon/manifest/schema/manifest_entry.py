@@ -20,16 +20,47 @@ from dataclasses import dataclass
 
 from pypaimon.manifest.schema.data_file_meta import (DATA_FILE_META_SCHEMA,
                                                      DataFileMeta)
+from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.row.generic_row import GenericRow
 
 
 @dataclass
-class ManifestEntry:
+class ManifestEntry(FileEntry):
     kind: int
     partition: GenericRow
     bucket: int
     total_buckets: int
     file: DataFileMeta
+
+    def copy_without_stats(self) -> 'ManifestEntry':
+        """Create a new ManifestEntry without value statistics."""
+        return ManifestEntry(
+            kind=self.kind,
+            partition=self.partition,
+            bucket=self.bucket,
+            total_buckets=self.total_buckets,
+            file=self.file.copy_without_stats()
+        )
+
+    def assign_first_row_id(self, first_row_id: int) -> 'ManifestEntry':
+        """Create a new ManifestEntry with the assigned first_row_id."""
+        return ManifestEntry(
+            kind=self.kind,
+            partition=self.partition,
+            bucket=self.bucket,
+            total_buckets=self.total_buckets,
+            file=self.file.assign_first_row_id(first_row_id)
+        )
+
+    def assign_sequence_number(self, min_sequence_number: int, max_sequence_number: int) -> 'ManifestEntry':
+        """Create a new ManifestEntry with the assigned sequence numbers."""
+        return ManifestEntry(
+            kind=self.kind,
+            partition=self.partition,
+            bucket=self.bucket,
+            total_buckets=self.total_buckets,
+            file=self.file.assign_sequence_number(min_sequence_number, max_sequence_number)
+        )
 
 
 MANIFEST_ENTRY_SCHEMA = {

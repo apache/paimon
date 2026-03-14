@@ -146,7 +146,7 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
         Set<Path> bucketDirs =
                 deleteFiles.stream()
                         .map(Path::getParent)
-                        .filter(path -> path.toUri().toString().contains(BUCKET_PATH_PREFIX))
+                        .filter(path -> path.toString().contains(BUCKET_PATH_PREFIX))
                         .collect(Collectors.toSet());
         randomlyOnlyExecute(executor, this::tryDeleteEmptyDirectory, bucketDirs);
 
@@ -246,7 +246,14 @@ public class LocalOrphanFilesClean extends OrphanFilesClean {
             List<FileStatus> files = tryBestListingDirs(path);
 
             if (files.isEmpty()) {
-                emptyDirs.add(path);
+                try {
+                    FileStatus dirStatus = fileIO.getFileStatus(path);
+                    if (oldEnough(dirStatus)) {
+                        emptyDirs.add(path);
+                    }
+                } catch (IOException e) {
+                    LOG.warn("IOException during check dirStatus for {}, ignore it", path, e);
+                }
                 return Collections.emptyList();
             }
 

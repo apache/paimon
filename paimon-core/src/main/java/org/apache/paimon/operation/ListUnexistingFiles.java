@@ -27,6 +27,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.FileOperationThreadPool;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ThreadPoolUtils;
 
 import java.io.IOException;
@@ -58,6 +59,7 @@ public class ListUnexistingFiles {
         Map<Integer, Map<String, DataFileMeta>> result = new HashMap<>();
         List<Split> splits =
                 table.newScan()
+                        .withLevelFilter(Filter.alwaysTrue())
                         .withPartitionFilter(Collections.singletonList(partition))
                         .plan()
                         .splits();

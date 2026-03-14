@@ -21,10 +21,13 @@ package org.apache.paimon;
 import org.apache.paimon.CoreOptions.ExternalPathStrategy;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilderImpl;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.IndexFileHandler;
@@ -33,7 +36,10 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
+import org.apache.paimon.metastore.ChainTableCommitPreCallback;
+import org.apache.paimon.metastore.ChainTableOverwriteCommitCallback;
 import org.apache.paimon.metastore.TagPreviewCommitCallback;
+import org.apache.paimon.metastore.VisibilityWaitCallback;
 import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.Lock;
@@ -41,17 +47,21 @@ import org.apache.paimon.operation.ManifestsReader;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.operation.commit.CommitRollback;
+import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
+import org.apache.paimon.table.sink.CommitPreCallback;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.SuccessFileTagCallback;
 import org.apache.paimon.tag.TagAutoManager;
@@ -132,7 +142,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.fileCompression(),
                 options.dataFilePathDirectory(),
                 createExternalPaths(),
-                options.indexFileInDataFileDir());
+                options.externalPathStrategy(),
+                options.externalPathWeights(),
+                options.indexFileInDataFileDir(),
+                options.globalIndexExternalPath());
     }
 
     private List<Path> createExternalPaths() {
@@ -165,7 +178,6 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 paths.add(path);
             }
         }
-
         checkArgument(!paths.isEmpty(), "External paths should not be empty");
         return paths;
     }
@@ -267,6 +279,25 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (snapshotCommit == null) {
             snapshotCommit = new RenamingSnapshotCommit(snapshotManager, Lock.empty());
         }
+        ConflictDetection.Factory conflictDetectFactory =
+                scanner ->
+                        new ConflictDetection(
+                                tableName,
+                                commitUser,
+                                partitionType,
+                                pathFactory(),
+                                newKeyComparator(),
+                                bucketMode(),
+                                options.deletionVectorsEnabled(),
+                                options.dataEvolutionEnabled(),
+                                newIndexFileHandler(),
+                                snapshotManager,
+                                scanner);
+        CommitRollback rollback = null;
+        TableRollback tableRollback = catalogEnvironment.catalogTableRollback();
+        if (tableRollback != null) {
+            rollback = new CommitRollback(tableRollback);
+        }
         return new FileStoreCommitImpl(
                 snapshotCommit,
                 fileIO,
@@ -275,30 +306,18 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 commitUser,
                 partitionType,
                 options,
-                options.partitionDefaultName(),
                 pathFactory(),
                 snapshotManager,
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),
-                newScan(),
-                options.bucket(),
-                options.manifestTargetSize(),
-                options.manifestFullCompactionThresholdSize(),
-                options.manifestMergeMinCount(),
-                partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
-                newKeyComparator(),
-                options.branch(),
+                this::newScan,
                 newStatsFileHandler(),
                 bucketMode(),
-                options.scanManifestParallelism(),
+                createCommitPreCallbacks(table),
                 createCommitCallbacks(commitUser, table),
-                options.commitMaxRetries(),
-                options.commitTimeout(),
-                options.commitMinRetryWait(),
-                options.commitMaxRetryWait(),
-                options.commitStrictModeLastSafeSnapshot().orElse(null),
-                options.rowTrackingEnabled());
+                conflictDetectFactory,
+                rollback);
     }
 
     @Override
@@ -348,20 +367,32 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
 
     public abstract Comparator<InternalRow> newKeyComparator();
 
+    @Override
+    public InternalRowPartitionComputer partitionComputer() {
+        return new InternalRowPartitionComputer(
+                options.partitionDefaultName(),
+                schema.logicalPartitionType(),
+                schema.partitionKeys().toArray(new String[0]),
+                options.legacyPartitionName());
+    }
+
+    private List<CommitPreCallback> createCommitPreCallbacks(FileStoreTable table) {
+        List<CommitPreCallback> callbacks = new ArrayList<>();
+        if (options.isChainTable()) {
+            callbacks.add(new ChainTableCommitPreCallback(table));
+        }
+        return callbacks;
+    }
+
     private List<CommitCallback> createCommitCallbacks(String commitUser, FileStoreTable table) {
-        List<CommitCallback> callbacks =
-                new ArrayList<>(CallbackUtils.loadCommitCallbacks(options, table));
+        List<CommitCallback> callbacks = new ArrayList<>();
 
         if (options.partitionedTableInMetastore() && !schema.partitionKeys().isEmpty()) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
-                InternalRowPartitionComputer partitionComputer =
-                        new InternalRowPartitionComputer(
-                                options.partitionDefaultName(),
-                                schema.logicalPartitionType(),
-                                schema.partitionKeys().toArray(new String[0]),
-                                options.legacyPartitionName());
-                callbacks.add(new AddPartitionCommitCallback(partitionHandler, partitionComputer));
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
+                callbacks.add(
+                        new AddPartitionCommitCallback(partitionModification, partitionComputer()));
             }
         }
 
@@ -369,12 +400,13 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         if (options.tagToPartitionField() != null
                 && tagPreview != null
                 && schema.partitionKeys().isEmpty()) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
                 TagPreviewCommitCallback callback =
                         new TagPreviewCommitCallback(
                                 new AddPartitionTagCallback(
-                                        partitionHandler, options.tagToPartitionField()),
+                                        partitionModification, options.tagToPartitionField()),
                                 tagPreview);
                 callbacks.add(callback);
             }
@@ -385,6 +417,18 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             callbacks.add(new IcebergCommitCallback(table, commitUser));
         }
 
+        if (options.isChainTable()) {
+            callbacks.add(new ChainTableOverwriteCommitCallback(table));
+        }
+
+        if (options.visibilityCallbackEnabled() && !schema.primaryKeys().isEmpty()) {
+            if (table.bucketMode() == BucketMode.POSTPONE_MODE
+                    || options.deletionVectorsEnabled()) {
+                callbacks.add(new VisibilityWaitCallback(table));
+            }
+        }
+
+        callbacks.addAll(CallbackUtils.loadCommitCallbacks(options, table));
         return callbacks;
     }
 
@@ -415,9 +459,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
             Duration expirationTime,
             Duration checkInterval,
             PartitionExpireStrategy expireStrategy) {
-        PartitionHandler partitionHandler = null;
+        PartitionModification partitionModification = null;
         if (options.partitionedTableInMetastore()) {
-            partitionHandler = catalogEnvironment.partitionHandler();
+            partitionModification = catalogEnvironment.partitionModification();
         }
 
         return new PartitionExpire(
@@ -426,7 +470,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 expireStrategy,
                 newScan(),
                 newCommit(commitUser, table),
-                partitionHandler,
+                partitionModification,
                 options.endInputCheckPartitionExpire(),
                 options.partitionExpireMaxNum(),
                 options.partitionExpireBatchSize());
@@ -448,9 +492,10 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
         String partitionField = options.tagToPartitionField();
 
         if (partitionField != null) {
-            PartitionHandler partitionHandler = catalogEnvironment.partitionHandler();
-            if (partitionHandler != null) {
-                callbacks.add(new AddPartitionTagCallback(partitionHandler, partitionField));
+            PartitionModification partitionModification =
+                    catalogEnvironment.partitionModification();
+            if (partitionModification != null) {
+                callbacks.add(new AddPartitionTagCallback(partitionModification, partitionField));
             }
         }
         if (options.tagCreateSuccessFile()) {
@@ -476,5 +521,16 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         this.snapshotCache = cache;
+    }
+
+    @Override
+    public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
+        return new GlobalIndexScanBuilderImpl(
+                options.toConfiguration(),
+                schema.logicalRowType(),
+                fileIO,
+                pathFactory().globalIndexFileFactory(),
+                snapshotManager(),
+                newIndexFileHandler());
     }
 }

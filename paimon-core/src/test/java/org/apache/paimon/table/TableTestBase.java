@@ -28,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.reader.RecordReader;
@@ -75,6 +76,7 @@ public abstract class TableTestBase {
     protected Catalog catalog;
     protected String database;
     @TempDir public java.nio.file.Path tempPath;
+    protected IOManager ioManager;
 
     @BeforeEach
     public void beforeEach() throws Catalog.DatabaseAlreadyExistException {
@@ -82,6 +84,7 @@ public abstract class TableTestBase {
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
         catalog.createDatabase(database, true);
+        this.ioManager = new IOManagerImpl(tempPath.toString());
     }
 
     @AfterEach
@@ -228,6 +231,18 @@ public abstract class TableTestBase {
             messages.addAll(writeOnce(table, i, size));
         }
         return messages;
+    }
+
+    protected void writeDataDefault(Iterable<InternalRow> rows) throws Exception {
+        Table table = getTableDefault();
+        BatchWriteBuilder builder = table.newBatchWriteBuilder();
+
+        BatchTableWrite batchTableWrite = builder.newWrite();
+        BatchTableCommit commit = builder.newCommit();
+        for (InternalRow row : rows) {
+            batchTableWrite.write(row);
+        }
+        commit.commit(batchTableWrite.prepareCommit());
     }
 
     public FileStoreTable getTableDefault() throws Exception {

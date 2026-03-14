@@ -18,7 +18,8 @@
 
 package org.apache.paimon.utils;
 
-import org.apache.paimon.io.PageFileInput;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.cache.Cache;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
@@ -62,16 +63,14 @@ public class FileBasedBloomFilterTest {
         BloomFilter.Builder builder = new BloomFilter.Builder(segment, 100);
         int[] inputs = CommonTestUtils.generateRandomInts(100);
         Arrays.stream(inputs).forEach(i -> builder.addHash(Integer.hashCode(i)));
-        File file = writeFile(segment.getArray());
+        org.apache.paimon.fs.Path filePath =
+                new org.apache.paimon.fs.Path(writeFile(segment.getArray()).getAbsolutePath());
+        FileIO fileIO = LocalFileIO.create();
 
         CacheManager cacheManager = new CacheManager(cacheType, MemorySize.ofMebiBytes(1), 0.1);
         FileBasedBloomFilter filter =
                 new FileBasedBloomFilter(
-                        PageFileInput.create(file, 1024, null, 0, null),
-                        cacheManager,
-                        100,
-                        0,
-                        1000);
+                        fileIO.newInputStream(filePath), filePath, cacheManager, 100, 0, 1000);
 
         Arrays.stream(inputs)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());

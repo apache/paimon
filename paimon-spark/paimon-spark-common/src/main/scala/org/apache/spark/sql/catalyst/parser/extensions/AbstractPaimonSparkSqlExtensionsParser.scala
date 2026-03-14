@@ -79,7 +79,8 @@ abstract class AbstractPaimonSparkSqlExtensionsParser(val delegate: ParserInterf
   private def parserRules(sparkSession: SparkSession): Seq[Rule[LogicalPlan]] = {
     Seq(
       RewritePaimonViewCommands(sparkSession),
-      RewritePaimonFunctionCommands(sparkSession)
+      RewritePaimonFunctionCommands(sparkSession),
+      RewriteSparkDDLCommands(sparkSession)
     )
   }
 
@@ -225,7 +226,8 @@ case object PaimonSqlExtensionsPostProcessor extends PaimonSqlExtensionsBaseList
       PaimonSqlExtensionsParser.IDENTIFIER,
       token.getChannel,
       token.getStartIndex + stripMargins,
-      token.getStopIndex - stripMargins)
+      token.getStopIndex - stripMargins
+    )
     parent.addChild(new TerminalNodeImpl(f(newToken)))
   }
 }

@@ -79,4 +79,17 @@ public class FileStoreSourceSplit implements SourceSplit {
     public int hashCode() {
         return Objects.hash(id, split, recordsToSkip);
     }
+
+    @Override
+    public String toString() {
+        return "{"
+                + "id='"
+                + id
+                + '\''
+                + ", split="
+                + split
+                + ", recordsToSkip="
+                + recordsToSkip
+                + '}';
+    }
 }

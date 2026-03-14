@@ -47,6 +47,14 @@ public class VariantSchema {
             this.schema = schema;
         }
 
+        public String fieldName() {
+            return fieldName;
+        }
+
+        public VariantSchema schema() {
+            return schema;
+        }
+
         @Override
         public String toString() {
             return "ObjectField{" + "fieldName=" + fieldName + ", schema=" + schema + '}';

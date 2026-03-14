@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
@@ -158,9 +158,10 @@ public class ReportPartStatsListener implements CommitListener {
             return Optional.empty();
         }
 
-        PartitionHandler partitionHandler = table.catalogEnvironment().partitionHandler();
+        PartitionModification partitionModification =
+                table.catalogEnvironment().partitionModification();
 
-        if (partitionHandler == null) {
+        if (partitionModification == null) {
             return Optional.empty();
         }
 
@@ -174,7 +175,7 @@ public class ReportPartStatsListener implements CommitListener {
         return Optional.of(
                 new ReportPartStatsListener(
                         partitionComputer,
-                        new PartitionStatisticsReporter(table, partitionHandler),
+                        new PartitionStatisticsReporter(table, partitionModification),
                         stateStore,
                         isRestored,
                         options.get(CoreOptions.PARTITION_IDLE_TIME_TO_REPORT_STATISTIC)

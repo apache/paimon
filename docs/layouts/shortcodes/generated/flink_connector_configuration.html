@@ -93,6 +93,12 @@ under the License.
             <td>If the pending snapshot count exceeds the threshold, lookup operator will refresh the table in sync.</td>
         </tr>
         <tr>
+            <td><h5>lookup.refresh.full-load-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>If the pending snapshot count exceeds this threshold, lookup table will discard incremental updates and refresh the entire table from the latest snapshot. This can improve performance when there are many snapshots pending. Set to a reasonable value (e.g., 10) to enable this optimization. Default is Integer.MAX_VALUE (disabled). </td>
+        </tr>
+        <tr>
             <td><h5>lookup.refresh.time-periods-blacklist</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -121,12 +127,6 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>You can specify time interval for partition, for example, daily partition is '1 d', hourly partition is '1 h'.</td>
-        </tr>
-        <tr>
-            <td><h5>postpone.default-bucket-num</h5></td>
-            <td style="word-wrap: break-word;">1</td>
-            <td>Integer</td>
-            <td>Bucket number for the partitions compacted for the first time in postpone bucket tables.</td>
         </tr>
         <tr>
             <td><h5>precommit-compact</h5></td>
@@ -180,7 +180,7 @@ under the License.
             <td><h5>scan.partitions</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
-            <td>Specify the partitions to scan. Partitions should be given in the form of key1=value1,key2=value2. Partition keys not specified will be filled with the value of partition.default-name. Multiple partitions should be separated by semicolon (;). This option can support normal source tables and lookup join tables. For lookup joins, two special values max_pt() and max_two_pt() are also supported, specifying the (two) partition(s) with the largest partition value.</td>
+            <td>Specify the partitions to scan. Partitions should be given in the form of key1=value1,key2=value2. Partition keys not specified will be filled with the value of partition.default-name. Multiple partitions should be separated by semicolon (;). This option can support normal source tables and lookup join tables. There are two special values max_pt() and max_two_pt() are also supported to specify the (two) partition(s) with the largest partition value. For lookup source, the max partition(s) will be periodically refreshed; for normal source, the max partition(s) will be determined before job running without refreshing even for streaming jobs.</td>
         </tr>
         <tr>
             <td><h5>scan.remove-normalize</h5></td>

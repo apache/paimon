@@ -56,7 +56,7 @@ public class PrimaryKeyTableUtils {
     }
 
     public static MergeFunctionFactory<KeyValue> createMergeFunctionFactory(
-            TableSchema tableSchema, KeyValueFieldsExtractor extractor) {
+            TableSchema tableSchema) {
         RowType rowType = tableSchema.logicalRowType();
         Options conf = Options.fromMap(tableSchema.options());
         CoreOptions options = new CoreOptions(conf);
@@ -68,11 +68,7 @@ public class PrimaryKeyTableUtils {
             case PARTIAL_UPDATE:
                 return PartialUpdateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
             case AGGREGATE:
-                return AggregateMergeFunction.factory(
-                        conf,
-                        tableSchema.fieldNames(),
-                        rowType.getFieldTypes(),
-                        tableSchema.primaryKeys());
+                return AggregateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
             case FIRST_ROW:
                 return FirstRowMergeFunction.factory(conf);
             default:

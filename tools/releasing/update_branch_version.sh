@@ -51,7 +51,7 @@ fi
 cd ${PROJECT_ROOT}
 
 # change version in all pom files
-mvn versions:set -DgenerateBackupPoms=false -DnewVersion=${NEW_VERSION}
+mvn versions:set -ntp -DgenerateBackupPoms=false -DnewVersion=${NEW_VERSION}
 
 git commit -am "[release] Update version to ${NEW_VERSION}"
 

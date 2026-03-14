@@ -228,9 +228,7 @@ class BucketedTableQueryTest extends PaimonSparkTestBase with AdaptiveSparkPlanH
       checkAnswerAndShuffleSorts("SELECT id, max(c) FROM t GROUP BY id", 0, 0)
 
       // generate some files
-      (1.to(20)).foreach {
-        i => spark.sql(s"INSERT INTO t VALUES ($i, 'x1'), ($i, 'x3'), ($i, 'x3')")
-      }
+      (1.to(20)).foreach(i => spark.sql(s"INSERT INTO t VALUES ($i, 'x1'), ($i, 'x3'), ($i, 'x3')"))
       checkAnswerAndShuffleSorts("SELECT id, max(c) FROM t GROUP BY id", 0, 1)
     }
   }

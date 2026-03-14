@@ -18,3 +18,4 @@
 
 .gitignore
 rat-results.txt
+.*\.jsonl$

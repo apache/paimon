@@ -46,11 +46,7 @@ public class FormatDataSplitTest {
         Predicate predicate = builder.equal(0, 5);
 
         // Create FormatDataSplit
-        FormatDataSplit split =
-                new FormatDataSplit(
-                        filePath, 100L, // offset
-                        1024L, // length
-                        null);
+        FormatDataSplit split = new FormatDataSplit(filePath, 1024L, null);
 
         // Test Java serialization
         byte[] serialized = InstantiationUtil.serializeObject(split);
@@ -58,8 +54,20 @@ public class FormatDataSplitTest {
                 InstantiationUtil.deserializeObject(serialized, getClass().getClassLoader());
 
         // Verify the deserialized object
-        assertThat(deserialized.filePath()).isEqualTo(filePath);
-        assertThat(deserialized.offset()).isEqualTo(100L);
-        assertThat(deserialized.length()).isEqualTo(1024L);
+        assertThat(deserialized.filePath()).isEqualTo(split.filePath());
+        assertThat(deserialized.offset()).isEqualTo(split.offset());
+        assertThat(deserialized.fileSize()).isEqualTo(split.fileSize());
+        assertThat(deserialized.length()).isEqualTo(split.length());
+
+        split = new FormatDataSplit(filePath, 1024L, 100L, 512L, null);
+
+        serialized = InstantiationUtil.serializeObject(split);
+        deserialized = InstantiationUtil.deserializeObject(serialized, getClass().getClassLoader());
+
+        // Verify the deserialized object
+        assertThat(deserialized.filePath()).isEqualTo(split.filePath());
+        assertThat(deserialized.offset()).isEqualTo(split.offset());
+        assertThat(deserialized.fileSize()).isEqualTo(split.fileSize());
+        assertThat(deserialized.length()).isEqualTo(split.length());
     }
 }

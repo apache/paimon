@@ -19,6 +19,7 @@
 package org.apache.paimon.fs.hadoop;
 
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,7 @@ public class HadoopSecuredFileSystemTest {
         options.set("security.kerberos.login.principal", "test-user");
         options.set("security.kerberos.login.keytab", keytabFile.getAbsolutePath());
 
-        HadoopFileIO fileIO = new HadoopFileIO();
+        HadoopFileIO fileIO = new HadoopFileIO(new Path("file:///tmp/test"));
         fileIO.configure(CatalogContext.create(options));
         assertThat(fileIO.getFileSystem(new org.apache.hadoop.fs.Path("file:///tmp/test")))
                 .isInstanceOf(HadoopSecuredFileSystem.class);

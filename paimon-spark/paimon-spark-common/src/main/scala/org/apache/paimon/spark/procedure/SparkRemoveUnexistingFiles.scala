@@ -71,7 +71,8 @@ case class SparkRemoveUnexistingFiles(
                         Collections.emptyList(),
                         new util.ArrayList[DataFileMeta](metaMap.values()),
                         Collections.emptyList()),
-                      CompactIncrement.emptyIncrement())
+                      CompactIncrement.emptyIncrement()
+                    )
                     (metaMap.keySet().asScala.toSeq, serializer.serialize(message))
                 }
               })

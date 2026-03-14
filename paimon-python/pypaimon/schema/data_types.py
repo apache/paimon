@@ -73,6 +73,16 @@ class AtomicType(DataType):
         super().__init__(nullable)
         self.type = type
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, AtomicType):
+            return False
+        return self.type == other.type and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.type, self.nullable))
+
     def to_dict(self) -> str:
         if not self.nullable:
             return self.type + " NOT NULL"
@@ -94,6 +104,16 @@ class ArrayType(DataType):
     def __init__(self, nullable: bool, element_type: DataType):
         super().__init__(nullable)
         self.element = element_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, ArrayType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -119,9 +139,20 @@ class MultisetType(DataType):
         super().__init__(nullable)
         self.element = element_type
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MultisetType):
+            return False
+        return self.element == other.element and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((self.element, self.nullable))
+
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "type": "MULTISET{}".format('<' + str(self.element) + '>' if self.element else ''),
+            "type": "MULTISET{}{}".format('<' + str(self.element) + '>' if self.element else '',
+                                          " NOT NULL" if not self.nullable else ""),
             "element": self.element.to_dict() if self.element else None,
             "nullable": self.nullable,
         }
@@ -148,6 +179,18 @@ class MapType(DataType):
         super().__init__(nullable)
         self.key = key_type
         self.value = value_type
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, MapType):
+            return False
+        return (self.key == other.key
+                and self.value == other.value
+                and self.nullable == other.nullable)
+
+    def __hash__(self):
+        return hash((self.key, self.value, self.nullable))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -198,6 +241,21 @@ class DataField:
     def from_dict(cls, data: Dict[str, Any]) -> "DataField":
         return DataTypeParser.parse_data_field(data)
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, DataField):
+            return False
+        return (self.id == other.id
+                and self.name == other.name
+                and self.type == other.type
+                and self.description == other.description
+                and self.default_value == other.default_value)
+
+    def __hash__(self):
+        return hash((self.id, self.name, self.type,
+                     self.description, self.default_value))
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             self.FIELD_ID: self.id,
@@ -222,6 +280,16 @@ class RowType(DataType):
         super().__init__(nullable)
         self.fields = fields or []
 
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if not isinstance(other, RowType):
+            return False
+        return self.fields == other.fields and self.nullable == other.nullable
+
+    def __hash__(self):
+        return hash((tuple(self.fields), self.nullable))
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "type": "ROW" + ("" if self.nullable else " NOT NULL"),
@@ -234,7 +302,10 @@ class RowType(DataType):
         return DataTypeParser.parse_data_type(data)
 
     def __str__(self) -> str:
-        field_strs = ["{}: {}".format(field.name, field.type) for field in self.fields]
+        field_strs = []
+        for field in self.fields:
+            description = " COMMENT {}".format(field.description) if field.description else ""
+            field_strs.append("{}: {}{}".format(field.name, field.type, description))
         null_suffix = "" if self.nullable else " NOT NULL"
         return "ROW<{}>{}".format(', '.join(field_strs), null_suffix)
 
@@ -247,6 +318,7 @@ class Keyword(Enum):
     BINARY = "BINARY"
     VARBINARY = "VARBINARY"
     BYTES = "BYTES"
+    BLOB = "BLOB"
     DECIMAL = "DECIMAL"
     NUMERIC = "NUMERIC"
     DEC = "DEC"
@@ -407,6 +479,8 @@ class PyarrowFieldParser:
                 return pyarrow.string()
             elif type_name == 'BYTES' or type_name.startswith('VARBINARY'):
                 return pyarrow.binary()
+            elif type_name == 'BLOB':
+                return pyarrow.large_binary()
             elif type_name.startswith('BINARY'):
                 if type_name == 'BINARY':
                     return pyarrow.binary(1)
@@ -427,42 +501,38 @@ class PyarrowFieldParser:
                     precision = int(match_p.group(1))
                     return pyarrow.decimal128(precision, 0)
             if type_name.startswith('TIMESTAMP'):
-                # WITH_LOCAL_TIME_ZONE is ambiguous and not supported
-                if type_name == 'TIMESTAMP':
-                    return pyarrow.timestamp('us', tz=None)  # default to 6
-                match = re.fullmatch(r'TIMESTAMP\((\d+)\)', type_name)
+                is_ltz = type_name.startswith('TIMESTAMP_LTZ') or 'WITH LOCAL TIME ZONE' in type_name
+                tz = 'UTC' if is_ltz else None
+
+                match = re.fullmatch(r'TIMESTAMP(?:_LTZ)?\((\d+)\)(?: WITH LOCAL TIME ZONE)?', type_name)
                 if match:
                     precision = int(match.group(1))
                     if precision == 0:
-                        return pyarrow.timestamp('s', tz=None)
+                        return pyarrow.timestamp('s', tz=tz)
                     elif 1 <= precision <= 3:
-                        return pyarrow.timestamp('ms', tz=None)
+                        return pyarrow.timestamp('ms', tz=tz)
                     elif 4 <= precision <= 6:
-                        return pyarrow.timestamp('us', tz=None)
+                        return pyarrow.timestamp('us', tz=tz)
                     elif 7 <= precision <= 9:
-                        return pyarrow.timestamp('ns', tz=None)
+                        return pyarrow.timestamp('ns', tz=tz)
+
+                return pyarrow.timestamp('us', tz=tz)  # default to 6
             elif type_name == 'DATE':
                 return pyarrow.date32()
             if type_name.startswith('TIME'):
-                if type_name == 'TIME':
-                    return pyarrow.time64('us')  # default to 6
-                match = re.fullmatch(r'TIME\((\d+)\)', type_name)
-                if match:
-                    precision = int(match.group(1))
-                    if precision == 0:
-                        return pyarrow.time32('s')
-                    if 1 <= precision <= 3:
-                        return pyarrow.time32('ms')
-                    if 4 <= precision <= 6:
-                        return pyarrow.time64('us')
-                    if 7 <= precision <= 9:
-                        return pyarrow.time64('ns')
+                return pyarrow.time32('ms')
         elif isinstance(data_type, ArrayType):
             return pyarrow.list_(PyarrowFieldParser.from_paimon_type(data_type.element))
         elif isinstance(data_type, MapType):
             key_type = PyarrowFieldParser.from_paimon_type(data_type.key)
             value_type = PyarrowFieldParser.from_paimon_type(data_type.value)
             return pyarrow.map_(key_type, value_type)
+        elif isinstance(data_type, RowType):
+            pa_fields = []
+            for field in data_type.fields:
+                pa_field_type = PyarrowFieldParser.from_paimon_type(field.type)
+                pa_fields.append(pyarrow.field(field.name, pa_field_type, nullable=field.type.nullable))
+            return pyarrow.struct(pa_fields)
         raise ValueError("Unsupported data type: {}".format(data_type))
 
     @staticmethod
@@ -506,16 +576,20 @@ class PyarrowFieldParser:
             type_name = f'BINARY({pa_type.byte_width})'
         elif types.is_binary(pa_type):
             type_name = 'BYTES'
+        elif types.is_large_binary(pa_type):
+            type_name = 'BLOB'
         elif types.is_decimal(pa_type):
             type_name = f'DECIMAL({pa_type.precision}, {pa_type.scale})'
-        elif types.is_timestamp(pa_type) and pa_type.tz is None:
+        elif types.is_timestamp(pa_type):
             precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
-            type_name = f'TIMESTAMP({precision_mapping[pa_type.unit]})'
+            if pa_type.tz is None:
+                type_name = f'TIMESTAMP({precision_mapping[pa_type.unit]})'
+            else:
+                type_name = f'TIMESTAMP_LTZ({precision_mapping[pa_type.unit]})'
         elif types.is_date32(pa_type):
             type_name = 'DATE'
         elif types.is_time(pa_type):
-            precision_mapping = {'s': 0, 'ms': 3, 'us': 6, 'ns': 9}
-            type_name = f'TIME({precision_mapping[pa_type.unit]})'
+            type_name = 'TIME(0)'
         elif types.is_list(pa_type) or types.is_large_list(pa_type):
             pa_type: pyarrow.ListType
             element_type = PyarrowFieldParser.to_paimon_type(pa_type.value_type, nullable)
@@ -525,6 +599,17 @@ class PyarrowFieldParser:
             key_type = PyarrowFieldParser.to_paimon_type(pa_type.key_type, nullable)
             value_type = PyarrowFieldParser.to_paimon_type(pa_type.item_type, nullable)
             return MapType(nullable, key_type, value_type)
+        elif types.is_struct(pa_type):
+            pa_type: pyarrow.StructType
+            fields = []
+            for i, pa_field in enumerate(pa_type):
+                field_type = PyarrowFieldParser.to_paimon_type(pa_field.type, pa_field.nullable)
+                fields.append(DataField(
+                    id=i,
+                    name=pa_field.name,
+                    type=field_type
+                ))
+            return RowType(nullable, fields)
         if type_name is not None:
             return AtomicType(type_name, nullable)
         raise ValueError("Unsupported pyarrow type: {}".format(pa_type))
@@ -543,6 +628,7 @@ class PyarrowFieldParser:
 
     @staticmethod
     def to_paimon_schema(pa_schema: pyarrow.Schema) -> List[DataField]:
+        # Convert PyArrow schema to Paimon fields
         fields = []
         for i, pa_field in enumerate(pa_schema):
             pa_field: pyarrow.Field
@@ -551,10 +637,11 @@ class PyarrowFieldParser:
         return fields
 
     @staticmethod
-    def to_avro_type(field_type: pyarrow.DataType, field_name: str) -> Union[str, Dict[str, Any]]:
+    def to_avro_type(field_type: pyarrow.DataType, field_name: str,
+                     parent_name: str = "record") -> Union[str, Dict[str, Any]]:
         if pyarrow.types.is_integer(field_type):
             if (pyarrow.types.is_signed_integer(field_type) and field_type.bit_width <= 32) or \
-               (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
+                    (pyarrow.types.is_unsigned_integer(field_type) and field_type.bit_width < 32):
                 return "int"
             else:
                 return "long"
@@ -577,33 +664,44 @@ class PyarrowFieldParser:
             }
         elif pyarrow.types.is_date(field_type):
             return {"type": "int", "logicalType": "date"}
+        elif pyarrow.types.is_time(field_type):
+            return {"type": "int", "logicalType": "time-millis"}
         elif pyarrow.types.is_timestamp(field_type):
             unit = field_type.unit
-            if unit == 'us':
-                return {"type": "long", "logicalType": "timestamp-micros"}
-            elif unit == 'ms':
-                return {"type": "long", "logicalType": "timestamp-millis"}
+            if field_type.tz is None:
+                if unit == 'ms':
+                    return {"type": "long", "logicalType": "timestamp-millis"}
+                elif unit == 'us':
+                    return {"type": "long", "logicalType": "timestamp-micros"}
+                else:
+                    raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
             else:
-                return {"type": "long", "logicalType": "timestamp-micros"}
+                if unit == 'ms':
+                    return {"type": "long", "logicalType": "local-timestamp-millis"}
+                elif unit == 'us':
+                    return {"type": "long", "logicalType": "local-timestamp-micros"}
+                else:
+                    raise ValueError(f"Avro does not support pyarrow timestamp with unit {unit}.")
         elif pyarrow.types.is_list(field_type) or pyarrow.types.is_large_list(field_type):
             value_field = field_type.value_field
             return {
                 "type": "array",
-                "items": PyarrowFieldParser.to_avro_type(value_field.type, value_field.name)
+                "items": PyarrowFieldParser.to_avro_type(value_field.type, value_field.name, parent_name)
             }
         elif pyarrow.types.is_struct(field_type):
-            return PyarrowFieldParser.to_avro_schema(field_type, name="{}_record".format(field_name))
+            nested_name = "{}_{}".format(parent_name, field_name)
+            return PyarrowFieldParser.to_avro_schema(field_type, name=nested_name)
 
         raise ValueError("Unsupported pyarrow type for Avro conversion: {}".format(field_type))
 
     @staticmethod
     def to_avro_schema(pyarrow_schema: Union[pyarrow.Schema, pyarrow.StructType],
-                       name: str = "Root",
-                       namespace: str = "pyarrow.avro"
+                       name: str = "record",
+                       namespace: str = "org.apache.paimon.avro.generated"
                        ) -> Dict[str, Any]:
         fields = []
         for field in pyarrow_schema:
-            avro_type = PyarrowFieldParser.to_avro_type(field.type, field.name)
+            avro_type = PyarrowFieldParser.to_avro_type(field.type, field.name, parent_name=name)
             if field.nullable:
                 avro_type = ["null", avro_type]
             fields.append({"name": field.name, "type": avro_type})

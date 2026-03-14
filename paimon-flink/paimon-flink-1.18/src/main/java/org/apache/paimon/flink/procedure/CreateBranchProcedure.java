@@ -45,21 +45,32 @@ public class CreateBranchProcedure extends ProcedureBase {
     public String[] call(
             ProcedureContext procedureContext, String tableId, String branchName, String tagName)
             throws Catalog.TableNotExistException {
-        return innerCall(tableId, branchName, tagName);
+        return innerCall(tableId, branchName, tagName, false);
     }
 
     public String[] call(ProcedureContext procedureContext, String tableId, String branchName)
             throws Catalog.TableNotExistException {
-        return innerCall(tableId, branchName, null);
+        return innerCall(tableId, branchName, null, false);
     }
 
-    private String[] innerCall(String tableId, String branchName, String tagName)
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String branchName,
+            String tagName,
+            Boolean ignoreIfExists)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, branchName, tagName, ignoreIfExists != null && ignoreIfExists);
+    }
+
+    private String[] innerCall(
+            String tableId, String branchName, String tagName, boolean ignoreIfExists)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         if (!StringUtils.isBlank(tagName)) {
-            table.createBranch(branchName, tagName);
+            table.createBranch(branchName, tagName, ignoreIfExists);
         } else {
-            table.createBranch(branchName);
+            table.createBranch(branchName, ignoreIfExists);
         }
         return new String[] {"Success"};
     }

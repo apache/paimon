@@ -169,7 +169,7 @@ public class ChangelogCompactTaskTest {
         List<CommitMessage> messages =
                 task.doCompact(table, Executors.newFixedThreadPool(1), MemorySize.ofMebiBytes(64))
                         .stream()
-                        .map(c -> (CommitMessageImpl) c.wrappedCommittable())
+                        .map(c -> (CommitMessageImpl) c.commitMessage())
                         .collect(Collectors.toList());
         TableCommitImpl commit = table.newCommit("test");
         commit.commit(messages);

@@ -127,10 +127,13 @@ object GenerateUtils {
       s"$sortUtil.compareBinary($leftTerm, $rightTerm)"
     case TINYINT | SMALLINT | INTEGER | BIGINT | FLOAT | DOUBLE | DATE | TIME_WITHOUT_TIME_ZONE =>
       s"($leftTerm > $rightTerm ? 1 : $leftTerm < $rightTerm ? -1 : 0)"
-    case ARRAY =>
-      val at = t.asInstanceOf[ArrayType]
+    case ARRAY | VECTOR =>
+      val elementType = t.getTypeRoot match {
+        case ARRAY => t.asInstanceOf[ArrayType].getElementType
+        case VECTOR => t.asInstanceOf[VectorType].getElementType
+      }
       val compareFunc = newName("compareArray")
-      val compareCode = generateArrayCompare(ctx, nullsIsLast = false, at, "a", "b")
+      val compareCode = generateArrayCompare(ctx, nullsIsLast = false, elementType, "a", "b")
       val funcCode: String =
         s"""
           public int $compareFunc($ARRAY_DATA a, $ARRAY_DATA b) {
@@ -188,11 +191,10 @@ object GenerateUtils {
   def generateArrayCompare(
       ctx: CodeGeneratorContext,
       nullsIsLast: Boolean,
-      arrayType: ArrayType,
+      elementType: DataType,
       leftTerm: String,
       rightTerm: String): String = {
     val nullIsLastRet = if (nullsIsLast) 1 else -1
-    val elementType = arrayType.getElementType
     val fieldA = newName("fieldA")
     val isNullA = newName("isNullA")
     val lengthA = newName("lengthA")
@@ -379,6 +381,7 @@ object GenerateUtils {
     case DOUBLE => className[JDouble]
     case TIMESTAMP_WITHOUT_TIME_ZONE | TIMESTAMP_WITH_LOCAL_TIME_ZONE => className[Timestamp]
     case ARRAY => className[InternalArray]
+    case VECTOR => className[InternalVector]
     case MULTISET | MAP => className[InternalMap]
     case ROW => className[InternalRow]
     case VARIANT => className[Variant]
@@ -417,6 +420,8 @@ object GenerateUtils {
         s"$rowTerm.getTimestamp($indexTerm, ${getPrecision(t)})"
       case ARRAY =>
         s"$rowTerm.getArray($indexTerm)"
+      case VECTOR =>
+        s"$rowTerm.getVector($indexTerm)"
       case MULTISET | MAP =>
         s"$rowTerm.getMap($indexTerm)"
       case ROW =>
@@ -606,6 +611,9 @@ object GenerateUtils {
     case ARRAY =>
       val ser = addSerializer(t)
       s"$writerTerm.writeArray($indexTerm, $fieldValTerm, $ser)"
+    case VECTOR =>
+      val ser = addSerializer(t)
+      s"$writerTerm.writeVector($indexTerm, $fieldValTerm, $ser)"
     case MULTISET | MAP =>
       val ser = addSerializer(t)
       s"$writerTerm.writeMap($indexTerm, $fieldValTerm, $ser)"

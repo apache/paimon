@@ -53,8 +53,9 @@ public class StaticFileStoreSource extends FlinkSource {
             ReadBuilder readBuilder,
             @Nullable Long limit,
             int splitBatchSize,
-            SplitAssignMode splitAssignMode) {
-        this(readBuilder, limit, splitBatchSize, splitAssignMode, null, null);
+            SplitAssignMode splitAssignMode,
+            boolean blobAsDescriptor) {
+        this(readBuilder, limit, splitBatchSize, splitAssignMode, null, null, blobAsDescriptor);
     }
 
     public StaticFileStoreSource(
@@ -63,8 +64,9 @@ public class StaticFileStoreSource extends FlinkSource {
             int splitBatchSize,
             SplitAssignMode splitAssignMode,
             @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
-            @Nullable NestedProjectedRowData rowData) {
-        super(readBuilder, limit, rowData);
+            @Nullable NestedProjectedRowData rowData,
+            boolean blobAsDescriptor) {
+        super(readBuilder, limit, rowData, blobAsDescriptor);
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
         this.dynamicPartitionFilteringInfo = dynamicPartitionFilteringInfo;

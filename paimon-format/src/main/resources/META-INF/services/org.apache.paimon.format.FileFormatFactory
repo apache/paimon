@@ -17,5 +17,6 @@ org.apache.paimon.format.avro.AvroFileFormatFactory
 org.apache.paimon.format.orc.OrcFileFormatFactory
 org.apache.paimon.format.parquet.ParquetFileFormatFactory
 org.apache.paimon.format.csv.CsvFileFormatFactory
+org.apache.paimon.format.text.TextFileFormatFactory
 org.apache.paimon.format.json.JsonFileFormatFactory
 org.apache.paimon.format.blob.BlobFileFormatFactory

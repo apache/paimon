@@ -205,14 +205,6 @@ public class TestFileStore extends KeyValueFileStore {
         return impl;
     }
 
-    public List<Snapshot> commitData(
-            List<KeyValue> kvs,
-            Function<KeyValue, BinaryRow> partitionCalculator,
-            Function<KeyValue, Integer> bucketCalculator)
-            throws Exception {
-        return commitData(kvs, partitionCalculator, bucketCalculator, new HashMap<>());
-    }
-
     public List<Snapshot> commitDataWatermark(
             List<KeyValue> kvs, Function<KeyValue, BinaryRow> partitionCalculator, Long watermark)
             throws Exception {
@@ -230,8 +222,7 @@ public class TestFileStore extends KeyValueFileStore {
     public List<Snapshot> commitData(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRow> partitionCalculator,
-            Function<KeyValue, Integer> bucketCalculator,
-            Map<Integer, Long> logOffsets)
+            Function<KeyValue, Integer> bucketCalculator)
             throws Exception {
         return commitDataImpl(
                 kvs,
@@ -241,11 +232,7 @@ public class TestFileStore extends KeyValueFileStore {
                 null,
                 null,
                 Collections.emptyList(),
-                (commit, committable) -> {
-                    logOffsets.forEach(
-                            (bucket, offset) -> committable.addLogOffset(bucket, offset, false));
-                    commit.commit(committable, false);
-                });
+                (commit, committable) -> commit.commit(committable, false));
     }
 
     public List<Snapshot> overwriteData(

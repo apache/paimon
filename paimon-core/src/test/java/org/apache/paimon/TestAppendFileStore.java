@@ -29,6 +29,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommitImpl;
@@ -36,6 +37,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -43,6 +45,7 @@ import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -140,6 +143,38 @@ public class TestAppendFileStore extends AppendOnlyFileStore {
         List<IndexFileMeta> indexFiles =
                 fileHandler.scan(latestSnapshot, DELETION_VECTORS_INDEX, partition, bucket);
         return factory.create(partition, bucket, indexFiles);
+    }
+
+    public CommitMessageImpl writeDataFiles(
+            BinaryRow partition, int bucket, List<String> dataFileNames) throws IOException {
+        List<DataFileMeta> fileMetas = new ArrayList<>();
+        Path bucketPath = pathFactory().bucketPath(partition, bucket);
+        for (String dataFileName : dataFileNames) {
+            Path path = new Path(bucketPath, dataFileName);
+            fileIO.newOutputStream(path, false).close();
+            fileMetas.add(
+                    DataFileMeta.forAppend(
+                            path.getName(),
+                            10L,
+                            10L,
+                            SimpleStats.EMPTY_STATS,
+                            0L,
+                            0L,
+                            schema.id(),
+                            Collections.emptyList(),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null));
+        }
+        return new CommitMessageImpl(
+                partition,
+                bucket,
+                options().bucket(),
+                new DataIncrement(fileMetas, Collections.emptyList(), Collections.emptyList()),
+                CompactIncrement.emptyIncrement());
     }
 
     public CommitMessageImpl writeDVIndexFiles(

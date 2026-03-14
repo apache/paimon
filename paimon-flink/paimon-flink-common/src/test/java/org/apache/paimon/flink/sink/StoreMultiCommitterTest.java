@@ -71,6 +71,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.SnapshotTest.newSnapshotManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -81,7 +83,6 @@ class StoreMultiCommitterTest {
     private Path warehouse;
     private CatalogLoader catalogLoader;
     private Catalog catalog;
-    private String databaseName;
     private Identifier firstTable;
     private Identifier secondTable;
     private Path firstTablePath;
@@ -100,7 +101,7 @@ class StoreMultiCommitterTest {
     public void beforeEach() throws Exception {
         initialCommitUser = UUID.randomUUID().toString();
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
-        databaseName = "test_db";
+        String databaseName = "test_db";
         firstTable = Identifier.create(databaseName, "test_table1");
         secondTable = Identifier.create(databaseName, "test_table2");
 
@@ -122,7 +123,7 @@ class StoreMultiCommitterTest {
         Options firstOptions = new Options();
         firstOptions.set(
                 CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.PROCESS_TIME);
-        firstOptions.setString("bucket", "-1");
+        firstOptions.set(BUCKET, -1);
         Schema firstTableSchema =
                 new Schema(
                         rowType1.getFields(),
@@ -132,8 +133,8 @@ class StoreMultiCommitterTest {
                         "");
 
         Options secondOptions = new Options();
-        secondOptions.setString("bucket", "1");
-        secondOptions.setString("bucket-key", "a");
+        secondOptions.set(BUCKET, 1);
+        secondOptions.set(BUCKET_KEY, "a");
         Schema secondTableSchema =
                 new Schema(
                         rowType2.getFields(),
@@ -177,8 +178,7 @@ class StoreMultiCommitterTest {
         long timestamp = 1;
         for (CommitMessage committable : write.prepareCommit(false, 8)) {
             testHarness.processElement(
-                    getMultiTableCommittable(
-                            firstTable, new Committable(8, Committable.Kind.FILE, committable)),
+                    getMultiTableCommittable(firstTable, new Committable(8, committable)),
                     timestamp++);
         }
         // checkpoint is completed but not notified, so no snapshot is committed
@@ -218,8 +218,7 @@ class StoreMultiCommitterTest {
 
         for (CommitMessage committable : write.prepareCommit(false, 9)) {
             testHarness.processElement(
-                    getMultiTableCommittable(
-                            secondTable, new Committable(9, Committable.Kind.FILE, committable)),
+                    getMultiTableCommittable(secondTable, new Committable(9, committable)),
                     timestamp++);
         }
 
@@ -258,6 +257,7 @@ class StoreMultiCommitterTest {
     public void testCheckpointAbort() throws Exception {
         FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
         FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
+        table2 = table2.copy(Collections.singletonMap("write-only", "true"));
         OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
                 testHarness = createRecoverableTestHarness();
         testHarness.open();
@@ -278,9 +278,7 @@ class StoreMultiCommitterTest {
             write1.write(GenericRow.of(2, 20L));
             for (CommitMessage committable : write1.prepareCommit(false, cpId)) {
                 testHarness.processElement(
-                        getMultiTableCommittable(
-                                firstTable,
-                                new Committable(cpId, Committable.Kind.FILE, committable)),
+                        getMultiTableCommittable(firstTable, new Committable(cpId, committable)),
                         1);
             }
         }
@@ -307,17 +305,13 @@ class StoreMultiCommitterTest {
             write2.write(GenericRow.of(3, 40.0, BinaryString.fromString("s4")));
             for (CommitMessage committable : write1.prepareCommit(false, cpId)) {
                 testHarness.processElement(
-                        getMultiTableCommittable(
-                                firstTable,
-                                new Committable(cpId, Committable.Kind.FILE, committable)),
+                        getMultiTableCommittable(firstTable, new Committable(cpId, committable)),
                         1);
             }
 
             for (CommitMessage committable : write2.prepareCommit(false, cpId)) {
                 testHarness.processElement(
-                        getMultiTableCommittable(
-                                secondTable,
-                                new Committable(cpId, Committable.Kind.FILE, committable)),
+                        getMultiTableCommittable(secondTable, new Committable(cpId, committable)),
                         1);
             }
         }
@@ -328,7 +322,7 @@ class StoreMultiCommitterTest {
         // should create 20 snapshots in total for first table
         assertThat(snapshotManager1.latestSnapshotId()).isEqualTo(20);
         // should create 10 snapshots for second table
-        assertThat(snapshotManager2.latestSnapshotId()).isEqualTo(11);
+        assertThat(snapshotManager2.latestSnapshotId()).isEqualTo(10);
         testHarness.close();
     }
 
@@ -362,8 +356,7 @@ class StoreMultiCommitterTest {
         write1.write(GenericRow.of(2, 20L));
         for (CommitMessage committable : write1.prepareCommit(false, 1)) {
             testHarness.processElement(
-                    getMultiTableCommittable(
-                            firstTable, new Committable(1, Committable.Kind.FILE, committable)),
+                    getMultiTableCommittable(firstTable, new Committable(1, committable)),
                     timestamp++);
         }
         testHarness.snapshot(1, timestamp++);
@@ -376,14 +369,12 @@ class StoreMultiCommitterTest {
         write2.write(GenericRow.of(3, 40.0, BinaryString.fromString("s4")));
         for (CommitMessage committable : write1.prepareCommit(false, 2)) {
             testHarness.processElement(
-                    getMultiTableCommittable(
-                            firstTable, new Committable(2, Committable.Kind.FILE, committable)),
+                    getMultiTableCommittable(firstTable, new Committable(2, committable)),
                     timestamp++);
         }
         for (CommitMessage committable : write2.prepareCommit(false, 2)) {
             testHarness.processElement(
-                    getMultiTableCommittable(
-                            secondTable, new Committable(2, Committable.Kind.FILE, committable)),
+                    getMultiTableCommittable(secondTable, new Committable(2, committable)),
                     timestamp++);
         }
         OperatorSubtaskState snapshot = testHarness.snapshot(2, timestamp++);
@@ -406,14 +397,12 @@ class StoreMultiCommitterTest {
         write2.write(GenericRow.of(6, 60.0, BinaryString.fromString("s6")));
         for (CommitMessage committable : write1.prepareCommit(false, 3)) {
             testHarness.processElement(
-                    getMultiTableCommittable(
-                            firstTable, new Committable(3, Committable.Kind.FILE, committable)),
+                    getMultiTableCommittable(firstTable, new Committable(3, committable)),
                     timestamp++);
         }
         for (CommitMessage committable : write2.prepareCommit(false, 2)) {
             testHarness.processElement(
-                    getMultiTableCommittable(
-                            secondTable, new Committable(2, Committable.Kind.FILE, committable)),
+                    getMultiTableCommittable(secondTable, new Committable(2, committable)),
                     timestamp++);
         }
         testHarness.snapshot(3, timestamp);
@@ -448,11 +437,7 @@ class StoreMultiCommitterTest {
         write1.write(GenericRow.of(1, 10L));
         testHarness.processElement(
                 getMultiTableCommittable(
-                        firstTable,
-                        new Committable(
-                                cpId,
-                                Committable.Kind.FILE,
-                                write1.prepareCommit(true, cpId).get(0))),
+                        firstTable, new Committable(cpId, write1.prepareCommit(true, cpId).get(0))),
                 timestamp++);
         testHarness.processWatermark(new Watermark(1024));
         testHarness.snapshot(cpId, timestamp++);
@@ -467,11 +452,7 @@ class StoreMultiCommitterTest {
         write2.write(GenericRow.of(1, 20.0, BinaryString.fromString("s2")));
         testHarness.processElement(
                 getMultiTableCommittable(
-                        firstTable,
-                        new Committable(
-                                cpId,
-                                Committable.Kind.FILE,
-                                write1.prepareCommit(true, cpId).get(0))),
+                        firstTable, new Committable(cpId, write1.prepareCommit(true, cpId).get(0))),
                 timestamp++);
         testHarness.processWatermark(new Watermark(2048));
         testHarness.snapshot(cpId, timestamp);
@@ -506,19 +487,12 @@ class StoreMultiCommitterTest {
         write2.write(GenericRow.of(1, 20.0, BinaryString.fromString("s2")));
         testHarness.processElement(
                 getMultiTableCommittable(
-                        firstTable,
-                        new Committable(
-                                cpId,
-                                Committable.Kind.FILE,
-                                write1.prepareCommit(true, cpId).get(0))),
+                        firstTable, new Committable(cpId, write1.prepareCommit(true, cpId).get(0))),
                 timestamp++);
         testHarness.processElement(
                 getMultiTableCommittable(
                         secondTable,
-                        new Committable(
-                                cpId,
-                                Committable.Kind.FILE,
-                                write2.prepareCommit(true, cpId).get(0))),
+                        new Committable(cpId, write2.prepareCommit(true, cpId).get(0))),
                 timestamp++);
         testHarness.processWatermark(new Watermark(2048));
         testHarness.snapshot(cpId, timestamp++);
@@ -568,19 +542,12 @@ class StoreMultiCommitterTest {
         write2.compact(BinaryRow.EMPTY_ROW, 0, true);
         testHarness.processElement(
                 getMultiTableCommittable(
-                        firstTable,
-                        new Committable(
-                                cpId,
-                                Committable.Kind.FILE,
-                                write1.prepareCommit(true, cpId).get(0))),
+                        firstTable, new Committable(cpId, write1.prepareCommit(true, cpId).get(0))),
                 timestamp++);
         testHarness.processElement(
                 getMultiTableCommittable(
                         secondTable,
-                        new Committable(
-                                cpId,
-                                Committable.Kind.FILE,
-                                write2.prepareCommit(true, cpId).get(0))),
+                        new Committable(cpId, write2.prepareCommit(true, cpId).get(0))),
                 timestamp++);
         testHarness.snapshot(cpId, timestamp);
         testHarness.notifyOfCompletedCheckpoint(cpId);

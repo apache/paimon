@@ -18,13 +18,23 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.PartitionEntry;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.apache.paimon.manifest.FileKind.ADD;
 
 /** The abstract class for StartingScanner. */
 public abstract class AbstractStartingScanner implements StartingScanner {
@@ -54,8 +64,35 @@ public abstract class AbstractStartingScanner implements StartingScanner {
     public List<PartitionEntry> scanPartitions(SnapshotReader snapshotReader) {
         Result result = scan(snapshotReader);
         if (result instanceof ScannedResult) {
-            return new ArrayList<>(PartitionEntry.mergeSplits(((ScannedResult) result).splits()));
+            return mergeDataSplitsToPartitionEntries(((ScannedResult) result).splits());
         }
         return Collections.emptyList();
+    }
+
+    private static List<PartitionEntry> mergeDataSplitsToPartitionEntries(
+            Collection<Split> splits) {
+        Map<BinaryRow, PartitionEntry> partitions = new HashMap<>();
+        for (Split s : splits) {
+            if (!(s instanceof DataSplit)) {
+                throw new UnsupportedOperationException();
+            }
+            DataSplit split = (DataSplit) s;
+            BinaryRow partition = split.partition();
+            for (DataFileMeta file : split.dataFiles()) {
+                PartitionEntry partitionEntry =
+                        PartitionEntry.fromDataFile(
+                                partition,
+                                ADD,
+                                file,
+                                Optional.ofNullable(split.totalBuckets()).orElse(0));
+                partitions.compute(
+                        partition,
+                        (part, old) -> old == null ? partitionEntry : old.merge(partitionEntry));
+            }
+
+            // Ignore before files, because we don't know how to merge them
+            // Ignore deletion files, because it is costly to read from it
+        }
+        return new ArrayList<>(partitions.values());
     }
 }

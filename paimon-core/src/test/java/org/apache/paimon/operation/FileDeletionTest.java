@@ -72,7 +72,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.SNAPSHOT_CLEAN_EMPTY_DIRECTORIES;
-import static org.apache.paimon.operation.FileStoreCommitImpl.mustConflictCheck;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertNFilesExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
@@ -929,10 +928,10 @@ public class FileDeletionTest {
                     commitIdentifier++,
                     null,
                     Collections.emptyMap(),
-                    Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
+                    false,
                     store.snapshotManager().latestSnapshot(),
-                    mustConflictCheck(),
+                    true,
                     null);
         }
     }

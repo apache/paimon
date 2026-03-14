@@ -34,12 +34,12 @@
         <fs.azure.sdk.version>3.3.4</fs.azure.sdk.version>
         <fs.azure.api.version>1.16.0</fs.azure.api.version>
     </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-hadoop-shaded</artifactId>
+            <artifactId>paimon-hadoop-shaded-3.4</artifactId>
             <version>${project.version}</version>
-
         </dependency>
         <dependency>
             <groupId>org.apache.paimon</groupId>
@@ -51,7 +51,7 @@
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-azure</artifactId>
-            <version>${fs.hadoopshaded.version}</version>
+            <version>${fs.hadoopshaded-3.4.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.microsoft.azure</groupId>

@@ -20,15 +20,18 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
-import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.DataSetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.UriReader;
 
 import java.io.Serializable;
 
@@ -42,6 +45,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     private RowKind rowKind = RowKind.INSERT;
     private VectorizedColumnBatch vectorizedColumnBatch;
+    private FileIO fileIO;
     private int rowId;
 
     public ColumnarRow() {}
@@ -58,6 +62,10 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     public void setVectorizedColumnBatch(VectorizedColumnBatch vectorizedColumnBatch) {
         this.vectorizedColumnBatch = vectorizedColumnBatch;
         this.rowId = 0;
+    }
+
+    public void setFileIO(FileIO fileIO) {
+        this.fileIO = fileIO;
     }
 
     public VectorizedColumnBatch batch() {
@@ -150,7 +158,18 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(getBinary(pos));
+        byte[] bytes = getBinary(pos);
+        if (bytes == null) {
+            return null;
+        }
+        if (fileIO == null) {
+            throw new IllegalStateException("FileIO is null, cannot read blob data from uri!");
+        }
+
+        // Only blob descriptor could be able to stored in columnar format.
+        BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
+        UriReader uriReader = UriReader.fromFile(fileIO);
+        return Blob.fromDescriptor(uriReader, blobDescriptor);
     }
 
     @Override
@@ -161,6 +180,11 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     @Override
     public InternalArray getArray(int pos) {
         return vectorizedColumnBatch.getArray(rowId, pos);
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return vectorizedColumnBatch.getVector(rowId, pos);
     }
 
     @Override
@@ -233,6 +257,7 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
     public ColumnarRow copy(ColumnVector[] vectors) {
         VectorizedColumnBatch vectorizedColumnBatchCopy = vectorizedColumnBatch.copy(vectors);
         ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, rowId);
+        columnarRow.setFileIO(fileIO);
         columnarRow.setRowKind(rowKind);
         return columnarRow;
     }

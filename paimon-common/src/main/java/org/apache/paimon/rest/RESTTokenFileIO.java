@@ -25,6 +25,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -64,8 +65,8 @@ public class RESTTokenFileIO implements FileIO {
 
     private static final Cache<RESTToken, FileIO> FILE_IO_CACHE =
             Caffeine.newBuilder()
-                    .expireAfterAccess(30, TimeUnit.MINUTES)
                     .maximumSize(1000)
+                    .expireAfterAccess(10, TimeUnit.HOURS)
                     .removalListener(
                             (ignored, value, cause) -> IOUtils.closeQuietly((FileIO) value))
                     .scheduler(
@@ -110,6 +111,12 @@ public class RESTTokenFileIO implements FileIO {
     @Override
     public PositionOutputStream newOutputStream(Path path, boolean overwrite) throws IOException {
         return fileIO().newOutputStream(path, overwrite);
+    }
+
+    @Override
+    public TwoPhaseOutputStream newTwoPhaseOutputStream(Path path, boolean overwrite)
+            throws IOException {
+        return fileIO().newTwoPhaseOutputStream(path, overwrite);
     }
 
     @Override
@@ -166,10 +173,7 @@ public class RESTTokenFileIO implements FileIO {
             }
 
             Options options = catalogContext.options();
-            options =
-                    new Options(
-                            RESTTokenFileIO.mergeTokenWithDlfEndpointHandling(
-                                    options.toMap(), token.token()));
+            options = new Options(RESTUtil.merge(options.toMap(), token.token()));
             options.set(FILE_IO_ALLOW_CACHE, false);
             CatalogContext context =
                     CatalogContext.create(
@@ -222,34 +226,20 @@ public class RESTTokenFileIO implements FileIO {
                 identifier,
                 response.getExpiresAtMillis());
 
-        token = new RESTToken(response.getToken(), response.getExpiresAtMillis());
+        token =
+                new RESTToken(
+                        mergeTokenWithCatalogOptions(response.getToken()),
+                        response.getExpiresAtMillis());
     }
 
-    /**
-     * Merges token properties with catalog properties and handles DLF OSS endpoint configuration.
-     *
-     * <p>This method performs the same merge logic as {@link RESTUtil#merge(Map, Map)} but also
-     * handles the special case where the DLF OSS endpoint should override the standard OSS
-     * endpoint. When 'dlf.oss-endpoint' is present in the merged properties, it will be used to set
-     * 'fs.oss.endpoint' for OSS file system configuration.
-     *
-     * @param restTokenProperties the properties from the REST token
-     * @param catalogProperties the catalog properties to merge with
-     * @return merged properties with DLF OSS endpoint handling applied
-     */
-    public static Map<String, String> mergeTokenWithDlfEndpointHandling(
-            Map<String, String> catalogProperties, Map<String, String> restTokenProperties) {
-        // Use RESTUtil.merge for the basic merge logic
-        Map<String, String> result =
-                Maps.newLinkedHashMap(RESTUtil.merge(catalogProperties, restTokenProperties));
-
-        // Handle special case: dlf.oss-endpoint should override fs.oss.endpoint
-        String dlfOssEndpoint = result.get(DLF_OSS_ENDPOINT.key());
+    private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
+        Map<String, String> newToken = Maps.newLinkedHashMap(token);
+        // DLF OSS endpoint should override the standard OSS endpoint.
+        String dlfOssEndpoint = catalogContext.options().get(DLF_OSS_ENDPOINT.key());
         if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
-            result.put("fs.oss.endpoint", dlfOssEndpoint);
+            newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
-
-        return ImmutableMap.copyOf(result);
+        return ImmutableMap.copyOf(newToken);
     }
 
     /**

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.spark.catalyst.analysis.AssignmentAlignmentHelper
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN}
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
@@ -26,9 +25,9 @@ import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowKind
 
-import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.{Column, Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If, Literal}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, Expression, If, Literal}
 import org.apache.spark.sql.catalyst.expressions.Literal.{FalseLiteral, TrueLiteral}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
@@ -38,15 +37,12 @@ case class UpdatePaimonTableCommand(
     relation: DataSourceV2Relation,
     override val table: FileStoreTable,
     condition: Expression,
-    assignments: Seq[Assignment])
+    alignedExpressions: Seq[(Expression, Attribute)])
   extends PaimonRowLevelCommand
-  with AssignmentAlignmentHelper
   with SupportsSubquery {
 
-  private lazy val updateExpressions = {
-    generateAlignedExpressions(relation.output, assignments).zip(relation.output).map {
-      case (expr, attr) => Alias(expr, attr.name)()
-    }
+  private lazy val updateExpressions = alignedExpressions.map {
+    case (expr, attr) => Alias(expr, attr.name)()
   }
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
@@ -71,6 +67,7 @@ case class UpdatePaimonTableCommand(
 
   /** Update for table without primary keys */
   private def performUpdateForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
+    val readSnapshot = table.snapshotManager().latestSnapshot()
     // Step1: the candidate data splits which are filtered by Paimon Predicate.
     val candidateDataSplits = findCandidateDataSplits(condition, relation.output)
     val dataFilePathToMeta = candidateFileMap(candidateDataSplits)
@@ -80,8 +77,6 @@ case class UpdatePaimonTableCommand(
       logDebug("No file need to rewrote. It's an empty Commit.")
       Seq.empty[CommitMessage]
     } else {
-      val pathFactory = fileStore.pathFactory()
-
       if (deletionVectorsEnabled) {
         // Step2: collect all the deletion vectors that marks the deleted rows.
         val deletionVectors = collectDeletionVectors(
@@ -94,13 +89,12 @@ case class UpdatePaimonTableCommand(
         deletionVectors.cache()
         try {
           // Step3: write these updated data
-          val touchedDataSplits = deletionVectors.collect().map {
-            SparkDeletionVector.toDataSplit(_, root, pathFactory, dataFilePathToMeta)
-          }
+          val touchedDataSplits =
+            deletionVectors.collect().map(SparkDeletionVector.toDataSplit(_, dataFilePathToMeta))
           val addCommitMessage = writeOnlyUpdatedData(sparkSession, touchedDataSplits)
 
           // Step4: write these deletion vectors.
-          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+          val indexCommitMsg = writer.persistDeletionVectors(deletionVectors, readSnapshot)
 
           addCommitMessage ++ indexCommitMsg
         } finally {
@@ -129,40 +123,49 @@ case class UpdatePaimonTableCommand(
   private def writeOnlyUpdatedData(
       sparkSession: SparkSession,
       touchedDataSplits: Array[DataSplit]): Seq[CommitMessage] = {
-    val updateColumns = updateExpressions.zip(relation.output).map {
-      case (update, origin) =>
-        toColumn(update).as(origin.name, origin.metadata)
-    }
+    val updateColumns = getUpdateColumns(sparkSession)
 
     val toUpdateScanRelation = createNewScanPlan(touchedDataSplits, relation, Some(condition))
     val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.write(data)
+    writer.withRowTracking().write(data)
   }
 
   private def writeUpdatedAndUnchangedData(
       sparkSession: SparkSession,
       toUpdateScanRelation: LogicalPlan): Seq[CommitMessage] = {
+    val updateColumns = getUpdateColumns(sparkSession)
+
+    val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
+    writer.withRowTracking().write(data)
+  }
+
+  private def getUpdateColumns(sparkSession: SparkSession): Seq[Column] = {
     var updateColumns = updateExpressions.zip(relation.output).map {
+      case (_, origin) if origin.name == ROW_ID_COLUMN => rowIdCol
+      case (_, origin) if origin.name == SEQUENCE_NUMBER_COLUMN => sequenceNumberCol(sparkSession)
       case (update, origin) =>
         val updated = optimizedIf(condition, update, origin)
         toColumn(updated).as(origin.name, origin.metadata)
     }
 
     if (coreOptions.rowTrackingEnabled()) {
-      updateColumns ++= Seq(
-        col(ROW_ID_COLUMN),
-        toColumn(
-          optimizedIf(
-            condition,
-            Literal(null),
-            toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
-          .as(SEQUENCE_NUMBER_COLUMN)
-      )
+      val outputSet = relation.outputSet
+      if (!outputSet.exists(_.name == ROW_ID_COLUMN)) {
+        updateColumns ++= Seq(rowIdCol)
+      }
+      if (!outputSet.exists(_.name == SEQUENCE_NUMBER_COLUMN)) {
+        updateColumns ++= Seq(sequenceNumberCol(sparkSession))
+      }
     }
 
-    val data = createDataset(sparkSession, toUpdateScanRelation).select(updateColumns: _*)
-    writer.withRowTracking().write(data)
+    updateColumns
   }
+
+  private def rowIdCol = col(ROW_ID_COLUMN)
+
+  private def sequenceNumberCol(sparkSession: SparkSession) = toColumn(
+    optimizedIf(condition, Literal(null), toExpression(sparkSession, col(SEQUENCE_NUMBER_COLUMN))))
+    .as(SEQUENCE_NUMBER_COLUMN)
 
   private def optimizedIf(
       predicate: Expression,

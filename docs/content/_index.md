@@ -45,7 +45,7 @@ Paimon offers the following core capabilities:
 
 ## Try Paimon
 
-If you’re interested in playing around with Paimon, check out our
+If you're interested in playing around with Paimon, check out our
 quick start guide with [Flink]({{< ref "flink/quick-start" >}}) or [Spark]({{< ref "spark/quick-start" >}}). It provides a step by
 step introduction to the APIs and guides you through real applications.
 

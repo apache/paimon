@@ -24,13 +24,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Utility interface to extract partition keys, bucket id, primary keys for file store ({@code
- * trimmedPrimaryKey}) and primary keys for external log system ({@code logPrimaryKey}) from the
- * given record.
+ * Utility interface to extract partition keys, bucket id, primary keys.
  *
  * @param <T> type of record
  */
 public interface KeyAndBucketExtractor<T> {
+
     Logger LOG = LoggerFactory.getLogger(KeyAndBucketExtractor.class);
 
     void setRecord(T record);
@@ -40,6 +39,4 @@ public interface KeyAndBucketExtractor<T> {
     int bucket();
 
     BinaryRow trimmedPrimaryKey();
-
-    BinaryRow logPrimaryKey();
 }

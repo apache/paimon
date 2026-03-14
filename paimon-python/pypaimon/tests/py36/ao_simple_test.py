@@ -20,10 +20,13 @@ from unittest.mock import patch
 import pyarrow as pa
 
 from pypaimon import Schema
-from pypaimon.catalog.catalog_exception import TableNotExistException, TableAlreadyExistException, \
-    DatabaseNotExistException, DatabaseAlreadyExistException
-from pypaimon.common.config import OssOptions
-from pypaimon.common.file_io import FileIO
+from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
+                                                DatabaseNotExistException,
+                                                TableAlreadyExistException,
+                                                TableNotExistException)
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import OssOptions
+from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
 from pypaimon.tests.py36.pyarrow_compat import table_sort_by
 from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
@@ -84,10 +87,10 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(2, 3).plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
-            'user_id': [5, 7, 7, 8, 9, 11, 13],
-            'item_id': [1005, 1007, 1007, 1008, 1009, 1011, 1013],
-            'behavior': ['e', 'f', 'g', 'h', 'h', 'j', 'l'],
-            'dt': ['p2', 'p2', 'p2', 'p2', 'p2', 'p2', 'p2'],
+            'user_id': [5, 7, 8, 9, 11, 13],
+            'item_id': [1005, 1007, 1008, 1009, 1011, 1013],
+            'behavior': ['e', 'g', 'h', 'h', 'j', 'l'],
+            'dt': ['p2', 'p2', 'p2', 'p2', 'p2', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
@@ -144,10 +147,10 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 3, 5, 8, 12],
-            'item_id': [1001, 1002, 1003, 1005, 1008, 1012],
-            'behavior': ['a', 'b', 'c', 'd', 'g', 'k'],
-            'dt': ['p1', 'p1', 'p2', 'p2', 'p1', 'p1'],
+            'user_id': [1, 2, 3, 4, 5, 13],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1013],
+            'behavior': ['a', 'b', 'c', None, 'd', 'l'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
@@ -240,19 +243,19 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
         actual1 = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected1 = pa.Table.from_pydict({
-            'user_id': [1, 2],
-            'item_id': [1001, 1002],
-            'behavior': ['a', 'b'],
-            'dt': ['p1', 'p1'],
+            'user_id': [1, 2, 3],
+            'item_id': [1001, 1002, 1003],
+            'behavior': ['a', 'b', 'c'],
+            'dt': ['p1', 'p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual1, expected1)
 
         splits = read_builder.new_scan().with_shard(1, 3).plan().splits()
         actual2 = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected2 = pa.Table.from_pydict({
-            'user_id': [3, 4],
-            'item_id': [1003, 1004],
-            'behavior': ['c', 'd'],
+            'user_id': [4, 5],
+            'item_id': [1004, 1005],
+            'behavior': ['d', 'e'],
             'dt': ['p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual2, expected2)
@@ -260,10 +263,10 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(2, 3).plan().splits()
         actual3 = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected3 = pa.Table.from_pydict({
-            'user_id': [5, 6, 7],
-            'item_id': [1005, 1006, 1007],
-            'behavior': ['e', 'f', 'g'],
-            'dt': ['p1', 'p1', 'p1'],
+            'user_id': [6, 7],
+            'item_id': [1006, 1007],
+            'behavior': ['f', 'g'],
+            'dt': ['p1', 'p1'],
         }, schema=self.pa_schema)
         self.assertEqual(actual3, expected3)
 
@@ -325,7 +328,7 @@ class AOSimpleTest(RESTBaseTest):
         # Test first shard (0, 4) - should get 1 row (5//4 = 1)
         splits = read_builder.new_scan().with_shard(0, 4).plan().splits()
         actual = table_read.to_arrow(splits)
-        self.assertEqual(len(actual), 1)
+        self.assertEqual(len(actual), 2)
 
         # Test middle shard (1, 4) - should get 1 row
         splits = read_builder.new_scan().with_shard(1, 4).plan().splits()
@@ -335,7 +338,7 @@ class AOSimpleTest(RESTBaseTest):
         # Test last shard (3, 4) - should get 2 rows (remainder goes to last shard)
         splits = read_builder.new_scan().with_shard(3, 4).plan().splits()
         actual = table_read.to_arrow(splits)
-        self.assertEqual(len(actual), 2)
+        self.assertEqual(len(actual), 1)
 
     def test_create_drop_database_table(self):
         # test create database
@@ -377,7 +380,7 @@ class AOSimpleTest(RESTBaseTest):
         try:
             self.rest_catalog.drop_table("db1.tbl1", True)
         except TableNotExistException:
-            self.fail("drop_table with ignore_if_exists=True should not raise TableNotExistException")
+            self.fail("drop_table with ignore_if_not_exists=True should not raise TableNotExistException")
 
         # test drop database
         self.rest_catalog.drop_database("db1", False)
@@ -388,34 +391,90 @@ class AOSimpleTest(RESTBaseTest):
         try:
             self.rest_catalog.drop_database("db1", True)
         except DatabaseNotExistException:
-            self.fail("drop_database with ignore_if_exists=True should not raise DatabaseNotExistException")
+            self.fail("drop_database with ignore_if_not_exists=True should not raise DatabaseNotExistException")
 
     def test_initialize_oss_fs_pyarrow_lt_7(self):
         props = {
-            OssOptions.OSS_ACCESS_KEY_ID: "AKID",
-            OssOptions.OSS_ACCESS_KEY_SECRET: "SECRET",
-            OssOptions.OSS_SECURITY_TOKEN: "TOKEN",
-            OssOptions.OSS_REGION: "cn-hangzhou",
-            OssOptions.OSS_ENDPOINT: "oss-cn-hangzhou.aliyuncs.com",
+            OssOptions.OSS_ACCESS_KEY_ID.key(): "AKID",
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): "SECRET",
+            OssOptions.OSS_SECURITY_TOKEN.key(): "TOKEN",
+            OssOptions.OSS_REGION.key(): "cn-hangzhou",
+            OssOptions.OSS_ENDPOINT.key(): "oss-cn-hangzhou.aliyuncs.com",
         }
 
         with patch("pypaimon.common.file_io.pyarrow.__version__", "6.0.0"), \
                 patch("pyarrow.fs.S3FileSystem") as mock_s3fs:
-            FileIO("oss://oss-bucket/paimon-database/paimon-table", props)
+            PyArrowFileIO("oss://oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_once_with(access_key="AKID",
                                               secret_key="SECRET",
                                               session_token="TOKEN",
                                               region="cn-hangzhou",
-                                              endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
-            FileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", props)
+                                              endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
+            PyArrowFileIO("oss://oss-bucket.endpoint/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",
                                          region="cn-hangzhou",
-                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
-            FileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", props)
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
+            PyArrowFileIO("oss://access_id:secret_key@Endpoint/oss-bucket/paimon-database/paimon-table", Options(props))
             mock_s3fs.assert_called_with(access_key="AKID",
                                          secret_key="SECRET",
                                          session_token="TOKEN",
                                          region="cn-hangzhou",
-                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT])
+                                         endpoint_override="oss-bucket." + props[OssOptions.OSS_ENDPOINT.key()])
+
+    def test_multi_prepare_commit_ao(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.rest_catalog.create_table('default.test_append_only_parquet', schema, False)
+        table = self.rest_catalog.get_table('default.test_append_only_parquet')
+        write_builder = table.new_stream_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        # write 1
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_write.prepare_commit(0)
+        # write 2
+        data2 = {
+            'user_id': [5, 6, 7, 8],
+            'item_id': [1005, 1006, 1007, 1008],
+            'behavior': ['e', 'f', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p2', 'p2'],
+        }
+        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        table_write.prepare_commit(1)
+        # write 3
+        data3 = {
+            'user_id': [9, 10],
+            'item_id': [1009, 1010],
+            'behavior': ['i', 'j'],
+            'dt': ['p2', 'p1'],
+        }
+        pa_table = pa.Table.from_pydict(data3, schema=self.pa_schema)
+        table_write.write_arrow(pa_table)
+        cm = table_write.prepare_commit(2)
+        # commit
+        table_commit.commit(cm, 2)
+        table_write.close()
+        table_commit.close()
+        self.assertEqual(2, table_write.file_store_write.commit_identifier)
+
+        read_builder = table.new_read_builder()
+        table_read = read_builder.new_read()
+        splits = read_builder.new_scan().plan().splits()
+        actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
+        expected = pa.Table.from_pydict({
+            'user_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010],
+            'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h', 'i', 'j'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2', 'p2', 'p1']
+        }, schema=self.pa_schema)
+        self.assertEqual(expected, actual)

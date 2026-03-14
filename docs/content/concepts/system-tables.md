@@ -136,6 +136,49 @@ SELECT * FROM my_table$audit_log;
 */
 ```
 
+For primary key tables, you can enable the `table-read.sequence-number.enabled` option to include the `_SEQUENCE_NUMBER` field in the output.
+
+{{< tabs "audit-log-sequence-number" >}}
+
+{{< tab "Enable via ALTER TABLE" >}}
+```sql
+ALTER TABLE my_table SET ('table-read.sequence-number.enabled' = 'true');
+```
+{{< /tab >}}
+
+{{< tab "Enable via CREATE TABLE" >}}
+```sql
+CREATE TABLE my_table (
+    ...
+) WITH (
+    'table-read.sequence-number.enabled' = 'true'
+);
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
+```sql
+SELECT * FROM my_table$audit_log;
+
+/*
++------------------+--------------------+-----------------+-----------------+
+|     rowkind      | _SEQUENCE_NUMBER   |     column_0    |     column_1    |
++------------------+--------------------+-----------------+-----------------+
+|        +I        |                 0  |      ...        |      ...        |
++------------------+--------------------+-----------------+-----------------+
+|        -U        |                 0  |      ...        |      ...        |
++------------------+--------------------+-----------------+-----------------+
+|        +U        |                 1  |      ...        |      ...        |
++------------------+--------------------+-----------------+-----------------+
+3 rows in set
+*/
+```
+
+{{< hint info >}}
+The `table-read.sequence-number.enabled` option cannot be set via SQL hints.
+{{< /hint >}}
+
 ### Binlog Table
 
 You can query the binlog through binlog table. In the binlog system table, the update before and update after will be packed in one row.
@@ -155,6 +198,24 @@ SELECT * FROM T$binlog;
 +------------------+----------------------+-----------------------+
 |        -D        |       [col_0]        |       [col_1]         |
 +------------------+----------------------+-----------------------+
+*/
+```
+
+Similar to the audit_log table, you can also enable `table-read.sequence-number.enabled` to include `_SEQUENCE_NUMBER` in the binlog table output:
+
+```sql
+SELECT * FROM T$binlog;
+
+/*
++------------------+--------------------+----------------------+-----------------------+
+|     rowkind      | _SEQUENCE_NUMBER   |       column_0       |       column_1        |
++------------------+--------------------+----------------------+-----------------------+
+|        +I        |                 0  |       [col_0]        |       [col_1]         |
++------------------+--------------------+----------------------+-----------------------+
+|        +U        |                 1  | [col_0_ub, col_0_ua] | [col_1_ub, col_1_ua]  |
++------------------+--------------------+----------------------+-----------------------+
+|        -D        |                 2  |       [col_0]        |       [col_1]         |
++------------------+--------------------+----------------------+-----------------------+
 */
 ```
 
@@ -351,13 +412,16 @@ You can query the partition files of the table.
 SELECT * FROM my_table$partitions;
 
 /*
-+---------------+----------------+--------------------+--------------------+------------------------+
-|  partition    |   record_count |  file_size_in_bytes|          file_count|        last_update_time|
-+---------------+----------------+--------------------+--------------------+------------------------+
-|  {1}          |           1    |             645    |                1   | 2024-06-24 10:25:57.400|
-+---------------+----------------+--------------------+--------------------+------------------------+
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
+| partition | record_count | file_size_in_bytes| file_count | last_update_time    | created_at          | created_by | updated_by | options |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
+| {1}       |            1 |               645 |          1 | 2024-06-24 10:25:57 | 2024-06-24 10:20:00 | admin      | test_user  | {}      |
++-----------+--------------+-------------------+------------+---------------------+---------------------+------------+------------+---------+
 */
 ```
+
+**Note**: 
+- The `created_by`, `created_at`, `updated_by`, and `options` fields are populated from REST catalog audit information. For non-REST catalogs, these fields will be `NULL`.
 
 ### Buckets Table
 
@@ -413,7 +477,7 @@ SELECT * FROM my_table$table_indexes;
 ## Global System Table
 
 Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.
-We can display all the global system tables by sql in flink:
+We can display all the global system tables by sql in flink or spark:
 
 ```sql
 USE sys;

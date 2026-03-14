@@ -41,7 +41,7 @@ public class PostponeBucketSink extends FlinkWriteSink<InternalRow> {
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return createNoStateRowWriteOperatorFactory(table, null, writeProvider, commitUser);
+        return createNoStateRowWriteOperatorFactory(table, writeProvider, commitUser);
     }
 
     @Override

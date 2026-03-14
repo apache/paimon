@@ -20,16 +20,21 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
-/** A {@link NullFalseLeafBinaryFunction} to eval greater or equal. */
-public class GreaterOrEqual extends NullFalseLeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to eval greater or equal. */
+public class GreaterOrEqual extends LeafBinaryFunction {
+
+    public static final String NAME = "GREATER_OR_EQUAL";
 
     public static final GreaterOrEqual INSTANCE = new GreaterOrEqual();
 
+    @JsonCreator
     private GreaterOrEqual() {}
 
     @Override
@@ -51,5 +56,10 @@ public class GreaterOrEqual extends NullFalseLeafBinaryFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitGreaterOrEqual(fieldRef, literals.get(0));
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

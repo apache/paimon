@@ -50,6 +50,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 
@@ -77,61 +78,127 @@ public class PredicateBuilder {
         return leaf(Equal.INSTANCE, idx, literal);
     }
 
+    public Predicate equal(Transform transform, Object literal) {
+        return leaf(Equal.INSTANCE, transform, literal);
+    }
+
     public Predicate notEqual(int idx, Object literal) {
         return leaf(NotEqual.INSTANCE, idx, literal);
+    }
+
+    public Predicate notEqual(Transform transform, Object literal) {
+        return leaf(NotEqual.INSTANCE, transform, literal);
     }
 
     public Predicate lessThan(int idx, Object literal) {
         return leaf(LessThan.INSTANCE, idx, literal);
     }
 
+    public Predicate lessThan(Transform transform, Object literal) {
+        return leaf(LessThan.INSTANCE, transform, literal);
+    }
+
     public Predicate lessOrEqual(int idx, Object literal) {
         return leaf(LessOrEqual.INSTANCE, idx, literal);
+    }
+
+    public Predicate lessOrEqual(Transform transform, Object literal) {
+        return leaf(LessOrEqual.INSTANCE, transform, literal);
     }
 
     public Predicate greaterThan(int idx, Object literal) {
         return leaf(GreaterThan.INSTANCE, idx, literal);
     }
 
+    public Predicate greaterThan(Transform transform, Object literal) {
+        return leaf(GreaterThan.INSTANCE, transform, literal);
+    }
+
     public Predicate greaterOrEqual(int idx, Object literal) {
         return leaf(GreaterOrEqual.INSTANCE, idx, literal);
+    }
+
+    public Predicate greaterOrEqual(Transform transform, Object literal) {
+        return leaf(GreaterOrEqual.INSTANCE, transform, literal);
     }
 
     public Predicate isNull(int idx) {
         return leaf(IsNull.INSTANCE, idx);
     }
 
+    public Predicate isNull(Transform transform) {
+        return leaf(IsNull.INSTANCE, transform);
+    }
+
     public Predicate isNotNull(int idx) {
         return leaf(IsNotNull.INSTANCE, idx);
+    }
+
+    public Predicate isNotNull(Transform transform) {
+        return leaf(IsNotNull.INSTANCE, transform);
     }
 
     public Predicate startsWith(int idx, Object patternLiteral) {
         return leaf(StartsWith.INSTANCE, idx, patternLiteral);
     }
 
+    public Predicate startsWith(Transform transform, Object patternLiteral) {
+        return leaf(StartsWith.INSTANCE, transform, patternLiteral);
+    }
+
     public Predicate endsWith(int idx, Object patternLiteral) {
         return leaf(EndsWith.INSTANCE, idx, patternLiteral);
+    }
+
+    public Predicate endsWith(Transform transform, Object patternLiteral) {
+        return leaf(EndsWith.INSTANCE, transform, patternLiteral);
     }
 
     public Predicate contains(int idx, Object patternLiteral) {
         return leaf(Contains.INSTANCE, idx, patternLiteral);
     }
 
-    public Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
+    public Predicate contains(Transform transform, Object patternLiteral) {
+        return leaf(Contains.INSTANCE, transform, patternLiteral);
+    }
+
+    public Predicate like(int idx, Object patternLiteral) {
+        Pair<LeafBinaryFunction, Object> optimized =
+                LikeOptimization.tryOptimize(patternLiteral)
+                        .orElse(Pair.of(Like.INSTANCE, patternLiteral));
+        return leaf(optimized.getKey(), idx, optimized.getValue());
+    }
+
+    public Predicate like(Transform transform, Object patternLiteral) {
+        Pair<LeafBinaryFunction, Object> optimized =
+                LikeOptimization.tryOptimize(patternLiteral)
+                        .orElse(Pair.of(Like.INSTANCE, patternLiteral));
+        return leaf(optimized.getKey(), transform, optimized.getValue());
+    }
+
+    private Predicate leaf(LeafFunction function, int idx, Object literal) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));
     }
 
-    public Predicate leaf(LeafUnaryFunction function, int idx) {
+    private Predicate leaf(LeafFunction function, Transform transform, Object literal) {
+        return LeafPredicate.of(transform, function, singletonList(literal));
+    }
+
+    private Predicate leaf(LeafUnaryFunction function, int idx) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(
                 function, field.type(), idx, field.name(), Collections.emptyList());
     }
 
+    private Predicate leaf(LeafFunction function, Transform transform) {
+        return LeafPredicate.of(transform, function, Collections.emptyList());
+    }
+
     public Predicate in(int idx, List<Object> literals) {
         // In the IN predicate, 20 literals are critical for performance.
         // If there are more than 20 literals, the performance will decrease.
-        if (literals.size() > 20) {
+        if (literals.size() > 20 || literals.isEmpty()) {
             DataField field = rowType.getFields().get(idx);
             return new LeafPredicate(In.INSTANCE, field.type(), idx, field.name(), literals);
         }
@@ -143,16 +210,46 @@ public class PredicateBuilder {
         return or(equals);
     }
 
+    public Predicate in(Transform transform, List<Object> literals) {
+        // In the IN predicate, 20 literals are critical for performance.
+        // If there are more than 20 literals, the performance will decrease.
+        if (literals.size() > 20) {
+            return LeafPredicate.of(transform, In.INSTANCE, literals);
+        }
+
+        List<Predicate> equals = new ArrayList<>(literals.size());
+        for (Object literal : literals) {
+            equals.add(equal(transform, literal));
+        }
+        return or(equals);
+    }
+
     public Predicate notIn(int idx, List<Object> literals) {
         return in(idx, literals).negate().get();
     }
 
     public Predicate between(int idx, Object includedLowerBound, Object includedUpperBound) {
-        return new CompoundPredicate(
-                And.INSTANCE,
-                Arrays.asList(
-                        greaterOrEqual(idx, includedLowerBound),
-                        lessOrEqual(idx, includedUpperBound)));
+        DataField field = rowType.getFields().get(idx);
+        return new LeafPredicate(
+                Between.INSTANCE,
+                field.type(),
+                idx,
+                field.name(),
+                Arrays.asList(includedLowerBound, includedUpperBound));
+    }
+
+    public Predicate between(
+            Transform transform, Object includedLowerBound, Object includedUpperBound) {
+        return new LeafPredicate(
+                transform, Between.INSTANCE, Arrays.asList(includedLowerBound, includedUpperBound));
+    }
+
+    public Predicate alwaysFalse() {
+        return new LeafPredicate(NullTransform.INSTANCE, AlwaysFalse.INSTANCE, emptyList());
+    }
+
+    public Predicate alwaysTrue() {
+        return new LeafPredicate(NullTransform.INSTANCE, AlwaysTrue.INSTANCE, emptyList());
     }
 
     public static Predicate and(Predicate... predicates) {
@@ -166,7 +263,11 @@ public class PredicateBuilder {
         if (predicates.size() == 1) {
             return predicates.get(0);
         }
-        return predicates.stream()
+
+        // Optimize by converting LessOrEqual and GreaterOrEqual to Between for same field
+        List<Predicate> optimized = Between.optimize(predicates);
+
+        return optimized.stream()
                 .reduce((a, b) -> new CompoundPredicate(And.INSTANCE, Arrays.asList(a, b)))
                 .get();
     }
@@ -208,21 +309,6 @@ public class PredicateBuilder {
         return result;
     }
 
-    public static Pair<List<Predicate>, List<Predicate>> splitAndByPartition(
-            Predicate predicate, int[] fieldIdxToPartitionIdx) {
-        List<Predicate> partitionFilters = new ArrayList<>();
-        List<Predicate> nonPartitionFilters = new ArrayList<>();
-        for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
-            Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
-            if (mapped.isPresent()) {
-                partitionFilters.add(mapped.get());
-            } else {
-                nonPartitionFilters.add(p);
-            }
-        }
-        return Pair.of(partitionFilters, nonPartitionFilters);
-    }
-
     public static List<Predicate> splitOr(@Nullable Predicate predicate) {
         if (predicate == null) {
             return Collections.emptyList();
@@ -233,7 +319,7 @@ public class PredicateBuilder {
     }
 
     private static void splitCompound(
-            CompoundPredicate.Function function, Predicate predicate, List<Predicate> result) {
+            CompoundFunction function, Predicate predicate, List<Predicate> result) {
         if (predicate instanceof CompoundPredicate
                 && ((CompoundPredicate) predicate).function().equals(function)) {
             for (Predicate child : ((CompoundPredicate) predicate).children()) {
@@ -336,6 +422,45 @@ public class PredicateBuilder {
         }
     }
 
+    public static Object convertToJavaObject(DataType dataType, Object o) {
+        if (o == null) {
+            return null;
+        }
+        switch (dataType.getTypeRoot()) {
+            case BOOLEAN:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+                return o;
+            case CHAR:
+            case VARCHAR:
+                return o instanceof BinaryString ? o.toString() : String.valueOf(o);
+            case DATE:
+                return LocalDate.ofEpochDay(((Number) o).intValue());
+            case TIME_WITHOUT_TIME_ZONE:
+                long millisOfDay = ((Number) o).intValue();
+                return LocalTime.ofNanoOfDay(millisOfDay * 1_000_000L);
+            case DECIMAL:
+                return ((Decimal) o).toBigDecimal();
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return ((Timestamp) o).toLocalDateTime();
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                Timestamp ts = (Timestamp) o;
+                long millisecond = ts.getMillisecond();
+                int nanoOfMillisecond = ts.getNanoOfMillisecond();
+                long epochSecond = Math.floorDiv(millisecond, 1000L);
+                int milliOfSecond = (int) Math.floorMod(millisecond, 1000L);
+                long nanoAdjustment = milliOfSecond * 1_000_000L + nanoOfMillisecond;
+                return Instant.ofEpochSecond(epochSecond, nanoAdjustment);
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported type " + dataType.getTypeRoot().name());
+        }
+    }
+
     public static List<Predicate> pickTransformFieldMapping(
             List<Predicate> predicates, List<String> inputFields, List<String> pickedFields) {
         return pickTransformFieldMapping(
@@ -354,6 +479,7 @@ public class PredicateBuilder {
 
     public static Optional<Predicate> transformFieldMapping(
             Predicate predicate, int[] fieldIdxMapping) {
+        // TODO: merge PredicateProjectionConverter
         if (predicate instanceof CompoundPredicate) {
             CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
             List<Predicate> children = new ArrayList<>();
@@ -366,20 +492,26 @@ public class PredicateBuilder {
                 }
             }
             return Optional.of(new CompoundPredicate(compoundPredicate.function(), children));
-        } else {
+        } else if (predicate instanceof LeafPredicate) {
             LeafPredicate leafPredicate = (LeafPredicate) predicate;
-            int mapped = fieldIdxMapping[leafPredicate.index()];
-            if (mapped >= 0) {
-                return Optional.of(
-                        new LeafPredicate(
-                                leafPredicate.function(),
-                                leafPredicate.type(),
-                                mapped,
-                                leafPredicate.fieldName(),
-                                leafPredicate.literals()));
-            } else {
-                return Optional.empty();
+            List<Object> inputs = leafPredicate.transform().inputs();
+            List<Object> newInputs = new ArrayList<>(inputs.size());
+            for (Object input : inputs) {
+                if (input instanceof FieldRef) {
+                    FieldRef fieldRef = (FieldRef) input;
+                    int mappedIndex = fieldIdxMapping[fieldRef.index()];
+                    if (mappedIndex >= 0) {
+                        newInputs.add(new FieldRef(mappedIndex, fieldRef.name(), fieldRef.type()));
+                    } else {
+                        return Optional.empty();
+                    }
+                } else {
+                    newInputs.add(input);
+                }
             }
+            return Optional.of(leafPredicate.copyWithNewInputs(newInputs));
+        } else {
+            return Optional.empty();
         }
     }
 
@@ -393,7 +525,7 @@ public class PredicateBuilder {
             return false;
         } else {
             LeafPredicate leafPredicate = (LeafPredicate) predicate;
-            return fields.contains(leafPredicate.fieldName());
+            return fields.containsAll(leafPredicate.fieldNames());
         }
     }
 

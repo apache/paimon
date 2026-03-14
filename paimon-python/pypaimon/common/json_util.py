@@ -27,6 +27,11 @@ def json_field(json_name: str, **kwargs):
     return field(metadata={"json_name": json_name}, **kwargs)
 
 
+def optional_json_field(json_name: str, json_include: str):
+    """Create a field with custom JSON name"""
+    return field(metadata={"json_name": json_name, "json_include": json_include}, default=None)
+
+
 class JSON:
 
     @staticmethod
@@ -54,6 +59,11 @@ class JSON:
 
             # Get custom JSON name from metadata
             json_name = field_info.metadata.get("json_name", field_info.name)
+
+            # Json include
+            if field_value is None:
+                if field_info.metadata.get("json_include", None) == "non_null":
+                    continue
 
             # Handle nested objects
             if hasattr(field_value, "to_dict"):

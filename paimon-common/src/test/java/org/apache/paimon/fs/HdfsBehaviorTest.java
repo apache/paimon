@@ -28,11 +28,14 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.ObjectOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assumptions.assumeThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Behavior tests for HDFS. */
 class HdfsBehaviorTest extends FileIOBehaviorTestBase {
@@ -62,8 +65,8 @@ class HdfsBehaviorTest extends FileIOBehaviorTestBase {
         org.apache.hadoop.fs.FileSystem hdfs = hdfsCluster.getFileSystem();
 
         basePath = new Path(hdfs.getUri().toString() + "/tests");
-        fs = new HadoopFileIO();
-        fs.setFileSystem(basePath, hdfs);
+        fs = new HadoopFileIO(basePath);
+        fs.setFileSystem(hdfs);
     }
 
     @AfterAll
@@ -101,5 +104,21 @@ class HdfsBehaviorTest extends FileIOBehaviorTestBase {
     @Test
     public void testAtomicWriteMultipleThreads() throws InterruptedException {
         FileIOTest.testOverwriteFileUtf8(new Path(getBasePath(), randomName()), fs);
+    }
+
+    @Test
+    public void testIsObjectStore() {
+        assertThat(fs.isObjectStore()).isEqualTo(false);
+    }
+
+    @Test
+    public void testSerializable() {
+        assertDoesNotThrow(
+                () -> {
+                    try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            ObjectOutputStream oos = new ObjectOutputStream(baos)) {
+                        oos.writeObject(fs);
+                    }
+                });
     }
 }

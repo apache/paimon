@@ -155,7 +155,10 @@ public abstract class ManifestFileMetaTestBase {
                                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                                 null,
                                 null,
-                                false),
+                                CoreOptions.ExternalPathStrategy.NONE,
+                                null,
+                                false,
+                                null),
                         Long.MAX_VALUE,
                         null)
                 .create();

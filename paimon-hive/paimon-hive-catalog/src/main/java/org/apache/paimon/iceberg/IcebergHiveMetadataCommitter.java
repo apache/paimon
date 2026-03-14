@@ -161,7 +161,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
 
         StorageDescriptor sd = hiveTable.getSd();
         sd.setCols(
-                table.schema().fields().stream()
+                table.copyWithLatestSchema().schema().fields().stream()
                         .map(this::convertToFieldSchema)
                         .collect(Collectors.toList()));
 
@@ -234,7 +234,7 @@ public class IcebergHiveMetadataCommitter implements IcebergMetadataCommitter {
         StorageDescriptor sd = hiveTable.getSd();
         sd.setLocation(metadataPath.getParent().getParent().toString());
         sd.setCols(
-                table.schema().fields().stream()
+                table.copyWithLatestSchema().schema().fields().stream()
                         .map(this::convertToFieldSchema)
                         .collect(Collectors.toList()));
         sd.setInputFormat("org.apache.hadoop.mapred.FileInputFormat");

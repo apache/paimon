@@ -41,7 +41,7 @@ public class RemoveUnexistingFilesActionITCase extends ActionITCaseBase {
         int numFiles = 10;
         int[] numDeletes = new int[numPartitions];
         ListUnexistingFilesTest.prepareRandomlyDeletedTable(
-                warehouse, "mydb", "t", bucket, numFiles, numDeletes);
+                warehouse, "mydb", "t", bucket, numFiles, numDeletes, false);
 
         RemoveUnexistingFilesAction action =
                 createAction(

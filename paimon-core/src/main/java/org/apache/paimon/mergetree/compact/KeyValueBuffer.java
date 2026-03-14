@@ -20,6 +20,7 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.function.Supplier;
 
 /** A buffer to cache {@link KeyValue}s. */
 public interface KeyValueBuffer {
@@ -63,6 +65,12 @@ public interface KeyValueBuffer {
             this.threshold = threshold;
             this.listBuffer = new ListBuffer();
             this.lazyBinaryBuffer = lazyBinaryBuffer;
+        }
+
+        @Nullable
+        @VisibleForTesting
+        BinaryBuffer binaryBuffer() {
+            return binaryBuffer;
         }
 
         @Override
@@ -89,7 +97,9 @@ public interface KeyValueBuffer {
         private void spillToBinary() {
             BinaryBuffer binaryBuffer = lazyBinaryBuffer.get();
             try (CloseableIterator<KeyValue> iterator = listBuffer.iterator()) {
-                binaryBuffer.put(iterator.next());
+                while (iterator.hasNext()) {
+                    binaryBuffer.put(iterator.next());
+                }
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -162,20 +172,20 @@ public interface KeyValueBuffer {
             return new CloseableIterator<KeyValue>() {
 
                 private boolean hasNextWasCalled = false;
-                private boolean hasNext = false;
+                private boolean nextResult = false;
 
                 @Override
                 public boolean hasNext() {
                     if (!hasNextWasCalled) {
-                        hasNext = iterator.advanceNext();
+                        nextResult = iterator.advanceNext();
                         hasNextWasCalled = true;
                     }
-                    return hasNext;
+                    return nextResult;
                 }
 
                 @Override
                 public KeyValue next() {
-                    if (!hasNext) {
+                    if (!hasNext()) {
                         throw new NoSuchElementException();
                     }
                     hasNextWasCalled = false;
@@ -213,6 +223,17 @@ public interface KeyValueBuffer {
                                 options.writeBufferSpillDiskSize(),
                                 options.spillCompressOptions());
         return new BinaryBuffer(buffer, kvSerializer);
+    }
+
+    static HybridBuffer createHybridBuffer(
+            CoreOptions options,
+            RowType keyType,
+            RowType valueType,
+            @Nullable IOManager ioManager) {
+        Supplier<BinaryBuffer> binarySupplier =
+                () -> createBinaryBuffer(options, keyType, valueType, ioManager);
+        int threshold = options == null ? 1024 : options.lookupMergeRecordsThreshold();
+        return new HybridBuffer(threshold, new LazyField<>(binarySupplier));
     }
 
     static void insertInto(

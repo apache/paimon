@@ -24,17 +24,27 @@ import org.apache.paimon.annotation.VisibleForTesting;
 public class ScanStats {
     // the unit is milliseconds
     private final long duration;
+    private final long scannedSnapshotId;
     private final long scannedManifests;
-
     private final long skippedTableFiles;
     private final long resultedTableFiles;
 
     public ScanStats(
-            long duration, long scannedManifests, long skippedTableFiles, long resultedTableFiles) {
+            long duration,
+            long scannedSnapshotId,
+            long scannedManifests,
+            long skippedTableFiles,
+            long resultedTableFiles) {
         this.duration = duration;
+        this.scannedSnapshotId = scannedSnapshotId;
         this.scannedManifests = scannedManifests;
         this.skippedTableFiles = skippedTableFiles;
         this.resultedTableFiles = resultedTableFiles;
+    }
+
+    @VisibleForTesting
+    protected long getScannedSnapshotId() {
+        return scannedSnapshotId;
     }
 
     @VisibleForTesting

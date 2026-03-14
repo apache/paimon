@@ -28,9 +28,11 @@ import org.assertj.core.api.Assertions.assertThat
 class ExpireTagsProcedureTest extends PaimonSparkTestBase {
 
   test("Paimon procedure: expire tags that reached its timeRetained") {
+    val tagTimeExpireEnabled = scala.util.Random.nextBoolean()
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING)
                  |USING PAIMON
+                 |TBLPROPERTIES ('tag.time-expire-enabled' = '$tagTimeExpireEnabled')
                  |""".stripMargin)
 
     val table = loadTable("T")

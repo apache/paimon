@@ -28,7 +28,6 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
-import org.apache.paimon.utils.Pair;
 
 import java.io.File;
 import java.io.IOException;
@@ -84,7 +83,7 @@ abstract class AbstractLookupBenchmark {
         return keySerializer.serializeToBytes(reusedKey);
     }
 
-    protected Pair<String, LookupStoreFactory.Context> writeData(
+    protected String writeData(
             Path tempDir,
             CoreOptions options,
             byte[][] inputs,
@@ -102,9 +101,7 @@ abstract class AbstractLookupBenchmark {
                         new CacheManager(MemorySize.ofMebiBytes(10)),
                         keySerializer.createSliceComparator());
 
-        String name =
-                String.format(
-                        "%s-%s-%s", options.lookupLocalFileType(), valueLength, bloomFilterEnabled);
+        String name = String.format("%s-%s", valueLength, bloomFilterEnabled);
         File file = new File(tempDir.toFile(), UUID.randomUUID() + "-" + name);
         LookupStoreWriter writer = factory.createWriter(file, createBloomFiler(bloomFilterEnabled));
         int i = 0;
@@ -120,8 +117,8 @@ abstract class AbstractLookupBenchmark {
                 i = (i + 1) % 2;
             }
         }
-        LookupStoreFactory.Context context = writer.close();
-        return Pair.of(file.getAbsolutePath(), context);
+        writer.close();
+        return file.getAbsolutePath();
     }
 
     private BloomFilter.Builder createBloomFiler(boolean enabled) {

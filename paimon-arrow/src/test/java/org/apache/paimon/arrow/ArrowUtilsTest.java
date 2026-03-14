@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.arrow.memory.RootAllocator;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.assertj.core.api.Assertions;
@@ -107,5 +108,14 @@ public class ArrowUtilsTest {
                         .get(1)
                         .getFieldType();
         Assertions.assertThat(fieldType.isNullable()).isTrue();
+    }
+
+    @Test
+    public void testVectorType() {
+        Field field =
+                ArrowUtils.toArrowField("embed", 0, DataTypes.VECTOR(4, DataTypes.FLOAT()), 0);
+        Assertions.assertThat(field.getFieldType().getType())
+                .isEqualTo(new ArrowType.FixedSizeList(4));
+        Assertions.assertThat(field.getChildren()).hasSize(1);
     }
 }

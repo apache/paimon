@@ -145,7 +145,7 @@ public abstract class KeyValueDataFileWriter
             return null;
         }
 
-        long fileSize = outputBytes;
+        long fileSize = outputBytes();
         Pair<SimpleColStats[], SimpleColStats[]> keyValueStats =
                 fetchKeyValueStats(fieldStats(fileSize));
 

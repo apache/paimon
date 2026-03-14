@@ -18,37 +18,46 @@
 
 package org.apache.paimon.io.cache;
 
+import org.apache.paimon.fs.Path;
+
 import java.io.RandomAccessFile;
 import java.util.Objects;
 
 /** Key for cache manager. */
 public interface CacheKey {
 
-    static CacheKey forPosition(RandomAccessFile file, long position, int length, boolean isIndex) {
-        return new PositionCacheKey(file, position, length, isIndex);
+    static PositionCacheKey forPosition(Path filePath, long position, int length, boolean isIndex) {
+        return new PositionCacheKey(filePath, position, length, isIndex);
     }
 
-    static CacheKey forPageIndex(RandomAccessFile file, int pageSize, int pageIndex) {
+    static PageIndexCacheKey forPageIndex(RandomAccessFile file, int pageSize, int pageIndex) {
         return new PageIndexCacheKey(file, pageSize, pageIndex, false);
     }
 
     /** @return Whether this cache key is for index cache. */
     boolean isIndex();
 
-    /** Key for file position and length. */
+    /** Key for file position of a file path (could be remote) and length. */
     class PositionCacheKey implements CacheKey {
 
-        private final RandomAccessFile file;
+        private final Path filePath;
         private final long position;
         private final int length;
         private final boolean isIndex;
 
-        private PositionCacheKey(
-                RandomAccessFile file, long position, int length, boolean isIndex) {
-            this.file = file;
+        private PositionCacheKey(Path filePath, long position, int length, boolean isIndex) {
+            this.filePath = filePath;
             this.position = position;
             this.length = length;
             this.isIndex = isIndex;
+        }
+
+        public long position() {
+            return position;
+        }
+
+        public int length() {
+            return length;
         }
 
         @Override
@@ -63,12 +72,12 @@ public interface CacheKey {
             return position == that.position
                     && length == that.length
                     && isIndex == that.isIndex
-                    && Objects.equals(file, that.file);
+                    && Objects.equals(filePath, that.filePath);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(file, position, length, isIndex);
+            return Objects.hash(filePath, position, length, isIndex);
         }
 
         @Override

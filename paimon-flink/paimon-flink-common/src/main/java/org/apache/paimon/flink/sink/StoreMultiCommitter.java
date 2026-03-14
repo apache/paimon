@@ -28,6 +28,8 @@ import org.apache.paimon.table.sink.CommitMessage;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -56,6 +58,7 @@ public class StoreMultiCommitter
     // Currently, only compact_database job needs to ignore empty commit and set dynamic options
     private final boolean ignoreEmptyCommit;
     private final Map<String, String> dynamicOptions;
+    @Nullable private final Map<Identifier, Map<String, String>> dynamicOptionsPerTable;
 
     private final TableFilter tableFilter;
 
@@ -68,7 +71,7 @@ public class StoreMultiCommitter
             Context context,
             boolean ignoreEmptyCommit,
             Map<String, String> dynamicOptions) {
-        this(catalogLoader, context, ignoreEmptyCommit, dynamicOptions, false, null);
+        this(catalogLoader, context, ignoreEmptyCommit, dynamicOptions, null, false, null);
     }
 
     public StoreMultiCommitter(
@@ -76,12 +79,14 @@ public class StoreMultiCommitter
             Context context,
             boolean ignoreEmptyCommit,
             Map<String, String> dynamicOptions,
+            @Nullable Map<Identifier, Map<String, String>> dynamicOptionsPerTable,
             boolean eagerInit,
             TableFilter tableFilter) {
         this.catalog = catalogLoader.load();
         this.context = context;
         this.ignoreEmptyCommit = ignoreEmptyCommit;
         this.dynamicOptions = dynamicOptions;
+        this.dynamicOptionsPerTable = dynamicOptionsPerTable;
         this.tableCommitters = new HashMap<>();
 
         this.tableFilter = tableFilter;
@@ -129,20 +134,8 @@ public class StoreMultiCommitter
             ManifestCommittable manifestCommittable =
                     wrappedManifestCommittable.computeCommittableIfAbsent(
                             identifier, checkpointId, watermark);
-
-            switch (committable.kind()) {
-                case FILE:
-                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
-                    manifestCommittable.addFileCommittable(file);
-                    break;
-                case LOG_OFFSET:
-                    LogOffsetCommittable offset =
-                            (LogOffsetCommittable) committable.wrappedCommittable();
-                    StoreCommitter committer = tableCommitters.get(identifier);
-                    manifestCommittable.addLogOffset(
-                            offset.bucket(), offset.offset(), committer.allowLogOffsetDuplicate());
-                    break;
-            }
+            CommitMessage file = committable.commitMessage();
+            manifestCommittable.addFileCommittable(file);
         }
         return wrappedManifestCommittable;
     }
@@ -225,7 +218,7 @@ public class StoreMultiCommitter
         if (committer == null) {
             FileStoreTable table;
             try {
-                table = (FileStoreTable) catalog.getTable(tableId).copy(dynamicOptions);
+                table = (FileStoreTable) catalog.getTable(tableId).copy(getDynamicOptions(tableId));
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(
                         String.format(
@@ -242,6 +235,16 @@ public class StoreMultiCommitter
         }
 
         return committer;
+    }
+
+    private Map<String, String> getDynamicOptions(Identifier identifier) {
+        if (dynamicOptionsPerTable != null) {
+            Map<String, String> dynamicOptions = dynamicOptionsPerTable.get(identifier);
+            if (dynamicOptions != null) {
+                return dynamicOptions;
+            }
+        }
+        return this.dynamicOptions;
     }
 
     @Override

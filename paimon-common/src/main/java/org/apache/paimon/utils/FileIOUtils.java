@@ -382,4 +382,27 @@ public class FileIOUtils {
         } catch (Exception ignored) {
         }
     }
+
+    public static boolean isObjectStore(String scheme) {
+        if (scheme.startsWith("s3")
+                || scheme.startsWith("emr")
+                || scheme.startsWith("oss")
+                || scheme.startsWith("wasb")
+                || scheme.startsWith("abfs")
+                || scheme.startsWith("gs")
+                || scheme.startsWith("cosn")) {
+            // the Amazon S3 storage or Aliyun OSS storage or Azure Blob Storage
+            // or Google Cloud Storage
+            return true;
+        } else if (scheme.startsWith("http") || scheme.startsWith("ftp")) {
+            // file servers instead of file systems
+            // they might actually be consistent, but we have no hard guarantees
+            // currently to rely on that
+            return true;
+        } else {
+            // the remainder should include hdfs, kosmos, ceph, ...
+            // this also includes federated HDFS (viewfs).
+            return false;
+        }
+    }
 }

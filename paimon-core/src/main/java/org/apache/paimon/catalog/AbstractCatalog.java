@@ -30,6 +30,7 @@ import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -39,8 +40,8 @@ import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Instant;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableSnapshot;
-import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.system.SystemTableLoader;
+import org.apache.paimon.utils.SnapshotNotExistException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -192,6 +193,13 @@ public abstract class AbstractCatalog implements Catalog {
         return new PagedList<>(listPartitions(identifier), null);
     }
 
+    @Override
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitions)
+            throws TableNotExistException {
+        return CatalogUtils.listPartitionsFromFileSystem(getTable(identifier), partitions);
+    }
+
     protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
 
     @Override
@@ -330,6 +338,19 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public List<Table> listTableDetails(String databaseName) throws DatabaseNotExistException {
+        List<Table> result = new ArrayList<>();
+        for (String tableName : listTables(databaseName)) {
+            try {
+                result.add(getTable(Identifier.create(databaseName, tableName)));
+            } catch (TableNotExistException e) {
+                // ignore
+            }
+        }
+        return result;
+    }
+
+    @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
         checkNotBranch(identifier, "dropTable");
@@ -381,7 +402,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotBranch(identifier, "createTable");
         checkNotSystemTable(identifier, "createTable");
-        validateCreateTable(schema);
+        validateCreateTable(schema, false);
         validateCustomTablePath(schema.options());
 
         // check db exists
@@ -475,7 +496,13 @@ public abstract class AbstractCatalog implements Catalog {
                 this::loadTableMetadata,
                 lockFactory().orElse(null),
                 lockContext().orElse(null),
-                context);
+                context,
+                false);
+    }
+
+    @Override
+    public Table getTableById(String tableId) throws TableIdNotExistException {
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -496,6 +523,39 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public List<String> listBranches(Identifier identifier) throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public GetTagResponse getTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained,
+            boolean ignoreIfExists)
+            throws TableNotExistException, SnapshotNotExistException, TagAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public PagedList<String> listTagsPaged(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix)
+            throws TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void deleteTag(Identifier identifier, String tagName)
+            throws TableNotExistException, TagNotExistException {
         throw new UnsupportedOperationException();
     }
 
@@ -525,7 +585,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public void rollbackTo(Identifier identifier, Instant instant)
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot)
             throws Catalog.TableNotExistException {
         throw new UnsupportedOperationException();
     }
@@ -541,28 +601,14 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public List<String> authTableQuery(Identifier identifier, List<String> select) {
+    public boolean supportsPartitionModification() {
+        return false;
+    }
+
+    @Override
+    public TableQueryAuthResult authTableQuery(Identifier identifier, List<String> select) {
         throw new UnsupportedOperationException();
     }
-
-    @Override
-    public void createPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {}
-
-    @Override
-    public void dropPartitions(Identifier identifier, List<Map<String, String>> partitions)
-            throws TableNotExistException {
-        Table table = getTable(identifier);
-        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
-            commit.truncatePartitions(partitions);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void alterPartitions(Identifier identifier, List<PartitionStatistics> partitions)
-            throws TableNotExistException {}
 
     @Override
     public List<String> listFunctions(String databaseName) {
@@ -664,7 +710,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected List<String> listDatabasesInFileSystem(Path warehouse) throws IOException {
         List<String> databases = new ArrayList<>();
-        for (FileStatus status : fileIO.listDirectories(warehouse)) {
+        for (FileStatus status : fileIO(warehouse).listDirectories(warehouse)) {
             Path path = status.getPath();
             if (status.isDir() && path.getName().endsWith(DB_SUFFIX)) {
                 String fileName = path.getName();
@@ -676,7 +722,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected List<String> listTablesInFileSystem(Path databasePath) throws IOException {
         List<String> tables = new ArrayList<>();
-        for (FileStatus status : fileIO.listDirectories(databasePath)) {
+        for (FileStatus status : fileIO(databasePath).listDirectories(databasePath)) {
             if (status.isDir() && tableExistsInFileSystem(status.getPath(), DEFAULT_MAIN_BRANCH)) {
                 tables.add(status.getPath().getName());
             }
@@ -685,7 +731,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected boolean tableExistsInFileSystem(Path tablePath, String branchName) {
-        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath, branchName);
+        SchemaManager schemaManager = new SchemaManager(fileIO(tablePath), tablePath, branchName);
 
         // in order to improve the performance, check the schema-0 firstly.
         boolean schemaZeroExists = schemaManager.schemaExists(0);
@@ -698,7 +744,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public Optional<TableSchema> tableSchemaInFileSystem(Path tablePath, String branchName) {
-        Optional<TableSchema> schema = new SchemaManager(fileIO, tablePath, branchName).latest();
+        Optional<TableSchema> schema =
+                new SchemaManager(fileIO(tablePath), tablePath, branchName).latest();
         if (!DEFAULT_MAIN_BRANCH.equals(branchName)) {
             schema =
                     schema.map(

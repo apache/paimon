@@ -28,13 +28,14 @@ import java.util.Objects
 
 case class PaimonPartitionReaderFactory(
     readBuilder: ReadBuilder,
-    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty)
+    metadataColumns: Seq[PaimonMetadataColumn] = Seq.empty,
+    blobAsDescriptor: Boolean)
   extends PartitionReaderFactory {
 
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: PaimonInputPartition =>
-        PaimonPartitionReader(readBuilder, paimonInputPartition, metadataColumns)
+        PaimonPartitionReader(readBuilder, paimonInputPartition, metadataColumns, blobAsDescriptor)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }

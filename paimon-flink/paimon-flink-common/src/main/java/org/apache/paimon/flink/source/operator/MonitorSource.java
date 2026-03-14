@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
@@ -130,6 +131,7 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
                                         Long.parseLong(x.split(":")[0]),
                                         Long.parseLong(x.split(":")[1])));
         private final TreeMap<Long, Long> nextSnapshotPerCheckpoint = new TreeMap<>();
+        private CompletableFuture<Void> availableFuture = CompletableFuture.completedFuture(null);
 
         @Override
         public void notifyCheckpointComplete(long checkpointId) {
@@ -186,6 +188,11 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
         }
 
         @Override
+        public CompletableFuture<Void> isAvailable() {
+            return availableFuture;
+        }
+
+        @Override
         public InputStatus pollNext(ReaderOutput<Split> readerOutput) throws Exception {
             boolean isEmpty;
             try {
@@ -209,7 +216,15 @@ public class MonitorSource extends AbstractNonCoordinatedSource<Split> {
             }
 
             if (isEmpty) {
-                Thread.sleep(monitorInterval);
+                availableFuture =
+                        CompletableFuture.runAsync(
+                                () -> {
+                                    try {
+                                        Thread.sleep(monitorInterval);
+                                    } catch (InterruptedException ignored) {
+                                    }
+                                });
+                return InputStatus.NOTHING_AVAILABLE;
             }
             return InputStatus.MORE_AVAILABLE;
         }

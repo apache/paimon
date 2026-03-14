@@ -22,7 +22,8 @@ import org.apache.paimon.fs.Path
 import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.{AnalysisException, Row, SparkSession}
+import org.apache.spark.SparkConf
+import org.apache.spark.sql.{AnalysisException, Row}
 import org.junit.jupiter.api.Assertions
 
 abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
@@ -281,48 +282,6 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
               }
           }
         }
-    }
-  }
-
-  test("Paimon DDL with hive catalog: set default database") {
-    if (!gteqSpark4_0) {
-      // TODO: This is skipped in Spark 4.0, because it would fail in afterAll method, not because the default database is not supported.
-
-      var reusedSpark = spark
-
-      Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
-        catalogName =>
-          {
-            val dbName = s"${catalogName}_default_db"
-            val tblName = s"${dbName}_tbl"
-
-            reusedSpark.sql(s"use $catalogName")
-            reusedSpark.sql(s"create database $dbName")
-            reusedSpark.sql(s"use $dbName")
-            reusedSpark.sql(s"create table $tblName (id int, name string, dt string) using paimon")
-            reusedSpark.stop()
-
-            reusedSpark = SparkSession
-              .builder()
-              .master("local[2]")
-              .config(sparkConf)
-              .config("spark.sql.defaultCatalog", catalogName)
-              .config(s"spark.sql.catalog.$catalogName.defaultDatabase", dbName)
-              .getOrCreate()
-
-            if (catalogName.equals(sparkCatalogName) && !gteqSpark3_4) {
-              checkAnswer(reusedSpark.sql("show tables").select("tableName"), Nil)
-              reusedSpark.sql(s"use $dbName")
-            }
-            checkAnswer(reusedSpark.sql("show tables").select("tableName"), Row(tblName) :: Nil)
-
-            reusedSpark.sql(s"drop table $tblName")
-          }
-      }
-
-      // Since we created a new sparkContext, we need to stop it and reset the default sparkContext
-      reusedSpark.stop()
-      reset()
     }
   }
 
@@ -861,5 +820,42 @@ abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
   def getActualTableLocation(dbName: String, tblName: String): String = {
     loadTable(dbName, tblName).location().toString.split(':').apply(1)
+  }
+}
+
+abstract class DefaultDatabaseTestBase extends PaimonHiveTestBase {
+
+  def databaseName(catalogName: String) = s"${catalogName}_test_default_db"
+
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf
+      .set(s"spark.sql.catalog.paimon.defaultDatabase", databaseName("paimon"))
+      .set(s"spark.sql.catalog.$sparkCatalogName.defaultDatabase", databaseName(sparkCatalogName))
+      .set(
+        s"spark.sql.catalog.$paimonHiveCatalogName.defaultDatabase",
+        databaseName(paimonHiveCatalogName))
+  }
+
+  test("Paimon DDL with hive catalog: set default database") {
+    Seq("paimon", sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        val dbName = databaseName(catalogName)
+        val tblName = s"${dbName}_tbl"
+
+        sql(s"USE $catalogName")
+        sql(s"CREATE DATABASE IF NOT EXISTS default")
+        sql(s"CREATE DATABASE IF NOT EXISTS $dbName")
+        sql(s"CREATE TABLE $dbName.$tblName (id INT) USING paimon")
+
+        // spark_catalog support default database since spark 3.4
+        if (catalogName.equals(sparkCatalogName) && !gteqSpark3_4) {
+          checkAnswer(sql("SHOW TABLES").select("tableName"), Seq())
+          sql(s"USE $dbName")
+        }
+        checkAnswer(sql("SHOW TABLES").select("tableName"), Seq(Row(tblName)))
+
+        sql(s"DROP TABLE $tblName")
+        sql("USE default")
+    }
   }
 }

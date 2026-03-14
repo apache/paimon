@@ -29,6 +29,7 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
@@ -213,6 +214,19 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
                         (writer, pos, value) ->
                                 writer.writeTimestamp((Timestamp) value, timestampPrecision);
                 break;
+            case VARIANT:
+                fieldWriter =
+                        (writer, pos, value) -> {
+                            Variant variant = (Variant) value;
+                            byte[] bytes;
+                            try {
+                                bytes = VariantSerializer.INSTANCE.serializeToBytes(variant);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            writer.writeBinary(bytes);
+                        };
+                break;
             case ARRAY:
                 Serializer<InternalArray> arraySerializer = InternalSerializers.create(fieldType);
                 fieldWriter =
@@ -300,6 +314,17 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 final int timestampPrecision = getPrecision(fieldType);
                 fieldReader = (reader, pos) -> reader.readTimestamp(timestampPrecision);
+                break;
+            case VARIANT:
+                fieldReader =
+                        (reader, pos) -> {
+                            byte[] bytes = reader.readBinary();
+                            try {
+                                return VariantSerializer.INSTANCE.deserializeFromBytes(bytes);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        };
                 break;
             case ARRAY:
                 fieldReader = (reader, pos) -> reader.readArray();

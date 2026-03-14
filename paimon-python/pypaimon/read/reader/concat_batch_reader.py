@@ -19,15 +19,19 @@
 import collections
 from typing import Callable, List, Optional
 
+import pyarrow as pa
+import pyarrow.dataset as ds
 from pyarrow import RecordBatch
 
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+
+_MIN_BATCH_SIZE_TO_REFILL = 1024
 
 
 class ConcatBatchReader(RecordBatchReader):
 
     def __init__(self, reader_suppliers: List[Callable]):
-        self.queue = collections.deque(reader_suppliers)
+        self.queue: collections.deque[Callable] = collections.deque(reader_suppliers)
         self.current_reader: Optional[RecordBatchReader] = None
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
@@ -51,28 +55,174 @@ class ConcatBatchReader(RecordBatchReader):
         self.queue.clear()
 
 
-class ShardBatchReader(ConcatBatchReader):
+class MergeAllBatchReader(RecordBatchReader):
+    """
+    A reader that accepts multiple reader suppliers and concatenates all their arrow batches
+    into one big batch. This is useful when you want to merge all data from multiple sources
+    into a single batch for processing.
+    """
 
-    def __init__(self, readers, split_start_row, split_end_row):
-        super().__init__(readers)
-        self.split_start_row = split_start_row
-        self.split_end_row = split_end_row
-        self.cur_end = 0
+    def __init__(self, reader_suppliers: List[Callable], batch_size: int = 1024):
+        self.reader_suppliers = reader_suppliers
+        self.merged_batch: Optional[RecordBatch] = None
+        self.reader = None
+        self._batch_size = batch_size
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
-        batch = super().read_arrow_batch()
-        if batch is None:
-            return None
-        if self.split_start_row is not None or self.split_end_row is not None:
-            cur_begin = self.cur_end  # begin idx of current batch based on the split
-            self.cur_end += batch.num_rows
-            # shard the first batch and the last batch
-            if self.split_start_row <= cur_begin < self.cur_end <= self.split_end_row:
-                return batch
-            elif cur_begin <= self.split_start_row < self.cur_end:
-                return batch.slice(self.split_start_row - cur_begin,
-                                   min(self.split_end_row, self.cur_end) - self.split_start_row)
-            elif cur_begin < self.split_end_row <= self.cur_end:
-                return batch.slice(0, self.split_end_row - cur_begin)
+        if self.reader:
+            try:
+                return self.reader.read_next_batch()
+            except StopIteration:
+                return None
+
+        all_batches = []
+
+        # Read all batches from all reader suppliers
+        for supplier in self.reader_suppliers:
+            reader = supplier()
+            if reader is None:
+                continue
+            try:
+                while True:
+                    batch = reader.read_arrow_batch()
+                    if batch is None:
+                        break
+                    all_batches.append(batch)
+            finally:
+                reader.close()
+
+        # Concatenate all batches into one big batch
+        if all_batches:
+            # For PyArrow < 17.0.0, use Table.concat_tables approach
+            # Convert batches to tables and concatenate
+            tables = [pa.Table.from_batches([batch]) for batch in all_batches]
+            if len(tables) == 1:
+                # Single table, just get the first batch
+                self.merged_batch = tables[0].to_batches()[0]
+            else:
+                # Multiple tables, concatenate them
+                concatenated_table = pa.concat_tables(tables)
+                # Convert back to a single batch by taking all batches and combining
+                all_concatenated_batches = concatenated_table.to_batches()
+                if len(all_concatenated_batches) == 1:
+                    self.merged_batch = all_concatenated_batches[0]
+                else:
+                    # If still multiple batches, we need to manually combine them
+                    # This shouldn't happen with concat_tables, but just in case
+                    combined_arrays = []
+                    for i in range(len(all_concatenated_batches[0].columns)):
+                        column_arrays = [batch.column(i) for batch in all_concatenated_batches]
+                        combined_arrays.append(pa.concat_arrays(column_arrays))
+                    self.merged_batch = pa.RecordBatch.from_arrays(
+                        combined_arrays,
+                        schema=all_concatenated_batches[0].schema
+                    )
         else:
-            return batch
+            self.merged_batch = None
+        dataset = ds.InMemoryDataset(self.merged_batch)
+        self.reader = dataset.scanner(batch_size=self._batch_size).to_reader()
+        return self.reader.read_next_batch()
+
+    def close(self) -> None:
+        self.merged_batch = None
+        self.reader = None
+
+
+class DataEvolutionMergeReader(RecordBatchReader):
+    """
+    This is a union reader which contains multiple inner readers, Each reader is responsible for reading one file.
+
+    This reader, assembling multiple reader into one big and great reader, will merge the batches from all readers.
+
+    For example, if rowOffsets is {0, 2, 0, 1, 2, 1} and fieldOffsets is {0, 0, 1, 1, 1, 0}, it means:
+     - The first field comes from batch0, and it is at offset 0 in batch0.
+     - The second field comes from batch2, and it is at offset 0 in batch2.
+     - The third field comes from batch0, and it is at offset 1 in batch0.
+     - The fourth field comes from batch1, and it is at offset 1 in batch1.
+     - The fifth field comes from batch2, and it is at offset 1 in batch2.
+     - The sixth field comes from batch1, and it is at offset 0 in batch1.
+    """
+
+    def __init__(
+        self,
+        row_offsets: List[int],
+        field_offsets: List[int],
+        readers: List[Optional[RecordBatchReader]],
+        schema: pa.Schema,
+    ):
+        if row_offsets is None:
+            raise ValueError("Row offsets must not be null")
+        if field_offsets is None:
+            raise ValueError("Field offsets must not be null")
+        if len(row_offsets) != len(field_offsets):
+            raise ValueError("Row offsets and field offsets must have the same length")
+        if not row_offsets:
+            raise ValueError("Row offsets must not be empty")
+        if not readers or len(readers) < 1:
+            raise ValueError("Readers should be more than 0")
+        self.row_offsets = row_offsets
+        self.field_offsets = field_offsets
+        self.readers = readers
+        self.schema = schema
+        self._buffers: List[Optional[RecordBatch]] = [None] * len(readers)
+
+    def read_arrow_batch(self) -> Optional[RecordBatch]:
+        batches: List[Optional[RecordBatch]] = [None] * len(self.readers)
+        for i, reader in enumerate(self.readers):
+            if reader is not None:
+                if self._buffers[i] is not None:
+                    remainder = self._buffers[i]
+                    self._buffers[i] = None
+                    if remainder.num_rows >= _MIN_BATCH_SIZE_TO_REFILL:
+                        batches[i] = remainder
+                    else:
+                        new_batch = reader.read_arrow_batch()
+                        if new_batch is not None and new_batch.num_rows > 0:
+                            combined_arrays = [
+                                pa.concat_arrays([remainder.column(j), new_batch.column(j)])
+                                for j in range(remainder.num_columns)
+                            ]
+                            batches[i] = pa.RecordBatch.from_arrays(
+                                combined_arrays, schema=remainder.schema
+                            )
+                        else:
+                            batches[i] = remainder
+                else:
+                    batch = reader.read_arrow_batch()
+                    if batch is None:
+                        batches[i] = None
+                    else:
+                        batches[i] = batch
+            else:
+                batches[i] = None
+
+        if not any(b is not None for b in batches):
+            return None
+
+        min_rows = min(b.num_rows for b in batches if b is not None)
+        if min_rows == 0:
+            return None
+
+        columns = []
+        for i in range(len(self.row_offsets)):
+            batch_index = self.row_offsets[i]
+            field_index = self.field_offsets[i]
+            if batch_index >= 0 and batches[batch_index] is not None:
+                columns.append(batches[batch_index].column(field_index).slice(0, min_rows))
+            else:
+                columns.append(pa.nulls(min_rows, type=self.schema.field(i).type))
+
+        for i in range(len(self.readers)):
+            if batches[i] is not None and batches[i].num_rows > min_rows:
+                self._buffers[i] = batches[i].slice(min_rows, batches[i].num_rows - min_rows)
+
+        return pa.RecordBatch.from_arrays(columns, schema=self.schema)
+
+    def close(self) -> None:
+        try:
+            self._buffers = [None] * len(self.readers)
+            for reader in self.readers:
+                if reader is not None:
+                    reader.close()
+        except Exception as e:
+            raise IOError("Failed to close inner readers") from e

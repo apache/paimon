@@ -18,9 +18,11 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
@@ -29,12 +31,15 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.TypeUtils.castFromString;
 
 /** Utils for file system. */
 public class PartitionPathUtils {
@@ -272,36 +277,98 @@ public class PartitionPathUtils {
             FileIO fileIO,
             Path path,
             int partitionNumber,
-            @Nullable List<String> partitionKeys,
-            boolean enablePartitionOnlyValueInPath) {
-        FileStatus[] generatedParts = getFileStatusRecurse(path, partitionNumber, fileIO);
+            List<String> partitionKeys,
+            boolean onlyValueInPath) {
+        return searchPartSpecAndPaths(
+                fileIO,
+                path,
+                partitionNumber,
+                partitionKeys,
+                onlyValueInPath,
+                Collections.emptyMap(),
+                null,
+                null);
+    }
+
+    public static List<Pair<LinkedHashMap<String, String>, Path>> searchPartSpecAndPaths(
+            FileIO fileIO,
+            Path path,
+            int partitionNumber,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            Map<String, Predicate> partitionFilter,
+            @Nullable RowType partitionType,
+            @Nullable String defaultPartValue) {
+        FileStatus[] generatedParts =
+                getFileStatusRecurse(
+                        path,
+                        partitionNumber,
+                        fileIO,
+                        partitionKeys,
+                        onlyValueInPath,
+                        partitionFilter,
+                        partitionType,
+                        defaultPartValue);
         List<Pair<LinkedHashMap<String, String>, Path>> ret = new ArrayList<>();
         for (FileStatus part : generatedParts) {
             // ignore hidden file
             if (isHiddenFile(part)) {
                 continue;
             }
-            if (enablePartitionOnlyValueInPath && partitionKeys != null) {
+            if (onlyValueInPath) {
                 ret.add(
                         Pair.of(
                                 extractPartitionSpecFromPathOnlyValue(
                                         part.getPath(), partitionKeys),
                                 part.getPath()));
             } else {
-                ret.add(Pair.of(extractPartitionSpecFromPath(part.getPath()), part.getPath()));
+                LinkedHashMap<String, String> spec = extractPartitionSpecFromPath(part.getPath());
+                if (spec.size() != partitionKeys.size()) {
+                    // illegal path, for example: /path/to/table/tmp/unknown, path without "="
+                    continue;
+                }
+                ret.add(Pair.of(spec, part.getPath()));
             }
         }
         return ret;
     }
 
-    private static FileStatus[] getFileStatusRecurse(Path path, int expectLevel, FileIO fileIO) {
+    private static FileStatus[] getFileStatusRecurse(
+            Path path,
+            int expectLevel,
+            FileIO fileIO,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            Map<String, Predicate> partitionFilter,
+            @Nullable RowType partitionType,
+            @Nullable String defaultPartValue) {
         ArrayList<FileStatus> result = new ArrayList<>();
 
         try {
-            FileStatus fileStatus = fileIO.getFileStatus(path);
-            listStatusRecursively(fileIO, fileStatus, 0, expectLevel, result);
-        } catch (IOException ignore) {
-            return new FileStatus[0];
+            if (fileIO.exists(path)) {
+                // ignore hidden file
+                FileStatus fileStatus = fileIO.getFileStatus(path);
+                // Calculate the starting offset when we begin from a prefix path
+                // For example, if partitionKeys = [ds, hr] and expectLevel = 1 (only hr remaining),
+                // then levelOffset = 2 - 1 = 1, so we access partitionKeys[1] for level 0
+                int levelOffset = partitionKeys.size() - expectLevel;
+                listStatusRecursively(
+                        fileIO,
+                        fileStatus,
+                        0,
+                        expectLevel,
+                        result,
+                        partitionKeys,
+                        onlyValueInPath,
+                        partitionFilter,
+                        partitionType,
+                        defaultPartValue,
+                        levelOffset);
+            } else {
+                return new FileStatus[0];
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list files in " + path, e);
         }
 
         return result.toArray(new FileStatus[0]);
@@ -312,8 +379,18 @@ public class PartitionPathUtils {
             FileStatus fileStatus,
             int level,
             int expectLevel,
-            List<FileStatus> results)
+            List<FileStatus> results,
+            List<String> partitionKeys,
+            boolean onlyValueInPath,
+            Map<String, Predicate> partitionFilter,
+            @Nullable RowType partitionType,
+            @Nullable String defaultPartValue,
+            int levelOffset)
             throws IOException {
+        if (isHiddenFile(fileStatus.getPath())) {
+            return;
+        }
+
         if (expectLevel == level) {
             results.add(fileStatus);
             return;
@@ -321,13 +398,94 @@ public class PartitionPathUtils {
 
         if (fileStatus.isDir()) {
             for (FileStatus stat : fileIO.listStatus(fileStatus.getPath())) {
-                listStatusRecursively(fileIO, stat, level + 1, expectLevel, results);
+                // Calculate the actual partition key index considering the level offset
+                // When starting from a prefix path, levelOffset accounts for already-traversed
+                // levels
+                int partitionKeyIndex = levelOffset + level;
+
+                // Apply partition filter if available
+                if (partitionFilter.containsKey(partitionKeys.get(partitionKeyIndex))
+                        && partitionType != null) {
+
+                    Predicate partitionPredicate =
+                            partitionFilter.get(partitionKeys.get(partitionKeyIndex));
+                    // Extract the partition value from the directory name
+                    String dirName = stat.getPath().getName();
+                    String partitionKey = partitionKeys.get(partitionKeyIndex);
+                    String partitionValue;
+
+                    if (onlyValueInPath) {
+                        partitionValue = unescapePathName(dirName);
+                    } else {
+                        // Parse key=value format
+                        Matcher m = PARTITION_NAME_PATTERN.matcher(dirName);
+                        if (m.matches()) {
+                            String key = unescapePathName(m.group(1));
+                            if (!key.equals(partitionKey)) {
+                                // Key doesn't match expected partition key, skip filtering
+                                partitionValue = null;
+                            } else {
+                                partitionValue = unescapePathName(m.group(2));
+                            }
+                        } else {
+                            // Not a valid partition directory format
+                            partitionValue = null;
+                        }
+                    }
+
+                    if (partitionValue != null) {
+                        // Convert the partition value to internal format
+                        Object internalValue =
+                                defaultPartValue != null && defaultPartValue.equals(partitionValue)
+                                        ? null
+                                        : castFromString(
+                                                partitionValue,
+                                                partitionType.getTypeAt(partitionKeyIndex));
+
+                        GenericRow partialRow = GenericRow.of(internalValue);
+                        if (!partitionPredicate.test(partialRow)) {
+                            continue;
+                        }
+
+                        // Pass the accumulated values to the next level
+                        listStatusRecursively(
+                                fileIO,
+                                stat,
+                                level + 1,
+                                expectLevel,
+                                results,
+                                partitionKeys,
+                                onlyValueInPath,
+                                partitionFilter,
+                                partitionType,
+                                defaultPartValue,
+                                levelOffset);
+                        continue;
+                    }
+                }
+
+                listStatusRecursively(
+                        fileIO,
+                        stat,
+                        level + 1,
+                        expectLevel,
+                        results,
+                        partitionKeys,
+                        onlyValueInPath,
+                        partitionFilter,
+                        partitionType,
+                        defaultPartValue,
+                        levelOffset);
             }
         }
     }
 
     private static boolean isHiddenFile(FileStatus fileStatus) {
-        String name = fileStatus.getPath().getName();
+        return isHiddenFile(fileStatus.getPath());
+    }
+
+    private static boolean isHiddenFile(Path path) {
+        String name = path.getName();
         return name.startsWith("_") || name.startsWith(".");
     }
 }

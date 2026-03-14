@@ -32,7 +32,6 @@ import org.apache.paimon.mergetree.localmerge.HashMapLocalMerger;
 import org.apache.paimon.mergetree.localmerge.LocalMerger;
 import org.apache.paimon.mergetree.localmerge.SortBufferLocalMerger;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.RowKindGenerator;
@@ -60,8 +59,6 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import javax.annotation.Nullable;
 
 import java.util.List;
-
-import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 
 /**
  * {@link AbstractStreamOperator} which buffer input record and apply merge function when the buffer
@@ -106,24 +103,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
         rowKindGenerator = RowKindGenerator.create(schema, options);
         MergeFunction<KeyValue> mergeFunction =
-                PrimaryKeyTableUtils.createMergeFunctionFactory(
-                                schema,
-                                new KeyValueFieldsExtractor() {
-                                    private static final long serialVersionUID = 1L;
-
-                                    // At local merge operator, the key extractor should include
-                                    // partition fields.
-                                    @Override
-                                    public List<DataField> keyFields(TableSchema schema) {
-                                        return addKeyNamePrefix(schema.primaryKeysFields());
-                                    }
-
-                                    @Override
-                                    public List<DataField> valueFields(TableSchema schema) {
-                                        return schema.fields();
-                                    }
-                                })
-                        .create();
+                PrimaryKeyTableUtils.createMergeFunctionFactory(schema).create();
 
         boolean canHashMerger = true;
         for (DataField field : valueType.getFields()) {

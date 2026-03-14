@@ -192,8 +192,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
             write.write(row);
         }
         for (CommitMessage committable : write.prepareCommit(false, checkpointId)) {
-            testHarness.processElement(
-                    new Committable(checkpointId, Committable.Kind.FILE, committable), timestamp);
+            testHarness.processElement(new Committable(checkpointId, committable), timestamp);
         }
     }
 

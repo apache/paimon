@@ -89,18 +89,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             ManifestCommittable manifestCommittable,
             List<Committable> committables) {
         for (Committable committable : committables) {
-            switch (committable.kind()) {
-                case FILE:
-                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
-                    manifestCommittable.addFileCommittable(file);
-                    break;
-                case LOG_OFFSET:
-                    LogOffsetCommittable offset =
-                            (LogOffsetCommittable) committable.wrappedCommittable();
-                    manifestCommittable.addLogOffset(
-                            offset.bucket(), offset.offset(), allowLogOffsetDuplicate);
-                    break;
-            }
+            CommitMessage file = committable.commitMessage();
+            manifestCommittable.addFileCommittable(file);
         }
         return manifestCommittable;
     }

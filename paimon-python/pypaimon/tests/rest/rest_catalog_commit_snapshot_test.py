@@ -22,8 +22,11 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
+import pyarrow as pa
+
+from pypaimon import Schema
 from pypaimon.api.api_response import CommitTableResponse
-from pypaimon.api.options import Options
+from pypaimon.common.options import Options
 from pypaimon.api.rest_exception import NoSuchResourceException
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_exception import TableNotExistException
@@ -31,6 +34,7 @@ from pypaimon.catalog.rest.rest_catalog import RESTCatalog
 from pypaimon.common.identifier import Identifier
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.tests.rest.rest_base_test import RESTBaseTest
 
 
 class TestRESTCatalogCommitSnapshot(unittest.TestCase):
@@ -57,11 +61,12 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
             schema_id=0,
             base_manifest_list="manifest-list-1",
             delta_manifest_list="manifest-list-1",
+            total_record_count=1,
+            delta_record_count=1,
             commit_user="test_user",
             commit_identifier=12345,
             commit_kind="APPEND",
-            time_millis=int(time.time() * 1000),
-            log_offsets={}
+            time_millis=int(time.time() * 1000)
         )
 
         # Create test statistics
@@ -164,13 +169,13 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
         from pypaimon.api.api_request import CommitTableRequest
 
         request = CommitTableRequest(
-            table_uuid="test-uuid",
+            table_id="test-uuid",
             snapshot=self.test_snapshot,
             statistics=self.test_statistics
         )
 
         # Verify request fields
-        self.assertEqual(request.table_uuid, "test-uuid")
+        self.assertEqual(request.table_id, "test-uuid")
         self.assertEqual(request.snapshot, self.test_snapshot)
         self.assertEqual(request.statistics, self.test_statistics)
 
@@ -215,6 +220,122 @@ class TestRESTCatalogCommitSnapshot(unittest.TestCase):
 
                 # Verify client was called correctly
                 mock_client.post_with_response_type.assert_called_once()
+
+    def test_rest_catalog_commit_snapshot_with_lance_format(self):
+        """Test snapshot commit with Lance format table."""
+        from pypaimon import Schema
+        import pyarrow as pa
+        import tempfile
+        import shutil
+        from pypaimon.api.api_response import ConfigResponse
+        from pypaimon.api.auth import BearTokenAuthProvider
+        from pypaimon.tests.rest.rest_server import RESTCatalogServer
+        import uuid
+
+        temp_dir = tempfile.mkdtemp(prefix="rest_lance_test_")
+        try:
+            config = ConfigResponse(defaults={"prefix": "mock-test"})
+            token = str(uuid.uuid4())
+            server = RESTCatalogServer(
+                data_path=temp_dir,
+                auth_provider=BearTokenAuthProvider(token),
+                config=config,
+                warehouse="warehouse"
+            )
+            server.start()
+
+            options = {
+                'metastore': 'rest',
+                'uri': f"http://localhost:{server.port}",
+                'warehouse': "warehouse",
+                'dlf.region': 'cn-hangzhou',
+                "token.provider": "bear",
+                'token': token,
+            }
+            catalog = RESTCatalog(CatalogContext.create_from_options(Options(options)))
+            catalog.create_database("default", False)
+
+            # Create table with Lance format
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string())
+            ])
+            schema = Schema.from_pyarrow_schema(
+                pa_schema,
+                options={'file.format': 'lance'}
+            )
+            identifier = Identifier.create("default", "test_lance_table")
+            catalog.create_table(identifier, schema, False)
+
+            # Write data and commit
+            table = catalog.get_table(identifier)
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+
+            data = pa.Table.from_pydict({
+                'id': [1, 2, 3],
+                'name': ['a', 'b', 'c']
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            commit_messages = table_write.prepare_commit()
+            table_commit.commit(commit_messages)
+            table_write.close()
+            table_commit.close()
+
+            # Verify commit was successful by reading the data back
+            read_builder = table.new_read_builder()
+            table_read = read_builder.new_read()
+            splits = read_builder.new_scan().plan().splits()
+            actual = table_read.to_arrow(splits)
+            self.assertEqual(actual.num_rows, 3)
+            self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+            self.assertEqual(actual.column('name').to_pylist(), ['a', 'b', 'c'])
+        finally:
+            server.shutdown()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestRESTCommit(RESTBaseTest):
+
+    def test_commit_succeeded_on_server_but_client_fails(self):
+        pa_schema = pa.schema([('id', pa.int32()), ('name', pa.string())])
+        opts = {
+            'bucket': '1',
+            'file.format': 'parquet',
+            'commit.max-retries': '0',
+            'commit.timeout': '1000',
+        }
+        schema = Schema.from_pyarrow_schema(
+            pa_schema, partition_keys=['id'], options=opts)
+        self.rest_catalog.create_table('default.test_abort_bug', schema, False)
+        table = self.rest_catalog.get_table('default.test_abort_bug')
+
+        tw = table.new_batch_write_builder().new_write()
+        tc = table.new_batch_write_builder().new_commit()
+        data = pa.Table.from_pydict(
+            {'id': [1, 2, 3], 'name': ['a', 'b', 'c']}, schema=pa_schema)
+        tw.write_arrow(data)
+        cm = tw.prepare_commit()
+
+        real_commit = tc.file_store_commit.snapshot_commit.commit
+
+        def commit_then_raise(sn, br, st):
+            real_commit(sn, br, st)
+            raise RuntimeError("simulated")
+
+        with patch.object(tc.file_store_commit.snapshot_commit, 'commit', side_effect=commit_then_raise):
+            with self.assertRaises(RuntimeError):
+                tc.commit(cm)
+        tw.close()
+        tc.close()
+
+        # We no longer abort on failure. Data was committed on server.
+        rb = table.new_read_builder()
+        actual = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(actual.num_rows, 3)
+        self.assertEqual(actual.column('id').to_pylist(), [1, 2, 3])
+        self.assertEqual(actual.column('name').to_pylist(), ['a', 'b', 'c'])
 
 
 if __name__ == '__main__':

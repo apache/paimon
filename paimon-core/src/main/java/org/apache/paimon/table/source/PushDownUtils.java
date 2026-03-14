@@ -55,16 +55,21 @@ public class PushDownUtils {
                 || type instanceof DateType;
     }
 
-    public static boolean minmaxAvailable(DataSplit split, Set<String> columns) {
+    public static boolean minmaxAvailable(Split split, Set<String> columns) {
+        if (!(split instanceof DataSplit)) {
+            return false;
+        }
+
+        DataSplit dataSplit = (DataSplit) split;
         if (isNullOrEmpty(columns)) {
             return false;
         }
 
-        if (!split.rawConvertible()) {
+        if (!dataSplit.rawConvertible()) {
             return false;
         }
 
-        return split.dataFiles().stream()
+        return dataSplit.dataFiles().stream()
                 .map(DataFileMeta::valueStatsCols)
                 .allMatch(
                         valueStatsCols ->

@@ -18,6 +18,10 @@
 
 package org.apache.paimon.format.parquet.reader;
 
+import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.heap.CastedArrayColumnVector;
+import org.apache.paimon.data.columnar.heap.CastedMapColumnVector;
+import org.apache.paimon.data.columnar.heap.CastedRowColumnVector;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapBooleanVector;
 import org.apache.paimon.data.columnar.heap.HeapByteVector;
@@ -31,13 +35,13 @@ import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.heap.HeapShortVector;
 import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.parquet.ParquetSchemaConverter;
+import org.apache.paimon.format.parquet.VariantUtils;
 import org.apache.paimon.format.parquet.type.ParquetField;
 import org.apache.paimon.format.parquet.type.ParquetGroupField;
 import org.apache.paimon.format.parquet.type.ParquetPrimitiveField;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
@@ -47,6 +51,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -55,19 +60,24 @@ import org.apache.parquet.io.ColumnIO;
 import org.apache.parquet.io.GroupColumnIO;
 import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.io.PrimitiveColumnIO;
-
-import javax.annotation.Nullable;
+import org.apache.parquet.schema.MessageType;
+import org.apache.parquet.schema.Type;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetListElementType;
+import static org.apache.paimon.format.parquet.ParquetSchemaConverter.parquetMapKeyValueType;
 import static org.apache.parquet.schema.Type.Repetition.REPEATED;
 import static org.apache.parquet.schema.Type.Repetition.REQUIRED;
 
 /** Util for generating parquet readers. */
 public class ParquetReaderUtil {
 
+    /** Create writable vectors. */
     public static WritableColumnVector createWritableColumnVector(
             int batchSize, DataType fieldType) {
         switch (fieldType.getTypeRoot()) {
@@ -90,6 +100,7 @@ public class ParquetReaderUtil {
             case CHAR:
             case VARCHAR:
             case VARBINARY:
+            case BLOB:
                 return new HeapBytesVector(batchSize);
             case BINARY:
                 return new HeapBytesVector(batchSize);
@@ -145,41 +156,109 @@ public class ParquetReaderUtil {
         }
     }
 
+    /**
+     * Create readable vectors from writable vectors. Especially for decimal, see {@code
+     * ParquetDecimalVector}.
+     */
+    public static ColumnVector[] createReadableColumnVectors(
+            List<DataType> types, WritableColumnVector[] writableVectors) {
+        ColumnVector[] vectors = new ColumnVector[writableVectors.length];
+        for (int i = 0; i < writableVectors.length; i++) {
+            vectors[i] = createReadableColumnVector(types.get(i), writableVectors[i]);
+        }
+        return vectors;
+    }
+
+    public static ColumnVector createReadableColumnVector(
+            DataType type, WritableColumnVector writableVector) {
+        switch (type.getTypeRoot()) {
+            case DECIMAL:
+                return new ParquetDecimalVector(writableVector);
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return new ParquetTimestampVector(writableVector);
+            case BLOB:
+                // Physical representation is bytes; higher-level Row#getBlob() handles descriptor.
+                return writableVector;
+            case ARRAY:
+                return new CastedArrayColumnVector(
+                        (HeapArrayVector) writableVector,
+                        createReadableColumnVectors(
+                                Collections.singletonList(((ArrayType) type).getElementType()),
+                                Arrays.stream(writableVector.getChildren())
+                                        .map(WritableColumnVector.class::cast)
+                                        .toArray(WritableColumnVector[]::new)));
+            case MAP:
+                MapType mapType = (MapType) type;
+                return new CastedMapColumnVector(
+                        (HeapMapVector) writableVector,
+                        createReadableColumnVectors(
+                                Arrays.asList(mapType.getKeyType(), mapType.getValueType()),
+                                Arrays.stream(writableVector.getChildren())
+                                        .map(WritableColumnVector.class::cast)
+                                        .toArray(WritableColumnVector[]::new)));
+            case MULTISET:
+                MultisetType multisetType = (MultisetType) type;
+                return new CastedMapColumnVector(
+                        (HeapMapVector) writableVector,
+                        createReadableColumnVectors(
+                                Arrays.asList(
+                                        multisetType.getElementType(),
+                                        multisetType.getElementType()),
+                                Arrays.stream(writableVector.getChildren())
+                                        .map(WritableColumnVector.class::cast)
+                                        .toArray(WritableColumnVector[]::new)));
+            case ROW:
+                RowType rowType = (RowType) type;
+                return new CastedRowColumnVector(
+                        (HeapRowVector) writableVector,
+                        createReadableColumnVectors(
+                                rowType.getFieldTypes(),
+                                Arrays.stream(writableVector.getChildren())
+                                        .map(WritableColumnVector.class::cast)
+                                        .toArray(WritableColumnVector[]::new)));
+            default:
+                return writableVector;
+        }
+    }
+
     public static List<ParquetField> buildFieldsList(
-            DataField[] readFields, MessageColumnIO columnIO, RowType[] shreddingSchemas) {
+            DataField[] readFields, MessageColumnIO columnIO, MessageType requestedFileSchema) {
         List<ParquetField> list = new ArrayList<>();
         for (int i = 0; i < readFields.length; i++) {
             list.add(
                     constructField(
                             readFields[i],
                             lookupColumnByName(columnIO, readFields[i].name()),
-                            shreddingSchemas[i]));
+                            requestedFileSchema.getType(i)));
         }
         return list;
     }
 
-    private static ParquetField constructField(DataField dataField, ColumnIO columnIO) {
-        return constructField(dataField, columnIO, null);
-    }
-
     private static ParquetField constructField(
-            DataField dataField, ColumnIO columnIO, @Nullable RowType shreddingSchema) {
+            DataField dataField, ColumnIO columnIO, Type parquetType) {
         boolean required = columnIO.getType().getRepetition() == REQUIRED;
         int repetitionLevel = columnIO.getRepetitionLevel();
         int definitionLevel = columnIO.getDefinitionLevel();
         DataType type = dataField.type();
-        String filedName = dataField.name();
+        String fieldName = dataField.name();
         if (type instanceof RowType) {
             GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
             RowType rowType = (RowType) type;
+            if (VariantMetadataUtils.isVariantRowType(rowType)) {
+                return constructVariantField(dataField, columnIO, parquetType);
+            }
+
             ImmutableList.Builder<ParquetField> fieldsBuilder = ImmutableList.builder();
             List<String> fieldNames = rowType.getFieldNames();
-            List<DataField> childrens = rowType.getFields();
-            for (int i = 0; i < childrens.size(); i++) {
+            List<DataField> children = rowType.getFields();
+            for (int i = 0; i < children.size(); i++) {
+                String childName = fieldNames.get(i);
                 fieldsBuilder.add(
                         constructField(
-                                childrens.get(i),
-                                lookupColumnByName(groupColumnIO, fieldNames.get(i))));
+                                children.get(i),
+                                lookupColumnByName(groupColumnIO, childName),
+                                parquetType.asGroupType().getType(childName)));
             }
 
             return new ParquetGroupField(
@@ -192,61 +271,24 @@ public class ParquetReaderUtil {
         }
 
         if (type instanceof VariantType) {
-            if (shreddingSchema != null) {
-                ParquetGroupField parquetField =
-                        (ParquetGroupField)
-                                constructField(dataField.newType(shreddingSchema), columnIO);
-                return new ParquetGroupField(
-                        type,
-                        parquetField.getRepetitionLevel(),
-                        parquetField.getDefinitionLevel(),
-                        parquetField.isRequired(),
-                        parquetField.getChildren(),
-                        parquetField.path(),
-                        parquetField);
-            }
-
-            GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
-            ImmutableList.Builder<ParquetField> fieldsBuilder = ImmutableList.builder();
-            PrimitiveColumnIO value =
-                    (PrimitiveColumnIO) lookupColumnByName(groupColumnIO, Variant.VALUE);
-            fieldsBuilder.add(
-                    new ParquetPrimitiveField(
-                            new BinaryType(),
-                            required,
-                            value.getColumnDescriptor(),
-                            value.getId(),
-                            value.getFieldPath()));
-            PrimitiveColumnIO metadata =
-                    (PrimitiveColumnIO) lookupColumnByName(groupColumnIO, Variant.METADATA);
-            fieldsBuilder.add(
-                    new ParquetPrimitiveField(
-                            new BinaryType(),
-                            required,
-                            metadata.getColumnDescriptor(),
-                            metadata.getId(),
-                            metadata.getFieldPath()));
-            return new ParquetGroupField(
-                    type,
-                    repetitionLevel,
-                    definitionLevel,
-                    required,
-                    fieldsBuilder.build(),
-                    groupColumnIO.getFieldPath());
+            return constructVariantField(dataField, columnIO, parquetType);
         }
 
         if (type instanceof MapType) {
             GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
             GroupColumnIO keyValueColumnIO = getMapKeyValueColumn(groupColumnIO);
+            Pair<Type, Type> keyValueType = parquetMapKeyValueType(parquetType.asGroupType());
             MapType mapType = (MapType) type;
             ParquetField keyField =
                     constructField(
                             new DataField(0, "", mapType.getKeyType()),
-                            keyValueColumnIO.getChild(0));
+                            keyValueColumnIO.getChild(0),
+                            keyValueType.getKey());
             ParquetField valueField =
                     constructField(
                             new DataField(0, "", mapType.getValueType()),
-                            keyValueColumnIO.getChild(1));
+                            keyValueColumnIO.getChild(1),
+                            keyValueType.getValue());
             return new ParquetGroupField(
                     type,
                     repetitionLevel,
@@ -259,14 +301,18 @@ public class ParquetReaderUtil {
         if (type instanceof MultisetType) {
             GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
             GroupColumnIO keyValueColumnIO = getMapKeyValueColumn(groupColumnIO);
+            Pair<Type, Type> keyValueType = parquetMapKeyValueType(parquetType.asGroupType());
             MultisetType multisetType = (MultisetType) type;
             ParquetField keyField =
                     constructField(
                             new DataField(0, "", multisetType.getElementType()),
-                            keyValueColumnIO.getChild(0));
+                            keyValueColumnIO.getChild(0),
+                            keyValueType.getKey());
             ParquetField valueField =
                     constructField(
-                            new DataField(0, "", new IntType()), keyValueColumnIO.getChild(1));
+                            new DataField(0, "", new IntType()),
+                            keyValueColumnIO.getChild(1),
+                            keyValueType.getValue());
             return new ParquetGroupField(
                     type,
                     repetitionLevel,
@@ -281,8 +327,8 @@ public class ParquetReaderUtil {
             ColumnIO elementTypeColumnIO;
             if (columnIO instanceof GroupColumnIO) {
                 GroupColumnIO groupColumnIO = (GroupColumnIO) columnIO;
-                if (!StringUtils.isNullOrWhitespaceOnly(filedName)) {
-                    while (!Objects.equals(groupColumnIO.getName(), filedName)) {
+                if (!StringUtils.isNullOrWhitespaceOnly(fieldName)) {
+                    while (!Objects.equals(groupColumnIO.getName(), fieldName)) {
                         groupColumnIO = (GroupColumnIO) groupColumnIO.getChild(0);
                     }
                     elementTypeColumnIO = groupColumnIO;
@@ -302,7 +348,8 @@ public class ParquetReaderUtil {
             ParquetField field =
                     constructField(
                             new DataField(0, "", arrayType.getElementType()),
-                            getArrayElementColumn(elementTypeColumnIO));
+                            getArrayElementColumn(elementTypeColumnIO),
+                            parquetListElementType(parquetType.asGroupType()));
             if (repetitionLevel == field.getRepetitionLevel()) {
                 repetitionLevel = columnIO.getParent().getRepetitionLevel();
             }
@@ -349,6 +396,24 @@ public class ParquetReaderUtil {
             groupColumnIO = (GroupColumnIO) groupColumnIO.getChild(0);
         }
         return groupColumnIO;
+    }
+
+    public static ParquetField constructVariantField(
+            DataField dataField, ColumnIO columnIO, Type parquetFieldType) {
+        DataType dataType = dataField.type();
+        RowType variantFileType = VariantUtils.variantFileType(parquetFieldType);
+        ParquetGroupField parquetField =
+                (ParquetGroupField)
+                        constructField(
+                                dataField.newType(variantFileType), columnIO, parquetFieldType);
+        return new ParquetGroupField(
+                dataType,
+                parquetField.getRepetitionLevel(),
+                parquetField.getDefinitionLevel(),
+                parquetField.isRequired(),
+                parquetField.getChildren(),
+                parquetField.path(),
+                parquetField);
     }
 
     public static ColumnIO getArrayElementColumn(ColumnIO columnIO) {

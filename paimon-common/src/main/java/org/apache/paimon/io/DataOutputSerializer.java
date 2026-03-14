@@ -26,7 +26,6 @@ import org.apache.paimon.utils.Preconditions;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UTFDataFormatException;
-import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 
@@ -37,8 +36,6 @@ public class DataOutputSerializer implements DataOutputView, MemorySegmentWritab
 
     private int position;
 
-    private ByteBuffer wrapper;
-
     // ------------------------------------------------------------------------
 
     public DataOutputSerializer(int startSize) {
@@ -47,13 +44,6 @@ public class DataOutputSerializer implements DataOutputView, MemorySegmentWritab
         }
 
         this.buffer = new byte[startSize];
-        this.wrapper = ByteBuffer.wrap(buffer);
-    }
-
-    public ByteBuffer wrapAsByteBuffer() {
-        this.wrapper.position(0);
-        this.wrapper.limit(this.position);
-        return this.wrapper;
     }
 
     /** @deprecated Replaced by {@link #getSharedBuffer()} for a better, safer name. */
@@ -329,7 +319,6 @@ public class DataOutputSerializer implements DataOutputView, MemorySegmentWritab
 
         System.arraycopy(this.buffer, 0, nb, 0, this.position);
         this.buffer = nb;
-        this.wrapper = ByteBuffer.wrap(this.buffer);
     }
 
     @Override

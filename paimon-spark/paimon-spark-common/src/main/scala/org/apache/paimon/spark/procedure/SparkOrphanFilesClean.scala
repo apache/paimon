@@ -119,7 +119,7 @@ case class SparkOrphanFilesClean(
       .toDF("used_name")
 
     // find candidate files which can be removed
-    val fileDirs = listPaimonFileDirs.asScala.map(_.toUri.toString).toSeq
+    val fileDirs = listPaimonFileDirs.asScala.map(_.toString).toSeq
     val maxFileDirsParallelism = Math.min(fileDirs.size, parallelism)
     val candidates = spark.sparkContext
       .parallelize(fileDirs, maxFileDirsParallelism)
@@ -128,7 +128,7 @@ case class SparkOrphanFilesClean(
           tryBestListingDirs(new Path(dir)).asScala.filter(oldEnough).map {
             file =>
               val path = file.getPath
-              (path.getName, path.toUri.toString, file.getLen, path.getParent.toUri.toString)
+              (path.getName, path.toString, file.getLen, path.getParent.toString)
           }
       }
       .toDF("name", "path", "len", "dataDir")

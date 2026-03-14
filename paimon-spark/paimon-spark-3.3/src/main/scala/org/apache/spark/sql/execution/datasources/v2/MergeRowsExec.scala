@@ -89,7 +89,8 @@ case class MergeRowsExec(
       isSourceRowPresentPred,
       matchedInstructionExecs,
       notMatchedInstructionExecs,
-      notMatchedBySourceInstructionExecs)
+      notMatchedBySourceInstructionExecs
+    )
 
     // null indicates a record must be discarded
     mergeIterator.filter(_ != null)

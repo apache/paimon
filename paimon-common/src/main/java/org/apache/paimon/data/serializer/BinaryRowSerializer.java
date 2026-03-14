@@ -113,15 +113,14 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
     }
 
     @Override
-    public int serializeToPages(BinaryRow record, AbstractPagedOutputView headerLessView)
-            throws IOException {
-        int skip = checkSkipWriteForFixLengthPart(headerLessView);
-        headerLessView.writeInt(record.getSizeInBytes());
-        serializeWithoutLength(record, headerLessView);
+    public int serializeToPages(BinaryRow record, AbstractPagedOutputView out) throws IOException {
+        int skip = checkSkipWriteForFixLengthPart(out);
+        out.writeInt(record.getSizeInBytes());
+        serializeWithoutLength(record, out);
         return skip;
     }
 
-    private static void serializeWithoutLength(BinaryRow record, MemorySegmentWritable writable)
+    public static void serializeWithoutLength(BinaryRow record, MemorySegmentWritable writable)
             throws IOException {
         if (record.getSegments().length == 1) {
             writable.write(record.getSegments()[0], record.getOffset(), record.getSizeInBytes());
@@ -281,11 +280,11 @@ public class BinaryRowSerializer extends AbstractRowDataSerializer<BinaryRow> {
 
     /** Return fixed part length to serialize one row. */
     public int getSerializedRowFixedPartLength() {
-        return getFixedLengthPartSize() + LENGTH_SIZE_IN_BYTES;
+        return fixedLengthPartSize + LENGTH_SIZE_IN_BYTES;
     }
 
-    public int getFixedLengthPartSize() {
-        return fixedLengthPartSize;
+    public static int getSerializedRowLength(BinaryRow row) {
+        return row.getSizeInBytes() + LENGTH_SIZE_IN_BYTES;
     }
 
     @Override

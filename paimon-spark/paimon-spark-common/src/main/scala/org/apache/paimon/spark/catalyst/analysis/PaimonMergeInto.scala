@@ -18,21 +18,29 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.commands.MergeIntoPaimonTable
-
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.AttributeReference
+import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.{MergeAction, MergeIntoTable}
 
 /** A post-hoc resolution rule for MergeInto. */
 case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
 
-  override def resolveNotMatchedBySourceActions(
-      merge: MergeIntoTable,
-      targetOutput: Seq[AttributeReference],
-      dataEvolutionEnabled: Boolean): Seq[MergeAction] = {
-    merge.notMatchedBySourceActions.map(
-      checkAndAlignActionAssignment(_, targetOutput, dataEvolutionEnabled))
+  /**
+   * Align all MergeActions in a MergeIntoTable based on the target table's output attributes.
+   * Returns a new MergeIntoTable with aligned matchedActions, notMatchedActions, and
+   * notMatchedBySourceActions.
+   */
+  override def alignMergeIntoTable(
+      m: MergeIntoTable,
+      targetOutput: Seq[Attribute]): MergeIntoTable = {
+    m.copy(
+      matchedActions = m.matchedActions.map(alignMergeAction(_, targetOutput)),
+      notMatchedActions = m.notMatchedActions.map(alignMergeAction(_, targetOutput)),
+      notMatchedBySourceActions = m.notMatchedBySourceActions.map(alignMergeAction(_, targetOutput))
+    )
+  }
+
+  override def resolveNotMatchedBySourceActions(merge: MergeIntoTable): Seq[MergeAction] = {
+    merge.notMatchedBySourceActions
   }
 }

@@ -377,6 +377,27 @@ public class JdbcUtils {
         }
     }
 
+    public static boolean insertTable(
+            JdbcClientPool connections, String catalogKey, String databaseName, String tableName) {
+        try {
+            int insertRecord =
+                    connections.run(
+                            conn -> {
+                                try (PreparedStatement sql =
+                                        conn.prepareStatement(
+                                                JdbcUtils.DO_COMMIT_CREATE_TABLE_SQL)) {
+                                    sql.setString(1, catalogKey);
+                                    sql.setString(2, databaseName);
+                                    sql.setString(3, tableName);
+                                    return sql.executeUpdate();
+                                }
+                            });
+            return insertRecord == 1;
+        } catch (SQLException | InterruptedException e) {
+            throw new RuntimeException("Failed to insert table: " + tableName, e);
+        }
+    }
+
     public static boolean insertProperties(
             JdbcClientPool connections,
             String storeKey,

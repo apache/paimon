@@ -20,7 +20,7 @@ package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.spark.leafnode.PaimonLeafCommand
 
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
+import org.apache.spark.sql.catalyst.expressions.Attribute
 
 case class RenameTagCommand(table: Seq[String], sourceTag: String, targetTag: String)
   extends PaimonLeafCommand {

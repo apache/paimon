@@ -19,7 +19,6 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.LimitedSeekableInputStream;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.rest.HttpClientUtils;
@@ -59,7 +58,7 @@ public interface UriReader {
 
         @Override
         public SeekableInputStream newInputStream(String uri) throws IOException {
-            return new LimitedSeekableInputStream(HttpClientUtils.getAsInputStream(uri));
+            return SeekableInputStream.wrap(HttpClientUtils.getAsInputStream(uri));
         }
     }
 }

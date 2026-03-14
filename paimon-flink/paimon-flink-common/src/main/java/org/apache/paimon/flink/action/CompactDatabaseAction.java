@@ -23,7 +23,7 @@ import org.apache.paimon.append.MultiTableAppendCompactTask;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.compact.AppendTableCompactBuilder;
+import org.apache.paimon.flink.compact.AppendTableCompact;
 import org.apache.paimon.flink.sink.BucketsRowChannelComputer;
 import org.apache.paimon.flink.sink.CombinedTableCompactorSink;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
@@ -278,8 +278,8 @@ public class CompactDatabaseAction extends ActionBase {
 
     private void buildForUnawareBucketCompaction(
             StreamExecutionEnvironment env, String fullName, FileStoreTable table) {
-        AppendTableCompactBuilder unawareBucketCompactionTopoBuilder =
-                new AppendTableCompactBuilder(env, fullName, table);
+        AppendTableCompact unawareBucketCompactionTopoBuilder =
+                new AppendTableCompact(env, fullName, table);
 
         unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
         unawareBucketCompactionTopoBuilder.withPartitionIdleTime(partitionIdleTime);

@@ -176,6 +176,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private int maxBucket = Integer.MIN_VALUE;
         private int minLevel = Integer.MAX_VALUE;
         private int maxLevel = Integer.MIN_VALUE;
+        private @Nullable RowIdStats rowIdStats = new RowIdStats();
 
         ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
             super(
@@ -208,6 +209,14 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             maxBucket = Math.max(maxBucket, entry.bucket());
             minLevel = Math.min(minLevel, entry.level());
             maxLevel = Math.max(maxLevel, entry.level());
+            if (rowIdStats != null) {
+                Long firstRowId = entry.file().firstRowId();
+                if (firstRowId == null) {
+                    rowIdStats = null;
+                } else {
+                    rowIdStats.collect(firstRowId, entry.file().rowCount());
+                }
+            }
 
             partitionStatsCollector.collect(entry.partition());
         }
@@ -216,7 +225,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         public ManifestFileMeta result() throws IOException {
             return new ManifestFileMeta(
                     path.getName(),
-                    outputBytes,
+                    outputBytes(),
                     numAddedFiles,
                     numDeletedFiles,
                     partitionStatsSerializer.toBinaryAllMode(partitionStatsCollector.extract()),
@@ -226,7 +235,20 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     minBucket,
                     maxBucket,
                     minLevel,
-                    maxLevel);
+                    maxLevel,
+                    rowIdStats == null ? null : rowIdStats.minRowId,
+                    rowIdStats == null ? null : rowIdStats.maxRowId);
+        }
+    }
+
+    private static class RowIdStats {
+
+        private long minRowId = Long.MAX_VALUE;
+        private long maxRowId = Long.MIN_VALUE;
+
+        private void collect(long firstRowId, long rowCount) {
+            minRowId = Math.min(minRowId, firstRowId);
+            maxRowId = Math.max(maxRowId, firstRowId + rowCount - 1);
         }
     }
 

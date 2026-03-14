@@ -200,4 +200,25 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
 
     checkAnswer(sql("SELECT DISTINCT bucket FROM `T$FILES`"), Seq(Row(0), Row(1), Row(2)))
   }
+
+  test("Paimon cross partition table: write multiple cols") {
+    withTable("t") {
+      val columns = (0 until 118).map(i => s"c$i STRING").mkString(", ")
+      sql(s"""
+             |CREATE TABLE t (
+             |  $columns,
+             |  pt STRING
+             |)
+             |PARTITIONED BY (pt)
+             |TBLPROPERTIES (
+             |  'primary-key' = 'c0');
+             |""".stripMargin)
+
+      sql("INSERT INTO t (c0, c1, c2, pt) VALUES ('c0','c1','c2','pt')")
+      checkAnswer(
+        sql("SELECT c0, c1, c2, pt from t"),
+        Row("c0", "c1", "c2", "pt")
+      )
+    }
+  }
 }

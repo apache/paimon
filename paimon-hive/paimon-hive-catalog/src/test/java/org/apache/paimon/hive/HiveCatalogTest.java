@@ -483,6 +483,27 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testCreateTableWithBlob() throws Exception {
+        String databaseName = "testCreateTableWithBlob";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .column("picture", DataTypes.BLOB())
+                        .option(CoreOptions.ROW_TRACKING_ENABLED.key(), "true")
+                        .option(CoreOptions.DATA_EVOLUTION_ENABLED.key(), "true")
+                        .build(),
+                true);
+
+        assertThat(catalog.listTables(databaseName)).contains("table");
+    }
+
+    @Test
     public void testAlterPartitions() throws Exception {
         if (!supportPartitions()) {
             return;
@@ -509,7 +530,7 @@ public class HiveCatalogTest extends CatalogTestBase {
         long fileCreationTime = System.currentTimeMillis();
         PartitionStatistics partition =
                 new PartitionStatistics(
-                        Collections.singletonMap("dt", "20250101"), 1, 2, 3, fileCreationTime);
+                        Collections.singletonMap("dt", "20250101"), 1, 2, 3, fileCreationTime, 4);
         catalog.alterPartitions(alterIdentifier, Collections.singletonList(partition));
         Partition partitionFromServer = catalog.listPartitions(alterIdentifier).get(0);
         checkPartition(
@@ -519,6 +540,7 @@ public class HiveCatalogTest extends CatalogTestBase {
                         2,
                         3,
                         fileCreationTime,
+                        4,
                         false),
                 partitionFromServer);
 

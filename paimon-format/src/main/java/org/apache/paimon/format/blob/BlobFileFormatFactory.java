@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.blob;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 
@@ -33,6 +34,7 @@ public class BlobFileFormatFactory implements FileFormatFactory {
 
     @Override
     public FileFormat create(FormatContext formatContext) {
-        return new BlobFileFormat();
+        boolean blobAsDescriptor = formatContext.options().get(CoreOptions.BLOB_AS_DESCRIPTOR);
+        return new BlobFileFormat(blobAsDescriptor);
     }
 }

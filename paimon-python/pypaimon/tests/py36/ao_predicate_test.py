@@ -16,18 +16,19 @@
 # limitations under the License.
 ################################################################################
 import os
+import shutil
 import tempfile
 import unittest
 
 import pandas as pd
 import pyarrow as pa
 
-from pypaimon import CatalogFactory
-from pypaimon import Schema
-from pypaimon.tests.predicates_test import _random_format, _check_filtered_result
+from pypaimon import CatalogFactory, Schema
+from pypaimon.tests.predicates_test import (_check_filtered_result,
+                                            _random_format)
 
 
-class PredicatePy36Test(unittest.TestCase):
+class AOPredicatePy36Test(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -40,7 +41,7 @@ class PredicatePy36Test(unittest.TestCase):
             ('f1', pa.string()),
         ])
         cls.catalog.create_table('default.test_append', Schema.from_pyarrow_schema(
-            pa_schema, options={'file.format': _random_format()}), False)
+            pa_schema, options={'file.format': _random_format(), 'metadata.stats-mode': 'full'}), False)
 
         df = pd.DataFrame({
             'f0': [1, 2, 3, 4, 5],
@@ -57,6 +58,10 @@ class PredicatePy36Test(unittest.TestCase):
         commit.close()
 
         cls.df = df
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_wrong_field_name(self):
         table = self.catalog.get_table('default.test_append')

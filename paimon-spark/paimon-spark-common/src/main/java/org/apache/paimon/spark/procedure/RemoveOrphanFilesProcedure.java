@@ -96,7 +96,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
         Preconditions.checkArgument(
                 tableId != null && !tableId.isEmpty(),
                 "Cannot handle an empty tableId for argument %s",
-                tableId);
+                PARAMETERS[0].name());
 
         if (tableId.endsWith(".*")) {
             identifier = org.apache.paimon.catalog.Identifier.fromString(tableId);

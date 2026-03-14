@@ -29,10 +29,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-
-import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 
 /** Benchmark for measuring the throughput of writing for lookup. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -67,31 +65,23 @@ public class LookupWriterBenchmark extends AbstractLookupBenchmark {
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         for (int valueLength : VALUE_LENGTHS) {
-            for (CoreOptions.LookupLocalFileType fileType :
-                    CoreOptions.LookupLocalFileType.values()) {
-                CoreOptions options =
-                        CoreOptions.fromMap(
-                                Collections.singletonMap(
-                                        LOOKUP_LOCAL_FILE_TYPE.key(), fileType.name()));
-                benchmark.addCase(
-                        String.format(
-                                "%s-write-%dB-value-%d-num",
-                                fileType.name(), valueLength, inputs.length),
-                        5,
-                        () -> {
-                            try {
-                                writeData(
-                                        tempDir,
-                                        options,
-                                        inputs,
-                                        valueLength,
-                                        sameValue,
-                                        bloomFilterEnabled);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-            }
+            CoreOptions options = new CoreOptions(new HashMap<>());
+            benchmark.addCase(
+                    String.format("write-%dB-value-%d-num", valueLength, inputs.length),
+                    5,
+                    () -> {
+                        try {
+                            writeData(
+                                    tempDir,
+                                    options,
+                                    inputs,
+                                    valueLength,
+                                    sameValue,
+                                    bloomFilterEnabled);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
         }
 
         benchmark.run();

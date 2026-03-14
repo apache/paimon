@@ -47,24 +47,28 @@ public class CsvOptions {
             ConfigOptions.key("csv.quote-character")
                     .stringType()
                     .defaultValue("\"")
+                    .withFallbackKeys("quote")
                     .withDescription("The quote character for CSV format");
 
     public static final ConfigOption<String> ESCAPE_CHARACTER =
             ConfigOptions.key("csv.escape-character")
                     .stringType()
                     .defaultValue("\\")
+                    .withFallbackKeys("escape")
                     .withDescription("The escape character for CSV format");
 
     public static final ConfigOption<Boolean> INCLUDE_HEADER =
             ConfigOptions.key("csv.include-header")
                     .booleanType()
                     .defaultValue(false)
+                    .withFallbackKeys("header")
                     .withDescription("Whether to include header in CSV files");
 
     public static final ConfigOption<String> NULL_LITERAL =
             ConfigOptions.key("csv.null-literal")
                     .stringType()
                     .defaultValue("")
+                    .withFallbackKeys("nullvalue")
                     .withDescription("The literal for null values in CSV format");
 
     public static final ConfigOption<Mode> MODE =

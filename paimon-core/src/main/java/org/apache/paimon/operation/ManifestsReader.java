@@ -27,6 +27,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -52,6 +54,8 @@ public class ManifestsReader {
     @Nullable private Integer specifiedBucket = null;
     @Nullable private Integer specifiedLevel = null;
     @Nullable private PartitionPredicate partitionFilter = null;
+    @Nullable private BiFilter<Integer, Integer> levelMinMaxFilter = null;
+    @Nullable protected RowRangeIndex rowRangeIndex = null;
 
     public ManifestsReader(
             RowType partitionType,
@@ -79,6 +83,11 @@ public class ManifestsReader {
         return this;
     }
 
+    public ManifestsReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter) {
+        this.levelMinMaxFilter = minMaxFilter;
+        return this;
+    }
+
     public ManifestsReader withPartitionFilter(Predicate predicate) {
         this.partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
         return this;
@@ -96,6 +105,11 @@ public class ManifestsReader {
 
     public ManifestsReader withPartitionFilter(PartitionPredicate predicate) {
         this.partitionFilter = predicate;
+        return this;
+    }
+
+    public ManifestsReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        this.rowRangeIndex = rowRangeIndex;
         return this;
     }
 
@@ -129,14 +143,23 @@ public class ManifestsReader {
             case DELTA:
                 return manifestList.readDeltaManifests(snapshot);
             case CHANGELOG:
-                if (snapshot.version() <= Snapshot.TABLE_STORE_02_VERSION) {
-                    throw new UnsupportedOperationException(
-                            "Unsupported snapshot version: " + snapshot.version());
-                }
                 return manifestList.readChangelogManifests(snapshot);
             default:
                 throw new UnsupportedOperationException("Unknown scan kind " + scanMode.name());
         }
+    }
+
+    private boolean filterManifestByRowRanges(ManifestFileMeta manifest) {
+        if (rowRangeIndex == null) {
+            return true;
+        }
+        Long min = manifest.minRowId();
+        Long max = manifest.maxRowId();
+        if (min == null || max == null) {
+            return true;
+        }
+
+        return this.rowRangeIndex.intersects(min, max);
     }
 
     /** Note: Keep this thread-safe. */
@@ -160,19 +183,27 @@ public class ManifestsReader {
                     && (specifiedLevel < minLevel || specifiedLevel > maxLevel)) {
                 return false;
             }
+            if (levelMinMaxFilter != null && !levelMinMaxFilter.test(minLevel, maxLevel)) {
+                return false;
+            }
         }
 
-        if (partitionFilter == null) {
-            return true;
+        if (partitionFilter != null) {
+            SimpleStats stats = manifest.partitionStats();
+            if (!partitionFilter.test(
+                    manifest.numAddedFiles() + manifest.numDeletedFiles(),
+                    stats.minValues(),
+                    stats.maxValues(),
+                    stats.nullCounts())) {
+                return false;
+            }
         }
 
-        SimpleStats stats = manifest.partitionStats();
-        return partitionFilter == null
-                || partitionFilter.test(
-                        manifest.numAddedFiles() + manifest.numDeletedFiles(),
-                        stats.minValues(),
-                        stats.maxValues(),
-                        stats.nullCounts());
+        if (!filterManifestByRowRanges(manifest)) {
+            return false;
+        }
+
+        return true;
     }
 
     /** Result for reading manifest files. */

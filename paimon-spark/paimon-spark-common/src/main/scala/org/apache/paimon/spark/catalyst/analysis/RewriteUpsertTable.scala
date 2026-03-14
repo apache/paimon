@@ -19,7 +19,6 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession

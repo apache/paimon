@@ -15,10 +15,11 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from typing import Optional, Dict
+from typing import Optional
 
 from pypaimon.api.rest_util import RESTUtil
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 
 
 class ResourcePaths:
@@ -32,7 +33,7 @@ class ResourcePaths:
 
     @classmethod
     def for_catalog_properties(
-            cls, options: Dict[str, str]) -> "ResourcePaths":
+            cls, options: Options) -> "ResourcePaths":
         prefix = options.get(CatalogOptions.PREFIX, "")
         return cls(prefix)
 
@@ -69,3 +70,11 @@ class ResourcePaths:
     def commit_table(self, database_name: str, table_name: str) -> str:
         return ("{}/{}/{}/{}/{}/commit".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def rollback_table(self, database_name: str, table_name: str) -> str:
+        return ("{}/{}/{}/{}/{}/rollback".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                                 self.TABLES, RESTUtil.encode_string(table_name)))
+
+    def table_snapshot(self, database_name: str, table_name: str) -> str:
+        return ("{}/{}/{}/{}/{}/snapshot".format(self.base_path, self.DATABASES, RESTUtil.encode_string(database_name),
+                                                 self.TABLES, RESTUtil.encode_string(table_name)))

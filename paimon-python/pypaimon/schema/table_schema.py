@@ -19,10 +19,9 @@ limitations under the License.
 import json
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Dict, List, Optional
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import json_field
 from pypaimon.schema.data_types import DataField
@@ -80,7 +79,7 @@ class TableSchema:
         partition_keys: List[str] = schema.partition_keys
         primary_keys: List[str] = schema.primary_keys
         options: Dict[str, str] = schema.options
-        highest_field_id: int = max(field.id for field in fields)
+        highest_field_id: int = max((field.id for field in fields), default=0)
 
         return TableSchema(
             TableSchema.CURRENT_VERSION,
@@ -94,7 +93,7 @@ class TableSchema:
         )
 
     @staticmethod
-    def from_path(file_io: FileIO, schema_path: Path):
+    def from_path(file_io: FileIO, schema_path: str):
         try:
             json_str = file_io.read_file_utf8(schema_path)
             return TableSchema.from_json(json_str)
@@ -110,10 +109,10 @@ class TableSchema:
             version = data.get(TableSchema.FIELD_VERSION, TableSchema.PAIMON_07_VERSION)
             fields = [DataField.from_dict(field) for field in data[TableSchema.FIELD_FIELDS]]
             options = data[TableSchema.FIELD_OPTIONS]
-            if version <= TableSchema.PAIMON_07_VERSION and CoreOptions.BUCKET not in options:
-                options[CoreOptions.BUCKET] = "1"
-            if version <= TableSchema.PAIMON_08_VERSION and CoreOptions.FILE_FORMAT not in options:
-                options[CoreOptions.FILE_FORMAT] = "orc"
+            if version <= TableSchema.PAIMON_07_VERSION and CoreOptions.BUCKET.key() not in options:
+                options[CoreOptions.BUCKET.key()] = "1"
+            if version <= TableSchema.PAIMON_08_VERSION and CoreOptions.FILE_FORMAT.key() not in options:
+                options[CoreOptions.FILE_FORMAT.key()] = "orc"
 
             return TableSchema(
                 version=version,
@@ -145,28 +144,3 @@ class TableSchema:
             comment=self.comment,
             time_millis=self.time_millis
         )
-
-    def get_primary_key_fields(self) -> List[DataField]:
-        if not self.primary_keys:
-            return []
-        field_map = {field.name: field for field in self.fields}
-        return [field_map[name] for name in self.primary_keys if name in field_map]
-
-    def get_partition_key_fields(self) -> List[DataField]:
-        if not self.partition_keys:
-            return []
-        field_map = {field.name: field for field in self.fields}
-        return [field_map[name] for name in self.partition_keys if name in field_map]
-
-    def get_trimmed_primary_key_fields(self) -> List[DataField]:
-        if not self.primary_keys or not self.partition_keys:
-            return self.get_primary_key_fields()
-        adjusted = [pk for pk in self.primary_keys if pk not in self.partition_keys]
-        # Validate that filtered list is not empty
-        if not adjusted:
-            raise ValueError(
-                f"Primary key constraint {self.primary_keys} "
-                f"should not be same with partition fields {self.partition_keys}, "
-                "this will result in only one record in a partition")
-        field_map = {field.name: field for field in self.fields}
-        return [field_map[name] for name in adjusted if name in field_map]

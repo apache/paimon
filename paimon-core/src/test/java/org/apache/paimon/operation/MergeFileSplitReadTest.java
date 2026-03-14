@@ -363,7 +363,7 @@ public class MergeFileSplitReadTest {
             private static final long serialVersionUID = 1L;
 
             @Override
-            public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+            public MergeFunction<KeyValue> create(@Nullable RowType readType) {
                 return new TestValueCountMergeFunction();
             }
         }

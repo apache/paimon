@@ -21,11 +21,12 @@ package org.apache.paimon.format.json;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.text.BaseTextFileReader;
+import org.apache.paimon.format.text.AbstractTextFileReader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.ArrayType;
@@ -34,10 +35,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -47,21 +51,22 @@ import java.util.List;
 import java.util.Map;
 
 /** JSON file reader. */
-public class JsonFileReader extends BaseTextFileReader {
+public class JsonFileReader extends AbstractTextFileReader {
 
     private static final Base64.Decoder BASE64_DECODER = Base64.getDecoder();
 
     private final JsonOptions options;
 
-    public JsonFileReader(FileIO fileIO, Path filePath, RowType rowType, JsonOptions options)
+    public JsonFileReader(
+            FileIO fileIO,
+            Path filePath,
+            RowType rowType,
+            JsonOptions options,
+            long offset,
+            @Nullable Long length)
             throws IOException {
-        super(fileIO, filePath, rowType);
+        super(fileIO, filePath, rowType, options.getLineDelimiter(), offset, length);
         this.options = options;
-    }
-
-    @Override
-    protected BaseTextRecordIterator createRecordIterator() {
-        return new JsonRecordIterator();
     }
 
     @Override
@@ -84,11 +89,6 @@ public class JsonFileReader extends BaseTextFileReader {
         }
     }
 
-    private class JsonRecordIterator extends BaseTextRecordIterator {
-        // Inherits all functionality from BaseTextRecordIterator
-        // No additional JSON-specific iterator logic needed
-    }
-
     private Object convertJsonValue(JsonNode node, DataType dataType, JsonOptions options) {
         if (node == null || node.isNull()) {
             return null;
@@ -104,6 +104,8 @@ public class JsonFileReader extends BaseTextFileReader {
                 }
             case ARRAY:
                 return convertJsonArray(node, (ArrayType) dataType, options);
+            case VECTOR:
+                return convertJsonVector(node, (VectorType) dataType, options);
             case MAP:
                 return convertJsonMap(node, (MapType) dataType, options);
             case ROW:
@@ -136,6 +138,13 @@ public class JsonFileReader extends BaseTextFileReader {
             }
         }
         return new GenericArray(elements.toArray());
+    }
+
+    private BinaryVector convertJsonVector(
+            JsonNode vectorNode, VectorType vectorType, JsonOptions options) {
+        ArrayType arrayType = DataTypes.ARRAY(vectorType.getElementType());
+        GenericArray array = convertJsonArray(vectorNode, arrayType, options);
+        return BinaryVector.fromInternalArray(array, vectorType.getElementType());
     }
 
     private GenericMap convertJsonMap(JsonNode objectNode, MapType mapType, JsonOptions options) {

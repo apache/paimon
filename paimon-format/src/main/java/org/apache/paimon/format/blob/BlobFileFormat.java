@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.blob;
 
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.EmptyStatsExtractor;
 import org.apache.paimon.format.FileFormat;
@@ -25,12 +26,16 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.SimpleStatsExtractor;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.statistics.SimpleColStatsCollector;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -43,12 +48,25 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** {@link FileFormat} for blob file. */
 public class BlobFileFormat extends FileFormat {
 
+    private final boolean blobAsDescriptor;
+
+    @Nullable public BlobConsumer writeConsumer;
+
     public BlobFileFormat() {
+        this(false);
+    }
+
+    public BlobFileFormat(boolean blobAsDescriptor) {
         super(BlobFileFormatFactory.IDENTIFIER);
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     public static boolean isBlobFile(String fileName) {
         return fileName.endsWith("." + BlobFileFormatFactory.IDENTIFIER);
+    }
+
+    public void setWriteConsumer(@Nullable BlobConsumer writeConsumer) {
+        this.writeConsumer = writeConsumer;
     }
 
     @Override
@@ -56,12 +74,12 @@ public class BlobFileFormat extends FileFormat {
             RowType dataSchemaRowType,
             RowType projectedRowType,
             @Nullable List<Predicate> filters) {
-        return new BlobFormatReaderFactory();
+        return new BlobFormatReaderFactory(blobAsDescriptor);
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new BlobFormatWriterFactory();
+        return new BlobFormatWriterFactory(type);
     }
 
     @Override
@@ -79,20 +97,44 @@ public class BlobFileFormat extends FileFormat {
         return Optional.of(new EmptyStatsExtractor());
     }
 
-    private static class BlobFormatWriterFactory implements FormatWriterFactory {
+    private class BlobFormatWriterFactory implements FormatWriterFactory {
+
+        private final RowType type;
+
+        private BlobFormatWriterFactory(RowType type) {
+            this.type = type;
+        }
 
         @Override
         public FormatWriter create(PositionOutputStream out, String compression) {
-            return new BlobFormatWriter(out);
+            return new BlobFormatWriter(out, writeConsumer, type);
         }
     }
 
     private static class BlobFormatReaderFactory implements FormatReaderFactory {
 
+        private final boolean blobAsDescriptor;
+
+        public BlobFormatReaderFactory(boolean blobAsDescriptor) {
+            this.blobAsDescriptor = blobAsDescriptor;
+        }
+
         @Override
         public FileRecordReader<InternalRow> createReader(Context context) throws IOException {
-            return new BlobFormatReader(
-                    context.fileIO(), context.filePath(), context.fileSize(), context.selection());
+            FileIO fileIO = context.fileIO();
+            Path filePath = context.filePath();
+            SeekableInputStream in = null;
+            BlobFileMeta fileMeta;
+            try {
+                in = fileIO.newInputStream(filePath);
+                fileMeta = new BlobFileMeta(in, context.fileSize(), context.selection());
+            } finally {
+                if (blobAsDescriptor) {
+                    IOUtils.closeQuietly(in);
+                    in = null;
+                }
+            }
+            return new BlobFormatReader(fileIO, filePath, fileMeta, in);
         }
     }
 }

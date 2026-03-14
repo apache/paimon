@@ -24,11 +24,12 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Database;
-import org.apache.paimon.catalog.FileSystemCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.TableMetadata;
+import org.apache.paimon.consumer.ConsumerInfo;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -42,6 +43,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.PartitionUtils;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.Transform;
 import org.apache.paimon.rest.auth.AuthProvider;
 import org.apache.paimon.rest.auth.RESTAuthParameter;
 import org.apache.paimon.rest.requests.AlterDatabaseRequest;
@@ -54,9 +57,12 @@ import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -68,9 +74,11 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
+import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
@@ -80,6 +88,7 @@ import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListTagsResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
@@ -95,14 +104,18 @@ import org.apache.paimon.table.TableSnapshot;
 import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.utils.TimeUtils;
 import org.apache.paimon.view.View;
 import org.apache.paimon.view.ViewChange;
 import org.apache.paimon.view.ViewImpl;
 import org.apache.paimon.view.ViewSchema;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
 
@@ -112,15 +125,20 @@ import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 
+import javax.annotation.Nullable;
+
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -144,6 +162,7 @@ import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTApi.PARTITION_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_NAME_PATTERN;
 import static org.apache.paimon.rest.RESTApi.TABLE_TYPE;
+import static org.apache.paimon.rest.RESTApi.TAG_NAME_PREFIX;
 import static org.apache.paimon.rest.RESTApi.VIEW_NAME_PATTERN;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTIONS;
 import static org.apache.paimon.rest.ResourcePaths.FUNCTION_DETAILS;
@@ -162,7 +181,7 @@ public class RESTCatalogServer {
     private final String databaseUri;
 
     private final CatalogContext catalogContext;
-    private final FileSystemCatalog catalog;
+    private final RESTFileSystemCatalog catalog;
     private final MockWebServer server;
 
     private final Map<String, Database> databaseStore = new HashMap<>();
@@ -175,10 +194,14 @@ public class RESTCatalogServer {
     private final List<String> noPermissionTables = new ArrayList<>();
     private final Map<String, Function> functionStore = new HashMap<>();
     private final Map<String, List<String>> columnAuthHandler = new HashMap<>();
+    private final Map<String, List<Predicate>> rowFilterAuthHandler = new HashMap<>();
+    private final Map<String, Map<String, Transform>> columnMaskingAuthHandler = new HashMap<>();
     public final ConfigResponse configResponse;
     public final String warehouse;
 
     private final ResourcePaths resourcePaths;
+
+    private final List<Map<String, String>> receivedHeaders = new ArrayList<>();
 
     public RESTCatalogServer(
             String dataPath, AuthProvider authProvider, ConfigResponse config, String warehouse) {
@@ -200,7 +223,7 @@ public class RESTCatalogServer {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        this.catalog = new FileSystemCatalog(fileIO, warehousePath, catalogContext);
+        this.catalog = new RESTFileSystemCatalog(fileIO, warehousePath, catalogContext);
         Dispatcher dispatcher = initDispatcher(authProvider);
         MockWebServer mockWebServer = new MockWebServer();
         mockWebServer.setDispatcher(dispatcher);
@@ -254,6 +277,14 @@ public class RESTCatalogServer {
         columnAuthHandler.put(identifier.getFullName(), select);
     }
 
+    public void setRowFilterAuth(Identifier identifier, List<Predicate> rowFilters) {
+        rowFilterAuthHandler.put(identifier.getFullName(), rowFilters);
+    }
+
+    public void setColumnMaskingAuth(Identifier identifier, Map<String, Transform> columnMasking) {
+        columnMaskingAuthHandler.put(identifier.getFullName(), columnMasking);
+    }
+
     public RESTToken getDataToken(Identifier identifier) {
         return DataTokenStore.getDataToken(warehouse, identifier.getFullName());
     }
@@ -275,6 +306,7 @@ public class RESTCatalogServer {
                 RESTResponse response;
                 try {
                     Map<String, String> headers = getHeader(request);
+                    receivedHeaders.add(new HashMap<>(headers));
                     String[] paths = request.getPath().split("\\?");
                     String resourcePath = paths[0];
                     Map<String, String> parameters =
@@ -298,10 +330,14 @@ public class RESTCatalogServer {
                     } else if (databaseUri.equals(request.getPath())
                             || request.getPath().contains(databaseUri + "?")) {
                         return databasesApiHandler(restAuthParameter.method(), data, parameters);
-                    } else if (resourcePaths.renameTable().equals(request.getPath())) {
+                    } else if ("POST".equals(request.getMethod())
+                            && resourcePaths.renameTable().equals(request.getPath())) {
                         return renameTableHandle(restAuthParameter.data());
                     } else if (resourcePaths.renameView().equals(request.getPath())) {
                         return renameViewHandle(restAuthParameter.data());
+                    } else if ("GET".equals(request.getMethod())
+                            && isTableByIdRequest(request.getPath())) {
+                        return tableByIdHandle(request.getPath());
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.tables())) {
                         return tablesHandle(parameters);
                     } else if (StringUtils.startsWith(request.getPath(), resourcePaths.views())) {
@@ -356,6 +392,15 @@ public class RESTCatalogServer {
                                 resources.length == 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && ResourcePaths.SNAPSHOTS.equals(resources[3]);
+                        boolean isListConsumers =
+                                resources.length == 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.CONSUMERS.equals(resources[3]);
+                        boolean isResetConsumer =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.CONSUMERS.equals(resources[3])
+                                        && "reset".equals(resources[4]);
                         boolean isLoadSnapshot =
                                 resources.length == 5
                                         && ResourcePaths.TABLES.equals(resources[1])
@@ -383,10 +428,24 @@ public class RESTCatalogServer {
                                         && "partitions".equals(resources[3])
                                         && "mark".equals(resources[4]);
 
+                        boolean isListPartitionsByNames =
+                                resources.length == 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && "partitions".equals(resources[3])
+                                        && "list-by-names".equals(resources[4]);
+
                         boolean isBranches =
                                 resources.length >= 4
                                         && ResourcePaths.TABLES.equals(resources[1])
                                         && "branches".equals(resources[3]);
+                        boolean isTags =
+                                resources.length >= 4
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && resources[3].startsWith(ResourcePaths.TAGS);
+                        boolean isTag =
+                                resources.length >= 5
+                                        && ResourcePaths.TABLES.equals(resources[1])
+                                        && ResourcePaths.TAGS.equals(resources[3]);
                         Identifier identifier =
                                 resources.length >= 3
                                                 && !"rename".equals(resources[2])
@@ -422,11 +481,25 @@ public class RESTCatalogServer {
                         } else if (isPartitions) {
                             return partitionsApiHandle(
                                     restAuthParameter.method(), parameters, identifier);
+                        } else if (isListPartitionsByNames) {
+                            ListPartitionsByNamesRequest listPartitionsByNamesRequest =
+                                    RESTApi.fromJson(data, ListPartitionsByNamesRequest.class);
+                            return listPartitionsByNames(
+                                    parameters,
+                                    identifier,
+                                    listPartitionsByNamesRequest.getPartitionSpecs());
                         } else if (isBranches) {
                             return branchApiHandle(
                                     resources,
                                     restAuthParameter.method(),
                                     restAuthParameter.data(),
+                                    identifier);
+                        } else if (isTags || isTag) {
+                            return tagApiHandle(
+                                    resources,
+                                    restAuthParameter.method(),
+                                    restAuthParameter.data(),
+                                    parameters,
                                     identifier);
                         } else if (isTableToken) {
                             return getDataTokenHandle(identifier);
@@ -434,6 +507,10 @@ public class RESTCatalogServer {
                             return snapshotHandle(identifier);
                         } else if (isListSnapshots) {
                             return listSnapshots(identifier);
+                        } else if (isListConsumers) {
+                            return listConsumers(identifier);
+                        } else if (isResetConsumer) {
+                            return resetConsumer(identifier, restAuthParameter.data());
                         } else if (isLoadSnapshot) {
                             return loadSnapshot(identifier, resources[4]);
                         } else if (isTableAuth) {
@@ -453,7 +530,8 @@ public class RESTCatalogServer {
                                 long snapshotId =
                                         ((Instant.SnapshotInstant) requestBody.getInstant())
                                                 .getSnapshotId();
-                                return rollbackTableByIdHandle(identifier, snapshotId);
+                                return rollbackTableByIdHandle(
+                                        identifier, snapshotId, requestBody.getFromSnapshot());
                             } else if (requestBody.getInstant() instanceof Instant.TagInstant) {
                                 String tagName =
                                         ((Instant.TagInstant) requestBody.getInstant())
@@ -681,6 +759,19 @@ public class RESTCatalogServer {
     }
 
     private MockResponse snapshotHandle(Identifier identifier) throws Exception {
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        if (tableMetadata.isExternal()) {
+            ErrorResponse response =
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_TABLE,
+                            identifier.getFullName(),
+                            "external paimon table does not support get table snapshot in rest server",
+                            501);
+            return mockResponse(response, 404);
+        }
         RESTResponse response;
         Optional<TableSnapshot> snapshotOptional =
                 Optional.ofNullable(tableLatestSnapshotStore.get(identifier.getFullName()));
@@ -711,7 +802,37 @@ public class RESTCatalogServer {
         return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
     }
 
+    private MockResponse listConsumers(Identifier identifier) throws Exception {
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        ConsumerManager consumerManager =
+                new ConsumerManager(table.fileIO(), table.location(), "main");
+        Map<String, Long> consumers = consumerManager.consumers();
+        List<ConsumerInfo> consumerEntries =
+                consumers.entrySet().stream()
+                        .map(e -> new ConsumerInfo(e.getKey(), e.getValue()))
+                        .collect(Collectors.toList());
+        ListConsumersResponse response = new ListConsumersResponse(consumerEntries, null);
+        return new MockResponse().setResponseCode(200).setBody(RESTApi.toJson(response));
+    }
+
+    private MockResponse resetConsumer(Identifier identifier, String data) throws Exception {
+        ResetConsumerRequest request = RESTApi.fromJson(data, ResetConsumerRequest.class);
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        ConsumerManager consumerManager =
+                new ConsumerManager(table.fileIO(), table.location(), "main");
+        if (request.nextSnapshotId() != null) {
+            table.snapshotManager().snapshot(request.nextSnapshotId());
+            consumerManager.resetConsumer(
+                    request.consumerId(),
+                    new org.apache.paimon.consumer.Consumer(request.nextSnapshotId()));
+        } else {
+            consumerManager.deleteConsumer(request.consumerId());
+        }
+        return new MockResponse().setResponseCode(200);
+    }
+
     private MockResponse loadSnapshot(Identifier identifier, String version) throws Exception {
+
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
         SnapshotManager snapshotManager = table.snapshotManager();
         Snapshot snapshot = null;
@@ -786,7 +907,33 @@ public class RESTCatalogServer {
                         }
                     });
         }
-        AuthTableQueryResponse response = new AuthTableQueryResponse(Collections.emptyList());
+        List<Predicate> rowFilters = rowFilterAuthHandler.get(identifier.getFullName());
+        Map<String, Transform> columnMasking =
+                columnMaskingAuthHandler.get(identifier.getFullName());
+
+        // Convert Predicate list to JSON string list
+        List<String> filterJsonList = null;
+        if (rowFilters != null) {
+            filterJsonList =
+                    rowFilters.stream().map(JsonSerdeUtil::toFlatJson).collect(Collectors.toList());
+        }
+
+        // Convert Transform map to JSON string map
+        Map<String, String> columnMaskingJsonMap = null;
+        if (columnMasking != null) {
+            columnMaskingJsonMap =
+                    columnMasking.entrySet().stream()
+                            .collect(
+                                    Collectors.toMap(
+                                            Map.Entry::getKey,
+                                            entry -> JsonSerdeUtil.toFlatJson(entry.getValue())));
+        }
+
+        AuthTableQueryResponse response =
+                new AuthTableQueryResponse(filterJsonList, columnMaskingJsonMap);
+        if (response == null) {
+            response = new AuthTableQueryResponse(Collections.emptyList(), ImmutableMap.of());
+        }
         return mockResponse(response, 200);
     }
 
@@ -805,26 +952,35 @@ public class RESTCatalogServer {
                 requestBody.getStatistics());
     }
 
-    private MockResponse rollbackTableByIdHandle(Identifier identifier, long snapshotId)
-            throws Exception {
+    private MockResponse rollbackTableByIdHandle(
+            Identifier identifier, long snapshotId, @Nullable Long fromSnapshot) throws Exception {
         FileStoreTable table = getFileTable(identifier);
         String identifierWithSnapshotId = geTableFullNameWithSnapshotId(identifier, snapshotId);
-        if (tableWithSnapshotId2SnapshotStore.containsKey(identifierWithSnapshotId)) {
-            table =
-                    table.copy(
-                            Collections.singletonMap(
-                                    SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
-            long latestSnapshotId = table.snapshotManager().latestSnapshotId();
-            table.rollbackTo(snapshotId);
-            cleanSnapshot(identifier, snapshotId, latestSnapshotId);
-            tableLatestSnapshotStore.put(
-                    identifier.getFullName(),
-                    tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId));
-            return new MockResponse().setResponseCode(200);
+        TableSnapshot toSnapshot = tableWithSnapshotId2SnapshotStore.get(identifierWithSnapshotId);
+        if (toSnapshot == null) {
+            return mockResponse(
+                    new ErrorResponse(
+                            ErrorResponse.RESOURCE_TYPE_SNAPSHOT, "" + snapshotId, "", 404),
+                    404);
         }
-        return mockResponse(
-                new ErrorResponse(ErrorResponse.RESOURCE_TYPE_SNAPSHOT, "" + snapshotId, "", 404),
-                404);
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+        if (fromSnapshot != null && fromSnapshot != latestSnapshotId) {
+            return mockResponse(
+                    new ErrorResponse(
+                            null,
+                            null,
+                            String.format(
+                                    "Latest snapshot %s is not %s", latestSnapshotId, fromSnapshot),
+                            500),
+                    500);
+        }
+        table =
+                table.copy(
+                        Collections.singletonMap(SNAPSHOT_CLEAN_EMPTY_DIRECTORIES.key(), "true"));
+        table.rollbackTo(snapshotId);
+        cleanSnapshot(identifier, snapshotId, latestSnapshotId);
+        tableLatestSnapshotStore.put(identifier.getFullName(), toSnapshot);
+        return new MockResponse().setResponseCode(200);
     }
 
     private MockResponse rollbackTableByTagNameHandle(Identifier identifier, String tagName)
@@ -1277,13 +1433,16 @@ public class RESTCatalogServer {
                         tableMetadata = createObjectTable(identifier, schema);
                     } else {
                         catalog.createTable(identifier, schema, false);
+                        boolean isExternal =
+                                schema.options() != null
+                                        && schema.options().containsKey(PATH.key());
                         tableMetadata =
                                 createTableMetadata(
                                         requestBody.getIdentifier(),
                                         0L,
                                         requestBody.getSchema(),
                                         UUID.randomUUID().toString(),
-                                        false);
+                                        isExternal);
                     }
                     tableMetadataStore.put(
                             requestBody.getIdentifier().getFullName(), tableMetadata);
@@ -1408,6 +1567,7 @@ public class RESTCatalogServer {
                 GetTableResponse getTableResponse =
                         new GetTableResponse(
                                 entry.getValue().uuid(),
+                                identifier.getDatabaseName(),
                                 identifier.getTableName(),
                                 entry.getValue().schema().options().get(PATH.key()),
                                 entry.getValue().isExternal(),
@@ -1470,6 +1630,27 @@ public class RESTCatalogServer {
         return Options.fromMap(schema.options()).get(TYPE) == OBJECT_TABLE;
     }
 
+    private boolean isTableByIdRequest(String requestPath) {
+        String tableByIdPath = StringUtils.substringBeforeLast(resourcePaths.table("mock_id"), "/");
+        String tableByIdPathPrefix = tableByIdPath + "/";
+        return requestPath.startsWith(tableByIdPathPrefix);
+    }
+
+    private MockResponse tableByIdHandle(String requestPath) throws Exception {
+        String tableId = StringUtils.substringAfterLast(requestPath, "/");
+        for (Map.Entry<String, TableMetadata> entry : tableMetadataStore.entrySet()) {
+            TableMetadata tableMetadata = entry.getValue();
+            if (tableId.equals(tableMetadata.uuid())) {
+                Identifier identifier = Identifier.fromString(entry.getKey());
+                return tableHandle("GET", "", identifier);
+            }
+        }
+        return mockResponse(
+                new ErrorResponse(
+                        ErrorResponse.RESOURCE_TYPE_TABLE, tableId, "Table not exist.", 404),
+                404);
+    }
+
     private MockResponse tableHandle(String method, String data, Identifier identifier)
             throws Exception {
         RESTResponse response;
@@ -1492,6 +1673,7 @@ public class RESTCatalogServer {
                 response =
                         new GetTableResponse(
                                 tableMetadata.uuid(),
+                                identifier.getDatabaseName(),
                                 identifier.getObjectName(),
                                 path,
                                 tableMetadata.isExternal(),
@@ -1508,10 +1690,16 @@ public class RESTCatalogServer {
                 alterTableImpl(identifier, requestBody.getChanges());
                 return new MockResponse().setResponseCode(200);
             case "DELETE":
-                try {
-                    catalog.dropTable(identifier, false);
-                } catch (Exception e) {
-                    System.out.println(e.getMessage());
+                if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+                    return new MockResponse().setResponseCode(404);
+                }
+                tableMetadata = tableMetadataStore.get(identifier.getFullName());
+                if (!tableMetadata.isExternal()) {
+                    try {
+                        catalog.dropTable(identifier, false);
+                    } catch (Exception e) {
+                        System.out.println(e.getMessage());
+                    }
                 }
                 tableMetadataStore.remove(identifier.getFullName());
                 tableLatestSnapshotStore.remove(identifier.getFullName());
@@ -1530,7 +1718,7 @@ public class RESTCatalogServer {
             throw new Catalog.TableNoPermissionException(fromTable);
         } else if (tableMetadataStore.containsKey(fromTable.getFullName())) {
             TableMetadata tableMetadata = tableMetadataStore.get(fromTable.getFullName());
-            if (!isFormatTable(tableMetadata.schema().toSchema())) {
+            if (!isFormatTable(tableMetadata.schema().toSchema()) && !tableMetadata.isExternal()) {
                 catalog.renameTable(requestBody.getSource(), requestBody.getDestination(), false);
             }
             if (tableMetadataStore.containsKey(toTable.getFullName())) {
@@ -1568,6 +1756,25 @@ public class RESTCatalogServer {
             default:
                 return new MockResponse().setResponseCode(404);
         }
+    }
+
+    private MockResponse listPartitionsByNames(
+            Map<String, String> parameters,
+            Identifier tableIdentifier,
+            List<Map<String, String>> partitionSpecs) {
+        List<Partition> partitions = new ArrayList<>();
+        Set<Map<String, String>> partitionSpecSet = new HashSet<>(partitionSpecs);
+        for (Map.Entry<String, List<Partition>> entry : tablePartitionsStore.entrySet()) {
+            String objectName = Identifier.fromString(entry.getKey()).getObjectName();
+            if (objectName.equals(tableIdentifier.getObjectName())) {
+                for (Partition partition : entry.getValue()) {
+                    if (partitionSpecSet.contains(partition.spec())) {
+                        partitions.add(partition);
+                    }
+                }
+            }
+        }
+        return generateFinalListPartitionsResponse(parameters, partitions);
     }
 
     private MockResponse branchApiHandle(
@@ -1656,6 +1863,178 @@ public class RESTCatalogServer {
             }
         }
         return new MockResponse().setResponseCode(404);
+    }
+
+    private MockResponse tagApiHandle(
+            String[] resources,
+            String method,
+            String data,
+            Map<String, String> parameters,
+            Identifier identifier)
+            throws Exception {
+        RESTResponse response;
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        TagManager tagManager = table.tagManager();
+        String tagName = "";
+        try {
+            switch (method) {
+                case "GET":
+                    if (resources.length == 4) {
+                        // GET /v1/{prefix}/databases/{database}/tables/{table}/tags
+                        // Page list tags
+                        List<String> tags = new ArrayList<>(tagManager.allTagNames());
+
+                        // Filter by tagNamePrefix if provided
+                        String tagNamePrefix = parameters.get(TAG_NAME_PREFIX);
+                        if (StringUtils.isNotEmpty(tagNamePrefix)) {
+                            tags =
+                                    tags.stream()
+                                            .filter(tag -> matchNamePattern(tag, tagNamePrefix))
+                                            .collect(Collectors.toList());
+                        }
+
+                        if (tags.isEmpty()) {
+                            response = new ListTagsResponse(Collections.emptyList(), null);
+                            return mockResponse(response, 200);
+                        }
+                        int maxResults;
+                        try {
+                            maxResults = getMaxResults(parameters);
+                        } catch (NumberFormatException e) {
+                            return handleInvalidMaxResults(parameters);
+                        }
+                        String pageToken = parameters.getOrDefault(PAGE_TOKEN, null);
+                        PagedList<String> pagedTags =
+                                buildPagedEntities(tags, maxResults, pageToken);
+                        response =
+                                new ListTagsResponse(
+                                        pagedTags.getElements(), pagedTags.getNextPageToken());
+                        return mockResponse(response, 200);
+                    } else {
+                        // GET /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}
+                        tagName = RESTUtil.decodeString(resources[4]);
+                        Optional<Tag> tag = tagManager.get(tagName);
+                        if (!tag.isPresent()) {
+                            response =
+                                    new ErrorResponse(
+                                            ErrorResponse.RESOURCE_TYPE_TAG,
+                                            tagName,
+                                            String.format(
+                                                    "Tag %s in table %s doesn't exist.",
+                                                    tagName, identifier.getFullName()),
+                                            404);
+                            return mockResponse(response, 404);
+                        }
+                        Tag tagObj = tag.get();
+                        Long tagCreateTimeMillis =
+                                tagObj.getTagCreateTime() != null
+                                        ? tagObj.getTagCreateTime()
+                                                .atZone(ZoneId.systemDefault())
+                                                .toInstant()
+                                                .toEpochMilli()
+                                        : null;
+                        String timeRetainedStr =
+                                tagObj.getTagTimeRetained() != null
+                                        ? tagObj.getTagTimeRetained().toString()
+                                        : null;
+                        response =
+                                new GetTagResponse(
+                                        tagName,
+                                        tagObj.trimToSnapshot(),
+                                        tagCreateTimeMillis,
+                                        timeRetainedStr);
+                        return mockResponse(response, 200);
+                    }
+                case "DELETE":
+                    // DELETE /v1/{prefix}/databases/{database}/tables/{table}/tags/{tag}
+                    tagName = RESTUtil.decodeString(resources[4]);
+                    Optional<Tag> tagToDelete = tagManager.get(tagName);
+                    if (!tagToDelete.isPresent()) {
+                        response =
+                                new ErrorResponse(
+                                        ErrorResponse.RESOURCE_TYPE_TAG,
+                                        tagName,
+                                        String.format(
+                                                "Tag %s in table %s doesn't exist.",
+                                                tagName, identifier.getFullName()),
+                                        404);
+                        return mockResponse(response, 404);
+                    }
+                    table.deleteTag(tagName);
+                    return new MockResponse().setResponseCode(200);
+                case "POST":
+                    // POST /v1/{prefix}/databases/{database}/tables/{table}/tags
+                    CreateTagRequest requestBody = RESTApi.fromJson(data, CreateTagRequest.class);
+                    tagName = requestBody.tagName();
+
+                    Snapshot snapshot;
+                    SnapshotManager snapshotManager = table.snapshotManager();
+                    if (requestBody.snapshotId() != null) {
+                        try {
+                            snapshot = snapshotManager.tryGetSnapshot(requestBody.snapshotId());
+                        } catch (FileNotFoundException e) {
+                            snapshot = null;
+                        }
+                    } else {
+                        // Use latest snapshot
+                        snapshot = snapshotManager.latestSnapshot();
+                    }
+                    if (snapshot == null) {
+                        response =
+                                new ErrorResponse(
+                                        ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                                        String.valueOf(requestBody.snapshotId()),
+                                        String.format(
+                                                "Snapshot %s in table %s doesn't exist.",
+                                                requestBody.snapshotId(), identifier.getFullName()),
+                                        404);
+                        return mockResponse(response, 404);
+                    }
+
+                    // Parse timeRetained
+                    Duration timeRetained = null;
+                    if (requestBody.timeRetained() != null) {
+                        try {
+                            timeRetained = TimeUtils.parseDuration(requestBody.timeRetained());
+                        } catch (Exception e) {
+                            response =
+                                    new ErrorResponse(
+                                            null,
+                                            null,
+                                            "Invalid timeRetained format: "
+                                                    + requestBody.timeRetained(),
+                                            400);
+                            return mockResponse(response, 400);
+                        }
+                    }
+
+                    // Create tag
+                    table.createTag(tagName, snapshot.id(), timeRetained);
+                    return new MockResponse().setResponseCode(200);
+                default:
+                    return new MockResponse().setResponseCode(404);
+            }
+        } catch (Exception e) {
+            if (e.getMessage().contains("Tag") && e.getMessage().contains("already exists")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_TAG, tagName, e.getMessage(), 409);
+                return mockResponse(response, 409);
+            }
+            if (e.getMessage().contains("Tag") && e.getMessage().contains("doesn't exist")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_TAG, tagName, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+            if (e.getMessage().contains("Snapshot") && e.getMessage().contains("doesn't exist")) {
+                response =
+                        new ErrorResponse(
+                                ErrorResponse.RESOURCE_TYPE_SNAPSHOT, tagName, e.getMessage(), 404);
+                return mockResponse(response, 404);
+            }
+            throw e;
+        }
     }
 
     private MockResponse generateFinalListPartitionsResponse(
@@ -2064,6 +2443,17 @@ public class RESTCatalogServer {
             Snapshot snapshot,
             List<PartitionStatistics> statistics)
             throws Catalog.TableNotExistException {
+        if (!tableMetadataStore.containsKey(identifier.getFullName())) {
+            throw new Catalog.TableNotExistException(identifier);
+        }
+        boolean isExternal = tableMetadataStore.get(identifier.getFullName()).isExternal();
+        if (isExternal) {
+            new ErrorResponse(
+                    ErrorResponse.RESOURCE_TYPE_TABLE,
+                    identifier.getFullName(),
+                    "external paimon table does not support commit in rest server",
+                    501);
+        }
         FileStoreTable table = getFileTable(identifier);
         if (!tableId.equals(table.catalogEnvironment().uuid())) {
             throw new Catalog.TableNotExistException(identifier);
@@ -2121,17 +2511,7 @@ public class RESTCatalogServer {
             if (!tablePartitionsStore.containsKey(identifier.getFullName())) {
                 if (statistics != null) {
                     List<Partition> newPartitions =
-                            statistics.stream()
-                                    .map(
-                                            stats ->
-                                                    new Partition(
-                                                            stats.spec(),
-                                                            stats.recordCount(),
-                                                            stats.fileSizeInBytes(),
-                                                            stats.fileCount(),
-                                                            stats.lastFileCreationTime(),
-                                                            false))
-                                    .collect(Collectors.toList());
+                            statistics.stream().map(this::toPartition).collect(Collectors.toList());
                     tablePartitionsStore.put(identifier.getFullName(), newPartitions);
                 }
             } else {
@@ -2156,7 +2536,7 @@ public class RESTCatalogServer {
                                                                 partitionStatisticsMap.get(
                                                                         oldPartition.spec());
                                                         if (stats == null) {
-                                                            return oldPartition; // 如果没有新的统计信息，保持原样
+                                                            return oldPartition;
                                                         }
                                                         return new Partition(
                                                                 oldPartition.spec(),
@@ -2171,9 +2551,25 @@ public class RESTCatalogServer {
                                                                                 .lastFileCreationTime(),
                                                                         stats
                                                                                 .lastFileCreationTime()),
-                                                                oldPartition.done());
+                                                                stats.totalBuckets(),
+                                                                oldPartition.done(),
+                                                                oldPartition.createdAt(),
+                                                                oldPartition.createdBy(),
+                                                                oldPartition.updatedAt(),
+                                                                oldPartition.updatedBy(),
+                                                                oldPartition.options());
                                                     })
                                             .collect(Collectors.toList());
+                            Set<Map<String, String>> existingSpecs =
+                                    oldPartitions.stream()
+                                            .map(Partition::spec)
+                                            .collect(Collectors.toSet());
+                            List<Partition> newPartitions =
+                                    statistics.stream()
+                                            .filter(stats -> !existingSpecs.contains(stats.spec()))
+                                            .map(this::toPartition)
+                                            .collect(Collectors.toList());
+                            updatedPartitions.addAll(newPartitions);
                             return updatedPartitions;
                         });
             }
@@ -2221,7 +2617,10 @@ public class RESTCatalogServer {
     private TableMetadata createTableMetadata(
             Identifier identifier, long schemaId, Schema schema, String uuid, boolean isExternal) {
         Map<String, String> options = new HashMap<>(schema.options());
-        Path path = catalog.getTableLocation(identifier);
+        Path path =
+                isExternal && Objects.nonNull(schema.options().get(PATH.key()))
+                        ? new Path(schema.options().get(PATH.key()))
+                        : catalog.getTableLocation(identifier);
         String restPath = path.toString();
         if (this.configResponse
                 .getDefaults()
@@ -2259,27 +2658,23 @@ public class RESTCatalogServer {
         return createTableMetadata(identifier, 1L, newSchema, UUID.randomUUID().toString(), false);
     }
 
-    private FileStoreTable getFileTable(Identifier identifier)
-            throws Catalog.TableNotExistException {
-        if (tableMetadataStore.containsKey(identifier.getFullName())) {
-            TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
-            TableSchema schema = tableMetadata.schema();
-            CatalogEnvironment catalogEnv =
-                    new CatalogEnvironment(
-                            identifier,
-                            tableMetadata.uuid(),
-                            catalog.catalogLoader(),
-                            catalog.lockFactory().orElse(null),
-                            catalog.lockContext().orElse(null),
-                            catalogContext,
-                            false);
-            Path path = new Path(schema.options().get(PATH.key()));
-            FileIO dataFileIO = catalog.fileIO();
-            FileStoreTable table =
-                    FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
-            return table;
-        }
-        throw new Catalog.TableNotExistException(identifier);
+    private FileStoreTable getFileTable(Identifier identifier) {
+        TableMetadata tableMetadata = tableMetadataStore.get(identifier.getFullName());
+        TableSchema schema = tableMetadata.schema();
+        CatalogEnvironment catalogEnv =
+                new CatalogEnvironment(
+                        identifier,
+                        tableMetadata.uuid(),
+                        catalog.catalogLoader(),
+                        catalog.lockFactory().orElse(null),
+                        catalog.lockContext().orElse(null),
+                        catalogContext,
+                        false,
+                        false);
+        Path path = new Path(schema.options().get(PATH.key()));
+        FileIO dataFileIO = catalog.fileIO();
+        FileStoreTable table = FileStoreTableFactory.create(dataFileIO, path, schema, catalogEnv);
+        return table;
     }
 
     private static int getMaxResults(Map<String, String> parameters) {
@@ -2374,5 +2769,29 @@ public class RESTCatalogServer {
                                 "Invalid input for queryParameter maxResults: %s", maxResults),
                         400),
                 400);
+    }
+
+    private Partition toPartition(PartitionStatistics stats) {
+        return new Partition(
+                stats.spec(),
+                stats.recordCount(),
+                stats.fileSizeInBytes(),
+                stats.fileCount(),
+                stats.lastFileCreationTime(),
+                stats.totalBuckets(),
+                false,
+                System.currentTimeMillis(),
+                "created",
+                System.currentTimeMillis(),
+                "updated",
+                new HashMap<>());
+    }
+
+    public List<Map<String, String>> getReceivedHeaders() {
+        return receivedHeaders;
+    }
+
+    public void clearReceivedHeaders() {
+        receivedHeaders.clear();
     }
 }

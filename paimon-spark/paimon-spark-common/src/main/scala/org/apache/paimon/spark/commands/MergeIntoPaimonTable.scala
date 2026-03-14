@@ -88,6 +88,8 @@ case class MergeIntoPaimonTable(
   }
 
   private def performMergeForNonPkTable(sparkSession: SparkSession): Seq[CommitMessage] = {
+    // todo: find a more universal way to make read snapshot consistent.
+    val readSnapshot = table.snapshotManager().latestSnapshot()
     val targetDS = createDataset(sparkSession, filteredTargetPlan)
     val sourceDS = createDataset(sparkSession, sourceTable)
 
@@ -113,7 +115,7 @@ case class MergeIntoPaimonTable(
         val dvDS = ds.where(
           s"$ROW_KIND_COL = ${RowKind.DELETE.toByteValue} or $ROW_KIND_COL = ${RowKind.UPDATE_AFTER.toByteValue}")
         val deletionVectors = collectDeletionVectors(dataFilePathToMeta, dvDS, sparkSession)
-        val indexCommitMsg = writer.persistDeletionVectors(deletionVectors)
+        val indexCommitMsg = writer.persistDeletionVectors(deletionVectors, readSnapshot)
 
         // Step4: filter rows that should be written as the inserted/updated data.
         val toWriteDS = ds
@@ -140,9 +142,15 @@ case class MergeIntoPaimonTable(
         }
       }
 
+      // If there is filter, we need to output the __paimon__file_path metadata column explicitly.
+      val targetDSWithFilePathCol = targetOnlyCondition.fold(targetDS) {
+        condition =>
+          createDataset(sparkSession, Filter.apply(condition, relation.withMetadataColumns()))
+      }
+
       def findTouchedFiles0(joinType: String): Array[String] = {
         findTouchedFiles(
-          targetDS.alias("_left").join(sourceDS, toColumn(mergeCondition), joinType),
+          targetDSWithFilePathCol.alias("_left").join(sourceDS, toColumn(mergeCondition), joinType),
           sparkSession,
           "_left." + FILE_PATH_COLUMN)
       }
@@ -188,14 +196,20 @@ case class MergeIntoPaimonTable(
         filesToRewrittenDS.union(filesToReadDS),
         writeRowTracking = writeRowTracking).drop(ROW_KIND_COL)
 
-      val finalWriter = if (writeRowTracking) {
-        writer.withRowTracking()
+      val rowTrackingNotNull = col(ROW_ID_COLUMN).isNotNull
+      val rowTrackingNull = col(ROW_ID_COLUMN).isNull
+      val addCommitMessageBuilder = Seq.newBuilder[CommitMessage]
+      if (writeRowTracking) {
+        val rowTrackingWriter = writer.withRowTracking()
+        addCommitMessageBuilder ++= rowTrackingWriter.write(toWriteDS.filter(rowTrackingNotNull))
+        addCommitMessageBuilder ++= writer.write(
+          toWriteDS.filter(rowTrackingNull).drop(ROW_ID_COLUMN, SEQUENCE_NUMBER_COLUMN))
       } else {
-        writer
+        addCommitMessageBuilder ++= writer.write(toWriteDS)
       }
-      val addCommitMessage = finalWriter.write(toWriteDS)
-      val deletedCommitMessage = buildDeletedCommitMessage(filesToRewritten)
 
+      val addCommitMessage = addCommitMessageBuilder.result()
+      val deletedCommitMessage = buildDeletedCommitMessage(filesToRewritten)
       addCommitMessage ++ deletedCommitMessage
     }
   }
@@ -324,7 +338,7 @@ case class MergeIntoPaimonTable(
       if (count > 0) {
         throw new RuntimeException(
           "Can't execute this MergeInto when there are some target rows that each of " +
-            "them match more then one source rows. It may lead to an unexpected result.")
+            "them match more than one source rows. It may lead to an unexpected result.")
       }
     }
   }

@@ -46,7 +46,6 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
                         table,
                         false,
                         null,
-                        null,
                         builder.greaterThan(2, 500L),
                         null,
                         null,

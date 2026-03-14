@@ -22,6 +22,7 @@ import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.Optional;
 
 /** Field that represent parquet's field type. */
@@ -88,7 +89,7 @@ public abstract class ParquetField {
 
     @Override
     public String toString() {
-        return "Field{"
+        return "ParquetField{"
                 + "type="
                 + type
                 + ", repetitionLevel="
@@ -97,6 +98,10 @@ public abstract class ParquetField {
                 + definitionLevel
                 + ", required="
                 + required
+                + ", path="
+                + Arrays.toString(path)
+                + ", variantFileType="
+                + variantFileType
                 + '}';
     }
 }

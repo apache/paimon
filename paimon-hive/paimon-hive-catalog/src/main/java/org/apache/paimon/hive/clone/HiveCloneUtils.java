@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
 /** Utils for cloning Hive table to Paimon table. */
@@ -151,6 +152,13 @@ public class HiveCloneUtils {
         List<FieldSchema> fields = extractor.extractSchema(client, hiveTable, database, table);
         List<String> partitionKeys = extractor.extractPartitionKeys(hiveTable);
         Map<String, String> options = extractor.extractOptions(hiveTable);
+        if (hiveTable.isSetPartitionKeys()) {
+            options.put(
+                    PARTITION_DEFAULT_NAME.key(),
+                    client.getConfigValue(
+                            "hive.exec.default.partition.name", "__HIVE_DEFAULT_PARTITION__"));
+        }
+
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
                         .comment(options.get("comment"))

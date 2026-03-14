@@ -88,6 +88,13 @@ public class HeapBytesVector extends AbstractHeapVector implements WritableBytes
     }
 
     @Override
+    public void appendByteArray(byte[] value, int offset, int length) {
+        reserve(elementsAppended + 1);
+        putByteArray(elementsAppended, value, offset, length);
+        elementsAppended++;
+    }
+
+    @Override
     public void fill(byte[] value) {
         reserveBytes(start.length * value.length);
         for (int i = 0; i < start.length; i++) {

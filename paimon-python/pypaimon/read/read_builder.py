@@ -20,9 +20,11 @@ from typing import List, Optional
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.globalindex import VectorSearch
 from pypaimon.read.table_read import TableRead
 from pypaimon.read.table_scan import TableScan
 from pypaimon.schema.data_types import DataField
+from pypaimon.table.special_fields import SpecialFields
 
 
 class ReadBuilder:
@@ -35,6 +37,7 @@ class ReadBuilder:
         self._predicate: Optional[Predicate] = None
         self._projection: Optional[List[str]] = None
         self._limit: Optional[int] = None
+        self._vector_search: Optional['VectorSearch'] = None
 
     def with_filter(self, predicate: Predicate) -> 'ReadBuilder':
         self._predicate = predicate
@@ -48,12 +51,16 @@ class ReadBuilder:
         self._limit = limit
         return self
 
+    def with_vector_search(self, vector_search: VectorSearch) -> 'ReadBuilder':
+        self._vector_search = vector_search
+        return self
+
     def new_scan(self) -> TableScan:
         return TableScan(
             table=self.table,
             predicate=self._predicate,
             limit=self._limit,
-            read_type=self.read_type()
+            vector_search=self._vector_search
         )
 
     def new_read(self) -> TableRead:
@@ -72,5 +79,7 @@ class ReadBuilder:
         if not self._projection:
             return table_fields
         else:
-            field_map = {field.name: field for field in self.table.fields}
+            if self.table.options.row_tracking_enabled():
+                table_fields = SpecialFields.row_type_with_row_tracking(table_fields)
+            field_map = {field.name: field for field in table_fields}
             return [field_map[name] for name in self._projection if name in field_map]

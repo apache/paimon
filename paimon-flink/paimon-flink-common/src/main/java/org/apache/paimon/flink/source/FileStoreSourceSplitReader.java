@@ -48,6 +48,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Objects;
 import java.util.Queue;
@@ -76,12 +77,14 @@ public class FileStoreSourceSplitReader
     private boolean paused;
     private final AtomicBoolean wakeup;
     private final FileStoreSourceReaderMetrics metrics;
+    private final boolean blobAsDescriptor;
 
     public FileStoreSourceSplitReader(
             TableRead tableRead,
             @Nullable RecordLimiter limiter,
             FileStoreSourceReaderMetrics metrics,
-            @Nullable RowType readType) {
+            @Nullable RowType readType,
+            boolean blobAsDescriptor) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
@@ -90,6 +93,7 @@ public class FileStoreSourceSplitReader
         this.paused = false;
         this.metrics = metrics;
         this.wakeup = new AtomicBoolean(false);
+        this.blobAsDescriptor = blobAsDescriptor;
     }
 
     @Override
@@ -264,19 +268,20 @@ public class FileStoreSourceSplitReader
 
         private final MutableRecordAndPosition<RowData> recordAndPosition =
                 new MutableRecordAndPosition<>();
-        @Nullable private final Integer blobField;
+        private final Set<Integer> blobFields;
 
         private FileStoreRecordIterator(@Nullable RowType rowType) {
-            this.blobField = rowType == null ? null : blobFieldIndex(rowType);
+            this.blobFields = rowType == null ? Collections.emptySet() : blobFieldIndex(rowType);
         }
 
-        private Integer blobFieldIndex(RowType rowType) {
+        private Set<Integer> blobFieldIndex(RowType rowType) {
+            Set<Integer> result = new HashSet<>();
             for (int i = 0; i < rowType.getFieldCount(); i++) {
                 if (rowType.getTypeAt(i).getTypeRoot() == DataTypeRoot.BLOB) {
-                    return i;
+                    result.add(i);
                 }
             }
-            return null;
+            return result;
         }
 
         public FileStoreRecordIterator replace(RecordIterator<InternalRow> iterator) {
@@ -302,9 +307,9 @@ public class FileStoreSourceSplitReader
             }
 
             recordAndPosition.setNext(
-                    blobField == null
+                    blobFields.isEmpty()
                             ? new FlinkRowData(row)
-                            : new FlinkRowDataWithBlob(row, blobField));
+                            : new FlinkRowDataWithBlob(row, blobFields, blobAsDescriptor));
             currentNumRead++;
             if (limiter != null) {
                 limiter.increment();
@@ -342,7 +347,7 @@ public class FileStoreSourceSplitReader
      * An empty implementation of {@link RecordsWithSplitIds}. It is used to indicate that the
      * {@link FileStoreSourceSplitReader} is paused or wakeup.
      */
-    private static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
+    public static class EmptyRecordsWithSplitIds<T> implements RecordsWithSplitIds<T> {
 
         @Nullable
         @Override

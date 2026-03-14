@@ -20,26 +20,44 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.{PaimonAppendBucketedTableTest, PaimonAppendNonBucketTableTest, PaimonPrimaryKeyBucketedTableTest, PaimonPrimaryKeyNonBucketTableTest}
 
+import org.apache.spark.SparkConf
+
 class MergeIntoPrimaryKeyBucketedTableTest
   extends MergeIntoTableTestBase
   with MergeIntoPrimaryKeyTableTest
   with MergeIntoNotMatchedBySourceTest
-  with PaimonPrimaryKeyBucketedTableTest {}
+  with PaimonPrimaryKeyBucketedTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
+}
 
 class MergeIntoPrimaryKeyNonBucketTableTest
   extends MergeIntoTableTestBase
   with MergeIntoPrimaryKeyTableTest
   with MergeIntoNotMatchedBySourceTest
-  with PaimonPrimaryKeyNonBucketTableTest {}
+  with PaimonPrimaryKeyNonBucketTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
+}
 
 class MergeIntoAppendBucketedTableTest
   extends MergeIntoTableTestBase
   with MergeIntoAppendTableTest
   with MergeIntoNotMatchedBySourceTest
-  with PaimonAppendBucketedTableTest {}
+  with PaimonAppendBucketedTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
+}
 
 class MergeIntoAppendNonBucketedTableTest
   extends MergeIntoTableTestBase
   with MergeIntoAppendTableTest
   with MergeIntoNotMatchedBySourceTest
-  with PaimonAppendNonBucketTableTest {}
+  with PaimonAppendNonBucketTableTest {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.write.use-v2-write", "false")
+  }
+}

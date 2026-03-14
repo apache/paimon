@@ -19,22 +19,27 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** IndexManifestFile Handler. */
 public class IndexManifestFileHandler {
@@ -57,42 +62,40 @@ public class IndexManifestFileHandler {
             checkArgument(entry.kind() == FileKind.ADD);
         }
 
-        Pair<List<IndexManifestEntry>, List<IndexManifestEntry>> previous =
-                separateIndexEntries(entries);
-        Pair<List<IndexManifestEntry>, List<IndexManifestEntry>> current =
-                separateIndexEntries(newIndexFiles);
+        Map<String, List<IndexManifestEntry>> previous = separateIndexEntries(entries);
+        Map<String, List<IndexManifestEntry>> current = separateIndexEntries(newIndexFiles);
 
-        // Step1: get the hash index files;
-        List<IndexManifestEntry> indexEntries =
-                getIndexManifestFileCombine(HASH_INDEX)
-                        .combine(previous.getLeft(), current.getLeft());
-
-        // Step2: get the dv index files;
-        indexEntries.addAll(
-                getIndexManifestFileCombine(DELETION_VECTORS_INDEX)
-                        .combine(previous.getRight(), current.getRight()));
+        List<IndexManifestEntry> indexEntries = new ArrayList<>();
+        Set<String> indexes = new HashSet<>();
+        indexes.addAll(previous.keySet());
+        indexes.addAll(current.keySet());
+        for (String indexName : indexes) {
+            indexEntries.addAll(
+                    getIndexManifestFileCombine(indexName)
+                            .combine(
+                                    previous.getOrDefault(indexName, Collections.emptyList()),
+                                    current.getOrDefault(indexName, Collections.emptyList())));
+        }
 
         return indexManifestFile.writeWithoutRolling(indexEntries);
     }
 
-    private Pair<List<IndexManifestEntry>, List<IndexManifestEntry>> separateIndexEntries(
+    private Map<String, List<IndexManifestEntry>> separateIndexEntries(
             List<IndexManifestEntry> indexFiles) {
-        List<IndexManifestEntry> hashEntries = new ArrayList<>();
-        List<IndexManifestEntry> dvEntries = new ArrayList<>();
+        Map<String, List<IndexManifestEntry>> result = new HashMap<>();
+
         for (IndexManifestEntry entry : indexFiles) {
             String indexType = entry.indexFile().indexType();
-            if (indexType.equals(DELETION_VECTORS_INDEX)) {
-                dvEntries.add(entry);
-            } else if (indexType.equals(HASH_INDEX)) {
-                hashEntries.add(entry);
-            } else {
-                throw new IllegalArgumentException("Can't recognize this index type: " + indexType);
-            }
+            result.computeIfAbsent(indexType, k -> new ArrayList<>()).add(entry);
         }
-        return Pair.of(hashEntries, dvEntries);
+        return result;
     }
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
+        if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
+            return new GlobalFileNameCombiner();
+        }
+
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
             return new GlobalCombiner();
         } else {
@@ -115,15 +118,48 @@ public class IndexManifestFileHandler {
         public List<IndexManifestEntry> combine(
                 List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
             Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
+            Set<String> dvDataFiles = new HashSet<>();
             for (IndexManifestEntry entry : prevIndexFiles) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
+                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
+                if (dvRanges != null) {
+                    dvDataFiles.addAll(dvRanges.keySet());
+                }
             }
 
             for (IndexManifestEntry entry : newIndexFiles) {
+                String fileName = entry.indexFile().fileName();
+                LinkedHashMap<String, DeletionVectorMeta> dvRanges = entry.indexFile().dvRanges();
                 if (entry.kind() == FileKind.ADD) {
-                    indexEntries.put(entry.indexFile().fileName(), entry);
+                    checkState(
+                            !indexEntries.containsKey(fileName),
+                            "Trying to add file %s which is already added.",
+                            fileName);
+                    if (dvRanges != null) {
+                        for (String dataFile : dvRanges.keySet()) {
+                            checkState(
+                                    !dvDataFiles.contains(dataFile),
+                                    "Trying to add dv for data file %s which is already added.",
+                                    dataFile);
+                            dvDataFiles.add(dataFile);
+                        }
+                    }
+                    indexEntries.put(fileName, entry);
                 } else {
-                    indexEntries.remove(entry.indexFile().fileName());
+                    checkState(
+                            indexEntries.containsKey(fileName),
+                            "Trying to delete file %s which is not exists.",
+                            fileName);
+                    if (dvRanges != null) {
+                        for (String dataFile : dvRanges.keySet()) {
+                            checkState(
+                                    dvDataFiles.contains(dataFile),
+                                    "Trying to delete dv for data file %s which is not exists.",
+                                    dataFile);
+                            dvDataFiles.remove(dataFile);
+                        }
+                    }
+                    indexEntries.remove(fileName);
                 }
             }
             return new ArrayList<>(indexEntries.values());
@@ -155,6 +191,36 @@ public class IndexManifestFileHandler {
             }
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(identifier(entry), entry);
+            }
+            return new ArrayList<>(indexEntries.values());
+        }
+    }
+
+    /** We combine the previous and new index files by file name. */
+    static class GlobalFileNameCombiner implements IndexManifestFileCombiner {
+
+        @Override
+        public List<IndexManifestEntry> combine(
+                List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
+            Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
+            for (IndexManifestEntry entry : prevIndexFiles) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
+            }
+
+            // The deleted entry is processed first to avoid overwriting a new entry.
+            List<IndexManifestEntry> removed =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.DELETE)
+                            .collect(Collectors.toList());
+            List<IndexManifestEntry> added =
+                    newIndexFiles.stream()
+                            .filter(f -> f.kind() == FileKind.ADD)
+                            .collect(Collectors.toList());
+            for (IndexManifestEntry entry : removed) {
+                indexEntries.remove(entry.indexFile().fileName());
+            }
+            for (IndexManifestEntry entry : added) {
+                indexEntries.put(entry.indexFile().fileName(), entry);
             }
             return new ArrayList<>(indexEntries.values());
         }

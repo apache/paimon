@@ -18,17 +18,22 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobData;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.UriReader;
+import org.apache.paimon.utils.UriReaderFactory;
 
 import org.apache.flink.table.data.DecimalData;
 import org.apache.flink.table.data.GenericRowData;
@@ -42,9 +47,15 @@ import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 public class FlinkRowWrapper implements InternalRow {
 
     private final org.apache.flink.table.data.RowData row;
+    private final UriReaderFactory uriReaderFactory;
 
     public FlinkRowWrapper(org.apache.flink.table.data.RowData row) {
+        this(row, null);
+    }
+
+    public FlinkRowWrapper(org.apache.flink.table.data.RowData row, CatalogContext catalogContext) {
         this.row = row;
+        this.uriReaderFactory = new UriReaderFactory(catalogContext);
     }
 
     @Override
@@ -131,12 +142,25 @@ public class FlinkRowWrapper implements InternalRow {
 
     @Override
     public Blob getBlob(int pos) {
-        return new BlobData(row.getBinary(pos));
+        byte[] bytes = row.getBinary(pos);
+        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
+        if (blobDes) {
+            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
+            UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
+            return Blob.fromDescriptor(uriReader, blobDescriptor);
+        } else {
+            return new BlobData(bytes);
+        }
     }
 
     @Override
     public InternalArray getArray(int pos) {
         return new FlinkArrayWrapper(row.getArray(pos));
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        return new FlinkVectorWrapper(row.getArray(pos));
     }
 
     @Override
@@ -240,6 +264,11 @@ public class FlinkRowWrapper implements InternalRow {
         }
 
         @Override
+        public InternalVector getVector(int pos) {
+            return new FlinkVectorWrapper(array.getArray(pos));
+        }
+
+        @Override
         public InternalMap getMap(int pos) {
             return new FlinkMapWrapper(array.getMap(pos));
         }
@@ -282,6 +311,12 @@ public class FlinkRowWrapper implements InternalRow {
         @Override
         public double[] toDoubleArray() {
             return array.toDoubleArray();
+        }
+    }
+
+    private static class FlinkVectorWrapper extends FlinkArrayWrapper implements InternalVector {
+        private FlinkVectorWrapper(org.apache.flink.table.data.ArrayData array) {
+            super(array);
         }
     }
 

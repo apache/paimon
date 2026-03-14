@@ -33,7 +33,9 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION_FIELDS;
+import static org.apache.paimon.table.system.AllPartitionsTable.ALL_PARTITIONS;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
+import static org.apache.paimon.table.system.AllTablesTable.ALL_TABLES;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.paimon.table.system.BinlogTable.BINLOG;
 import static org.apache.paimon.table.system.BranchesTable.BRANCHES;
@@ -78,6 +80,9 @@ public class SystemTableLoader {
 
     public static final List<String> SYSTEM_TABLES = new ArrayList<>(SYSTEM_TABLE_LOADERS.keySet());
 
+    public static final List<String> GLOBAL_SYSTEM_TABLES =
+            Arrays.asList(ALL_TABLES, ALL_PARTITIONS, ALL_TABLE_OPTIONS, CATALOG_OPTIONS);
+
     @Nullable
     public static Table load(String type, FileStoreTable dataTable) {
         return Optional.ofNullable(SYSTEM_TABLE_LOADERS.get(type.toLowerCase()))
@@ -86,6 +91,6 @@ public class SystemTableLoader {
     }
 
     public static List<String> loadGlobalTableNames() {
-        return Arrays.asList(ALL_TABLE_OPTIONS, CATALOG_OPTIONS);
+        return GLOBAL_SYSTEM_TABLES;
     }
 }

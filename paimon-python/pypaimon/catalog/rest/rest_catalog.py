@@ -15,42 +15,47 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
-from urllib.parse import urlparse
 
-import pyarrow
-from packaging.version import parse
-
-from pypaimon.api.api_response import GetTableResponse, PagedList
-from pypaimon.api.options import Options
+from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
-from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException
+from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_context import CatalogContext
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import TableNotExistException, DatabaseAlreadyExistException, \
-    TableAlreadyExistException, DatabaseNotExistException
+from pypaimon.catalog.catalog_exception import (
+    TableNotExistException, DatabaseAlreadyExistException,
+    TableAlreadyExistException, DatabaseNotExistException,
+    TableNoPermissionException, DatabaseNoPermissionException
+)
 from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
-from pypaimon.common.config import CatalogOptions
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.file_store_table import FileStoreTable
+from pypaimon.table.format.format_table import FormatTable, Format
+from pypaimon.table.iceberg.iceberg_table import IcebergTable
+from pypaimon.table.object.object_table import ObjectTable
+
+FORMAT_TABLE_TYPE = "format-table"
+ICEBERG_TABLE_TYPE = "iceberg-table"
+OBJECT_TABLE_TYPE = "object-table"
 
 
 class RESTCatalog(Catalog):
     def __init__(self, context: CatalogContext, config_required: Optional[bool] = True):
         self.warehouse = context.options.get(CatalogOptions.WAREHOUSE)
-        self.rest_api = RESTApi(context.options.to_map(), config_required)
-        self.context = CatalogContext.create(Options(self.rest_api.options), context.hadoop_conf,
+        self.rest_api = RESTApi(context.options, config_required)
+        self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
                                              context.prefer_io_loader, context.fallback_io_loader)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
 
@@ -94,11 +99,14 @@ class RESTCatalog(Catalog):
 
         Raises:
             TableNotExistException: If the target table does not exist
+            TableNoPermissionException: If no permission to access this table
         """
         try:
             return self.rest_api.commit_snapshot(identifier, table_uuid, snapshot, statistics)
         except NoSuchResourceException as e:
             raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
         except Exception as e:
             # Handle other exceptions that might be thrown by the API
             raise RuntimeError(f"Failed to commit snapshot for table {identifier.get_full_name()}: {e}") from e
@@ -117,45 +125,83 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 # Convert REST API exception to catalog exception
                 raise DatabaseAlreadyExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
     def get_database(self, name: str) -> Database:
-        response = self.rest_api.get_database(name)
-        options = response.options
-        options[Catalog.DB_LOCATION_PROP] = response.location
-        response.put_audit_options_to(options)
-        if response is not None:
-            return Database(name, options)
+        try:
+            response = self.rest_api.get_database(name)
+            options = response.options
+            options[Catalog.DB_LOCATION_PROP] = response.location
+            response.put_audit_options_to(options)
+            if response is not None:
+                return Database(name, options)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
-    def drop_database(self, name: str, ignore_if_exists: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        if not cascade:
+            try:
+                tables = self.list_tables(name)
+                if tables:
+                    raise ValueError(
+                        f"Database {name} is not empty. "
+                        f"Use cascade=True to drop all tables first."
+                    )
+            except DatabaseNotExistException:
+                if not ignore_if_not_exists:
+                    raise
+                return
+
         try:
             self.rest_api.drop_database(name)
         except NoSuchResourceException as e:
-            if not ignore_if_exists:
-                # Convert REST API exception to catalog exception
+            if not ignore_if_not_exists:
                 raise DatabaseNotExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
     def alter_database(self, name: str, changes: List[PropertyChange]):
-        set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
-        self.rest_api.alter_database(name, list(remove_keys), set_properties)
+        try:
+            set_properties, remove_keys = PropertyChange.get_set_properties_to_remove_keys(changes)
+            self.rest_api.alter_database(name, list(remove_keys), set_properties)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(name) from e
 
     def list_tables(self, database_name: str) -> List[str]:
-        return self.rest_api.list_tables(database_name)
+        try:
+            return self.rest_api.list_tables(database_name)
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
 
     def list_tables_paged(
             self,
             database_name: str,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
-            table_name_pattern: Optional[str] = None
+            table_name_pattern: Optional[str] = None,
+            table_type: Optional[str] = None
     ) -> PagedList[str]:
-        return self.rest_api.list_tables_paged(
-            database_name,
-            max_results,
-            page_token,
-            table_name_pattern
-        )
+        try:
+            return self.rest_api.list_tables_paged(
+                database_name,
+                max_results,
+                page_token,
+                table_name_pattern,
+                table_type
+            )
+        except NoSuchResourceException as e:
+            raise DatabaseNotExistException(database_name) from e
+        except ForbiddenException as e:
+            raise DatabaseNoPermissionException(database_name) from e
 
-    def get_table(self, identifier: Union[str, Identifier]) -> FileStoreTable:
+    def get_table(self, identifier: Union[str, Identifier]):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         return self.load_table(
@@ -174,28 +220,139 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
 
-    def drop_table(self, identifier: Union[str, Identifier], ignore_if_exists: bool = False):
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+        try:
+            self.rest_api.rename_table(source_identifier, target_identifier)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(source_identifier) from e
+        except AlreadyExistsException as e:
+            raise TableAlreadyExistException(target_identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(source_identifier) from e
+
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
         try:
             self.rest_api.drop_table(identifier)
         except NoSuchResourceException as e:
-            if not ignore_if_exists:
+            if not ignore_if_not_exists:
                 raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def drop_partitions(
+        self,
+        identifier: Union[str, Identifier],
+        partitions: List[Dict[str, str]],
+    ) -> None:
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        if not partitions:
+            raise ValueError("Partitions list cannot be empty.")
+        table = self.get_table(identifier)
+        if isinstance(table, (FormatTable, IcebergTable, ObjectTable)):
+            unsupported_type = type(table).__name__
+            raise ValueError(
+                f"drop_partitions is not supported for table type '{unsupported_type}'. "
+                "Only Paimon (FileStore) tables support this operation."
+            )
+        commit = table.new_batch_write_builder().new_commit()
+        try:
+            commit.truncate_partitions(partitions)
+        finally:
+            commit.close()
+
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.alter_table(identifier, changes)
+        except NoSuchResourceException as e:
+            if not ignore_if_not_exists:
+                raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def rollback_to(self, identifier, instant, from_snapshot=None):
+        """Rollback table by the given identifier and instant.
+
+        Args:
+            identifier: Path of the table (Identifier or string).
+            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
+            from_snapshot: Optional snapshot ID. Success only occurs when the
+                latest snapshot is this snapshot.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            TableNoPermissionException: If no permission to access this table.
+        """
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.rollback_to(identifier, instant, from_snapshot)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
+                raise ValueError(
+                    "Rollback snapshot '{}' doesn't exist.".format(e.resource_name)) from e
+            elif e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
+                raise ValueError(
+                    "Rollback tag '{}' doesn't exist.".format(e.resource_name)) from e
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional['TableSnapshot']:
+        """Load the latest snapshot for table.
+
+        Args:
+            identifier: Path of the table (Identifier or string).
+
+        Returns:
+            TableSnapshot instance or None if snapshot not found.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            TableNoPermissionException: If no permission to access this table.
+        """
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.load_snapshot(identifier)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
+                return None
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
 
     def load_table_metadata(self, identifier: Identifier) -> TableMetadata:
-        response = self.rest_api.get_table(identifier)
-        return self.to_table_metadata(identifier.get_database_name(), response)
+        try:
+            response = self.rest_api.get_table(identifier)
+            return self.to_table_metadata(identifier.get_database_name(), response)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
 
     def to_table_metadata(self, db: str, response: GetTableResponse) -> TableMetadata:
         schema = TableSchema.from_schema(response.schema_id, response.get_schema())
         options: Dict[str, str] = dict(schema.options)
-        options[CoreOptions.PATH] = response.get_path()
+        options[CoreOptions.PATH.key()] = response.get_path()
         response.put_audit_options_to(options)
 
         identifier = Identifier.create(db, response.get_name())
         if identifier.get_branch_name() is not None:
-            options[CoreOptions.BRANCH] = identifier.get_branch_name()
+            options[CoreOptions.BRANCH.key()] = identifier.get_branch_name()
 
         return TableMetadata(
             schema=schema.copy(options),
@@ -204,10 +361,10 @@ class RESTCatalog(Catalog):
         )
 
     def file_io_from_options(self, table_path: str) -> FileIO:
-        return FileIO(table_path, self.context.options.data)
+        return FileIO.get(table_path, self.context.options)
 
     def file_io_for_data(self, table_path: str, identifier: Identifier):
-        return RESTTokenFileIO(identifier, table_path, self.context.options.data) \
+        return RESTTokenFileIO(identifier, table_path, self.context.options) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
 
     def load_table(self,
@@ -215,32 +372,93 @@ class RESTCatalog(Catalog):
                    internal_file_io: Callable[[str], Any],
                    external_file_io: Callable[[str], Any],
                    metadata_loader: Callable[[Identifier], TableMetadata],
-                   ) -> FileStoreTable:
+                   ):
         metadata = metadata_loader(identifier)
         schema = metadata.schema
+        table_type = schema.options.get(CoreOptions.TYPE.key(), "").strip().lower()
+        if table_type == FORMAT_TABLE_TYPE:
+            return self._create_format_table(identifier, metadata, internal_file_io, external_file_io)
         data_file_io = external_file_io if metadata.is_external else internal_file_io
+        if table_type == ICEBERG_TABLE_TYPE:
+            return self._create_iceberg_table(identifier, metadata, data_file_io)
+        if table_type == OBJECT_TABLE_TYPE:
+            return self._create_object_table(identifier, metadata, data_file_io)
         catalog_env = CatalogEnvironment(
             identifier=identifier,
             uuid=metadata.uuid,
             catalog_loader=self.catalog_loader(),
             supports_version_management=True  # REST catalogs support version management
         )
-        path_parsed = urlparse(schema.options.get(CoreOptions.PATH))
-        path = path_parsed.path if path_parsed.scheme is None else schema.options.get(CoreOptions.PATH)
-        if path_parsed.scheme == "file":
-            table_path = path_parsed.path
-        else:
-            table_path = path_parsed.netloc + path_parsed.path \
-                if parse(pyarrow.__version__) >= parse("7.0.0") else path_parsed.path[1:]
-        table = self.create(data_file_io(path),
-                            Path(table_path),
+        # Use the path from server response directly (do not trim scheme)
+        table_path = schema.options.get(CoreOptions.PATH.key())
+        table = self.create(data_file_io(table_path),
+                            table_path,
                             schema,
                             catalog_env)
         return table
 
+    def _create_format_table(self,
+                             identifier: Identifier,
+                             metadata: TableMetadata,
+                             internal_file_io: Callable[[str], Any],
+                             external_file_io: Callable[[str], Any],
+                             ) -> FormatTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        if not location:
+            raise ValueError("Format table schema must have path option")
+        data_file_io = external_file_io if metadata.is_external else internal_file_io
+        file_io = data_file_io(location)
+        file_format = schema.options.get(CoreOptions.FILE_FORMAT.key(), "parquet")
+        fmt = Format.parse(file_format)
+        return FormatTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            format=fmt,
+            options=dict(schema.options),
+            comment=schema.comment,
+        )
+
+    def _create_iceberg_table(self,
+                              identifier: Identifier,
+                              metadata: TableMetadata,
+                              file_io: Callable[[str], Any],
+                              ) -> IcebergTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        file_io = file_io(location)
+        return IcebergTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            options=dict(schema.options),
+            comment=schema.comment,
+            uuid=metadata.uuid,
+        )
+
+    def _create_object_table(self,
+                             identifier: Identifier,
+                             metadata: TableMetadata,
+                             file_io: Callable[[str], Any],
+                             ) -> ObjectTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        file_io = file_io(location)
+        return ObjectTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            options=dict(schema.options),
+            comment=schema.comment,
+        )
+
     @staticmethod
     def create(file_io: FileIO,
-               table_path: Path,
+               table_path: str,
                table_schema: TableSchema,
                catalog_environment: CatalogEnvironment
                ) -> FileStoreTable:

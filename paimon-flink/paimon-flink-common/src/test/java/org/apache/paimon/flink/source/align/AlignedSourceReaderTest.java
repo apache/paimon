@@ -224,7 +224,8 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
                 IOManager.create(tempDir.toString()),
                 null,
                 null,
-                null);
+                null,
+                false);
     }
 
     private void writeTable() throws Exception {

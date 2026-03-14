@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class FormatTableRead implements TableRead {
 
     private final RowType readType;
+    private final RowType tableRowType;
     private final Predicate predicate;
     private final FormatReadBuilder read;
     private final Integer limit;
@@ -44,7 +45,12 @@ public class FormatTableRead implements TableRead {
     private boolean executeFilter = false;
 
     public FormatTableRead(
-            RowType readType, FormatReadBuilder read, Predicate predicate, Integer limit) {
+            RowType readType,
+            RowType tableRowType,
+            FormatReadBuilder read,
+            Predicate predicate,
+            Integer limit) {
+        this.tableRowType = tableRowType;
         this.readType = readType;
         this.read = read;
         this.predicate = predicate;
@@ -88,7 +94,7 @@ public class FormatTableRead implements TableRead {
 
         Predicate predicate = this.predicate;
         if (readType != null) {
-            int[] projection = readType.getFieldIndices(readType.getFieldNames());
+            int[] projection = tableRowType.getFieldIndices(readType.getFieldNames());
             Optional<Predicate> optional =
                     predicate.visit(new PredicateProjectionConverter(projection));
             if (!optional.isPresent()) {

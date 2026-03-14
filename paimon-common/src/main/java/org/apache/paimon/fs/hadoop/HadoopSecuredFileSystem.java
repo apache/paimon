@@ -89,6 +89,41 @@ public class HadoopSecuredFileSystem extends FileSystem {
     }
 
     @Override
+    public FSDataOutputStream create(Path path, boolean overwrite) throws IOException {
+        return runSecuredWithIOException(() -> fileSystem.create(path, overwrite));
+    }
+
+    @Override
+    public FSDataOutputStream create(
+            Path path, boolean overwrite, int bufferSize, short replication, long blockSize)
+            throws IOException {
+        return runSecuredWithIOException(
+                () -> fileSystem.create(path, overwrite, bufferSize, replication, blockSize));
+    }
+
+    @Override
+    public short getDefaultReplication(Path f) {
+        return runSecured(() -> fileSystem.getDefaultReplication(f));
+    }
+
+    @Deprecated
+    @Override
+    public short getDefaultReplication() {
+        return runSecured(() -> fileSystem.getDefaultReplication());
+    }
+
+    @Override
+    public long getDefaultBlockSize(Path f) {
+        return runSecured(() -> fileSystem.getDefaultBlockSize(f));
+    }
+
+    @Deprecated
+    @Override
+    public long getDefaultBlockSize() {
+        return runSecured(() -> fileSystem.getDefaultBlockSize());
+    }
+
+    @Override
     public boolean exists(Path f) throws IOException {
         return runSecuredWithIOException(() -> fileSystem.exists(f));
     }

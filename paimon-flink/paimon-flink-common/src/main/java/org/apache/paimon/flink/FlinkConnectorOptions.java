@@ -20,22 +20,18 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.description.DescribedEnum;
-import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
-import org.apache.paimon.options.description.TextElement;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
 
@@ -47,48 +43,6 @@ public class FlinkConnectorOptions {
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon.";
 
     public static final int MIN_CLUSTERING_SAMPLE_FACTOR = 20;
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<String> LOG_SYSTEM =
-            ConfigOptions.key("log.system")
-                    .stringType()
-                    .defaultValue(NONE)
-                    .withDescription(
-                            Description.builder()
-                                    .text("The log system used to keep changes of the table.")
-                                    .linebreak()
-                                    .linebreak()
-                                    .text("Possible values:")
-                                    .linebreak()
-                                    .list(
-                                            TextElement.text(
-                                                    "\"none\": No log system, the data is written only to file store,"
-                                                            + " and the streaming read will be directly read from the file store."))
-                                    .list(
-                                            TextElement.text(
-                                                    "\"kafka\": Kafka log system, the data is double written to file"
-                                                            + " store and kafka, and the streaming read will be read from kafka. If streaming read from file, configures "
-                                                            + STREAMING_READ_MODE.key()
-                                                            + " to "
-                                                            + StreamingReadMode.FILE.getValue()
-                                                            + "."))
-                                    .build());
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<Integer> LOG_SYSTEM_PARTITIONS =
-            ConfigOptions.key("log.system.partitions")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "The number of partitions of the log system. If log system is kafka, this is kafka partitions.");
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<Integer> LOG_SYSTEM_REPLICATION =
-            ConfigOptions.key("log.system.replication")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "The number of replication of the log system. If log system is kafka, this is kafka replicationFactor.");
 
     public static final ConfigOption<Integer> SINK_PARALLELISM =
             ConfigOptions.key("sink.parallelism")
@@ -302,8 +256,11 @@ public class FlinkConnectorOptions {
                                     + CoreOptions.PARTITION_DEFAULT_NAME.key()
                                     + ". Multiple partitions should be separated by semicolon (;). "
                                     + "This option can support normal source tables and lookup join tables. "
-                                    + "For lookup joins, two special values max_pt() and max_two_pt() are also supported, "
-                                    + "specifying the (two) partition(s) with the largest partition value.");
+                                    + "There are two special values max_pt() and max_two_pt() are also supported "
+                                    + "to specify the (two) partition(s) with the largest partition value. For "
+                                    + "lookup source, the max partition(s) will be periodically refreshed; for "
+                                    + "normal source, the max partition(s) will be determined before job running "
+                                    + "without refreshing even for streaming jobs.");
 
     public static final ConfigOption<Duration> LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL =
             ConfigOptions.key("lookup.dynamic-partition.refresh-interval")
@@ -334,6 +291,15 @@ public class FlinkConnectorOptions {
                             "The blacklist contains several time periods. During these time periods, the lookup table's "
                                     + "cache refreshing is forbidden. Blacklist format is start1->end1,start2->end2,... , "
                                     + "and the time format is yyyy-MM-dd HH:mm. Only used when lookup table is FULL cache mode.");
+
+    public static final ConfigOption<Integer> LOOKUP_REFRESH_FULL_LOAD_THRESHOLD =
+            ConfigOptions.key("lookup.refresh.full-load-threshold")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If the pending snapshot count exceeds this threshold, lookup table will discard incremental updates "
+                                    + "and refresh the entire table from the latest snapshot. This can improve performance when there are many snapshots pending. "
+                                    + "Set to a reasonable value (e.g., 10) to enable this optimization. Default is Integer.MAX_VALUE (disabled). ");
 
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
@@ -480,13 +446,6 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Bounded mode for Paimon consumer. "
                                     + "By default, Paimon automatically selects bounded mode based on the mode of the Flink job.");
-
-    public static final ConfigOption<Integer> POSTPONE_DEFAULT_BUCKET_NUM =
-            key("postpone.default-bucket-num")
-                    .intType()
-                    .defaultValue(1)
-                    .withDescription(
-                            "Bucket number for the partitions compacted for the first time in postpone bucket tables.");
 
     public static final ConfigOption<Boolean> SCAN_DEDICATED_SPLIT_GENERATION =
             key("scan.dedicated-split-generation")

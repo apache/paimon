@@ -22,6 +22,7 @@ import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
@@ -32,9 +33,12 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafBinaryFunction;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.LeafPredicateExtractor;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -63,6 +67,7 @@ import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SerializationUtils;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -77,6 +82,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -117,7 +123,9 @@ public class FilesTable implements ReadonlyTable {
                             new DataField(14, "max_sequence_number", new BigIntType(true)),
                             new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS()),
                             new DataField(16, "deleteRowCount", DataTypes.BIGINT()),
-                            new DataField(17, "file_source", DataTypes.STRING())));
+                            new DataField(17, "file_source", DataTypes.STRING()),
+                            new DataField(18, "first_row_id", DataTypes.BIGINT()),
+                            new DataField(19, "write_cols", DataTypes.ARRAY(DataTypes.STRING()))));
 
     private final FileStoreTable storeTable;
 
@@ -189,31 +197,88 @@ public class FilesTable implements ReadonlyTable {
         @Override
         public Plan innerPlan() {
             SnapshotReader snapshotReader = fileStoreTable.newSnapshotReader();
-            if (partitionPredicate != null && partitionPredicate.function() instanceof Equal) {
-                String partitionStr = partitionPredicate.literals().get(0).toString();
-                if (partitionStr.startsWith("{")) {
-                    partitionStr = partitionStr.substring(1);
-                }
-                if (partitionStr.endsWith("}")) {
-                    partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
-                }
-                String[] partFields = partitionStr.split(", ");
-                LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
+            if (partitionPredicate != null) {
                 List<String> partitionKeys = fileStoreTable.partitionKeys();
-                if (partitionKeys.size() != partFields.length) {
-                    return Collections::emptyList;
+                RowType partitionType = fileStoreTable.schema().logicalPartitionType();
+                if (partitionPredicate.function() instanceof Equal) {
+                    LinkedHashMap<String, String> partSpec =
+                            parsePartitionSpec(
+                                    partitionPredicate.literals().get(0).toString(), partitionKeys);
+                    if (partSpec == null) {
+                        return Collections::emptyList;
+                    }
+                    snapshotReader.withPartitionFilter(partSpec);
+                } else if (partitionPredicate.function() instanceof In) {
+                    List<Predicate> orPredicates = new ArrayList<>();
+                    PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
+                    for (Object literal : partitionPredicate.literals()) {
+                        LinkedHashMap<String, String> partSpec =
+                                parsePartitionSpec(literal.toString(), partitionKeys);
+                        if (partSpec == null) {
+                            continue;
+                        }
+                        List<Predicate> andPredicates = new ArrayList<>();
+                        for (int i = 0; i < partitionKeys.size(); i++) {
+                            Object value =
+                                    TypeUtils.castFromString(
+                                            partSpec.get(partitionKeys.get(i)),
+                                            partitionType.getTypeAt(i));
+                            andPredicates.add(partBuilder.equal(i, value));
+                        }
+                        orPredicates.add(PredicateBuilder.and(andPredicates));
+                    }
+                    if (!orPredicates.isEmpty()) {
+                        snapshotReader.withPartitionFilter(PredicateBuilder.or(orPredicates));
+                    }
+                } else if (partitionPredicate.function() instanceof LeafBinaryFunction) {
+                    LinkedHashMap<String, String> partSpec =
+                            parsePartitionSpec(
+                                    partitionPredicate.literals().get(0).toString(), partitionKeys);
+                    if (partSpec != null) {
+                        PredicateBuilder partBuilder = new PredicateBuilder(partitionType);
+                        List<Predicate> predicates = new ArrayList<>();
+                        for (int i = 0; i < partitionKeys.size(); i++) {
+                            Object value =
+                                    TypeUtils.castFromString(
+                                            partSpec.get(partitionKeys.get(i)),
+                                            partitionType.getTypeAt(i));
+                            predicates.add(
+                                    new LeafPredicate(
+                                            partitionPredicate.function(),
+                                            partitionType.getTypeAt(i),
+                                            i,
+                                            partitionKeys.get(i),
+                                            Collections.singletonList(value)));
+                        }
+                        snapshotReader.withPartitionFilter(PredicateBuilder.and(predicates));
+                    }
                 }
-                for (int i = 0; i < partitionKeys.size(); i++) {
-                    partSpec.put(partitionKeys.get(i), partFields[i]);
-                }
-                snapshotReader.withPartitionFilter(partSpec);
-                // TODO support range?
             }
 
             return () ->
                     snapshotReader.partitions().stream()
                             .map(p -> new FilesSplit(p, bucketPredicate, levelPredicate))
                             .collect(Collectors.toList());
+        }
+
+        @Nullable
+        private LinkedHashMap<String, String> parsePartitionSpec(
+                String partitionStr, List<String> partitionKeys) {
+            if (partitionStr.startsWith("{")) {
+                partitionStr = partitionStr.substring(1);
+            }
+            if (partitionStr.endsWith("}")) {
+                partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
+            }
+            String[] partFields = partitionStr.split(", ");
+            if (partitionKeys.size() != partFields.length) {
+                return null;
+            }
+            LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
+            for (int i = 0; i < partitionKeys.size(); i++) {
+                partSpec.put(partitionKeys.get(i), partFields[i]);
+            }
+            return partSpec;
         }
     }
 
@@ -274,8 +339,16 @@ public class FilesTable implements ReadonlyTable {
                             return levelPredicate.test(
                                     GenericRow.of(null, null, null, null, null, level));
                         });
+            } else {
+                // avoid that batchScanSkipLevel0 is true
+                scan.withLevelFilter(level -> true);
             }
             return scan.plan();
+        }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
         }
     }
 
@@ -432,7 +505,16 @@ public class FilesTable implements ReadonlyTable {
                         () -> file.deleteRowCount().orElse(null),
                         () ->
                                 BinaryString.fromString(
-                                        file.fileSource().map(FileSource::toString).orElse(null))
+                                        file.fileSource().map(FileSource::toString).orElse(null)),
+                        file::firstRowId,
+                        () -> {
+                            List<String> writeCols = file.writeCols();
+                            if (writeCols == null) {
+                                return null;
+                            }
+                            return new GenericArray(
+                                    writeCols.stream().map(BinaryString::fromString).toArray());
+                        },
                     };
 
             return new LazyGenericRow(fields);

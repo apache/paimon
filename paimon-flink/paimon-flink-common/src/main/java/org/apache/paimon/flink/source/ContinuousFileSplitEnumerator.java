@@ -27,6 +27,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.IncrementalSplit;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -91,6 +92,14 @@ public class ContinuousFileSplitEnumerator
 
     private final int maxSnapshotCount;
 
+    private final int sourceParallelismUpperBound;
+
+    /**
+     * Metric name for source scaling max parallelism. This metric provides a recommended upper
+     * bound of parallelism for auto-scaling systems.
+     */
+    public static final String SOURCE_PARALLELISM_UPPER_BOUND = "sourceParallelismUpperBound";
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
@@ -100,7 +109,8 @@ public class ContinuousFileSplitEnumerator
             boolean unordered,
             int splitMaxPerTask,
             boolean shuffleBucketWithPartition,
-            int maxSnapshotCount) {
+            int maxSnapshotCount,
+            int sourceParallelismUpperBound) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -117,6 +127,7 @@ public class ContinuousFileSplitEnumerator
         this.consumerProgressCalculator =
                 new ConsumerProgressCalculator(context.currentParallelism());
         this.maxSnapshotCount = maxSnapshotCount;
+        this.sourceParallelismUpperBound = sourceParallelismUpperBound;
     }
 
     @VisibleForTesting
@@ -134,8 +145,18 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
+        registerMetrics();
         context.callAsync(
                 this::scanNextSnapshot, this::processDiscoveredSplits, 0, discoveryInterval);
+    }
+
+    private void registerMetrics() {
+        try {
+            context.metricGroup()
+                    .gauge(SOURCE_PARALLELISM_UPPER_BOUND, () -> sourceParallelismUpperBound);
+        } catch (Exception e) {
+            LOG.warn("Failed to register enumerator metrics.", e);
+        }
     }
 
     @Override
@@ -305,20 +326,39 @@ public class ContinuousFileSplitEnumerator
     }
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
-        DataSplit dataSplit = ((DataSplit) split.split());
+        if (split.split() instanceof DataSplit) {
+            return assignSuggestedTask((DataSplit) split.split());
+        } else {
+            return assignSuggestedTask((IncrementalSplit) split.split());
+        }
+    }
+
+    protected int assignSuggestedTask(DataSplit split) {
         int parallelism = context.currentParallelism();
 
         int bucketId;
-        if (dataSplit.bucket() == BucketMode.POSTPONE_BUCKET) {
+        if (split.bucket() == BucketMode.POSTPONE_BUCKET) {
             bucketId =
-                    PostponeBucketFileStoreWrite.getWriteId(dataSplit.dataFiles().get(0).fileName())
+                    PostponeBucketFileStoreWrite.getWriteId(split.dataFiles().get(0).fileName())
                             % parallelism;
         } else {
-            bucketId = dataSplit.bucket();
+            bucketId = split.bucket();
         }
 
         if (shuffleBucketWithPartition) {
-            return ChannelComputer.select(dataSplit.partition(), bucketId, parallelism);
+            return ChannelComputer.select(split.partition(), bucketId, parallelism);
+        } else {
+            return ChannelComputer.select(bucketId, parallelism);
+        }
+    }
+
+    protected int assignSuggestedTask(IncrementalSplit split) {
+        int parallelism = context.currentParallelism();
+
+        // TODO how to deal with postpone bucket?
+        int bucketId = split.bucket();
+        if (shuffleBucketWithPartition) {
+            return ChannelComputer.select(split.partition(), bucketId, parallelism);
         } else {
             return ChannelComputer.select(bucketId, parallelism);
         }

@@ -55,6 +55,7 @@ public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexF
                 rnd.nextInt(),
                 rnd.nextInt(),
                 null,
+                null,
                 null);
     }
 

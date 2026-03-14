@@ -126,7 +126,9 @@ public class ManifestTestDataGenerator {
                 minBucket,
                 maxBucket,
                 minLevel,
-                maxLevel);
+                maxLevel,
+                null,
+                null);
     }
 
     private void mergeLevelsIfNeeded(BinaryRow partition, int bucket) {

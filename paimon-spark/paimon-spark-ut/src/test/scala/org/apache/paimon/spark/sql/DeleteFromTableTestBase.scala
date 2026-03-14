@@ -52,6 +52,53 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
     )
   }
 
+  test(s"Paimon Delete: append-only table, no match and full delete scenarios") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
+
+    spark.sql("DELETE FROM T WHERE name = 'e'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    spark.sql("DELETE FROM T")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      spark.emptyDataFrame
+    )
+  }
+
+  test(
+    s"Paimon Delete: append-only table, no match and full delete scenarios with partitioned table") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
+
+    spark.sql("DELETE FROM T WHERE name = 'e'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    spark.sql("DELETE FROM T")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      spark.emptyDataFrame
+    )
+  }
+
   test(s"Paimon Delete: append-only table with partition") {
     spark.sql(s"""
                  |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
@@ -469,6 +516,19 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       val latestSnapshot = table.latestSnapshot().get()
       assert(latestSnapshot.id == 4)
       assert(latestSnapshot.commitKind.equals(Snapshot.CommitKind.COMPACT))
+    }
+  }
+
+  test("Paimon delete: delete with range condition") {
+    withTable("t") {
+      sql(s"CREATE TABLE t (id INT, v INT)")
+      sql("INSERT INTO t SELECT /*+ REPARTITION(1) */ id, id FROM range (1, 50000)")
+      sql("DELETE FROM t WHERE id >= 111 and id <= 444")
+
+      checkAnswer(
+        sql("SELECT count(*) FROM t"),
+        Row(49665)
+      )
     }
   }
 }

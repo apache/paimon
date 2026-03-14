@@ -248,7 +248,7 @@ public class CopyFilesUtil {
             Path relativePath = getPathExcludeTableRoot(file, sourceTableRoot);
             result.add(
                     new CopyFileInfo(
-                            file.toUri().toString(),
+                            file.toString(),
                             relativePath.toString(),
                             sourceIdentifier,
                             targetIdentifier));
@@ -257,7 +257,7 @@ public class CopyFilesUtil {
     }
 
     public static Path getPathExcludeTableRoot(Path absolutePath, Path sourceTableRoot) {
-        String fileAbsolutePath = absolutePath.toUri().toString();
+        String fileAbsolutePath = absolutePath.toString();
         String sourceTableRootPath = sourceTableRoot.toString();
 
         Preconditions.checkState(

@@ -74,6 +74,8 @@ You will get the following result:
 Then you can update and query the table again:
 ```sql
 UPDATE t SET data = 'new-data-update' WHERE id = 11;
+-- Alternatively, update using the hidden row id `_ROW_ID`
+UPDATE t SET data = 'new-data-update' WHERE _ROW_ID = 0;
 SELECT id, data, _ROW_ID, _SEQUENCE_NUMBER FROM t;
 ```
 
@@ -110,6 +112,8 @@ You can also delete from the table:
 
 ```sql
 DELETE FROM t WHERE id = 11;
+-- Alternatively, delete using the hidden row id `_ROW_ID`
+DELETE FROM t WHERE _ROW_ID = 0;
 ```
 
 You will get:

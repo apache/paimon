@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
@@ -149,13 +150,11 @@ public class FactoryUtil {
      * @param <T> the type of the factory
      * @return the factory
      */
-    public static <T> T discoverSingletonFactory(ClassLoader classLoader, Class<T> klass) {
+    public static <T> Optional<T> discoverSingletonFactory(
+            ClassLoader classLoader, Class<T> klass) {
         List<T> factories = FactoryUtil.discoverFactories(classLoader, klass);
         if (factories.isEmpty()) {
-            throw new FactoryException(
-                    String.format(
-                            "Could not find any factories that implement '%s' in the classpath.",
-                            klass.getName()));
+            return Optional.empty();
         }
 
         if (factories.size() > 1) {
@@ -171,6 +170,6 @@ public class FactoryUtil {
                                     .collect(Collectors.joining("\n"))));
         }
 
-        return factories.get(0);
+        return Optional.of(factories.get(0));
     }
 }

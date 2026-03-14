@@ -84,10 +84,7 @@ public abstract class AppendCompactWorkerOperator<IN>
     @Override
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        List<Committable> committables =
-                this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
-        this.unawareBucketCompactor.tryRefreshWrite();
-        return committables;
+        return this.unawareBucketCompactor.prepareCommit(waitCompaction, checkpointId);
     }
 
     private ExecutorService workerExecutor() {

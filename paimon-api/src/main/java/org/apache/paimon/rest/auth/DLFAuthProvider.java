@@ -25,8 +25,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
+import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
@@ -53,25 +52,41 @@ public class DLFAuthProvider implements AuthProvider {
     protected static final String MEDIA_TYPE = "application/json";
 
     @Nullable private final DLFTokenLoader tokenLoader;
+    private final String uri;
     private final String region;
+    private final String signingAlgorithm;
 
     @Nullable protected volatile DLFToken token;
+    private final DLFRequestSigner signer;
 
-    public static DLFAuthProvider fromTokenLoader(DLFTokenLoader tokenLoader, String region) {
-        return new DLFAuthProvider(tokenLoader, null, region);
+    public static DLFAuthProvider fromTokenLoader(
+            DLFTokenLoader tokenLoader, String uri, String region, String signingAlgorithm) {
+        return new DLFAuthProvider(tokenLoader, null, uri, region, signingAlgorithm);
     }
 
     public static DLFAuthProvider fromAccessKey(
-            String accessKeyId, String accessKeySecret, String securityToken, String region) {
+            String accessKeyId,
+            String accessKeySecret,
+            @Nullable String securityToken,
+            String uri,
+            String region,
+            String signingAlgorithm) {
         DLFToken token = new DLFToken(accessKeyId, accessKeySecret, securityToken, null);
-        return new DLFAuthProvider(null, token, region);
+        return new DLFAuthProvider(null, token, uri, region, signingAlgorithm);
     }
 
     public DLFAuthProvider(
-            @Nullable DLFTokenLoader tokenLoader, @Nullable DLFToken token, String region) {
+            @Nullable DLFTokenLoader tokenLoader,
+            @Nullable DLFToken token,
+            String uri,
+            String region,
+            String signingAlgorithm) {
         this.tokenLoader = tokenLoader;
         this.token = token;
+        this.uri = uri;
         this.region = region;
+        this.signingAlgorithm = signingAlgorithm;
+        this.signer = createSigner(signingAlgorithm);
     }
 
     @Override
@@ -79,23 +94,61 @@ public class DLFAuthProvider implements AuthProvider {
             Map<String, String> baseHeader, RESTAuthParameter restAuthParameter) {
         DLFToken token = getFreshToken();
         try {
-            String dateTime =
-                    baseHeader.getOrDefault(
-                            DLF_DATE_HEADER_KEY.toLowerCase(),
-                            ZonedDateTime.now(ZoneOffset.UTC).format(AUTH_DATE_TIME_FORMATTER));
-            String date = dateTime.substring(0, 8);
+            Instant now = Instant.now();
+            String host = extractHost(uri);
             Map<String, String> signHeaders =
-                    generateSignHeaders(
-                            restAuthParameter.data(), dateTime, token.getSecurityToken());
+                    signer.signHeaders(
+                            restAuthParameter.data(), now, token.getSecurityToken(), host);
             String authorization =
-                    DLFAuthSignature.getAuthorization(
-                            restAuthParameter, token, region, signHeaders, dateTime, date);
+                    signer.authorization(restAuthParameter, token, host, signHeaders);
             Map<String, String> headersWithAuth = new HashMap<>(baseHeader);
             headersWithAuth.putAll(signHeaders);
             headersWithAuth.put(DLF_AUTHORIZATION_HEADER_KEY, authorization);
             return headersWithAuth;
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Failed to generate authorization header", e);
+        }
+    }
+
+    /**
+     * Extracts the host (with port if present) from a URI string.
+     *
+     * <p>Handles URIs in the following formats:
+     *
+     * <ul>
+     *   <li>http://hostname/prefix -> hostname
+     *   <li>https://hostname:8080/prefix -> hostname:8080
+     *   <li>http://hostname -> hostname
+     *   <li>https://hostname:8080 -> hostname:8080
+     * </ul>
+     *
+     * @param uri the URI string
+     * @return the host part (with port if present) of the URI
+     */
+    @VisibleForTesting
+    static String extractHost(String uri) {
+        // Remove protocol (http:// or https://)
+        String withoutProtocol = uri.replaceFirst("^https?://", "");
+
+        // Remove path (everything after '/')
+        int pathIndex = withoutProtocol.indexOf('/');
+        return pathIndex >= 0 ? withoutProtocol.substring(0, pathIndex) : withoutProtocol;
+    }
+
+    private DLFRequestSigner createSigner(String signingAlgorithm) {
+        switch (signingAlgorithm) {
+            case DLFDefaultSigner.IDENTIFIER:
+                return new DLFDefaultSigner(region);
+            case DLFOpenApiSigner.IDENTIFIER:
+                return new DLFOpenApiSigner();
+            default:
+                throw new IllegalArgumentException(
+                        "Unknown DLF signing algorithm: "
+                                + signingAlgorithm
+                                + ". Supported: "
+                                + DLFDefaultSigner.IDENTIFIER
+                                + ", "
+                                + DLFOpenApiSigner.IDENTIFIER);
         }
     }
 
@@ -134,21 +187,5 @@ public class DLFAuthProvider implements AuthProvider {
         }
         long now = System.currentTimeMillis();
         return expireTime - now < TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
-    }
-
-    public static Map<String, String> generateSignHeaders(
-            String data, String dateTime, String securityToken) throws Exception {
-        Map<String, String> signHeaders = new HashMap<>();
-        signHeaders.put(DLF_DATE_HEADER_KEY, dateTime);
-        signHeaders.put(DLF_CONTENT_SHA56_HEADER_KEY, DLF_CONTENT_SHA56_VALUE);
-        signHeaders.put(DLF_AUTH_VERSION_HEADER_KEY, DLFAuthSignature.VERSION);
-        if (data != null && !data.isEmpty()) {
-            signHeaders.put(DLF_CONTENT_TYPE_KEY, MEDIA_TYPE);
-            signHeaders.put(DLF_CONTENT_MD5_HEADER_KEY, DLFAuthSignature.md5(data));
-        }
-        if (securityToken != null) {
-            signHeaders.put(DLF_SECURITY_TOKEN_HEADER_KEY, securityToken);
-        }
-        return signHeaders;
     }
 }

@@ -213,7 +213,7 @@ note that partition fields and primary key fields can not be specified.
 
 ## Create Table As Select
 
-Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FORM table_a`,
+Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FROM table_a`,
 The resulting table `table_b` will be equivalent to create the table and insert the data with the following statement:
 `CREATE TABLE table_b (id INT, name STRING); INSERT INTO table_b SELECT id, name FROM table_a;`
 

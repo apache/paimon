@@ -16,21 +16,23 @@
 # limitations under the License.
 #################################################################################
 
-from pathlib import Path
 from typing import List, Optional, Union
-from urllib.parse import urlparse
 
 from pypaimon.catalog.catalog import Catalog
 from pypaimon.catalog.catalog_environment import CatalogEnvironment
-from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
-                                                DatabaseNotExistException,
-                                                TableAlreadyExistException,
-                                                TableNotExistException)
+from pypaimon.catalog.catalog_exception import (
+    DatabaseAlreadyExistException,
+    DatabaseNotExistException,
+    TableAlreadyExistException,
+    TableNotExistException
+)
 from pypaimon.catalog.database import Database
-from pypaimon.common.config import CatalogOptions
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
@@ -39,12 +41,23 @@ from pypaimon.table.table import Table
 
 
 class FileSystemCatalog(Catalog):
-    def __init__(self, catalog_options: dict):
-        if CatalogOptions.WAREHOUSE not in catalog_options:
-            raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE}' path must be set")
+    def __init__(self, catalog_options: Options):
+        if not catalog_options.contains(CatalogOptions.WAREHOUSE):
+            raise ValueError(f"Paimon '{CatalogOptions.WAREHOUSE.key()}' path must be set")
         self.warehouse = catalog_options.get(CatalogOptions.WAREHOUSE)
         self.catalog_options = catalog_options
-        self.file_io = FileIO(self.warehouse, self.catalog_options)
+        self.file_io = FileIO.get(self.warehouse, self.catalog_options)
+
+    def list_databases(self) -> list:
+        statuses = self.file_io.list_status(self.warehouse)
+        database_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and name.endswith(Catalog.DB_SUFFIX):
+                database_names.append(name[:-len(Catalog.DB_SUFFIX)])
+        return sorted(database_names)
 
     def get_database(self, name: str) -> Database:
         if self.file_io.exists(self.get_database_path(name)):
@@ -63,10 +76,52 @@ class FileSystemCatalog(Catalog):
             path = self.get_database_path(name)
             self.file_io.mkdirs(path)
 
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        try:
+            self.get_database(name)
+        except DatabaseNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+
+        db_path = self.get_database_path(name)
+
+        if cascade:
+            for table_name in self.list_tables(name):
+                table_path = f"{db_path}/{table_name}"
+                self.file_io.delete(table_path, True)
+
+        # Check if database still has tables
+        remaining_tables = self.list_tables(name)
+        if remaining_tables and not cascade:
+            raise ValueError(
+                f"Database {name} is not empty. "
+                f"Use cascade=True to drop all tables first."
+            )
+
+        self.file_io.delete(db_path, True)
+
+    def list_tables(self, database_name: str) -> list:
+        try:
+            self.get_database(database_name)
+        except DatabaseNotExistException:
+            raise
+
+        db_path = self.get_database_path(database_name)
+        statuses = self.file_io.list_status(db_path)
+        table_names = []
+        for status in statuses:
+            import pyarrow.fs as pafs
+            is_directory = hasattr(status, 'type') and status.type == pafs.FileType.Directory
+            name = status.base_name if hasattr(status, 'base_name') else ""
+            if is_directory and name and not name.startswith("."):
+                table_names.append(name)
+        return sorted(table_names)
+
     def get_table(self, identifier: Union[str, Identifier]) -> Table:
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
-        if CoreOptions.SCAN_FALLBACK_BRANCH in self.catalog_options:
+        if self.catalog_options.contains(CoreOptions.SCAN_FALLBACK_BRANCH):
             raise ValueError(f"Unsupported CoreOption {CoreOptions.SCAN_FALLBACK_BRANCH}")
         table_path = self.get_table_path(identifier)
         table_schema = self.get_table_schema(identifier)
@@ -83,8 +138,8 @@ class FileSystemCatalog(Catalog):
         return FileStoreTable(self.file_io, identifier, table_path, table_schema, catalog_environment)
 
     def create_table(self, identifier: Union[str, Identifier], schema: 'Schema', ignore_if_exists: bool):
-        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE):
-            raise ValueError(f"The value of {CoreOptions.AUTO_CREATE} property should be False.")
+        if schema.options and schema.options.get(CoreOptions.AUTO_CREATE.key()):
+            raise ValueError(f"The value of {CoreOptions.AUTO_CREATE.key()} property should be False.")
 
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
@@ -94,9 +149,9 @@ class FileSystemCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier)
         except TableNotExistException:
-            if schema.options and CoreOptions.TYPE in schema.options and schema.options.get(
-                    CoreOptions.TYPE) != "table":
-                raise ValueError(f"Table Type {schema.options.get(CoreOptions.TYPE)}")
+            if schema.options and CoreOptions.TYPE.key() in schema.options and schema.options.get(
+                    CoreOptions.TYPE.key()) != "table":
+                raise ValueError(f"Table Type: {schema.options.get(CoreOptions.TYPE.key())}")
             table_path = self.get_table_path(identifier)
             schema_manager = SchemaManager(self.file_io, table_path)
             schema_manager.create_table(schema)
@@ -108,18 +163,77 @@ class FileSystemCatalog(Catalog):
             raise TableNotExistException(identifier)
         return table_schema
 
-    def get_database_path(self, name) -> Path:
-        return self._trim_schema(self.warehouse) / f"{name}{Catalog.DB_SUFFIX}"
+    def get_database_path(self, name) -> str:
+        warehouse = self.warehouse.rstrip('/')
+        return f"{warehouse}/{name}{Catalog.DB_SUFFIX}"
 
-    def get_table_path(self, identifier: Identifier) -> Path:
-        return self.get_database_path(identifier.get_database_name()) / identifier.get_table_name()
+    def get_table_path(self, identifier: Identifier) -> str:
+        db_path = self.get_database_path(identifier.get_database_name())
+        return f"{db_path}/{identifier.get_table_name()}"
 
-    @staticmethod
-    def _trim_schema(warehouse_url: str) -> Path:
-        parsed = urlparse(warehouse_url)
-        bucket = parsed.netloc
-        warehouse_dir = parsed.path.lstrip('/')
-        return Path(f"{bucket}/{warehouse_dir}" if warehouse_dir else bucket)
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.get_table(identifier)
+        except TableNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+
+        table_path = self.get_table_path(identifier)
+        schema_manager = SchemaManager(self.file_io, table_path)
+        try:
+            schema_manager.commit_changes(changes)
+        except Exception as e:
+            raise RuntimeError(f"Failed to alter table {identifier.get_full_name()}: {e}") from e
+
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+
+        # Verify source table exists
+        try:
+            self.get_table(source_identifier)
+        except TableNotExistException:
+            raise
+
+        # Verify target database exists
+        self.get_database(target_identifier.get_database_name())
+
+        # Verify target table does not exist
+        try:
+            self.get_table(target_identifier)
+            raise TableAlreadyExistException(target_identifier)
+        except TableNotExistException:
+            pass
+
+        source_path = self.get_table_path(source_identifier)
+        target_path = self.get_table_path(target_identifier)
+        self.file_io.rename(source_path, target_path)
+
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        
+        # Check if table exists
+        try:
+            self.get_table(identifier)
+        except TableNotExistException:
+            if not ignore_if_not_exists:
+                raise
+            return
+        
+        # Delete the table directory
+        table_path = self.get_table_path(identifier)
+        self.file_io.delete(table_path, True)
 
     def commit_snapshot(
             self,
@@ -129,3 +243,14 @@ class FileSystemCatalog(Catalog):
             statistics: List[PartitionStatistics]
     ) -> bool:
         raise NotImplementedError("This catalog does not support commit catalog")
+
+    def load_snapshot(self, identifier: Identifier):
+        """Load the snapshot of table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+
+        Raises:
+            NotImplementedError: FileSystemCatalog does not support version management
+        """
+        raise NotImplementedError("Filesystem catalog does not support load_snapshot")

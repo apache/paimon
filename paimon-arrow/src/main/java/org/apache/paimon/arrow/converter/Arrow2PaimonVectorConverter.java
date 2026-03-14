@@ -22,6 +22,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.BooleanColumnVector;
@@ -31,6 +32,7 @@ import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarArray;
 import org.apache.paimon.data.columnar.ColumnarMap;
 import org.apache.paimon.data.columnar.ColumnarRow;
+import org.apache.paimon.data.columnar.ColumnarVec;
 import org.apache.paimon.data.columnar.DecimalColumnVector;
 import org.apache.paimon.data.columnar.DoubleColumnVector;
 import org.apache.paimon.data.columnar.FloatColumnVector;
@@ -40,6 +42,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -66,7 +69,9 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateDayVector;
@@ -82,6 +87,7 @@ import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 
@@ -95,13 +101,18 @@ public interface Arrow2PaimonVectorConverter {
         return type.accept(Arrow2PaimonVectorConvertorVisitor.INSTANCE);
     }
 
+    static Arrow2PaimonVectorConverter construct(
+            Arrow2PaimonVectorConvertorVisitor visitor, DataType type) {
+        return type.accept(visitor);
+    }
+
     ColumnVector convertVector(FieldVector vector);
 
     /** Visitor to create convertor from arrow to paimon. */
     class Arrow2PaimonVectorConvertorVisitor
             implements DataTypeVisitor<Arrow2PaimonVectorConverter> {
 
-        private static final Arrow2PaimonVectorConvertorVisitor INSTANCE =
+        public static final Arrow2PaimonVectorConvertorVisitor INSTANCE =
                 new Arrow2PaimonVectorConvertorVisitor();
 
         @Override
@@ -478,6 +489,61 @@ public interface Arrow2PaimonVectorConverter {
         }
 
         @Override
+        public Arrow2PaimonVectorConverter visit(VectorType vectorType) {
+            final Arrow2PaimonVectorConverter arrowVectorConvertor =
+                    vectorType.getElementType().accept(this);
+
+            return vector ->
+                    new VecColumnVector() {
+
+                        private boolean inited = false;
+                        private ColumnVector columnVector;
+                        private ColumnarVec.Factory factory;
+
+                        private void init() {
+                            if (!inited) {
+                                if (!(vector instanceof FixedSizeListVector)) {
+                                    throw new UnsupportedOperationException(
+                                            "Cannot convert " + vector.getClass() + " to vector");
+                                }
+                                FixedSizeListVector listVector = (FixedSizeListVector) vector;
+                                FieldVector dataVector = listVector.getDataVector();
+                                factory =
+                                        new Arrow2ColumnarVecFactory(
+                                                dataVector.getValidityBuffer());
+                                this.columnVector = arrowVectorConvertor.convertVector(dataVector);
+                                inited = true;
+                            }
+                        }
+
+                        @Override
+                        public boolean isNullAt(int index) {
+                            return vector.isNull(index);
+                        }
+
+                        @Override
+                        public InternalVector getVector(int index) {
+                            init();
+                            FixedSizeListVector listVector = (FixedSizeListVector) vector;
+                            int start = listVector.getElementStartIndex(index);
+                            int end = listVector.getElementEndIndex(index);
+                            return factory.create(columnVector, start, end - start);
+                        }
+
+                        @Override
+                        public ColumnVector getColumnVector() {
+                            init();
+                            return columnVector;
+                        }
+
+                        @Override
+                        public int getVectorSize() {
+                            return vectorType.getLength();
+                        }
+                    };
+        }
+
+        @Override
         public Arrow2PaimonVectorConverter visit(MultisetType multisetType) {
             throw new UnsupportedOperationException("Doesn't support MultisetType.");
         }
@@ -583,6 +649,61 @@ public interface Arrow2PaimonVectorConverter {
                             return vectorizedColumnBatch;
                         }
                     };
+        }
+
+        private static final int[] VALIDITY_BYTE_MASK =
+                new int[] {0b0, 0b1, 0b11, 0b111, 0b1111, 0b11111, 0b111111, 0b1111111, 0b11111111};
+
+        private static class Arrow2ColumnarVecFactory extends ColumnarVec.Factory {
+
+            private final ArrowBuf validityBuf;
+            private final boolean nullable;
+
+            private Arrow2ColumnarVecFactory(ArrowBuf validityBuf) {
+                this.validityBuf = validityBuf;
+                this.nullable = validityBuf != null && validityBuf.capacity() > 0;
+            }
+
+            @Override
+            public void ensureNonNull(ColumnVector data, int offset, int numElements) {
+                if (!nullable) {
+                    return;
+                }
+
+                final int startByteIndex = offset >> 3;
+                final int startBitIndex = offset & 7;
+                final int endByteIndex = (offset + numElements - 1) >> 3;
+                final int endBitIndex = (offset + numElements - 1) & 7;
+
+                if (startByteIndex == endByteIndex) {
+                    byte bits = validityBuf.getByte(startByteIndex);
+                    checkValidityRange(bits, startBitIndex, endBitIndex);
+                    return;
+                }
+
+                byte bits = validityBuf.getByte(startByteIndex);
+                checkValidityRange(bits, startBitIndex, 7);
+                for (int i = startByteIndex + 1; i < endByteIndex; ++i) {
+                    bits = validityBuf.getByte(i);
+                    checkValidityAll(bits);
+                }
+                bits = validityBuf.getByte(endByteIndex);
+                checkValidityRange(bits, 0, endBitIndex);
+            }
+
+            private void checkValidityAll(byte bits) {
+                if ((bits & 0xFF) != 0xFF) {
+                    throw new UnsupportedOperationException("Vector elements must be nonNull");
+                }
+            }
+
+            private void checkValidityRange(byte bits, int start, int end) {
+                int r = (bits & 0xFF) | VALIDITY_BYTE_MASK[start];
+                int m = VALIDITY_BYTE_MASK[end + 1];
+                if ((r & m) != m) {
+                    throw new UnsupportedOperationException("Vector elements must be nonNull");
+                }
+            }
         }
     }
 }

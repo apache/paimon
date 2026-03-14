@@ -115,12 +115,16 @@ public class TestHiveMetastore {
     private TServer server;
     private HiveMetaStore.HMSHandler baseHandler;
 
+    public void start(Configuration configuration, int port) {
+        start(configuration, DEFAULT_POOL_SIZE, port);
+    }
+
     /**
      * Starts a TestHiveMetastore with the default connection pool size (5) and the default
      * HiveConf.
      */
     public void start(int port) {
-        start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE, port);
+        start(new Configuration(), DEFAULT_POOL_SIZE, port);
     }
 
     /**
@@ -128,7 +132,7 @@ public class TestHiveMetastore {
      * HiveConf.
      */
     public void start() {
-        start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE, 9083);
+        start(new Configuration(), DEFAULT_POOL_SIZE, 9083);
     }
 
     /**
@@ -137,13 +141,11 @@ public class TestHiveMetastore {
      * @param conf The hive configuration to use
      * @param poolSize The number of threads in the executor pool
      */
-    public void start(HiveConf conf, int poolSize, int portNum) {
+    public void start(Configuration conf, int poolSize, int portNum) {
         try {
             TServerSocket socket = new TServerSocket(portNum);
             int port = socket.getServerSocket().getLocalPort();
-            initConf(conf, port);
-
-            this.hiveConf = conf;
+            this.hiveConf = initConf(conf, port);
             this.server = newThriftServer(socket, poolSize, hiveConf);
             this.executorService = Executors.newSingleThreadExecutor();
             this.executorService.submit(() -> server.serve());
@@ -211,16 +213,17 @@ public class TestHiveMetastore {
         return new TThreadPoolServer(args);
     }
 
-    private void initConf(HiveConf conf, int port) {
-        conf.set(HiveConf.ConfVars.METASTOREURIS.varname, "thrift://localhost:" + port);
-        conf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouseDir());
-        conf.set(HiveConf.ConfVars.METASTORE_TRY_DIRECT_SQL.varname, "false");
-        conf.set(
+    private HiveConf initConf(Configuration conf, int port) {
+        conf.setIfUnset(HiveConf.ConfVars.METASTOREURIS.varname, "thrift://localhost:" + port);
+        conf.setIfUnset(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouseDir());
+        conf.setIfUnset(HiveConf.ConfVars.METASTORE_TRY_DIRECT_SQL.varname, "false");
+        conf.setIfUnset(
                 HiveConf.ConfVars.METASTORE_DISALLOW_INCOMPATIBLE_COL_TYPE_CHANGES.varname,
                 "false");
-        conf.set(
+        conf.setIfUnset(
                 HiveConf.ConfVars.HIVE_IN_TEST.varname,
                 HiveConf.ConfVars.HIVE_IN_TEST.getDefaultValue());
+        return new HiveConf(conf, TestHiveMetastore.class);
     }
 
     private static void setupMetastoreDB(String dbURL) throws SQLException, IOException {

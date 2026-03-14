@@ -20,12 +20,15 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{Row, SaveMode}
+import org.apache.spark.sql.functions.lit
 import org.apache.spark.sql.types._
 
 import java.sql.{Date, Timestamp}
 
 abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
+
+  import testImplicits._
 
   fileFormats.foreach {
     fileFormat =>
@@ -638,5 +641,17 @@ abstract class InsertOverwriteTableTestBase extends PaimonSparkTestBase {
         )
       }
     }
+  }
+
+  test("Paimon Insert: insert unsupported type") {
+    val rows = Seq(("1", "2")).toDF("f1", "f2")
+    assert(intercept[Exception] {
+      rows
+        .withColumn("bad", lit(null))
+        .write
+        .format("paimon")
+        .mode(SaveMode.Overwrite)
+        .saveAsTable("badTable")
+    }.getMessage.contains("Not a supported type: void"))
   }
 }

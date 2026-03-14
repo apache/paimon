@@ -172,7 +172,8 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
           Row("20240726", "cherry", 3),
           Row("20240725", "apple", 5),
           Row("20240726", "pear", 6),
-          Row("20240725", "banana", 7)))
+          Row("20240725", "banana", 7))
+      )
 
       sql("ALTER TABLE T UNSET TBLPROPERTIES ('scan.fallback-branch')")
       checkAnswer(

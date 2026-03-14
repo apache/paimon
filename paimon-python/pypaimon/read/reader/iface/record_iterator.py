@@ -32,3 +32,8 @@ class RecordIterator(Generic[T], ABC):
         """
         Gets the next record from the iterator. Returns null if this iterator has no more elements.
         """
+
+    def return_pos(self) -> int:
+        """
+        Returns the current position of the file.
+        """

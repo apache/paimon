@@ -58,6 +58,10 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                 cache);
     }
 
+    public Path indexManifestFilePath(String fileName) {
+        return pathFactory.toPath(fileName);
+    }
+
     /** Write new index files to index manifest. */
     @Nullable
     public String writeIndexFiles(

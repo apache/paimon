@@ -170,7 +170,7 @@ UPDATE t SET s.c2 = 'a_new' WHERE s.c1 = 1;
 Deletes the rows that match a predicate. When no predicate is provided, deletes all rows.
 
 ```sql
-DELETE FROM my_table WHERE currency = 'UNKNOWN';
+DELETE FROM my_table WHERE id = 1;
 ```
 
 ## Merge Into Table
@@ -288,11 +288,11 @@ Here list the configurations.
 This mode also supports Spark SQL. Here is an example:
 
 ```sql
-set `spark.paimon.write.merge-schema` = true;
+SET `spark.paimon.write.merge-schema` = true;
 
 CREATE TABLE t (a INT, b STRING);
 INSERT INTO t VALUES (1, '1'), (2, '2');
 
--- need using by name mode
+-- Need using `BY NAME` statement (requires Spark 3.5+)
 INSERT INTO t BY NAME SELECT 3 AS a, '3' AS b, 3 AS c;
 ```

@@ -50,7 +50,9 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 meta.minBucket(),
                 meta.maxBucket(),
                 meta.minLevel(),
-                meta.maxLevel());
+                meta.maxLevel(),
+                meta.minRowId(),
+                meta.maxRowId());
     }
 
     @Override
@@ -75,6 +77,8 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 row.isNullAt(6) ? null : row.getInt(6),
                 row.isNullAt(7) ? null : row.getInt(7),
                 row.isNullAt(8) ? null : row.getInt(8),
-                row.isNullAt(9) ? null : row.getInt(9));
+                row.isNullAt(9) ? null : row.getInt(9),
+                row.isNullAt(10) ? null : row.getLong(10),
+                row.isNullAt(11) ? null : row.getLong(11));
     }
 }

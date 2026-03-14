@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.options.MemorySize;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.Writer;
@@ -38,22 +39,27 @@ public class OrcBulkWriter implements FormatWriter {
     private final VectorizedRowBatch rowBatch;
     private final PositionOutputStream underlyingStream;
 
+    private long currentBatchMemoryUsage = 0;
+    private final long memoryLimit;
+
     public OrcBulkWriter(
             Vectorizer<InternalRow> vectorizer,
             Writer writer,
             PositionOutputStream underlyingStream,
-            int batchSize) {
+            int batchSize,
+            MemorySize memoryLimit) {
         this.vectorizer = checkNotNull(vectorizer);
         this.writer = checkNotNull(writer);
 
         this.rowBatch = vectorizer.getSchema().createRowBatch(batchSize);
         this.underlyingStream = underlyingStream;
+        this.memoryLimit = memoryLimit.getBytes();
     }
 
     @Override
     public void addElement(InternalRow element) throws IOException {
-        vectorizer.vectorize(element, rowBatch);
-        if (rowBatch.size == rowBatch.getMaxSize()) {
+        currentBatchMemoryUsage += vectorizer.vectorize(element, rowBatch);
+        if (rowBatch.size == rowBatch.getMaxSize() || currentBatchMemoryUsage >= this.memoryLimit) {
             flush();
         }
     }
@@ -62,6 +68,7 @@ public class OrcBulkWriter implements FormatWriter {
         if (rowBatch.size != 0) {
             writer.addRowBatch(rowBatch);
             rowBatch.reset();
+            currentBatchMemoryUsage = 0;
         }
     }
 
@@ -87,5 +94,10 @@ public class OrcBulkWriter implements FormatWriter {
     @VisibleForTesting
     VectorizedRowBatch getRowBatch() {
         return rowBatch;
+    }
+
+    @VisibleForTesting
+    long getMemoryLimit() {
+        return memoryLimit;
     }
 }

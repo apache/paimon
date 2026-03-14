@@ -86,4 +86,35 @@ public class CoreOptionsTest {
         conf.set(CoreOptions.LOOKUP_WAIT, false);
         assertThat(options.prepareCommitWaitCompaction()).isFalse();
     }
+
+    @Test
+    public void testSequenceFieldTrim() {
+        Options conf = new Options();
+        conf.set(CoreOptions.SEQUENCE_FIELD, " f1 ,f2 ,  f3  ");
+
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.sequenceField()).containsExactly("f1", "f2", "f3");
+    }
+
+    @Test
+    public void testBlobSplitByFileSizeDefault() {
+        Options conf = new Options();
+        conf.set(CoreOptions.BLOB_SPLIT_BY_FILE_SIZE, false);
+        CoreOptions options = new CoreOptions(conf);
+        assertThat(options.blobSplitByFileSize()).isFalse();
+
+        conf.set(CoreOptions.BLOB_SPLIT_BY_FILE_SIZE, true);
+        options = new CoreOptions(conf);
+        assertThat(options.blobSplitByFileSize()).isTrue();
+
+        conf = new Options();
+        conf.set(CoreOptions.BLOB_AS_DESCRIPTOR, true);
+        options = new CoreOptions(conf);
+        assertThat(options.blobSplitByFileSize()).isFalse();
+
+        conf = new Options();
+        conf.set(CoreOptions.BLOB_AS_DESCRIPTOR, false);
+        options = new CoreOptions(conf);
+        assertThat(options.blobSplitByFileSize()).isTrue();
+    }
 }

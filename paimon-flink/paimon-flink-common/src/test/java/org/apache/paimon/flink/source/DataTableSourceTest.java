@@ -74,11 +74,7 @@ class DataTableSourceTest {
 
         DataTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("cat", "db", "table"),
-                        fileStoreTable,
-                        true,
-                        null,
-                        null);
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();
         sEnv1.setParallelism(-1);
@@ -108,11 +104,7 @@ class DataTableSourceTest {
 
         DataTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("cat", "db", "table"),
-                        fileStoreTable,
-                        true,
-                        null,
-                        null);
+                        ObjectIdentifier.of("cat", "db", "table"), fileStoreTable, true, null);
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         StreamExecutionEnvironment sEnv1 = StreamExecutionEnvironment.createLocalEnvironment();

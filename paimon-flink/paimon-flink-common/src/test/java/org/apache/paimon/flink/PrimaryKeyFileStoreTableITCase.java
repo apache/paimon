@@ -19,11 +19,14 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.FileSystemCatalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.fs.local.LocalFileIOLoader;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -49,6 +52,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -142,11 +147,21 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                         return;
                                     }
                                 } catch (Exception e) {
-                                    client.cancel();
-                                    throw new RuntimeException(e);
+                                    // If we can't get job status, assume the job has terminated.
+                                    // This handles cases where MiniCluster has already shut down.
+                                    // Similar to Flink's CollectResultFetcher behavior.
+                                    return;
                                 }
                             }
-                            client.cancel();
+                            // Only cancel if job is not already terminated
+                            try {
+                                if (!client.getJobStatus().get().isGloballyTerminalState()) {
+                                    client.cancel();
+                                }
+                            } catch (Exception e) {
+                                // If we can't check status or cancel, assume job has terminated.
+                                // This handles IllegalStateException when MiniCluster is shut down.
+                            }
                         });
         timeoutThread.start();
         return result.collect();
@@ -291,6 +306,66 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
 
         assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
+    }
+
+    @Test
+    public void testTableReadWriteWithExternalPathWeightRobin() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        String externalPaths =
+                TraceableFileIO.SCHEME
+                        + "://"
+                        + externalPath1.toString()
+                        + ","
+                        + LocalFileIOLoader.SCHEME
+                        + "://"
+                        + externalPath2.toString();
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '1',"
+                        + "'write-only' = 'true',"
+                        + "'data-file.external-paths' = '"
+                        + externalPaths
+                        + "',"
+                        + "'data-file.external-paths.strategy' = 'weight-robin',"
+                        + "'data-file.external-paths.weights' = '10,5'"
+                        + ")");
+
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
+
+        int fileNum = 30;
+        for (int i = 1; i <= fileNum; i++) {
+            sEnv.executeSql("INSERT INTO T2 VALUES (" + i + ", 'data" + i + "')").await();
+        }
+
+        List<String> actual = new ArrayList<>();
+        for (int i = 0; i < fileNum; i++) {
+            actual.add(it.next().toString());
+        }
+        // Verify all data is readable
+        assertThat(actual).hasSize(fileNum);
+
+        long filesInPath1 = 0;
+        long filesInPath2 = 0;
+        try {
+            filesInPath1 = Files.list(Paths.get(externalPath1.toString() + "/bucket-0")).count();
+            filesInPath2 = Files.list(Paths.get(externalPath2.toString() + "/bucket-0")).count();
+
+        } catch (NoSuchFileException ignored) {
+        }
+        long totalFiles = filesInPath1 + filesInPath2;
+
+        // Since the file sample size is small in IT case, we only verify the writing and reading
+        // For tests on file distribution by weights, see WeightedExternalPathProviderTest
+        assertThat(totalFiles).isEqualTo(fileNum);
     }
 
     @Test
@@ -1504,9 +1579,25 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     }
 
     private void checkBatchResult(int numProducers) throws Exception {
+        FileSystemCatalog catalog = new FileSystemCatalog(LocalFileIO.create(), new Path(path));
+        FileStoreTable table = (FileStoreTable) catalog.getTable(Identifier.create("default", "T"));
         TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
         bEnv.executeSql(createCatalogSql("testCatalog", path));
         bEnv.executeSql("USE CATALOG testCatalog");
+
+        if (table.coreOptions().needLookup()) {
+            // if table needs lookup, batch query will not get data on level = 0,
+            // so we need to wait until all level 0 are compacted
+            while (true) {
+                try (CloseableIterator<Row> it =
+                        bEnv.executeSql("SELECT * FROM `T$files` WHERE level = 0").collect()) {
+                    if (!it.hasNext()) {
+                        break;
+                    }
+                }
+                Thread.sleep(500);
+            }
+        }
 
         ResultChecker checker = new ResultChecker();
         try (CloseableIterator<Row> it = collect(bEnv.executeSql("SELECT * FROM T"))) {
@@ -1566,6 +1657,131 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                     String expectedValue = x + "|" + x + ".str";
                     assertThat(valueMap.get(key)).isEqualTo(expectedValue);
                 }
+            }
+        }
+    }
+
+    @Test
+    public void testLimitPushdownWithTimeFilter() throws Exception {
+        // This test verifies that limit pushdown works correctly when valueFilter
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        tEnv.executeSql("USE CATALOG testCatalog");
+        tEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "ts TIMESTAMP(3), "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ")");
+
+        // Insert data with different timestamps
+        tEnv.executeSql(
+                        "INSERT INTO T VALUES "
+                                + "(1, 'a', TIMESTAMP '2024-01-01 10:00:00'), "
+                                + "(2, 'b', TIMESTAMP '2024-01-01 11:00:00'), "
+                                + "(3, 'c', TIMESTAMP '2024-01-01 12:00:00'), "
+                                + "(4, 'd', TIMESTAMP '2024-01-01 13:00:00'), "
+                                + "(5, 'e', TIMESTAMP '2024-01-01 14:00:00')")
+                .await();
+
+        // Without filter, limit pushdown should work
+        try (CloseableIterator<Row> iter = tEnv.executeSql("SELECT * FROM T LIMIT 3").collect()) {
+            List<Row> allRows = new ArrayList<>();
+            iter.forEachRemaining(allRows::add);
+            assertThat(allRows.size()).isEqualTo(3);
+        }
+
+        // Test limit pushdown with time filter (4 rows match, LIMIT 3)
+        try (CloseableIterator<Row> iter =
+                tEnv.executeSql(
+                                "SELECT * FROM T WHERE ts >= TIMESTAMP '2024-01-01 11:00:00' LIMIT 3")
+                        .collect()) {
+            List<Row> filteredRows = new ArrayList<>();
+            iter.forEachRemaining(filteredRows::add);
+            assertThat(filteredRows.size()).isGreaterThanOrEqualTo(3);
+            assertThat(filteredRows.size()).isLessThanOrEqualTo(4);
+            for (Row row : filteredRows) {
+                java.time.LocalDateTime ts = (java.time.LocalDateTime) row.getField(2);
+                java.time.LocalDateTime filterTime =
+                        java.time.LocalDateTime.parse("2024-01-01T11:00:00");
+                assertThat(ts).isAfterOrEqualTo(filterTime);
+            }
+        }
+
+        // Test with more restrictive filter (3 rows match, LIMIT 2)
+        try (CloseableIterator<Row> iter =
+                tEnv.executeSql(
+                                "SELECT * FROM T WHERE ts >= TIMESTAMP '2024-01-01 12:00:00' LIMIT 2")
+                        .collect()) {
+            List<Row> filteredRows2 = new ArrayList<>();
+            iter.forEachRemaining(filteredRows2::add);
+            assertThat(filteredRows2.size()).isGreaterThanOrEqualTo(2);
+            assertThat(filteredRows2.size()).isLessThanOrEqualTo(3);
+            for (Row row : filteredRows2) {
+                java.time.LocalDateTime ts = (java.time.LocalDateTime) row.getField(2);
+                java.time.LocalDateTime filterTime =
+                        java.time.LocalDateTime.parse("2024-01-01T12:00:00");
+                assertThat(ts).isAfterOrEqualTo(filterTime);
+            }
+        }
+    }
+
+    @Test
+    public void testLimitPushdownBasic() throws Exception {
+        // Test basic limit pushdown
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        tEnv.executeSql("USE CATALOG testCatalog");
+        tEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (4, 'd'), (5, 'e'), (6, 'f')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (7, 'g'), (8, 'h'), (9, 'i')").await();
+
+        try (CloseableIterator<Row> iter = tEnv.executeSql("SELECT * FROM T LIMIT 5").collect()) {
+            List<Row> rows = new ArrayList<>();
+            iter.forEachRemaining(rows::add);
+
+            assertThat(rows.size()).isEqualTo(5);
+        }
+    }
+
+    @Test
+    public void testLimitPushdownWithDeletionVector() throws Exception {
+        // Test limit pushdown is disabled when deletion vector is enabled
+        TableEnvironment tEnv = tableEnvironmentBuilder().batchMode().build();
+        tEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        tEnv.executeSql("USE CATALOG testCatalog");
+        tEnv.executeSql(
+                "CREATE TABLE T ("
+                        + "id INT, "
+                        + "name STRING, "
+                        + "PRIMARY KEY (id) NOT ENFORCED"
+                        + ") WITH ("
+                        + "'deletion-vectors.enabled' = 'true'"
+                        + ")");
+
+        tEnv.executeSql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')").await();
+        tEnv.executeSql("INSERT INTO T VALUES (4, 'd'), (5, 'e'), (6, 'f')").await();
+
+        tEnv.executeSql("DELETE FROM T WHERE id = 2").await();
+
+        // Limit pushdown should be disabled when deletion vector is enabled
+        // because we can't accurately calculate row count after applying deletion vectors
+        try (CloseableIterator<Row> iter = tEnv.executeSql("SELECT * FROM T LIMIT 3").collect()) {
+            List<Row> rows = new ArrayList<>();
+            iter.forEachRemaining(rows::add);
+
+            assertThat(rows.size()).isEqualTo(3);
+
+            for (Row row : rows) {
+                assertThat(row.getField(0)).isNotEqualTo(2);
             }
         }
     }

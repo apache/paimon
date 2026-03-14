@@ -267,6 +267,7 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
 
     @Test
     public void testDynamicBucketSortCompact() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
         sql(
                 "CREATE TABLE T ("
                         + " f0 BIGINT PRIMARY KEY NOT ENFORCED,"
@@ -279,9 +280,12 @@ public class CompactProcedureITCase extends CatalogITCaseBase {
                         + " 'dynamic-bucket.target-row-num' = '100',"
                         + " 'zorder.var-length-contribution' = '14'"
                         + ")");
+        boolean overwriteUpgrade = random.nextBoolean();
+        if (!overwriteUpgrade) {
+            sql("ALTER TABLE T SET ('overwrite-upgrade' = 'false')");
+        }
         FileStoreTable table = paimonTable("T");
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
         int commitTimes = 20;
         for (int i = 0; i < commitTimes; i++) {
             String value =

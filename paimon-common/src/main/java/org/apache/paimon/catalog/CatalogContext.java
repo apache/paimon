@@ -64,7 +64,7 @@ public class CatalogContext implements Serializable {
 
     public static CatalogContext create(Path warehouse) {
         Options options = new Options();
-        options.set(WAREHOUSE, warehouse.toUri().toString());
+        options.set(WAREHOUSE, warehouse.toString());
         return create(options);
     }
 
