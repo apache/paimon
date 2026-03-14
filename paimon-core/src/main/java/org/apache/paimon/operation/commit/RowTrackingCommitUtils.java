@@ -49,9 +49,20 @@ public class RowTrackingCommitUtils {
     private static void assignSnapshotId(
             long snapshotId, List<ManifestEntry> deltaFiles, List<ManifestEntry> snapshotAssigned) {
         for (ManifestEntry entry : deltaFiles) {
-            if (entry.file().minSequenceNumber() == 0L) {
+            long minSeqNumber = entry.file().minSequenceNumber();
+            long maxSeqNumber = entry.file().maxSequenceNumber();
+            if (minSeqNumber == 0L) {
+                // Case 1: New file (e.g., from INSERT)
+                // All records in this file get the current snapshot ID as sequence number
                 snapshotAssigned.add(entry.assignSequenceNumber(snapshotId, snapshotId));
+            } else if (maxSeqNumber == 0L) {
+                // Case 2: File with some modified records
+                // - min: Preserve original sequence number (from unmodified records)
+                // - max: Assign current snapshot ID
+                snapshotAssigned.add(entry.assignSequenceNumber(minSeqNumber, snapshotId));
             } else {
+                // Case 3: Pure compact file (no modified records)
+                // Preserve original min/max sequence numbers from source files
                 snapshotAssigned.add(entry);
             }
         }
