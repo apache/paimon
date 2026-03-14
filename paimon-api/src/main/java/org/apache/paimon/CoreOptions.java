@@ -1413,7 +1413,6 @@ public class CoreOptions implements Serializable {
                                     + "the assigner will asynchronously check for newly emptied buckets. "
                                     + "Higher values improve responsiveness but may increase overhead.");
 
-
     public static final ConfigOption<Duration> DYNAMIC_BUCKET_MIN_REFRESH_INTERVAL =
             key("dynamic-bucket.min-refresh-interval")
                     .durationType()
@@ -1422,7 +1421,6 @@ public class CoreOptions implements Serializable {
                             "Minimum time between bucket refresh checks. Too short will cause excessive "
                                     + "overhead from scanning bucket table, too long may delay discovery of "
                                     + "available buckets.");
-
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN =
             key("incremental-between")

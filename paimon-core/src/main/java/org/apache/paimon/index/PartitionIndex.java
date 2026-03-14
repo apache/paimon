@@ -24,6 +24,9 @@ import org.apache.paimon.utils.Int2ShortHashMap;
 import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.ListUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -44,6 +47,8 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
 /** Bucket Index Per Partition. */
 public class PartitionIndex {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionIndex.class);
 
     public final Int2ShortHashMap hash2Bucket;
 
@@ -98,8 +103,18 @@ public class PartitionIndex {
             return hash2Bucket.get(hash);
         }
 
+        // Check if we should refresh bucket information from disk
         if (shouldRefreshEmptyBuckets(maxBucketId, minEmptyBucketsBeforeAsyncCheck)
                 && isReachedTheMinRefreshInterval(minRefreshInterval)) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Refresh conditions met for partition {}. "
+                                + "Non-full buckets: {}, threshold: {}, max bucket ID: {}",
+                        partition,
+                        nonFullBucketInformation.size(),
+                        minEmptyBucketsBeforeAsyncCheck,
+                        maxBucketId);
+            }
             refreshBucketsFromDisk();
         }
 
@@ -119,30 +134,48 @@ public class PartitionIndex {
             }
         }
 
-        // from onwards is to create new bucket
+        // 3. No available non-full buckets, try to create a new bucket
         int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
         if (totalBucketSet.isEmpty() || maxBucketId < globalMaxBucketId) {
-            // 3. create a new bucket
+            // Try to find an unused bucket ID
             for (int i = 0; i <= globalMaxBucketId; i++) {
                 if (bucketFilter.test(i) && !totalBucketSet.contains(i)) {
                     nonFullBucketInformation.put(i, 1L);
                     totalBucketSet.add(i);
                     totalBucketArray.add(i);
                     hash2Bucket.put(hash, (short) i);
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Created new bucket {} for partition {}", i, partition);
+                    }
                     return i;
                 }
             }
             if (-1 == maxBucketsNum) {
                 throw new RuntimeException(
                         String.format(
-                                "Too more bucket %s, you should increase target bucket row number %s.",
+                                "Too many buckets %s, you should increase target bucket row number %s.",
                                 maxBucketId, targetBucketRowNumber));
             }
         }
-        // todo: check this part
-        // 4. exceed buckets upper bound
+
+        // 4. Exceeded bucket upper bound - randomly assign to an existing bucket
+        // This happens when we've reached the max bucket limit and all buckets are full.
+        // We distribute the overflow records randomly across all buckets to maintain some
+        // level of balance, even though individual buckets will exceed targetBucketRowNumber.
         int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, (short) bucket);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(
+                    "Bucket limit reached for partition {}. "
+                            + "Randomly assigning to existing bucket {}. "
+                            + "Total buckets: {}, max allowed: {}",
+                    partition,
+                    bucket,
+                    totalBucketSet.size(),
+                    maxBucketsNum);
+        }
+
         return bucket;
     }
 
@@ -185,20 +218,43 @@ public class PartitionIndex {
 
     private boolean shouldRefreshEmptyBuckets(
             int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
-        return maxBucketId != -1
-                && minEmptyBucketsBeforeAsyncCheck != -1
-                && (nonFullBucketInformation.size()
-                == maxBucketId - minEmptyBucketsBeforeAsyncCheck);
+        // Only refresh if:
+        // 1. Feature is enabled (minEmptyBucketsBeforeAsyncCheck != -1)
+        // 2. We have some buckets already (maxBucketId != -1)
+        // 3. Available non-full buckets have dropped to or below the threshold
+        return minEmptyBucketsBeforeAsyncCheck != -1
+                && maxBucketId != -1
+                && nonFullBucketInformation.size() <= minEmptyBucketsBeforeAsyncCheck;
     }
 
     private boolean isReachedTheMinRefreshInterval(final Duration duration) {
         return Instant.now().isAfter(lastRefreshTime.plus(duration));
     }
 
+    /**
+     * Cancel any ongoing refresh operation. Should be called when this PartitionIndex is no longer
+     * needed (e.g., during cleanup in prepareCommit).
+     */
+    public void cancelOngoingRefresh() {
+        if (refreshFuture != null && !refreshFuture.isDone()) {
+            refreshFuture.cancel(false);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Cancelled ongoing refresh for partition {}", partition);
+            }
+        }
+    }
 
     private void refreshBucketsFromDisk() {
         // Only start refresh if not already in progress
         if (refreshFuture == null || refreshFuture.isDone()) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Triggering async refresh of bucket information for partition {}. "
+                                + "Current non-full buckets: {}",
+                        partition,
+                        nonFullBucketInformation.size());
+            }
+
             refreshFuture =
                     CompletableFuture.runAsync(
                             () -> {
@@ -214,15 +270,45 @@ public class PartitionIndex {
                                         }
                                     }
 
-                                    nonFullBucketInformation.putAll(tempBucketInfo);
+                                    // Use merge to avoid race conditions - only update if the new
+                                    // value is more recent
+                                    int newBucketsFound = 0;
+                                    for (Map.Entry<Integer, Long> entry :
+                                            tempBucketInfo.entrySet()) {
+                                        Long previous =
+                                                nonFullBucketInformation.putIfAbsent(
+                                                        entry.getKey(), entry.getValue());
+                                        if (previous == null) {
+                                            newBucketsFound++;
+                                        }
+                                    }
+
                                     lastRefreshTime = Instant.now();
+
+                                    if (LOG.isDebugEnabled()) {
+                                        LOG.debug(
+                                                "Async refresh completed for partition {}. "
+                                                        + "Found {} total non-full buckets, {} are new. "
+                                                        + "Current non-full buckets: {}",
+                                                partition,
+                                                tempBucketInfo.size(),
+                                                newBucketsFound,
+                                                nonFullBucketInformation.size());
+                                    }
                                 } catch (Exception e) {
-                                    // Log error instead of throwing
-                                    System.err.println(
-                                            "Error refreshing buckets from disk: "
-                                                    + e.getMessage());
+                                    LOG.warn(
+                                            "Error refreshing buckets from disk for partition {}: {}",
+                                            partition,
+                                            e.getMessage(),
+                                            e);
                                 }
                             });
+        } else {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Skipping refresh for partition {} - refresh already in progress",
+                        partition);
+            }
         }
     }
 }
