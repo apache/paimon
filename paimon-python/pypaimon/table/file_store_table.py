@@ -24,6 +24,7 @@ from pypaimon.common.identifier import Identifier
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.options.options import Options
 from pypaimon.read.read_builder import ReadBuilder
+from pypaimon.read.stream_read_builder import StreamReadBuilder
 from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.table.bucket_mode import BucketMode
@@ -107,12 +108,12 @@ class FileStoreTable(Table):
     ) -> None:
         """
         Create a tag for a snapshot.
-        
+
         Args:
             tag_name: Name for the tag
             snapshot_id: ID of the snapshot to tag. If None, uses the latest snapshot.
             ignore_if_exists: If True, don't raise error if tag already exists
-            
+
         Raises:
             ValueError: If no snapshot exists or tag already exists (when ignore_if_exists=False)
         """
@@ -134,10 +135,10 @@ class FileStoreTable(Table):
     def delete_tag(self, tag_name: str) -> bool:
         """
         Delete a tag.
-        
+
         Args:
             tag_name: Name of the tag to delete
-            
+
         Returns:
             True if tag was deleted, False if tag didn't exist
         """
@@ -330,6 +331,9 @@ class FileStoreTable(Table):
             index_file_handler=IndexFileHandler(table=self)
         )
 
+    def new_stream_read_builder(self) -> 'StreamReadBuilder':
+        return StreamReadBuilder(self)
+
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         return BatchWriteBuilder(self)
 
@@ -371,10 +375,10 @@ class FileStoreTable(Table):
     def _try_time_travel(self, options: Options) -> Optional[TableSchema]:
         """
         Try to resolve time travel options and return the corresponding schema.
-        
+
         Supports the following time travel options:
         - scan.tag-name: Travel to a specific tag
-        
+
         Returns:
             The TableSchema at the time travel point, or None if no time travel option is set.
         """
