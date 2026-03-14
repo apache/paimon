@@ -94,6 +94,9 @@ class ObjectTable(Table):
             "ObjectTable is read-only and does not support batch write."
         )
 
+    def new_stream_read_builder(self):
+        raise NotImplementedError("ObjectTable does not support stream read.")
+
     def new_stream_write_builder(self):
         raise NotImplementedError(
             "ObjectTable is read-only and does not support stream write."
