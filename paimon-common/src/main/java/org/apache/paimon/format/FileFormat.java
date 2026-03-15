@@ -107,6 +107,14 @@ public abstract class FileFormat {
         return FileFormat.fromIdentifier(options.fileFormatString(), options.toConfiguration());
     }
 
+    public static FileFormat vectorFileFormat(CoreOptions options) {
+        String vectorFileFormat = options.vectorFileFormatString();
+        if (vectorFileFormat == null) {
+            return fileFormat(options);
+        }
+        return FileFormat.fromIdentifier(vectorFileFormat, options.toConfiguration());
+    }
+
     public static FileFormat manifestFormat(CoreOptions options) {
         return FileFormat.fromIdentifier(options.manifestFormatString(), options.toConfiguration());
     }
