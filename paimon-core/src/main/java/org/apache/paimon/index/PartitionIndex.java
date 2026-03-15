@@ -79,8 +79,7 @@ public class PartitionIndex {
                     @Override
                     public Thread newThread(Runnable r) {
                         Thread thread =
-                                new Thread(
-                                        r, "paimon-bucket-refresh-" + counter.getAndIncrement());
+                                new Thread(r, "paimon-bucket-refresh-" + counter.getAndIncrement());
                         thread.setDaemon(true);
                         return thread;
                     }
@@ -339,7 +338,8 @@ public class PartitionIndex {
                                                                             file ->
                                                                                     file.indexFile()
                                                                                             .rowCount(),
-                                                                            (existing, replacement) ->
+                                                                            (existing,
+                                                                                    replacement) ->
                                                                                     existing));
 
                                             // Use putIfAbsent to avoid race conditions

@@ -398,9 +398,15 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 0,
                 Arrays.asList(
                         createCommitMessage(
-                                row(1), 0, 2, fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1})),
+                                row(1),
+                                0,
+                                2,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1})),
                         createCommitMessage(
-                                row(1), 1, 2, fileHandler.hashIndex(row(1), 1).write(new int[] {2, 3, 4}))));
+                                row(1),
+                                1,
+                                2,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {2, 3, 4}))));
 
         // Create a new assigner that will load the index from disk
         assigner =
@@ -488,7 +494,10 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 0,
                 Collections.singletonList(
                         createCommitMessage(
-                                row(1), 0, 1, fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
 
         // Recreate assigner to load from disk
         assigner =
@@ -516,8 +525,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     /**
-     * Test refresh with multiple partitions to ensure each partition is handled independently.
-     * Data skew scenario where different partitions have different bucket counts.
+     * Test refresh with multiple partitions to ensure each partition is handled independently. Data
+     * skew scenario where different partitions have different bucket counts.
      */
     @Test
     public void testRefreshWithMultiplePartitionsDataSkew() throws IOException {
@@ -539,13 +548,25 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 0,
                 Arrays.asList(
                         createCommitMessage(
-                                row(1), 0, 1, fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1})),
+                                row(1),
+                                0,
+                                1,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1})),
                         createCommitMessage(
-                                row(2), 0, 3, fileHandler.hashIndex(row(2), 0).write(new int[] {10, 11})),
+                                row(2),
+                                0,
+                                3,
+                                fileHandler.hashIndex(row(2), 0).write(new int[] {10, 11})),
                         createCommitMessage(
-                                row(2), 1, 3, fileHandler.hashIndex(row(2), 1).write(new int[] {12})),
+                                row(2),
+                                1,
+                                3,
+                                fileHandler.hashIndex(row(2), 1).write(new int[] {12})),
                         createCommitMessage(
-                                row(2), 2, 3, fileHandler.hashIndex(row(2), 2).write(new int[] {13}))));
+                                row(2),
+                                2,
+                                3,
+                                fileHandler.hashIndex(row(2), 2).write(new int[] {13}))));
 
         // Recreate assigner
         assigner =
@@ -580,8 +601,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     /**
-     * Test that refresh correctly discovers buckets freed by compaction. Simulates a scenario
-     * where compaction removes data from a full bucket, making it available again.
+     * Test that refresh correctly discovers buckets freed by compaction. Simulates a scenario where
+     * compaction removes data from a full bucket, making it available again.
      */
     @Test
     public void testRefreshDiscoversFreedBucketsAfterCompaction() throws IOException {
@@ -610,7 +631,10 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                                         .hashIndex(row(1), 0)
                                         .write(new int[] {0, 1, 2, 3, 4})), // Full bucket
                         createCommitMessage(
-                                row(1), 1, 2, fileHandler.hashIndex(row(1), 1).write(new int[] {5, 6}))));
+                                row(1),
+                                1,
+                                2,
+                                fileHandler.hashIndex(row(1), 1).write(new int[] {5, 6}))));
 
         // Recreate assigner - should load bucket 1 (has space), but not bucket 0 (full)
         assigner =
@@ -631,7 +655,10 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 1,
                 Collections.singletonList(
                         createCommitMessage(
-                                row(1), 0, 2, fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
+                                row(1),
+                                0,
+                                2,
+                                fileHandler.hashIndex(row(1), 0).write(new int[] {0, 1}))));
 
         // Assign to bucket 1 until it approaches threshold, triggering refresh
         assertThat(assigner.assign(row(1), 5)).isEqualTo(1); // 3 rows now
