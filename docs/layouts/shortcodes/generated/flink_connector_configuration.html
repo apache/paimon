@@ -81,6 +81,12 @@ under the License.
             <td>Specific dynamic partition refresh interval for lookup, scan all partitions and obtain corresponding partition.</td>
         </tr>
         <tr>
+            <td><h5>lookup.dynamic-partition.refresh.async</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to refresh dynamic partition lookup table asynchronously. When enabled, partition changes will be loaded in a background thread while the old partition data continues serving queries. When disabled (default), partition refresh is synchronous and blocks queries until the new partition data is fully loaded.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.refresh.async</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

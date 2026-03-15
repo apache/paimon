@@ -271,13 +271,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (partitionLoader == null) {
                 return lookupInternal(key);
             }
-
-            if (partitionLoader.partitions().isEmpty()) {
+            List<BinaryRow> partitions =
+                    lookupTable.scanPartitions() == null
+                            ? partitionLoader.partitions()
+                            : lookupTable.scanPartitions();
+            if (partitions.isEmpty()) {
                 return Collections.emptyList();
             }
 
             List<RowData> rows = new ArrayList<>();
-            for (BinaryRow partition : partitionLoader.partitions()) {
+            for (BinaryRow partition : partitions) {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
             return rows;
@@ -324,7 +327,15 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             return;
         }
 
-        // 2. refresh dynamic partition
+        // 2. check if async partition refresh has completed, and switch if so
+        LookupTable switchedTable = lookupTable.checkPartitionRefreshCompletion();
+        if (switchedTable != null) {
+            close();
+            lookupTable = switchedTable;
+            path = ((FullCacheLookupTable) switchedTable).context.tempPath;
+        }
+
+        // 3. refresh dynamic partition
         if (partitionLoader != null) {
             boolean partitionChanged = partitionLoader.checkRefresh();
             List<BinaryRow> partitions = partitionLoader.partitions();
@@ -334,18 +345,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
 
             if (partitionChanged) {
-                // reopen with latest partition
-                lookupTable.specifyPartitions(
-                        partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
-                lookupTable.close();
-                lookupTable.open();
+                lookupTable.startPartitionRefresh(
+                        partitions, partitionLoader.createSpecificPartFilter());
                 nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
-                // no need to refresh the lookup table because it is reopened
                 return;
             }
         }
 
-        // 3. refresh lookup table
+        // 4. refresh lookup table
         if (shouldRefreshLookupTable()) {
             // Check if we should do full load (close and reopen table) instead of incremental
             // refresh
