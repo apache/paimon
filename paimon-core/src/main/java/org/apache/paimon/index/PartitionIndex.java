@@ -183,48 +183,29 @@ public class PartitionIndex {
             refreshBucketsFromDisk();
         }
 
-        // 3. No available non-full buckets, try to create a new bucket
         int globalMaxBucketId = (maxBucketsNum == -1 ? Short.MAX_VALUE : maxBucketsNum) - 1;
         if (totalBucketSet.isEmpty() || maxBucketId < globalMaxBucketId) {
-            // Try to find an unused bucket ID
+            // 3. create a new bucket
             for (int i = 0; i <= globalMaxBucketId; i++) {
                 if (bucketFilter.test(i) && !totalBucketSet.contains(i)) {
                     nonFullBucketInformation.put(i, 1L);
                     totalBucketSet.add(i);
                     totalBucketArray.add(i);
                     hash2Bucket.put(hash, (short) i);
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug("Created new bucket {} for partition {}", i, partition);
-                    }
                     return i;
                 }
             }
             if (-1 == maxBucketsNum) {
                 throw new RuntimeException(
                         String.format(
-                                "Too many buckets %s, you should increase target bucket row number %s.",
+                                "Too more bucket %s, you should increase target bucket row number %s.",
                                 maxBucketId, targetBucketRowNumber));
             }
         }
 
-        // 4. Exceeded bucket upper bound - randomly assign to an existing bucket
-        // This happens when we've reached the max bucket limit and all buckets are full.
-        // We distribute the overflow records randomly across all buckets to maintain some
-        // level of balance, even though individual buckets will exceed targetBucketRowNumber.
+        // 4. exceed buckets upper bound
         int bucket = ListUtils.pickRandomly(totalBucketArray);
         hash2Bucket.put(hash, (short) bucket);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                    "Bucket limit reached for partition {}. "
-                            + "Randomly assigning to existing bucket {}. "
-                            + "Total buckets: {}, max allowed: {}",
-                    partition,
-                    bucket,
-                    totalBucketSet.size(),
-                    maxBucketsNum);
-        }
-
         return bucket;
     }
 
