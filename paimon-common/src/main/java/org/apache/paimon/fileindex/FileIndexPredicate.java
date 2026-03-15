@@ -127,7 +127,6 @@ public class FileIndexPredicate implements Closeable {
                     public Set<String> visit(CompoundPredicate predicate) {
                         Set<String> result = new HashSet<>();
                         for (Predicate child : predicate.children()) {
-                            child.visit(this);
                             result.addAll(child.visit(this));
                         }
                         return result;
