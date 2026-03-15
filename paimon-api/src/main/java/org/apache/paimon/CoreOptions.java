@@ -1408,19 +1408,23 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(-1)
                     .withDescription(
-                            "Threshold for triggering asynchronous refresh of empty bucket information. "
-                                    + "When the number of available empty buckets drops below this value, "
-                                    + "the assigner will asynchronously check for newly emptied buckets. "
-                                    + "Higher values improve responsiveness but may increase overhead.");
+                            "Threshold for triggering asynchronous refresh of bucket information. "
+                                    + "When a bucket's row count reaches (target-row-num - threshold), "
+                                    + "the assigner will asynchronously scan disk to find buckets freed by compaction. "
+                                    + "For example, with target-row-num=1000000 and threshold=100000, "
+                                    + "refresh triggers at 900000 rows. "
+                                    + "Set to -1 to disable. Recommended value: 10-20% of target-row-num.");
 
     public static final ConfigOption<Duration> DYNAMIC_BUCKET_MIN_REFRESH_INTERVAL =
             key("dynamic-bucket.min-refresh-interval")
                     .durationType()
-                    .defaultValue(Duration.ofHours(1))
+                    .defaultValue(Duration.ofHours(24))
                     .withDescription(
-                            "Minimum time between bucket refresh checks. Too short will cause excessive "
-                                    + "overhead from scanning bucket table, too long may delay discovery of "
-                                    + "available buckets.");
+                            "Minimum time between bucket refresh checks. "
+                                    + "Default is 24 hours which is recommended for most use cases. "
+                                    + "Too short intervals (< 1 hour) will cause excessive overhead from "
+                                    + "scanning bucket index files. With many partitions (e.g., 500+), "
+                                    + "a longer interval ensures the refresh queue remains manageable.");
 
     public static final ConfigOption<String> INCREMENTAL_BETWEEN =
             key("incremental-between")

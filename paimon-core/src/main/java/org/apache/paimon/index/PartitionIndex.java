@@ -41,7 +41,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntPredicate;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
@@ -49,6 +57,47 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 public class PartitionIndex {
 
     private static final Logger LOG = LoggerFactory.getLogger(PartitionIndex.class);
+
+    // Configuration for bucket refresh executor
+    // Higher thread count because refresh operations are I/O bound (waiting on disk/network)
+    private static final int REFRESH_CORE_THREADS = 4;
+    private static final int REFRESH_MAX_THREADS = 12;
+    private static final int REFRESH_TIMEOUT_MINUTES = 5;
+
+    // Shared executor for all PartitionIndex instances to control global concurrency
+    // Uses unbounded queue because:
+    // 1. Refresh tasks are infrequent (hours/days between refreshes)
+    // 2. Low memory footprint (~400 bytes per task, max ~200KB for 500 partitions)
+    // 3. Tasks process quickly (30-60s each) so queue drains fast
+    // 4. Ensures all partitions eventually refresh (no task rejection)
+    private static final ExecutorService REFRESH_EXECUTOR;
+
+    static {
+        ThreadFactory threadFactory =
+                new ThreadFactory() {
+                    private final AtomicInteger counter = new AtomicInteger(0);
+
+                    @Override
+                    public Thread newThread(Runnable r) {
+                        Thread thread =
+                                new Thread(
+                                        r, "paimon-bucket-refresh-" + counter.getAndIncrement());
+                        thread.setDaemon(true);
+                        return thread;
+                    }
+                };
+
+        // Unbounded queue - never rejects tasks
+        // With 24h refresh interval, queue size is manageable even with many partitions
+        REFRESH_EXECUTOR =
+                new ThreadPoolExecutor(
+                        REFRESH_CORE_THREADS,
+                        REFRESH_MAX_THREADS,
+                        60L,
+                        TimeUnit.SECONDS,
+                        new LinkedBlockingQueue<>(),
+                        threadFactory);
+    }
 
     public final Int2ShortHashMap hash2Bucket;
 
@@ -103,22 +152,8 @@ public class PartitionIndex {
             return hash2Bucket.get(hash);
         }
 
-        // Check if we should refresh bucket information from disk
-        if (shouldRefreshEmptyBuckets(maxBucketId, minEmptyBucketsBeforeAsyncCheck)
-                && isReachedTheMinRefreshInterval(minRefreshInterval)) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug(
-                        "Refresh conditions met for partition {}. "
-                                + "Non-full buckets: {}, threshold: {}, max bucket ID: {}",
-                        partition,
-                        nonFullBucketInformation.size(),
-                        minEmptyBucketsBeforeAsyncCheck,
-                        maxBucketId);
-            }
-            refreshBucketsFromDisk();
-        }
-
         // 2. find bucket from existing buckets
+        boolean shouldRefresh = false;
         Iterator<Map.Entry<Integer, Long>> iterator =
                 nonFullBucketInformation.entrySet().iterator();
         while (iterator.hasNext()) {
@@ -126,12 +161,30 @@ public class PartitionIndex {
             Integer bucket = entry.getKey();
             Long number = entry.getValue();
             if (number < targetBucketRowNumber) {
+                // Check if this bucket is approaching capacity
+                if (!shouldRefresh
+                        && shouldRefreshWhenBucketNearFull(
+                                number, targetBucketRowNumber, minEmptyBucketsBeforeAsyncCheck)) {
+                    shouldRefresh = true;
+                }
                 entry.setValue(number + 1);
                 hash2Bucket.put(hash, (short) bucket.intValue());
                 return bucket;
             } else {
                 iterator.remove();
             }
+        }
+
+        // Check if we should refresh bucket information from disk before creating new bucket
+        if (shouldRefresh && isReachedTheMinRefreshInterval(minRefreshInterval)) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(
+                        "Refresh conditions met for partition {}. "
+                                + "Bucket approaching capacity, threshold: {}",
+                        partition,
+                        minEmptyBucketsBeforeAsyncCheck);
+            }
+            refreshBucketsFromDisk();
         }
 
         // 3. No available non-full buckets, try to create a new bucket
@@ -216,15 +269,21 @@ public class PartitionIndex {
                 mapBuilder.build(), buckets, targetBucketRowNumber, indexFileHandler, partition);
     }
 
-    private boolean shouldRefreshEmptyBuckets(
-            int maxBucketId, int minEmptyBucketsBeforeAsyncCheck) {
+    private boolean shouldRefreshWhenBucketNearFull(
+            long currentBucketRowCount,
+            long targetBucketRowNumber,
+            int minEmptyBucketsBeforeAsyncCheck) {
         // Only refresh if:
         // 1. Feature is enabled (minEmptyBucketsBeforeAsyncCheck != -1)
-        // 2. We have some buckets already (maxBucketId != -1)
-        // 3. Available non-full buckets have dropped to or below the threshold
-        return minEmptyBucketsBeforeAsyncCheck != -1
-                && maxBucketId != -1
-                && nonFullBucketInformation.size() <= minEmptyBucketsBeforeAsyncCheck;
+        // 2. Current bucket is approaching its target capacity
+        // When bucket reaches (targetBucketRowNumber - minEmptyBucketsBeforeAsyncCheck),
+        // trigger refresh to find buckets freed by compaction
+        if (minEmptyBucketsBeforeAsyncCheck == -1) {
+            return false;
+        }
+
+        long threshold = targetBucketRowNumber - minEmptyBucketsBeforeAsyncCheck;
+        return currentBucketRowCount >= threshold;
     }
 
     private boolean isReachedTheMinRefreshInterval(final Duration duration) {
@@ -255,54 +314,83 @@ public class PartitionIndex {
                         nonFullBucketInformation.size());
             }
 
+            // With unbounded queue, tasks are never rejected
             refreshFuture =
                     CompletableFuture.runAsync(
-                            () -> {
-                                try {
-                                    List<IndexManifestEntry> files =
-                                            indexFileHandler.scanEntries(HASH_INDEX, partition);
-                                    Map<Integer, Long> tempBucketInfo = new HashMap<>();
+                                    () -> {
+                                        try {
+                                            List<IndexManifestEntry> files =
+                                                    indexFileHandler.scanEntries(
+                                                            HASH_INDEX, partition);
 
-                                    for (IndexManifestEntry file : files) {
-                                        long currentNumberOfRows = file.indexFile().rowCount();
-                                        if (currentNumberOfRows < targetBucketRowNumber) {
-                                            tempBucketInfo.put(file.bucket(), currentNumberOfRows);
+                                            // Use parallel stream to scan multiple files
+                                            // concurrently
+                                            // This reduces latency when dealing with many buckets
+                                            Map<Integer, Long> tempBucketInfo =
+                                                    files.parallelStream()
+                                                            .filter(
+                                                                    file ->
+                                                                            file.indexFile()
+                                                                                            .rowCount()
+                                                                                    < targetBucketRowNumber)
+                                                            .collect(
+                                                                    Collectors.toMap(
+                                                                            IndexManifestEntry
+                                                                                    ::bucket,
+                                                                            file ->
+                                                                                    file.indexFile()
+                                                                                            .rowCount(),
+                                                                            (existing, replacement) ->
+                                                                                    existing));
+
+                                            // Use putIfAbsent to avoid race conditions
+                                            int newBucketsFound = 0;
+                                            for (Map.Entry<Integer, Long> entry :
+                                                    tempBucketInfo.entrySet()) {
+                                                Long previous =
+                                                        nonFullBucketInformation.putIfAbsent(
+                                                                entry.getKey(), entry.getValue());
+                                                if (previous == null) {
+                                                    newBucketsFound++;
+                                                }
+                                            }
+
+                                            lastRefreshTime = Instant.now();
+
+                                            if (LOG.isDebugEnabled()) {
+                                                LOG.debug(
+                                                        "Async refresh completed for partition {}. "
+                                                                + "Scanned {} files, found {} non-full buckets ({} new). "
+                                                                + "Current non-full buckets: {}",
+                                                        partition,
+                                                        files.size(),
+                                                        tempBucketInfo.size(),
+                                                        newBucketsFound,
+                                                        nonFullBucketInformation.size());
+                                            }
+                                        } catch (Exception e) {
+                                            LOG.warn(
+                                                    "Error refreshing buckets from disk for partition {}: {}",
+                                                    partition,
+                                                    e.getMessage(),
+                                                    e);
                                         }
-                                    }
-
-                                    // Use merge to avoid race conditions - only update if the new
-                                    // value is more recent
-                                    int newBucketsFound = 0;
-                                    for (Map.Entry<Integer, Long> entry :
-                                            tempBucketInfo.entrySet()) {
-                                        Long previous =
-                                                nonFullBucketInformation.putIfAbsent(
-                                                        entry.getKey(), entry.getValue());
-                                        if (previous == null) {
-                                            newBucketsFound++;
+                                    },
+                                    REFRESH_EXECUTOR)
+                            .orTimeout(REFRESH_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+                            .exceptionally(
+                                    throwable -> {
+                                        if (throwable instanceof TimeoutException
+                                                || throwable.getCause()
+                                                        instanceof TimeoutException) {
+                                            LOG.warn(
+                                                    "Bucket refresh timed out for partition {} after {} minutes. "
+                                                            + "This may indicate slow storage or too many buckets.",
+                                                    partition,
+                                                    REFRESH_TIMEOUT_MINUTES);
                                         }
-                                    }
-
-                                    lastRefreshTime = Instant.now();
-
-                                    if (LOG.isDebugEnabled()) {
-                                        LOG.debug(
-                                                "Async refresh completed for partition {}. "
-                                                        + "Found {} total non-full buckets, {} are new. "
-                                                        + "Current non-full buckets: {}",
-                                                partition,
-                                                tempBucketInfo.size(),
-                                                newBucketsFound,
-                                                nonFullBucketInformation.size());
-                                    }
-                                } catch (Exception e) {
-                                    LOG.warn(
-                                            "Error refreshing buckets from disk for partition {}: {}",
-                                            partition,
-                                            e.getMessage(),
-                                            e);
-                                }
-                            });
+                                        return null;
+                                    });
         } else {
             if (LOG.isDebugEnabled()) {
                 LOG.debug(
