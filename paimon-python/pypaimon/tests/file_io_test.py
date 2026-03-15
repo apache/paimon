@@ -67,11 +67,14 @@ class FileIOTest(unittest.TestCase):
 
         lt7 = _pyarrow_lt_7()
         oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
-            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com'
+            OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+            OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+            OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
         }))
+        use_jindo_fs = oss_io.use_jindo_fs
         got = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
-        self.assertEqual(got, "path/to/file.txt" if lt7 else "test-bucket/path/to/file.txt")
-        if lt7:
+        self.assertEqual(got, "path/to/file.txt" if lt7 or use_jindo_fs else "test-bucket/path/to/file.txt")
+        if lt7 or use_jindo_fs:
             self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx/data.parquet"),
                              "db-xxx.db/tbl-xxx/data.parquet")
             self.assertEqual(oss_io.to_filesystem_path("db-xxx.db/tbl-xxx"), "db-xxx.db/tbl-xxx")
@@ -88,26 +91,27 @@ class FileIOTest(unittest.TestCase):
             get_file_info_calls.append(list(paths))
             return [MagicMock(type=pafs.FileType.NotFound) for _ in paths]
 
-        mock_fs = MagicMock()
-        mock_fs.get_file_info.side_effect = record_get_file_info if lt7 else [[nf], [nf]]
-        mock_fs.create_dir = MagicMock()
-        mock_fs.open_output_stream.return_value = MagicMock()
-        oss_io.filesystem = mock_fs
-        oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
-        mock_fs.create_dir.assert_called_once()
-        path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
-        if lt7:
-            expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
-        else:
-            expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
-        self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
-        if lt7:
-            for call_paths in get_file_info_calls:
-                for p in call_paths:
-                    self.assertFalse(
-                        p.startswith("test-bucket/"),
-                        "OSS+PyArrow<7 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
-                    )
+        if not use_jindo_fs:
+            mock_fs = MagicMock()
+            mock_fs.get_file_info.side_effect = record_get_file_info if lt7 else [[nf], [nf]]
+            mock_fs.create_dir = MagicMock()
+            mock_fs.open_output_stream.return_value = MagicMock()
+            oss_io.filesystem = mock_fs
+            oss_io.new_output_stream("oss://test-bucket/path/to/file.txt")
+            mock_fs.create_dir.assert_called_once()
+            path_str = oss_io.to_filesystem_path("oss://test-bucket/path/to/file.txt")
+            if lt7:
+                expected_parent = '/'.join(path_str.split('/')[:-1]) if '/' in path_str else ''
+            else:
+                expected_parent = "/".join(path_str.split("/")[:-1]) if "/" in path_str else str(Path(path_str).parent)
+            self.assertEqual(mock_fs.create_dir.call_args[0][0], expected_parent)
+            if lt7:
+                for call_paths in get_file_info_calls:
+                    for p in call_paths:
+                        self.assertFalse(
+                            p.startswith("test-bucket/"),
+                            "OSS+PyArrow<7 must pass key only to get_file_info, not bucket/key. Got: %r" % (p,)
+                        )
 
     def test_exists(self):
         lt7 = _pyarrow_lt_7()
@@ -286,7 +290,9 @@ class FileIOTest(unittest.TestCase):
             file_io.delete_directory_quietly("file:///some/path")
 
             oss_io = PyArrowFileIO("oss://test-bucket/warehouse", Options({
-                OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com'
+                OssOptions.OSS_ENDPOINT.key(): 'oss-cn-hangzhou.aliyuncs.com',
+                OssOptions.OSS_ACCESS_KEY_ID.key(): 'test-key',
+                OssOptions.OSS_ACCESS_KEY_SECRET.key(): 'test-secret',
             }))
             mock_fs = MagicMock()
             mock_fs.get_file_info.return_value = [
