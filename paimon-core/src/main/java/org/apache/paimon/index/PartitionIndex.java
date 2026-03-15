@@ -45,7 +45,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntPredicate;
 import java.util.stream.Collectors;
@@ -61,7 +60,6 @@ public class PartitionIndex {
     // Higher thread count because refresh operations are I/O bound (waiting on disk/network)
     private static final int REFRESH_CORE_THREADS = 4;
     private static final int REFRESH_MAX_THREADS = 12;
-    private static final int REFRESH_TIMEOUT_MINUTES = 5;
 
     // Shared executor for all PartitionIndex instances to control global concurrency
     // Uses unbounded queue because:
@@ -313,6 +311,8 @@ public class PartitionIndex {
             }
 
             // With unbounded queue, tasks are never rejected
+            // Note: Using exceptionally for error handling (Java 8 compatible)
+            // Timeout is handled by the ThreadPoolExecutor's keep-alive time
             refreshFuture =
                     CompletableFuture.runAsync(
                                     () -> {
@@ -376,18 +376,12 @@ public class PartitionIndex {
                                         }
                                     },
                                     REFRESH_EXECUTOR)
-                            .orTimeout(REFRESH_TIMEOUT_MINUTES, TimeUnit.MINUTES)
                             .exceptionally(
                                     throwable -> {
-                                        if (throwable instanceof TimeoutException
-                                                || throwable.getCause()
-                                                        instanceof TimeoutException) {
-                                            LOG.warn(
-                                                    "Bucket refresh timed out for partition {} after {} minutes. "
-                                                            + "This may indicate slow storage or too many buckets.",
-                                                    partition,
-                                                    REFRESH_TIMEOUT_MINUTES);
-                                        }
+                                        LOG.warn(
+                                                "Error during bucket refresh for partition {}: {}",
+                                                partition,
+                                                throwable.getMessage());
                                         return null;
                                     });
         } else {
