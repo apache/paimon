@@ -241,7 +241,10 @@ public class RESTTokenFileIO implements FileIO {
         if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
-        newToken.put(IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
+        if (catalogOptions.contains(IO_CACHE_ENABLED)) {
+            newToken.put(
+                    IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
+        }
         return ImmutableMap.copyOf(newToken);
     }
 
