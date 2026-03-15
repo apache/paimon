@@ -139,6 +139,7 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1749,6 +1750,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
         assertEquals("test-endpoint", fileDataToken.token().get("fs.oss.endpoint"));
+    }
+
+    @Test
+    void testValidTokenWithIOCacheEnabled() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IO_CACHE_ENABLED.key(), "true");
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_io_cache_enabled");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+
+        // Verify IO_CACHE_ENABLED is merged into token
+        assertEquals("true", fileDataToken.token().get(IO_CACHE_ENABLED.key()));
     }
 
     @Test

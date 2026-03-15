@@ -51,6 +51,7 @@ import java.util.concurrent.TimeUnit;
 import static org.apache.paimon.options.CatalogOptions.FILE_IO_ALLOW_CACHE;
 import static org.apache.paimon.rest.RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 
 /** A {@link FileIO} to support getting token from REST Server. */
 public class RESTTokenFileIO implements FileIO {
@@ -234,11 +235,13 @@ public class RESTTokenFileIO implements FileIO {
 
     private Map<String, String> mergeTokenWithCatalogOptions(Map<String, String> token) {
         Map<String, String> newToken = Maps.newLinkedHashMap(token);
+        Options catalogOptions = catalogContext.options();
         // DLF OSS endpoint should override the standard OSS endpoint.
-        String dlfOssEndpoint = catalogContext.options().get(DLF_OSS_ENDPOINT.key());
+        String dlfOssEndpoint = catalogOptions.get(DLF_OSS_ENDPOINT.key());
         if (dlfOssEndpoint != null && !dlfOssEndpoint.isEmpty()) {
             newToken.put("fs.oss.endpoint", dlfOssEndpoint);
         }
+        newToken.put(IO_CACHE_ENABLED.key(), String.valueOf(catalogOptions.get(IO_CACHE_ENABLED)));
         return ImmutableMap.copyOf(newToken);
     }
 
