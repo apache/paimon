@@ -32,6 +32,8 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.ListUtils.pickRandomly;
+
 /** The facade for the provided I/O manager services. */
 public class IOManagerImpl implements IOManager {
 
@@ -90,6 +92,11 @@ public class IOManagerImpl implements IOManager {
     @Override
     public String[] tempDirs() {
         return tempDirs;
+    }
+
+    @Override
+    public String pickRandomTempDir() {
+        return pickRandomly(Arrays.asList(tempDirs()));
     }
 
     @Override

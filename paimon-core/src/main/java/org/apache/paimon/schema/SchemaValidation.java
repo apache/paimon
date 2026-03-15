@@ -466,9 +466,12 @@ public class SchemaValidation {
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
                 "Deletion vectors mode is only supported for NONE/INPUT/LOOKUP changelog producer now.");
 
-        checkArgument(
-                !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
-                "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
+        // pk-clustering-override mode requires deletion vectors even for first-row
+        if (!options.pkClusteringOverride()) {
+            checkArgument(
+                    !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
+                    "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
+        }
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {

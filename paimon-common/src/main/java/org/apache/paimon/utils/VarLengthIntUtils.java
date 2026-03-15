@@ -21,6 +21,8 @@ package org.apache.paimon.utils;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 
 /* This file is based on source code of LongPacker from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -126,9 +128,38 @@ public final class VarLengthIntUtils {
         return i;
     }
 
+    /** @return bytes length. */
+    public static int encodeInt(OutputStream os, int value) throws IOException {
+
+        if (value < 0) {
+            throw new IllegalArgumentException("negative value: v=" + value);
+        }
+
+        int i = 1;
+        while ((value & ~0x7F) != 0) {
+            os.write(((value & 0x7F) | 0x80));
+            value >>>= 7;
+            i++;
+        }
+
+        os.write((byte) value);
+        return i;
+    }
+
     public static int decodeInt(DataInput is) throws IOException {
         for (int offset = 0, result = 0; offset < 32; offset += 7) {
             int b = is.readUnsignedByte();
+            result |= (b & 0x7F) << offset;
+            if ((b & 0x80) == 0) {
+                return result;
+            }
+        }
+        throw new Error("Malformed integer.");
+    }
+
+    public static int decodeInt(InputStream is) throws IOException {
+        for (int offset = 0, result = 0; offset < 32; offset += 7) {
+            int b = is.read() & 0xFF;
             result |= (b & 0x7F) << offset;
             if ((b & 0x80) == 0) {
                 return result;

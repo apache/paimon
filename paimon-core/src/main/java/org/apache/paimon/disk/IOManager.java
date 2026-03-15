@@ -38,6 +38,8 @@ public interface IOManager extends AutoCloseable {
 
     String[] tempDirs();
 
+    String pickRandomTempDir();
+
     Enumerator createChannelEnumerator();
 
     BufferFileWriter createBufferFileWriter(ID channelID) throws IOException;

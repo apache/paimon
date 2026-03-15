@@ -2314,6 +2314,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The interval for checking visibility when visibility-callback enabled.");
 
+    public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
+            key("pk-clustering-override")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Enables clustering by non-primary key fields. When set to true, the physical"
+                                    + " sort order of data files is determined by the configured 'clustering.columns'"
+                                    + " instead of the primary key, optimizing query performance for non-PK columns.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -2369,6 +2378,10 @@ public class CoreOptions implements Serializable {
 
     public TableType type() {
         return options.get(TYPE);
+    }
+
+    public boolean pkClusteringOverride() {
+        return options.get(PK_CLUSTERING_OVERRIDE);
     }
 
     public String formatType() {
