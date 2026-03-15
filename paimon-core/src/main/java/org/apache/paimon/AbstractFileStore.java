@@ -290,6 +290,7 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                                 bucketMode(),
                                 options.deletionVectorsEnabled(),
                                 options.dataEvolutionEnabled(),
+                                options.pkClusteringOverride(),
                                 newIndexFileHandler(),
                                 snapshotManager,
                                 scanner);

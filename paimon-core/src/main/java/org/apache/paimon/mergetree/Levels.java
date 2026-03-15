@@ -32,6 +32,7 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
+import static org.apache.paimon.io.DataFileMeta.groupByLevel;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A class which stores all level files of merge tree. */
@@ -205,11 +206,6 @@ public class Levels {
             files.addAll(after);
             levels.set(level - 1, SortedRun.fromUnsorted(files, keyComparator));
         }
-    }
-
-    private Map<Integer, List<DataFileMeta>> groupByLevel(List<DataFileMeta> files) {
-        return files.stream()
-                .collect(Collectors.groupingBy(DataFileMeta::level, Collectors.toList()));
     }
 
     /** A callback to notify dropping file. */

@@ -80,6 +80,7 @@ public class ConflictDetection {
     private final BucketMode bucketMode;
     private final boolean deletionVectorsEnabled;
     private final boolean dataEvolutionEnabled;
+    private final boolean pkClusteringOverride;
     private final IndexFileHandler indexFileHandler;
     private final SnapshotManager snapshotManager;
     private final CommitScanner commitScanner;
@@ -96,6 +97,7 @@ public class ConflictDetection {
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
             boolean dataEvolutionEnabled,
+            boolean pkClusteringOverride,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
             CommitScanner commitScanner) {
@@ -107,6 +109,7 @@ public class ConflictDetection {
         this.bucketMode = bucketMode;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
+        this.pkClusteringOverride = pkClusteringOverride;
         this.indexFileHandler = indexFileHandler;
         this.snapshotManager = snapshotManager;
         this.commitScanner = commitScanner;
@@ -269,6 +272,11 @@ public class ConflictDetection {
             String baseCommitUser) {
         // fast exit for file store without keys
         if (keyComparator == null) {
+            return Optional.empty();
+        }
+
+        // Not clustering by pk, no need to check key range
+        if (pkClusteringOverride) {
             return Optional.empty();
         }
 
