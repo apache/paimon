@@ -221,6 +221,29 @@ run_btree_index_test() {
     fi
 }
 
+run_compressed_text_test() {
+    echo -e "${YELLOW}=== Step 7: Running Compressed Text Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyE2ETest.testJavaWriteCompressedTextAppendTable..."
+    if mvn test -Dtest=org.apache.paimon.JavaPyE2ETest#testJavaWriteCompressedTextAppendTable -pl paimon-core -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_compressed_text_append_table..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest -k "test_read_compressed_text_append_table" -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
 # Main execution
 main() {
     local java_write_result=0
@@ -229,6 +252,7 @@ main() {
     local java_read_result=0
     local pk_dv_result=0
     local btree_index_result=0
+    local compressed_text_result=0
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
     echo ""
@@ -281,6 +305,12 @@ main() {
 
     echo ""
 
+    if ! run_compressed_text_test; then
+        compressed_text_result=1
+    fi
+
+    echo ""
+
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
     if [[ $java_write_result -eq 0 ]]; then
@@ -319,12 +349,18 @@ main() {
         echo -e "${RED}✗ BTree Index Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $compressed_text_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Compressed Text Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Compressed Text Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

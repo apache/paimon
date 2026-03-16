@@ -674,6 +674,47 @@ public class JavaPyE2ETest {
         assertThat(result).containsExactlyInAnyOrder("v3", "v5");
     }
 
+    @Test
+    @EnabledIfSystemProperty(named = "run.e2e.tests", matches = "true")
+    public void testJavaWriteCompressedTextAppendTable() throws Exception {
+        for (String format : Arrays.asList("json", "csv")) {
+            String tableName = "mixed_test_append_tablej_" + format + "_gz";
+            Identifier identifier = identifier(tableName);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("value", DataTypes.DOUBLE())
+                            .option("file.format", format)
+                            .option("file.compression", "gzip")
+                            .option("bucket", "-1")
+                            .build();
+
+            catalog.createTable(identifier, schema, true);
+            Table table = catalog.getTable(identifier);
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+
+            BatchWriteBuilder writeBuilder = fileStoreTable.newBatchWriteBuilder();
+            try (BatchTableWrite write = writeBuilder.newWrite();
+                    BatchTableCommit commit = writeBuilder.newCommit()) {
+                write.write(GenericRow.of(1, BinaryString.fromString("Apple"), 1.5));
+                write.write(GenericRow.of(2, BinaryString.fromString("Banana"), 0.8));
+                write.write(GenericRow.of(3, BinaryString.fromString("Carrot"), 0.6));
+                commit.commit(write.prepareCommit());
+            }
+
+            List<Split> splits =
+                    new ArrayList<>(fileStoreTable.newSnapshotReader().read().dataSplits());
+            TableRead read = fileStoreTable.newRead();
+            List<String> res =
+                    getResult(
+                            read,
+                            splits,
+                            row -> DataFormatTestUtil.toStringNoRowKind(row, table.rowType()));
+            assertThat(res).hasSize(3);
+        }
+    }
+
     // Helper method from TableTestBase
     protected Identifier identifier(String tableName) {
         return new Identifier(database, tableName);
