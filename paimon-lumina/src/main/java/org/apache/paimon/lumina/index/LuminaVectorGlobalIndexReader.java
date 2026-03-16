@@ -146,8 +146,8 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
         // Min-heap: smallest score at head, so we can evict the weakest candidate efficiently.
         PriorityQueue<ScoredRow> topK =
-                new PriorityQueue<>(limit + 1, Comparator.comparingDouble(s -> s.score));
-        collectResults(distances, labels, effectiveK, limit, topK, indexMetric);
+                new PriorityQueue<>(effectiveK + 1, Comparator.comparingDouble(s -> s.score));
+        collectResults(distances, labels, effectiveK, effectiveK, topK, indexMetric);
 
         RoaringNavigableMap64 roaringBitmap64 = new RoaringNavigableMap64();
         HashMap<Long, Float> id2scores = new HashMap<>(topK.size());
@@ -229,6 +229,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
                         searcherOptions.putAll(indexMeta.options());
                         index =
                                 LuminaIndex.fromStream(
+                                        indexMeta.indexType(),
                                         fileInput,
                                         ioMeta.fileSize(),
                                         indexMeta.dim(),

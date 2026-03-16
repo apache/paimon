@@ -30,7 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * A high-level wrapper for Lumina index operations (build and search).
+ * Lumina index operations：build and search.
  *
  * <p>This class provides a safe Java API for building and searching Lumina vector indices. It
  * manages the lifecycle of native LuminaBuilder and LuminaSearcher objects.
@@ -50,16 +50,13 @@ public class LuminaIndex implements Closeable {
 
     /** Create a new index for building. */
     public static LuminaIndex createForBuild(
-            int dimension, LuminaVectorMetric metric, Map<String, String> extraOptions) {
+            String indexType,
+            int dimension,
+            LuminaVectorMetric metric,
+            Map<String, String> extraOptions) {
         LuminaIndex index = new LuminaIndex(dimension, metric);
-
         Map<String, String> opts = new LinkedHashMap<>(extraOptions);
-        index.builder =
-                LuminaBuilder.create(
-                        LuminaVectorIndexOptions.INDEX_TYPE.defaultValue(),
-                        dimension,
-                        toMetricType(metric),
-                        opts);
+        index.builder = LuminaBuilder.create(indexType, dimension, toMetricType(metric), opts);
         return index;
     }
 
@@ -70,6 +67,7 @@ public class LuminaIndex implements Closeable {
      * underlying stream open until this index is closed.
      */
     public static LuminaIndex fromStream(
+            String indexType,
             LuminaFileInput fileInput,
             long fileSize,
             int dimension,
@@ -77,23 +75,17 @@ public class LuminaIndex implements Closeable {
             Map<String, String> extraOptions) {
         LuminaIndex index = new LuminaIndex(dimension, metric);
         index.searcher =
-                LuminaSearcher.create(
-                        LuminaVectorIndexOptions.INDEX_TYPE.defaultValue(),
-                        dimension,
-                        toMetricType(metric),
-                        extraOptions);
+                LuminaSearcher.create(indexType, dimension, toMetricType(metric), extraOptions);
         index.searcher.open(fileInput, fileSize);
         return index;
     }
 
-    /** Pretrain using a streaming dataset (no contiguous buffer needed). */
     public void pretrainFrom(LuminaDataset dataset) {
         ensureOpen();
         ensureBuilder();
         builder.pretrainFrom(dataset);
     }
 
-    /** Insert vectors using a streaming dataset (no contiguous buffer needed). */
     public void insertFrom(LuminaDataset dataset) {
         ensureOpen();
         ensureBuilder();

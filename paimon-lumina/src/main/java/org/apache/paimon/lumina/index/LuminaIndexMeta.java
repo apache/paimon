@@ -44,12 +44,14 @@ import java.util.Map;
  */
 public class LuminaIndexMeta implements Serializable {
 
-    private static final long serialVersionUID = 3L;
+    private static final long serialVersionUID = 1L;
 
     private static final String KEY_DIMENSION =
             LuminaVectorIndexOptions.toLuminaKey(LuminaVectorIndexOptions.DIMENSION);
     private static final String KEY_DISTANCE_METRIC =
             LuminaVectorIndexOptions.toLuminaKey(LuminaVectorIndexOptions.DISTANCE_METRIC);
+    private static final String KEY_INDEX_TYPE =
+            LuminaVectorIndexOptions.toLuminaKey(LuminaVectorIndexOptions.INDEX_TYPE);
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -77,6 +79,11 @@ public class LuminaIndexMeta implements Serializable {
 
     public LuminaVectorMetric metric() {
         return LuminaVectorMetric.fromLuminaName(distanceMetric());
+    }
+
+    public String indexType() {
+        return options.getOrDefault(
+                KEY_INDEX_TYPE, LuminaVectorIndexOptions.INDEX_TYPE.defaultValue());
     }
 
     /** Serializes this metadata as a UTF-8 encoded JSON string (flat key-value map). */

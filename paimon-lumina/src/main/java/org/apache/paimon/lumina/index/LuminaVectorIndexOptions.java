@@ -27,24 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Options for the Lumina vector index.
- *
- * <p>All option keys use the {@code lumina.} prefix so that both paimon-cpp and paimon-lumina share
- * the same table properties. For example:
- *
- * <pre>
- *   lumina.index.dimension = 1024
- *   lumina.distance.metric = inner_product
- *   lumina.encoding.type   = pq
- *   lumina.diskann.build.ef_construction = 128
- *   lumina.diskann.search.list_size = 100
- * </pre>
- *
- * <p>Use {@link #toLuminaOptions()} to obtain a {@code Map<String, String>} with the {@code
- * lumina.} prefix stripped, suitable for passing directly to the native Lumina API. This mirrors
- * paimon-cpp's {@code FetchOptionsWithPrefix("lumina.", options)}.
- */
+/** Options for the Lumina vector index. */
 public class LuminaVectorIndexOptions {
 
     /** The common prefix for all Lumina options. */
@@ -128,11 +111,13 @@ public class LuminaVectorIndexOptions {
 
     private final int dimension;
     private final LuminaVectorMetric metric;
+    private final String indexType;
     private final Map<String, String> luminaOptions;
 
     public LuminaVectorIndexOptions(Options options) {
         this.dimension = validatePositive(options.get(DIMENSION), DIMENSION.key());
         this.metric = parseMetric(options.get(DISTANCE_METRIC));
+        this.indexType = options.get(INDEX_TYPE);
         validateEncodingMetricCombination(options.get(ENCODING_TYPE), this.metric);
         this.luminaOptions = buildLuminaOptions(options, this.dimension);
     }
@@ -152,6 +137,10 @@ public class LuminaVectorIndexOptions {
 
     public LuminaVectorMetric metric() {
         return metric;
+    }
+
+    public String indexType() {
+        return indexType;
     }
 
     /**

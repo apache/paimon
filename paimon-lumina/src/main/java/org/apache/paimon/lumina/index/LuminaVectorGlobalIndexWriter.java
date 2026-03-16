@@ -29,6 +29,8 @@ import org.apache.paimon.types.FloatType;
 
 import org.aliyun.lumina.LuminaDataset;
 import org.aliyun.lumina.LuminaFileOutput;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.File;
@@ -57,6 +59,8 @@ import java.util.Map;
 public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter, Closeable {
 
     private static final String FILE_NAME_PREFIX = "lumina";
+
+    private static final Logger LOG = LoggerFactory.getLogger(LuminaVectorGlobalIndexWriter.class);
 
     /** I/O buffer size for reading/writing the temp vector file (~8 MB). */
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
@@ -177,7 +181,8 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private ResultEntry buildIndex() throws IOException {
         configureExecutorThreadCount();
         try (LuminaIndex index =
-                LuminaIndex.createForBuild(dim, options.metric(), options.toLuminaOptions())) {
+                LuminaIndex.createForBuild(
+                        options.indexType(), dim, options.metric(), options.toLuminaOptions())) {
 
             // Pretrain and insert via streaming file-backed Dataset API
             try (FileBackedDataset ds = new FileBackedDataset(tempVectorFile, dim, count)) {
@@ -227,6 +232,10 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             field.setAccessible(true);
             ((Map<String, String>) field.get(env)).put(key, value);
         } catch (Exception e) {
+            LOG.warn(
+                    "Failed to set environment variable '{}' for Lumina executor. Thread-count tuning may not take effect.",
+                    key,
+                    e);
         }
     }
 
@@ -306,8 +315,15 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                     if (readBuf.remaining() < Float.BYTES) {
                         // Compact any partial float bytes and refill
                         readBuf.compact();
-                        channel.read(readBuf);
+                        int bytesRead = channel.read(readBuf);
                         readBuf.flip();
+                        if (bytesRead == -1 && readBuf.remaining() < Float.BYTES) {
+                            throw new IOException(
+                                    "Unexpected end of temp file: read "
+                                            + destOffset
+                                            + " floats but need "
+                                            + floatsNeeded);
+                        }
                     }
                     int availableFloats = readBuf.remaining() / Float.BYTES;
                     int toRead = Math.min(availableFloats, floatsNeeded - destOffset);
