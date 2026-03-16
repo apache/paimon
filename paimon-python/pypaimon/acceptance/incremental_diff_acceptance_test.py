@@ -119,13 +119,6 @@ class IncrementalDiffAcceptanceTest(unittest.TestCase):
                     entries = manifest_file_manager.read_entries_parallel(manifest_files)
                     all_entries.extend(entries)
 
-        if not all_entries:
-            return pa.Table.from_pydict({
-                'id': [],
-                'value': [],
-                'partition_col': []
-            }, schema=self.pa_schema)
-
         # Create splits from entries
         options = table.options
         split_generator = AppendTableSplitGenerator(
