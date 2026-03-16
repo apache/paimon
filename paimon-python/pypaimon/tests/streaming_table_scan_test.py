@@ -489,5 +489,129 @@ class StreamingCatchUpDiffTest(unittest.TestCase):
         self.assertEqual(scan.next_snapshot_id, 101)
 
 
+class StreamingConsumerTest(unittest.TestCase):
+    """Tests for consumer management integration in AsyncStreamingTableScan."""
+
+    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
+    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    def test_consumer_restores_next_snapshot_id(
+        self, MockManifestFileManager, MockManifestListManager,
+        MockSnapshotManager, MockConsumerManager
+    ):
+        """When consumer exists, stream() should resume from saved position."""
+        from pypaimon.consumer.consumer import Consumer
+
+        table, _ = _create_mock_table(latest_snapshot_id=10)
+
+        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_consumer_manager = MockConsumerManager.return_value
+        mock_manifest_list_manager = MockManifestListManager.return_value
+
+        # Consumer has saved progress at snapshot 8
+        mock_consumer_manager.consumer.return_value = Consumer(next_snapshot=8)
+
+        # Snapshot 8 exists and is APPEND
+        snapshot_8 = _create_mock_snapshot(8, "APPEND")
+        mock_snapshot_manager.find_next_scannable.return_value = (snapshot_8, 9, 0)
+        mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(10)
+
+        mock_manifest_list_manager.read_delta.return_value = []
+
+        scan = AsyncStreamingTableScan(
+            table, poll_interval_ms=10, prefetch_enabled=False,
+            consumer_id="my-consumer"
+        )
+
+        # next_snapshot_id is None initially
+        self.assertIsNone(scan.next_snapshot_id)
+
+        async def get_first_plan():
+            async for plan in scan.stream():
+                return plan
+
+        asyncio.run(get_first_plan())
+
+        # Consumer should have been queried
+        mock_consumer_manager.consumer.assert_called_once_with("my-consumer")
+
+        # next_snapshot_id should have been restored from consumer (8),
+        # then advanced after scanning snapshot 8
+        self.assertEqual(scan.next_snapshot_id, 9)
+
+    @patch('pypaimon.read.streaming_table_scan.ConsumerManager')
+    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.FileScanner')
+    def test_consumer_saves_after_yield(
+        self, MockFileScanner, MockManifestListManager,
+        MockSnapshotManager, MockConsumerManager
+    ):
+        """Consumer progress is flushed on the next __anext__() call after yielding a plan.
+
+        The save is deferred until the caller asks for the next plan (i.e. after the caller's
+        loop body has completed), giving at-least-once semantics: the consumer file only
+        advances once the caller has finished processing the previous plan.
+        """
+        table, _ = _create_mock_table(latest_snapshot_id=5)
+
+        mock_snapshot_manager = MockSnapshotManager.return_value
+        mock_consumer_manager = MockConsumerManager.return_value
+
+        # No existing consumer state
+        mock_consumer_manager.consumer.return_value = None
+
+        # Latest snapshot is 5
+        mock_snapshot_manager.get_latest_snapshot.return_value = _create_mock_snapshot(5)
+        mock_snapshot_manager.get_snapshot_by_id.return_value = None
+        # No follow-up snapshots available (so the polling loop sleeps and we break out)
+        mock_snapshot_manager.find_next_scannable.return_value = (None, 6, 0)
+
+        mock_file_scanner = MockFileScanner.return_value
+        mock_file_scanner.scan.return_value = Plan([])
+
+        scan = AsyncStreamingTableScan(
+            table, poll_interval_ms=10, prefetch_enabled=False,
+            consumer_id="save-test"
+        )
+
+        async def get_first_plan_then_resume():
+            gen = scan.stream()
+            plan = await gen.__anext__()        # yields initial plan; save is staged but not flushed
+            # Consumer not yet saved — save is pending until the next __anext__() call
+            mock_consumer_manager.reset_consumer.assert_not_called()
+            # Drive the generator one more step (enters polling loop, flushes pending save,
+            # then finds no snapshot and sleeps — we cancel via timeout)
+            try:
+                await asyncio.wait_for(gen.__anext__(), timeout=0.05)
+            except (asyncio.TimeoutError, StopAsyncIteration):
+                pass
+            return plan
+
+        asyncio.run(get_first_plan_then_resume())
+
+        # Consumer should now have been saved with next_snapshot_id = 6
+        mock_consumer_manager.reset_consumer.assert_called_once()
+        call_args = mock_consumer_manager.reset_consumer.call_args
+        self.assertEqual(call_args[0][0], "save-test")
+        self.assertEqual(call_args[0][1].next_snapshot, 6)
+
+    @patch('pypaimon.read.streaming_table_scan.SnapshotManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestListManager')
+    @patch('pypaimon.read.streaming_table_scan.ManifestFileManager')
+    def test_no_consumer_when_consumer_id_not_set(
+        self, MockManifestFileManager, MockManifestListManager,
+        MockSnapshotManager
+    ):
+        """Without consumer_id, no ConsumerManager should be created."""
+        table, _ = _create_mock_table()
+
+        scan = AsyncStreamingTableScan(table)
+
+        self.assertIsNone(scan._consumer_id)
+        self.assertIsNone(scan._consumer_manager)
+
+
 if __name__ == '__main__':
     unittest.main()
