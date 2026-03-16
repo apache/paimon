@@ -43,9 +43,6 @@ public class LuminaIndex implements Closeable {
     private final LuminaVectorMetric metric;
     private volatile boolean closed = false;
 
-    /** All lumina options (prefix-stripped), stored for building search options at query time. */
-    private Map<String, String> allOptions;
-
     private LuminaIndex(int dimension, LuminaVectorMetric metric) {
         this.dimension = dimension;
         this.metric = metric;
@@ -86,7 +83,6 @@ public class LuminaIndex implements Closeable {
                         toMetricType(metric),
                         extraOptions);
         index.searcher.open(fileInput, fileSize);
-        index.allOptions = extraOptions;
         return index;
     }
 

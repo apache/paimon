@@ -426,7 +426,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         private long openReadCount;
         private long openReadTimeNanos;
         private long openSeekTimeNanos;
-        private boolean openPhaseRecorded;
 
         InputStreamFileInput(SeekableInputStream in) {
             this.in = in;
@@ -464,7 +463,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             openReadCount = totalReadCount;
             openReadTimeNanos = totalReadTimeNanos;
             openSeekTimeNanos = totalSeekTimeNanos;
-            openPhaseRecorded = true;
         }
 
         long getTotalBytesRead() {
@@ -509,10 +507,6 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
 
         long getSearchSeekTimeNanos() {
             return totalSeekTimeNanos - openSeekTimeNanos;
-        }
-
-        boolean isOpenPhaseRecorded() {
-            return openPhaseRecorded;
         }
 
         @Override

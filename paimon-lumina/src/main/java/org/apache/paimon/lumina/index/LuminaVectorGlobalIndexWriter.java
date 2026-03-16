@@ -163,6 +163,14 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             return Collections.singletonList(buildIndex());
         } catch (IOException e) {
             throw new RuntimeException("Failed to write Lumina vector global index", e);
+        } finally {
+            // Delete the temp file eagerly so index builds don't exhaust disk.
+            // Production callers (e.g. DefaultGlobalIndexBuilder) call finish()
+            // but never close(), so we must clean up here.
+            if (tempVectorFile != null) {
+                tempVectorFile.delete();
+                tempVectorFile = null;
+            }
         }
     }
 
@@ -219,7 +227,6 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             field.setAccessible(true);
             ((Map<String, String>) field.get(env)).put(key, value);
         } catch (Exception e) {
-            // Fall back: the environment variable may already be set externally.
         }
     }
 
@@ -350,8 +357,6 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         }
 
         @Override
-        public void close() {
-            // Lifecycle managed by the caller's try-with-resources.
-        }
+        public void close() {}
     }
 }
