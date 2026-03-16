@@ -18,22 +18,35 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.options.CatalogOptions.CACHE_ENABLED;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Test for changelog expire. */
@@ -77,5 +90,57 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
                 (ExpireSnapshotsImpl) table.newExpireSnapshots().config(expireConfig);
         expireSnapshots.expireUntil(1, 7);
         assertThatCode(() -> expire.expireUntil(1, 6)).doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testChangelogExpireWithRestoredManifestLists() throws Exception {
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        dynamicOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        dynamicOptions.put(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key(), "3");
+        table = table.copy(dynamicOptions);
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = writeBuilder.newWrite();
+        StreamTableCommit commit = writeBuilder.newCommit();
+
+        write(write, createRow(1, 0, 1, 10));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // Save snapshot-1's manifest list files before they get cleaned
+        SnapshotManager snapshotManager = table.snapshotManager();
+        FileStorePathFactory pathFactory = table.store().pathFactory();
+        FileIO fileIO = table.fileIO();
+        Snapshot snapshot1 = snapshotManager.snapshot(1);
+        Path manifestDir = pathFactory.manifestPath();
+        Path baseSaved = new Path(manifestDir, snapshot1.baseManifestList() + ".saved");
+        Path deltaSaved = new Path(manifestDir, snapshot1.deltaManifestList() + ".saved");
+        fileIO.copyFile(
+                pathFactory.toManifestListPath(snapshot1.baseManifestList()), baseSaved, false);
+        fileIO.copyFile(
+                pathFactory.toManifestListPath(snapshot1.deltaManifestList()), deltaSaved, false);
+
+        write(write, createRow(1, 0, 2, 20));
+        commit.commit(2, write.prepareCommit(true, 2));
+        write(write, createRow(1, 0, 3, 30));
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        // Copy back changelog-1's manifest list files, simulating SnapshotDeletion failure
+        fileIO.copyFile(
+                baseSaved, pathFactory.toManifestListPath(snapshot1.baseManifestList()), true);
+        fileIO.copyFile(
+                deltaSaved, pathFactory.toManifestListPath(snapshot1.deltaManifestList()), true);
+
+        // expire changelog-1
+        write(write, createRow(1, 0, 4, 40));
+        commit.commit(4, write.prepareCommit(true, 4));
+
+        write.close();
+        commit.close();
+        Snapshot snapshot4 = snapshotManager.snapshot(4);
+        ManifestList manifestList = table.store().manifestListFactory().create();
+        for (ManifestFileMeta manifest : manifestList.readDataManifests(snapshot4)) {
+            assertThat(fileIO.exists(pathFactory.toManifestFilePath(manifest.fileName()))).isTrue();
+        }
     }
 }
