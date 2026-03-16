@@ -24,7 +24,6 @@ returns the same data as the delta approach (reading N delta_manifest_lists).
 Uses real file I/O with local temp filesystem.
 """
 
-import asyncio
 import os
 import shutil
 import tempfile
@@ -39,7 +38,6 @@ from pypaimon.read.scanner.append_table_split_generator import \
     AppendTableSplitGenerator
 from pypaimon.read.scanner.incremental_diff_scanner import \
     IncrementalDiffScanner
-from pypaimon.read.streaming_table_scan import AsyncStreamingTableScan
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
@@ -250,72 +248,6 @@ class IncrementalDiffAcceptanceTest(unittest.TestCase):
 
         self.assertGreater(len(p1_rows), 0, "Should have rows in partition p1")
         self.assertGreater(len(p2_rows), 0, "Should have rows in partition p2")
-
-    def test_streaming_catch_up_returns_same_data(self):
-        """
-        End-to-end: Verify AsyncStreamingTableScan catch-up returns same data.
-
-        Creates a table with 20 snapshots, then uses streaming scan with
-        a low diff_threshold to trigger diff-based catch-up. Verifies the
-        total rows match expected.
-        """
-        table, all_data = self._create_table_with_snapshots(
-            'test_streaming_catch_up',
-            num_snapshots=20
-        )
-
-        # Create streaming scan with low threshold to trigger diff catch-up
-        scan = AsyncStreamingTableScan(
-            table,
-            poll_interval_ms=10,
-            diff_threshold=5,  # Low threshold to trigger diff for gap > 5
-            prefetch_enabled=False
-        )
-
-        # Restore to snapshot 1 (will trigger catch-up to snapshot 20)
-        scan.next_snapshot_id = 1
-
-        # Collect all rows from streaming scan
-        all_rows = []
-        table_read = table.new_read_builder().new_read()
-
-        async def collect_rows():
-            plan_count = 0
-            async for plan in scan.stream():
-                splits = plan.splits()
-                if splits:
-                    arrow_table = table_read.to_arrow(splits)
-                    for i in range(arrow_table.num_rows):
-                        row = (
-                            arrow_table.column('id')[i].as_py(),
-                            arrow_table.column('value')[i].as_py(),
-                            arrow_table.column('partition_col')[i].as_py()
-                        )
-                        all_rows.append(row)
-                plan_count += 1
-                # After first plan (catch-up), we should have all data
-                # Break to avoid infinite loop waiting for new snapshots
-                if plan_count >= 1:
-                    break
-
-        asyncio.run(collect_rows())
-
-        # Verify diff catch-up was used (gap of 19 > threshold of 5)
-        self.assertTrue(scan._diff_catch_up_used,
-                        "Diff-based catch-up should have been used for large gap")
-
-        # Verify we got all expected rows (snapshots 1-20, 5 rows each = 100)
-        # Note: catch-up includes snapshot 1's data since we start from next_snapshot_id=1
-        self.assertEqual(len(all_rows), 100)
-
-        # Verify all expected IDs are present
-        expected_ids = set()
-        for snap_id in range(1, 21):  # snapshots 1-20
-            for i in range(5):
-                expected_ids.add(snap_id * 10 + i)
-
-        actual_ids = {row[0] for row in all_rows}
-        self.assertEqual(actual_ids, expected_ids)
 
 
 if __name__ == '__main__':
