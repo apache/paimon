@@ -101,17 +101,8 @@ class IncrementalDiffAcceptanceTest(unittest.TestCase):
         scanner = IncrementalDiffScanner(table)
         plan = scanner.scan(start_snapshot, end_snapshot)
 
-        splits = plan.splits()
-        if not splits:
-            # Return empty table with correct schema
-            return pa.Table.from_pydict({
-                'id': [],
-                'value': [],
-                'partition_col': []
-            }, schema=self.pa_schema)
-
         table_read = table.new_read_builder().new_read()
-        return table_read.to_arrow(splits)
+        return table_read.to_arrow(plan.splits())
 
     def _read_via_delta(self, table, start_snap_id, end_snap_id):
         """Read data by iterating delta_manifest_lists between two snapshots."""
