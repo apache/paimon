@@ -64,6 +64,19 @@ KEY_PREFIX = "_KEY_"
 KEY_FIELD_ID_START = 1000000
 NULL_FIELD_INDEX = -1
 
+_COMPRESS_EXTENSIONS = frozenset(['gz', 'bz2', 'deflate', 'snappy', 'lz4', 'zst'])
+
+
+def format_identifier(file_name):
+    idx = file_name.rfind('.')
+    assert idx != -1, "%s is not a legal file name." % file_name
+    ext = file_name[idx + 1:]
+    if ext.lower() in _COMPRESS_EXTENSIONS:
+        second_idx = file_name.rfind('.', 0, idx)
+        assert second_idx != -1, "%s is not a legal file name." % file_name
+        return file_name[second_idx + 1:idx]
+    return ext
+
 
 class SplitRead(ABC):
     """Abstract base class for split reading operations."""
@@ -119,8 +132,7 @@ class SplitRead(ABC):
 
         # Use external_path if available, otherwise use file_path
         file_path = file.external_path if file.external_path else file.file_path
-        _, extension = os.path.splitext(file_path)
-        file_format = extension[1:]
+        file_format = format_identifier(os.path.basename(file_path))
 
         batch_size = self.table.options.read_batch_size()
 
@@ -142,6 +154,10 @@ class SplitRead(ABC):
             format_reader = FormatPyArrowReader(
                 self.table.file_io, file_format, file_path,
                 ordered_read_fields, read_arrow_predicate, batch_size=batch_size)
+        elif file_format in ('json', 'csv'):
+            raise NotImplementedError(
+                f"Reading '{file_format}' format is not yet supported in Python SDK. "
+                f"Supported formats: parquet, orc, avro, lance, blob.")
         else:
             raise ValueError(f"Unexpected file format: {file_format}")
 

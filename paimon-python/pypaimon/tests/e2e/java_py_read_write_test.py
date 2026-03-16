@@ -429,3 +429,16 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'v': ["v1", "v2", "v4"]
         })
         self.assertEqual(expected, actual)
+
+    @parameterized.expand([('json',), ('csv',)])
+    def test_read_compressed_text_append_table(self, file_format):
+        table = self.catalog.get_table(
+            f'default.mixed_test_append_tablej_{file_format}_gz')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        with self.assertRaises(NotImplementedError) as ctx:
+            table_read.to_arrow(splits)
+        self.assertIn(file_format, str(ctx.exception))
+        self.assertIn("not yet supported", str(ctx.exception))
