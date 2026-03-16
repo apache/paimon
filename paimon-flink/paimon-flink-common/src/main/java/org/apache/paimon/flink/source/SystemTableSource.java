@@ -101,11 +101,7 @@ public class SystemTableSource extends FlinkTableSource {
         if (unbounded && table instanceof DataTable) {
             source =
                     new ContinuousFileStoreSource(
-                            readBuilder,
-                            table.options(),
-                            limit,
-                            isUnordered(table),
-                            rowData);
+                            readBuilder, table.options(), limit, isUnordered(table), rowData);
         } else {
             source =
                     new StaticFileStoreSource(

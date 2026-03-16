@@ -153,7 +153,8 @@ class DataTableSourceTest {
         // Retrieve the source from the transformation and verify unordered = true
         ContinuousFileStoreSource source =
                 (ContinuousFileStoreSource)
-                        ((org.apache.flink.streaming.api.transformations.SourceTransformation<?, ?, ?>)
+                        ((org.apache.flink.streaming.api.transformations.SourceTransformation<
+                                                ?, ?, ?>)
                                         sourceStream.getTransformation())
                                 .getSource();
         java.lang.reflect.Field unorderedField =
@@ -164,14 +165,14 @@ class DataTableSourceTest {
 
     @Test
     public void testSystemTableSourceOrderedForHashFixedTable() throws Exception {
-        // bucket > 0 (HASH_FIXED) with bucket-append-ordered = true should produce unordered = false
+        // bucket > 0 (HASH_FIXED) with bucket-append-ordered = true should produce unordered =
+        // false
         FileStoreTable hashFixedTable =
                 createTable(ImmutableMap.of("bucket", "4", "bucket-key", "a"));
         ReadOptimizedTable roTable = new ReadOptimizedTable(hashFixedTable);
 
         SystemTableSource tableSource =
-                new SystemTableSource(
-                        roTable, true, ObjectIdentifier.of("cat", "db", "table$ro"));
+                new SystemTableSource(roTable, true, ObjectIdentifier.of("cat", "db", "table$ro"));
         PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
@@ -180,7 +181,8 @@ class DataTableSourceTest {
 
         ContinuousFileStoreSource source =
                 (ContinuousFileStoreSource)
-                        ((org.apache.flink.streaming.api.transformations.SourceTransformation<?, ?, ?>)
+                        ((org.apache.flink.streaming.api.transformations.SourceTransformation<
+                                                ?, ?, ?>)
                                         sourceStream.getTransformation())
                                 .getSource();
         java.lang.reflect.Field unorderedField =
