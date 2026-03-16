@@ -31,6 +31,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.table.system.ReadOptimizedTable;
 import org.apache.paimon.types.DataTypes;
 
@@ -131,6 +132,61 @@ class DataTableSourceTest {
         DataStream<RowData> sourceStream1 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv1);
         assertThat(sourceStream1.getParallelism()).isEqualTo(3);
+    }
+
+    @Test
+    public void testSystemTableSourceUnorderedForBucketUnawareTable() throws Exception {
+        // bucket = -1 (BUCKET_UNAWARE append-only table) wrapped in a system table should produce
+        // unordered = true so splits are distributed via FIFOSplitAssigner across all tasks
+        FileStoreTable bucketUnawareTable = createTable(ImmutableMap.of("bucket", "-1"));
+        AuditLogTable auditLogTable = new AuditLogTable(bucketUnawareTable);
+
+        SystemTableSource tableSource =
+                new SystemTableSource(
+                        auditLogTable, true, ObjectIdentifier.of("cat", "db", "table$audit_log"));
+        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+        DataStream<RowData> sourceStream =
+                runtimeProvider.produceDataStream(s -> Optional.empty(), env);
+
+        // Retrieve the source from the transformation and verify unordered = true
+        ContinuousFileStoreSource source =
+                (ContinuousFileStoreSource)
+                        ((org.apache.flink.streaming.api.transformations.SourceTransformation<?, ?, ?>)
+                                        sourceStream.getTransformation())
+                                .getSource();
+        java.lang.reflect.Field unorderedField =
+                ContinuousFileStoreSource.class.getDeclaredField("unordered");
+        unorderedField.setAccessible(true);
+        assertThat((boolean) unorderedField.get(source)).isTrue();
+    }
+
+    @Test
+    public void testSystemTableSourceOrderedForHashFixedTable() throws Exception {
+        // bucket > 0 (HASH_FIXED) with bucket-append-ordered = true should produce unordered = false
+        FileStoreTable hashFixedTable =
+                createTable(ImmutableMap.of("bucket", "4", "bucket-key", "a"));
+        ReadOptimizedTable roTable = new ReadOptimizedTable(hashFixedTable);
+
+        SystemTableSource tableSource =
+                new SystemTableSource(
+                        roTable, true, ObjectIdentifier.of("cat", "db", "table$ro"));
+        PaimonDataStreamScanProvider runtimeProvider = runtimeProvider(tableSource);
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+        DataStream<RowData> sourceStream =
+                runtimeProvider.produceDataStream(s -> Optional.empty(), env);
+
+        ContinuousFileStoreSource source =
+                (ContinuousFileStoreSource)
+                        ((org.apache.flink.streaming.api.transformations.SourceTransformation<?, ?, ?>)
+                                        sourceStream.getTransformation())
+                                .getSource();
+        java.lang.reflect.Field unorderedField =
+                ContinuousFileStoreSource.class.getDeclaredField("unordered");
+        unorderedField.setAccessible(true);
+        assertThat((boolean) unorderedField.get(source)).isFalse();
     }
 
     private PaimonDataStreamScanProvider runtimeProvider(FlinkTableSource tableSource) {

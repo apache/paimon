@@ -101,7 +101,11 @@ public class SystemTableSource extends FlinkTableSource {
         if (unbounded && table instanceof DataTable) {
             source =
                     new ContinuousFileStoreSource(
-                            readBuilder, table.options(), limit, false, rowData);
+                            readBuilder,
+                            table.options(),
+                            limit,
+                            isUnordered(table),
+                            rowData);
         } else {
             source =
                     new StaticFileStoreSource(
@@ -156,5 +160,21 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public boolean isUnbounded() {
         return unbounded;
+    }
+
+    private static boolean isUnordered(Table table) {
+        if (!table.primaryKeys().isEmpty()) {
+            return false;
+        }
+        Options options = Options.fromMap(table.options());
+        int bucket = options.get(CoreOptions.BUCKET);
+        if (bucket == -1) {
+            // bucket = -1 means BUCKET_UNAWARE for append-only tables
+            return true;
+        } else if (bucket > 0) {
+            // HASH_FIXED mode: check append order option
+            return !options.get(CoreOptions.BUCKET_APPEND_ORDERED);
+        }
+        return false;
     }
 }
