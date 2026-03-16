@@ -62,6 +62,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link TableWriteImpl}. */
 public class TableWriteTest {
@@ -295,6 +296,21 @@ public class TableWriteTest {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testPartitionTimestampValidation() throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 1);
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        FileStoreTable table = createFileStoreTable(conf);
+
+        TableWriteImpl<?> write = table.newWrite(commitUser);
+        assertThatThrownBy(() -> write.write(GenericRow.of(-100, 1, 1L)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "does not match the 'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration.");
+        write.close();
     }
 
     private BinaryRow partition(int x) {
