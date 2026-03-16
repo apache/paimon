@@ -93,7 +93,7 @@ public class ChangelogExpireTest extends IndexFileExpireTableTest {
     }
 
     @Test
-    public void testChangelogExpireWithRestoredManifestLists() throws Exception {
+    public void testChangelogExpireWithUncleanedManifestLists() throws Exception {
         Map<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
         dynamicOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
