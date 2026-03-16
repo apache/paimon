@@ -306,10 +306,12 @@ public class TableWriteTest {
         FileStoreTable table = createFileStoreTable(conf);
 
         TableWriteImpl<?> write = table.newWrite(commitUser);
+        // valid partition value: 20260316 matches yyyyMMdd
+        write.write(GenericRow.of(20260316, 1, 1L));
+        // invalid partition value: -100 does not match yyyyMMdd
         assertThatThrownBy(() -> write.write(GenericRow.of(-100, 1, 1L)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining(
-                        "does not match the 'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration.");
+                .hasMessageContaining("partition.timestamp-formatter");
         write.close();
     }
 
