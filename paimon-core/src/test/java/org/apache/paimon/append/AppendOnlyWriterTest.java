@@ -52,6 +52,7 @@ import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -578,7 +579,7 @@ public class AppendOnlyWriterTest {
         writer.close();
     }
 
-    /* @Test // TODO this can be enabled after avro supports vector
+    @Test
     public void testVectorStoreSameFormatUsesRowDataWriter() throws Exception {
         RowType vectorStoreSchema =
                 RowType.builder()
@@ -599,7 +600,7 @@ public class AppendOnlyWriterTest {
         assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
         DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
         assertThat(meta.fileName()).doesNotContain(".vector");
-    } */
+    }
 
     private SimpleColStats initStats(Integer min, Integer max, long nullCount) {
         return new SimpleColStats(min, max, nullCount);
