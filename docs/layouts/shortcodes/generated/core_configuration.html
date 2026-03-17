@@ -639,6 +639,12 @@ under the License.
             <td>For streaming write, full compaction will be constantly triggered after delta commits. For batch write, full compaction will be triggered with each commit as long as this value is greater than 0.</td>
         </tr>
         <tr>
+            <td><h5>global-index.build.max-parallelism</h5></td>
+            <td style="word-wrap: break-word;">4096</td>
+            <td>Integer</td>
+            <td>The max parallelism of Flink/Spark for building global index.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.column-update-action</h5></td>
             <td style="word-wrap: break-word;">THROW_ERROR</td>
             <td><p>Enum</p></td>
