@@ -843,6 +843,108 @@ branch_manager = manager.with_branch('feature_branch')
 print(branch_manager.consumers())  # Consumers on feature branch
 ```
 
+## Branch Management
+
+Branch management allows you to create multiple versions of a table, enabling parallel development and experimentation. Paimon supports creating branches from the current state or from specific tags.
+
+{{< hint info >}}
+PyPaimon provides two implementations of `BranchManager`:
+- **FileSystemBranchManager**: For tables accessed directly via filesystem (default for filesystem catalog)
+- **CatalogBranchManager**: For tables accessed via catalog (e.g., REST catalog)
+
+The `table.branch_manager()` method automatically returns the appropriate implementation based on the table's catalog environment.
+{{< /hint >}}
+
+### Create Branch
+
+Create a new branch from the current table state:
+
+```python
+from pypaimon import CatalogFactory
+
+catalog = CatalogFactory.create({'warehouse': 'file:///path/to/warehouse'})
+table = catalog.get_table('database_name.table_name')
+
+# Create a branch from current state
+table.branch_manager().create_branch('feature_branch')
+```
+
+Create a branch from a specific tag:
+
+```python
+# Create a branch from tag 'v1.0'
+table.branch_manager().create_branch('feature_branch', tag_name='v1.0')
+```
+
+Create a branch and ignore if it already exists:
+
+```python
+# No error if branch already exists
+table.branch_manager().create_branch('feature_branch', ignore_if_exists=True)
+```
+
+### List Branches
+
+List all branches for a table:
+
+```python
+# Get all branch names
+branches = table.branch_manager().branches()
+
+for branch in branches:
+    print(f"Branch: {branch}")
+```
+
+### Check Branch Exists
+
+Check if a specific branch exists:
+
+```python
+if table.branch_manager().branch_exists('feature_branch'):
+    print("Branch exists")
+else:
+    print("Branch does not exist")
+```
+
+### Drop Branch
+
+Delete an existing branch:
+
+```python
+# Drop a branch
+table.branch_manager().drop_branch('feature_branch')
+```
+
+### Fast Forward
+
+Fast forward the main branch to a specific branch:
+
+```python
+# Fast forward main to feature branch
+# This is useful when you want to merge changes from a feature branch back to main
+table.branch_manager().fast_forward('feature_branch')
+```
+
+{{< hint warning >}}
+Fast forward operation is irreversible and will replace the current state of the main branch with the target branch's state.
+{{< /hint >}}
+
+### Branch Path Structure
+
+Paimon organizes branches in the file system as follows:
+
+- **Main branch**: Stored directly in the table directory (e.g., `/path/to/table/`)
+- **Feature branches**: Stored in a `branch` subdirectory (e.g., `/path/to/table/branch/branch-feature_branch/`)
+
+### Branch Name Validation
+
+Branch names have the following constraints:
+
+- Cannot be "main" (the default branch)
+- Cannot be blank or whitespace only
+- Cannot be a pure numeric string
+- Valid examples: `feature`, `develop`, `feature-123`, `my-branch`
+
 ## Supported Features
 
 The following shows the supported features of Python Paimon compared to Java Paimon:
