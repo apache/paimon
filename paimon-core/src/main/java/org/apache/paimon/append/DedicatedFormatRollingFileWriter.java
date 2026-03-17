@@ -59,24 +59,39 @@ import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
 import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 
 /**
- * A rolling file writer that handles both normal data and blob data. This writer creates separate
- * files for normal columns and blob columns, managing their lifecycle and ensuring consistency
- * between them.
+ * A rolling file writer that supports dedicated file formats for different column types. This
+ * writer creates separate files for normal columns, blob columns, vector columns, and external
+ * storage blob columns, managing their lifecycle and ensuring consistency between them.
+ *
+ * <p>The writer handles four types of data:
+ *
+ * <ul>
+ *   <li><b>Normal columns</b>: Stored in the main data file using the configured file format (e.g.,
+ *       parquet)
+ *   <li><b>Blob columns</b>: Stored in dedicated blob files within blob file format
+ *   <li><b>Vector columns</b>: Stored in dedicated vector files using a specialized format (e.g.,
+ *       lance)
+ *   <li><b>External storage blob columns</b>: Stored in external storage locations for blob data
+ * </ul>
+ *
+ * <p>File rolling is triggered based on the target file size for each type. When rolling occurs,
+ * all active writers are closed together to maintain consistency. One normal data file may
+ * correspond to multiple blob/vector files.
  *
  * <pre>
- * For example,
- * given a table schema with normal columns (id INT, name STRING) and a blob column (data BLOB),
- * this writer will create separate files for (id, name) and (data).
- * It will roll files based on the specified target file size, ensuring that both normal and blob
- * files are rolled simultaneously.
+ * Example file structure:
+ *   Normal file: f1.parquet (id, name columns)
+ *   Blob files:  blob/b1.blob, blob/b2.blob (data BLOB column)
+ *   Vector file: vector/v1.lance (embedding VECTOR column)
+ *   External blob: stored in external storage path
  *
- * Every time a file is rolled, the writer will close the current normal data file and blob data files,
- * so one normal data file may correspond to multiple blob data files.
- *
- * Normal file1: f1.parquet may include (b1.blob, b2.blob, b3.blob)
- * Normal file2: f1-2.parquet may include (b4.blob, b5.blob)
- *
+ * Rolling behavior:
+ *   Normal file1: f1.parquet -&gt; blob files (b1.blob, b2.blob)
+ *   Normal file2: f2.parquet -&gt; blob files (b3.blob)
  * </pre>
+ *
+ * <p>This writer is primarily used for append-only tables that require specialized storage formats
+ * for certain column types (multimodal data, vector embeddings, etc.).
  */
 public class DedicatedFormatRollingFileWriter
         implements RollingFileWriter<InternalRow, DataFileMeta> {
