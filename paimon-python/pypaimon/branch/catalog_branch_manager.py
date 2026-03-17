@@ -97,7 +97,10 @@ class CatalogBranchManager(BranchManager):
         """
         def _create(catalog: Catalog):
             BranchManager.validate_branch(branch_name)
-            if ignore_if_exists and branch_name in catalog.list_branches(self.identifier):
+            existing_branches = catalog.list_branches(self.identifier)
+            if branch_name in existing_branches:
+                if not ignore_if_exists:
+                    raise ValueError(f"Branch name '{branch_name}' already exists.")
                 return
             catalog.create_branch(self.identifier, branch_name, tag_name)
 
@@ -129,7 +132,7 @@ class CatalogBranchManager(BranchManager):
             ValueError: If fast-forward parameters are invalid
         """
         def _fast_forward(catalog: Catalog):
-            current_branch = self.identifier.get_branch_name()
+            current_branch = self.identifier.get_branch_name_or_default()
             BranchManager.fast_forward_validate(branch_name, current_branch)
             catalog.fast_forward(self.identifier, branch_name)
 

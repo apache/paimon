@@ -40,7 +40,6 @@ class TestCatalogBranchManager(unittest.TestCase):
 
     def test_create_branch_basic(self):
         """Test basic branch creation."""
-        self.catalog.list_branches.return_value = []
         self.branch_manager.create_branch("test-branch")
 
         self.catalog.create_branch.assert_called_once_with(
@@ -49,7 +48,6 @@ class TestCatalogBranchManager(unittest.TestCase):
 
     def test_create_branch_from_tag(self):
         """Test creating branch from tag."""
-        self.catalog.list_branches.return_value = []
         self.branch_manager.create_branch("test-branch", "tag-1")
 
         self.catalog.create_branch.assert_called_once_with(
@@ -63,10 +61,13 @@ class TestCatalogBranchManager(unittest.TestCase):
 
         # Should not call create_branch if branch exists and ignore_if_exists is True
         self.catalog.create_branch.assert_not_called()
+        # Reset for next test
+        self.catalog.list_branches.return_value = []
 
     def test_create_branch_already_exists(self):
         """Test creating branch when it already exists."""
         self.catalog.list_branches.return_value = ["existing-branch"]
+        self.catalog.create_branch.side_effect = BranchAlreadyExistException("existing-branch")
 
         with self.assertRaises(ValueError) as cm:
             self.branch_manager.create_branch("existing-branch")
@@ -75,7 +76,6 @@ class TestCatalogBranchManager(unittest.TestCase):
 
     def test_create_branch_with_branch_not_exist_exception(self):
         """Test creating branch when catalog raises BranchNotExistException."""
-        self.catalog.list_branches.return_value = []
         self.catalog.create_branch.side_effect = BranchNotExistException("test-branch")
 
         with self.assertRaises(ValueError) as cm:
@@ -85,7 +85,6 @@ class TestCatalogBranchManager(unittest.TestCase):
 
     def test_create_branch_with_tag_not_exist_exception(self):
         """Test creating branch when catalog raises TagNotExistException."""
-        self.catalog.list_branches.return_value = []
         self.catalog.create_branch.side_effect = TagNotExistException("tag-1")
 
         with self.assertRaises(ValueError) as cm:
@@ -95,7 +94,6 @@ class TestCatalogBranchManager(unittest.TestCase):
 
     def test_create_branch_with_branch_already_exist_exception(self):
         """Test creating branch when catalog raises BranchAlreadyExistException."""
-        self.catalog.list_branches.return_value = []
         self.catalog.create_branch.side_effect = BranchAlreadyExistException("test-branch")
 
         with self.assertRaises(ValueError) as cm:
@@ -120,27 +118,29 @@ class TestCatalogBranchManager(unittest.TestCase):
 
     def test_fast_forward(self):
         """Test fast-forward operation."""
-        # Set up identifier to return a branch name
-        self.identifier.branch = "main"
         self.branch_manager.fast_forward("test-branch")
 
         self.catalog.fast_forward.assert_called_once_with(self.identifier, "test-branch")
 
     def test_fast_forward_to_main(self):
         """Test fast-forward to main branch should raise error."""
-        self.identifier.branch = "feature"
+        from pypaimon.common.identifier import Identifier
+        identifier_with_branch = Identifier("test_db", "test_table", "feature")
+        branch_manager = CatalogBranchManager(self.catalog_loader, identifier_with_branch)
 
         with self.assertRaises(ValueError) as cm:
-            self.branch_manager.fast_forward("main")
+            branch_manager.fast_forward("main")
 
         self.assertIn("do not use in fast-forward", str(cm.exception))
 
     def test_fast_forward_to_current_branch(self):
         """Test fast-forward to current branch should raise error."""
-        self.identifier.branch = "feature"
+        from pypaimon.common.identifier import Identifier
+        identifier_with_branch = Identifier("test_db", "test_table", "feature")
+        branch_manager = CatalogBranchManager(self.catalog_loader, identifier_with_branch)
 
         with self.assertRaises(ValueError) as cm:
-            self.branch_manager.fast_forward("feature")
+            branch_manager.fast_forward("feature")
 
         self.assertIn("is not allowed", str(cm.exception))
 
