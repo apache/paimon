@@ -254,3 +254,77 @@ class FileSystemCatalog(Catalog):
             NotImplementedError: FileSystemCatalog does not support version management
         """
         raise NotImplementedError("Filesystem catalog does not support load_snapshot")
+
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        from pypaimon.api.api_response import Partition, PagedList
+        from pypaimon.manifest.manifest_list_manager import ManifestListManager
+        from pypaimon.manifest.manifest_file_manager import ManifestFileManager
+
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+
+        table = self.get_table(identifier)
+        snapshot = table.snapshot_manager().get_latest_snapshot()
+        if snapshot is None:
+            return PagedList(elements=[])
+
+        # Read all manifest entries (ADD - DELETE merged)
+        manifest_list_manager = ManifestListManager(table)
+        manifest_file_manager = ManifestFileManager(table)
+        manifest_files = manifest_list_manager.read_all(snapshot)
+        entries = manifest_file_manager.read_entries_parallel(manifest_files, drop_stats=True)
+
+        # Group entries by partition spec
+        partition_map = {}  # spec_key -> aggregated stats
+        for entry in entries:
+            spec = {field.name: str(v) for field, v in
+                    zip(entry.partition.fields, entry.partition.values)}
+            spec_key = tuple(sorted(spec.items()))
+
+            if spec_key not in partition_map:
+                partition_map[spec_key] = {
+                    'spec': spec,
+                    'record_count': 0,
+                    'file_size_in_bytes': 0,
+                    'file_count': 0,
+                    'last_file_creation_time': 0,
+                    'buckets': set(),
+                }
+            stats = partition_map[spec_key]
+            stats['record_count'] += entry.file.row_count
+            stats['file_size_in_bytes'] += entry.file.file_size
+            stats['file_count'] += 1
+            if entry.file.creation_time is not None:
+                ct = entry.file.creation_time.get_millisecond()
+                if ct > stats['last_file_creation_time']:
+                    stats['last_file_creation_time'] = ct
+            stats['buckets'].add(entry.bucket)
+
+        # Convert to Partition objects
+        partitions = []
+        for stats in partition_map.values():
+            partitions.append(Partition(
+                spec=stats['spec'],
+                record_count=stats['record_count'],
+                file_size_in_bytes=stats['file_size_in_bytes'],
+                file_count=stats['file_count'],
+                last_file_creation_time=stats['last_file_creation_time'],
+                total_buckets=len(stats['buckets']),
+            ))
+
+        # Apply pattern filter
+        if partition_name_pattern:
+            import re
+            regex = re.compile(partition_name_pattern.replace('*', '.*'))
+            partitions = [
+                p for p in partitions
+                if regex.fullmatch(','.join(f'{k}={v}' for k, v in p.spec.items()))
+            ]
+
+        return PagedList(elements=partitions)

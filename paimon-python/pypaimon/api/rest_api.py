@@ -26,8 +26,10 @@ from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetTableResponse,
                                        GetTableTokenResponse,
                                        ListDatabasesResponse,
+                                       ListPartitionsResponse,
                                        ListTablesResponse, PagedList,
-                                       PagedResponse, GetTableSnapshotResponse)
+                                       PagedResponse, GetTableSnapshotResponse,
+                                       Partition)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
@@ -48,6 +50,7 @@ class RESTApi:
     DATABASE_NAME_PATTERN = "databaseNamePattern"
     TABLE_NAME_PATTERN = "tableNamePattern"
     TABLE_TYPE = "tableType"
+    PARTITION_NAME_PATTERN = "partitionNamePattern"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
     def __init__(self, options: Union[Options, Dict[str, str]], config_required: bool = True):
@@ -398,6 +401,29 @@ class RESTApi:
         if response is None:
             return None
         return response.get_snapshot()
+
+    def list_partitions_paged(
+            self,
+            identifier: Identifier,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ) -> PagedList[Partition]:
+        database_name, table_name = self.__validate_identifier(identifier)
+
+        response = self.client.get_with_params(
+            self.resource_paths.partitions(database_name, table_name),
+            self.__build_paged_query_params(
+                max_results,
+                page_token,
+                {self.PARTITION_NAME_PATTERN: partition_name_pattern},
+            ),
+            ListPartitionsResponse,
+            self.rest_auth_function,
+        )
+
+        partitions = response.data() or []
+        return PagedList(partitions, response.get_next_page_token())
 
     @staticmethod
     def __validate_identifier(identifier: Identifier):

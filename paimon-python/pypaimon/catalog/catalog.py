@@ -200,3 +200,28 @@ class Catalog(ABC):
         raise NotImplementedError(
             "drop_partitions is not supported by this catalog. Use REST catalog for partition drop."
         )
+
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        """List partitions of a table with pagination.
+
+        Args:
+            identifier: Path of the table.
+            max_results: Maximum number of results to return per page.
+            page_token: Token for pagination.
+            partition_name_pattern: Optional pattern to filter partition names.
+
+        Returns:
+            PagedList of Partition objects.
+
+        Raises:
+            NotImplementedError: If the catalog does not support listing partitions.
+        """
+        raise NotImplementedError(
+            "list_partitions_paged is not supported by this catalog."
+        )

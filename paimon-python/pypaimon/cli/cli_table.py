@@ -573,6 +573,70 @@ def cmd_table_alter(args):
         sys.exit(1)
 
 
+def cmd_table_list_partitions(args):
+    """
+    Execute the 'table list-partitions' command.
+
+    Lists partitions of a Paimon table with optional pattern filtering.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    # Load catalog configuration
+    config_path = args.config
+    config = load_catalog_config(config_path)
+
+    # Create catalog
+    catalog = create_catalog(config)
+
+    # Parse table identifier
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    # List partitions with pagination
+    pattern = getattr(args, 'pattern', None)
+    try:
+        paged_list = catalog.list_partitions_paged(
+            table_identifier,
+            partition_name_pattern=pattern,
+        )
+        import pandas as pd
+
+        partitions = paged_list.elements
+        if not partitions:
+            print("No partitions found.")
+            return
+
+        data = []
+        for p in partitions:
+            spec_str = ",".join(f"{k}={v}" for k, v in p.spec.items())
+            data.append({
+                'Partition': spec_str,
+                'RecordCount': p.record_count,
+                'FileSizeInBytes': p.file_size_in_bytes,
+                'FileCount': p.file_count,
+                'LastFileCreationTime': p.last_file_creation_time,
+                'UpdatedAt': p.updated_at,
+                'UpdatedBy': p.updated_by or '',
+            })
+
+        df = pd.DataFrame(data)
+        print(df.to_string(index=False))
+
+    except NotImplementedError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: Failed to list partitions: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def add_table_subcommands(table_parser):
     """
     Add table subcommands to the parser.
@@ -669,6 +733,20 @@ def add_table_subcommands(table_parser):
     )
     import_parser.set_defaults(func=cmd_table_import)
     
+    # table list-partitions command
+    list_partitions_parser = table_subparsers.add_parser('list-partitions', help='List partitions of a table')
+    list_partitions_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    list_partitions_parser.add_argument(
+        '--pattern', '-p',
+        type=str,
+        default=None,
+        help='Partition name pattern to filter partitions (e.g., "dt=2024*")'
+    )
+    list_partitions_parser.set_defaults(func=cmd_table_list_partitions)
+
     # table rename command
     rename_parser = table_subparsers.add_parser('rename', help='Rename a table')
     rename_parser.add_argument(

@@ -23,6 +23,7 @@ from typing import Dict, Generic, List, Optional
 from pypaimon.common.json_util import T, json_field
 from pypaimon.common.options import Options
 from pypaimon.schema.schema import Schema
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.snapshot.table_snapshot import TableSnapshot
 
 
@@ -129,6 +130,37 @@ class ListDatabasesResponse(PagedResponse[str]):
         return self.databases
 
     def get_next_page_token(self) -> str:
+        return self.next_page_token
+
+
+@dataclass
+class Partition(PartitionStatistics):
+    """Partition data model matching Java org.apache.paimon.partition.Partition."""
+
+    FIELD_DONE = "done"
+    FIELD_OPTIONS = "options"
+
+    done: bool = json_field(FIELD_DONE, default=False)
+    created_at: Optional[int] = json_field("createdAt", default=None)
+    created_by: Optional[str] = json_field("createdBy", default=None)
+    updated_at: Optional[int] = json_field("updatedAt", default=None)
+    updated_by: Optional[str] = json_field("updatedBy", default=None)
+    options: Optional[Dict[str, str]] = json_field(FIELD_OPTIONS, default=None)
+
+
+@dataclass
+class ListPartitionsResponse(PagedResponse['Partition']):
+    """Response for listing partitions."""
+    FIELD_PARTITIONS = "partitions"
+
+    partitions: Optional[List[Partition]] = json_field(FIELD_PARTITIONS)
+    next_page_token: Optional[str] = json_field(
+        PagedResponse.FIELD_NEXT_PAGE_TOKEN)
+
+    def data(self) -> Optional[List[Partition]]:
+        return self.partitions
+
+    def get_next_page_token(self) -> Optional[str]:
         return self.next_page_token
 
 

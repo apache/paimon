@@ -267,6 +267,27 @@ class RESTCatalog(Catalog):
         finally:
             commit.close()
 
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.list_partitions_paged(
+                identifier,
+                max_results,
+                page_token,
+                partition_name_pattern
+            )
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
     def alter_table(
         self,
         identifier: Union[str, Identifier],
