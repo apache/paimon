@@ -16,5 +16,7 @@
 #  under the License.
 
 from .branch_manager import BranchManager, DEFAULT_MAIN_BRANCH
+from .catalog_branch_manager import CatalogBranchManager
+from .filesystem_branch_manager import FileSystemBranchManager
 
-__all__ = ['BranchManager', 'DEFAULT_MAIN_BRANCH']
+__all__ = ['BranchManager', 'DEFAULT_MAIN_BRANCH', 'CatalogBranchManager', 'FileSystemBranchManager']

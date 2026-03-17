@@ -84,18 +84,19 @@ class FileSystemBranchManager(BranchManager):
     def _copy_with_branch(self, manager, branch: str):
         """
         Create a copy of the manager for a different branch.
-        
+
         Args:
             manager: The manager to copy (TagManager, SnapshotManager, etc.)
             branch: The target branch name
-        
+
         Returns:
             A new manager instance for the specified branch
         """
         if isinstance(manager, TagManager):
             return TagManager(self.file_io, self.table_path, branch)
         elif isinstance(manager, SchemaManager):
-            return SchemaManager(self.file_io, self.table_path, branch)
+            # SchemaManager doesn't support branch parameter, use branch path instead
+            return SchemaManager(self.file_io, self.branch_path(branch))
         elif isinstance(manager, SnapshotManager):
             return SnapshotManager(self.snapshot_manager.table)
         else:
@@ -137,7 +138,7 @@ class FileSystemBranchManager(BranchManager):
             try:
                 latest_schema = self.schema_manager.latest()
                 if latest_schema:
-                    self._copy_schemas_to_branch(branch_name, latest_schema.id())
+                    self._copy_schemas_to_branch(branch_name, latest_schema.id)
                 else:
                     raise RuntimeError("No schema found for creating branch")
             except Exception as e:
@@ -163,11 +164,11 @@ class FileSystemBranchManager(BranchManager):
                     overwrite=True
                 )
                 self.file_io.copy_file(
-                    self.snapshot_manager.get_snapshot_path(snapshot.id()),
-                    branch_snapshot_manager.get_snapshot_path(snapshot.id()),
+                    self.snapshot_manager.get_snapshot_path(snapshot.id),
+                    branch_snapshot_manager.get_snapshot_path(snapshot.id),
                     overwrite=True
                 )
-                self._copy_schemas_to_branch(branch_name, snapshot.schema_id())
+                self._copy_schemas_to_branch(branch_name, snapshot.schema_id)
             except Exception as e:
                 raise RuntimeError(
                     f"Exception occurs when create branch '{branch_name}' "
@@ -177,20 +178,20 @@ class FileSystemBranchManager(BranchManager):
     def drop_branch(self, branch_name: str) -> None:
         """
         Drop a branch.
-        
+
         Args:
             branch_name: Name of the branch to drop
-        
+
         Raises:
             ValueError: If branch doesn't exist
         """
         if not self.branch_exists(branch_name):
             raise ValueError(f"Branch name '{branch_name}' doesn't exist.")
-        
+
         try:
-            # Delete branch directory
+            # Delete branch directory recursively
             branch_path = self.branch_path(branch_name)
-            self.file_io.delete_quietly(branch_path)
+            self.file_io.delete(branch_path, recursive=True)
         except Exception as e:
             logger.warning(
                 f"Deleting the branch failed due to an exception in deleting the directory "
@@ -312,15 +313,16 @@ class FileSystemBranchManager(BranchManager):
     def _copy_schemas_to_branch(self, branch_name: str, schema_id: int) -> None:
         """
         Copy schemas to the specified branch.
-        
+
         Args:
             branch_name: The target branch name
             schema_id: The maximum schema id to copy
         """
-        branch_schema_manager = SchemaManager(self.file_io, self.table_path, branch_name)
-        
+        branch_schema_manager = SchemaManager(self.file_io, self.branch_path(branch_name))
+
         for i in range(schema_id + 1):
-            if self.schema_manager.schema_exists(i):
-                schema_path = self.schema_manager.to_schema_path(i)
-                branch_schema_path = branch_schema_manager.to_schema_path(i)
+            schema = self.schema_manager.get_schema(i)
+            if schema is not None:
+                schema_path = self.schema_manager._to_schema_path(i)
+                branch_schema_path = branch_schema_manager._to_schema_path(i)
                 self.file_io.copy_file(schema_path, branch_schema_path, overwrite=True)
