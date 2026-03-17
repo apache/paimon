@@ -612,6 +612,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         @Nullable
         private static PartitionTimestampValidator create(
                 CoreOptions options, RowType partitionType) {
+            if (!options.partitionTimestampFormatStrict()) {
+                return null;
+            }
             String timeFormatter = options.partitionTimestampFormatter();
             String timePattern = options.partitionTimestampPattern();
             if ((timeFormatter != null || timePattern != null)

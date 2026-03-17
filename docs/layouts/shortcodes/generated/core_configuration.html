@@ -27,16 +27,16 @@ under the License.
     </thead>
     <tbody>
         <tr>
-            <td><h5>aggregation.remove-record-on-delete</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to remove the whole row in aggregation engine when -D records are received.</td>
-        </tr>
-        <tr>
             <td><h5>add-column-before-partition</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If true, when adding a new column without specifying a position, the column will be placed before the first partition column instead of at the end of the schema. This only takes effect for partitioned tables.</td>
+        </tr>
+        <tr>
+            <td><h5>aggregation.remove-record-on-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to remove the whole row in aggregation engine when -D records are received.</td>
         </tr>
         <tr>
             <td><h5>alter-column-null-to-not-null.disabled</h5></td>
@@ -1042,6 +1042,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">NONE</td>
             <td><p>Enum</p></td>
             <td>This is only for partitioned append table or postpone pk table, and the purpose is to reduce small files and improve write performance. Through this repartitioning strategy to reduce the number of partitions written by each task to as few as possible.<ul><li>none: Rebalanced or Forward partitioning, this is the default behavior, this strategy is suitable for the number of partitions you write in a batch is much smaller than write parallelism.</li><li>hash: Hash the partitions value, this strategy is suitable for the number of partitions you write in a batch is greater equals than write parallelism.</li></ul><br /><br />Possible values:<ul><li>"NONE"</li><li>"HASH"</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>partition.timestamp-format.strict</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>When enabled, if a partition value does not match the 'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration, an error will be thrown during writing. This helps prevent dirty partition directories caused by incorrectly specified partition fields.</td>
         </tr>
         <tr>
             <td><h5>partition.timestamp-formatter</h5></td>

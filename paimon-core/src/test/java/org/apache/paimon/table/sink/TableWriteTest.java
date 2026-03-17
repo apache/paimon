@@ -303,6 +303,7 @@ public class TableWriteTest {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 1);
         conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMATTER, "yyyyMMdd");
+        conf.set(CoreOptions.PARTITION_TIMESTAMP_FORMAT_STRICT, true);
         FileStoreTable table = createFileStoreTable(conf);
 
         TableWriteImpl<?> write = table.newWrite(commitUser);
