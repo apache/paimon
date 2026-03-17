@@ -43,6 +43,7 @@ import java.nio.channels.FileChannel;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Vector global index writer using Lumina. Builds a single index file per shard.
@@ -61,6 +62,14 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     private static final String FILE_NAME_PREFIX = "lumina";
 
     private static final Logger LOG = LoggerFactory.getLogger(LuminaVectorGlobalIndexWriter.class);
+
+    /**
+     * Tracks which environment variables have already been set in this JVM. Used to avoid
+     * concurrent reflection-based modification of {@code System.getenv()} when multiple shard tasks
+     * run in parallel on the same TaskManager.
+     */
+    private static final ConcurrentHashMap<String, String> CONFIGURED_ENV_VARS =
+            new ConcurrentHashMap<>();
 
     /** I/O buffer size for reading/writing the temp vector file (~8 MB). */
     private static final int IO_BUFFER_SIZE = 8 * 1024 * 1024;
@@ -117,26 +126,30 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
     @Override
     public void write(Object fieldData) {
-        float[] vector;
         if (fieldData == null) {
             throw new IllegalArgumentException("Field data must not be null");
         }
-        if (fieldData instanceof float[]) {
-            vector = (float[]) fieldData;
-        } else if (fieldData instanceof InternalArray) {
-            vector = ((InternalArray) fieldData).toFloatArray();
-        } else {
-            throw new RuntimeException(
-                    "Unsupported vector type: " + fieldData.getClass().getName());
-        }
-        checkDimension(vector);
 
         int bytesNeeded = dim * Float.BYTES;
         if (writeBuf.remaining() < bytesNeeded) {
             flushWriteBuffer();
         }
-        for (int i = 0; i < dim; i++) {
-            writeBuf.putFloat(vector[i]);
+
+        if (fieldData instanceof float[]) {
+            float[] vector = (float[]) fieldData;
+            checkDimension(vector.length);
+            for (int i = 0; i < dim; i++) {
+                writeBuf.putFloat(vector[i]);
+            }
+        } else if (fieldData instanceof InternalArray) {
+            InternalArray array = (InternalArray) fieldData;
+            checkDimension(array.size());
+            for (int i = 0; i < dim; i++) {
+                writeBuf.putFloat(array.getFloat(i));
+            }
+        } else {
+            throw new RuntimeException(
+                    "Unsupported vector type: " + fieldData.getClass().getName());
         }
         count++;
     }
@@ -220,31 +233,46 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     }
 
     /**
-     * Best-effort attempt to set an environment variable in the current process. Uses reflection to
-     * modify the JVM's process environment map. This is necessary because Lumina's native executor
-     * thread pool reads {@code LUMINA_EXECUTOR_THREAD_COUNT} from the OS environment.
+     * Best-effort, thread-safe, idempotent attempt to set an environment variable in the current
+     * process. Uses reflection to modify the JVM's process environment map. This is necessary
+     * because Lumina's native executor thread pool reads {@code LUMINA_EXECUTOR_THREAD_COUNT} from
+     * the OS environment.
+     *
+     * <p>When multiple shard tasks run in parallel on the same TaskManager JVM, this method ensures
+     * the reflection-based map modification happens at most once per key-value pair.
      */
     @SuppressWarnings("unchecked")
     private static void setEnv(String key, String value) {
-        try {
-            Map<String, String> env = System.getenv();
-            Field field = env.getClass().getDeclaredField("m");
-            field.setAccessible(true);
-            ((Map<String, String>) field.get(env)).put(key, value);
-        } catch (Exception e) {
-            LOG.warn(
-                    "Failed to set environment variable '{}' for Lumina executor. Thread-count tuning may not take effect.",
-                    key,
-                    e);
+        // Skip if already set to the same value in this JVM
+        if (value.equals(CONFIGURED_ENV_VARS.get(key))) {
+            return;
+        }
+        synchronized (CONFIGURED_ENV_VARS) {
+            // Double-check after acquiring lock
+            if (value.equals(CONFIGURED_ENV_VARS.get(key))) {
+                return;
+            }
+            try {
+                Map<String, String> env = System.getenv();
+                Field field = env.getClass().getDeclaredField("m");
+                field.setAccessible(true);
+                ((Map<String, String>) field.get(env)).put(key, value);
+                CONFIGURED_ENV_VARS.put(key, value);
+            } catch (Exception e) {
+                LOG.warn(
+                        "Failed to set environment variable '{}' for Lumina executor. "
+                                + "Thread-count tuning may not take effect.",
+                        key,
+                        e);
+            }
         }
     }
 
-    private void checkDimension(float[] vector) {
-        if (vector.length != dim) {
+    private void checkDimension(int actualDim) {
+        if (actualDim != dim) {
             throw new IllegalArgumentException(
                     String.format(
-                            "Vector dimension mismatch: expected %d, but got %d",
-                            dim, vector.length));
+                            "Vector dimension mismatch: expected %d, but got %d", dim, actualDim));
         }
     }
 
