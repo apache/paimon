@@ -133,7 +133,7 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertIsNotNone(consumer)
         self.assertEqual(consumer.next_snapshot, 10)
 
-def test_branch_manager(self):
+    def test_branch_manager(self):
         """Test that FileStoreTable has branch_manager method."""
         # Get branch_manager
         branch_manager = self.table.branch_manager()
