@@ -110,6 +110,8 @@ class FileSystemBranchManagerTest(unittest.TestCase):
         """Set up test environment."""
         self.temp_dir = tempfile.mkdtemp()
         self.table_path = os.path.join(self.temp_dir, "test_table")
+        from pypaimon.filesystem.local_file_io import LocalFileIO
+        self.file_io = LocalFileIO(self.table_path)
 
     def tearDown(self):
         """Clean up test environment."""
@@ -119,33 +121,27 @@ class FileSystemBranchManagerTest(unittest.TestCase):
     def test_branch_directory(self):
         """Test branch_directory method."""
         # Create a mock manager with minimal dependencies
-        from pypaimon.common.file_io import FileIO
-        file_io = FileIO.local()
-        
         manager = FileSystemBranchManager(
-            file_io=file_io,
+            file_io=self.file_io,
             table_path=self.table_path,
             snapshot_manager=None,
             tag_manager=None,
             schema_manager=None
         )
-        
+
         expected_dir = f"{self.table_path}/branch"
         self.assertEqual(manager._branch_directory(), expected_dir)
 
     def test_branch_path(self):
         """Test branch_path method."""
-        from pypaimon.common.file_io import FileIO
-        file_io = FileIO.local()
-        
         manager = FileSystemBranchManager(
-            file_io=file_io,
+            file_io=self.file_io,
             table_path=self.table_path,
             snapshot_manager=None,
             tag_manager=None,
             schema_manager=None
         )
-        
+
         self.assertEqual(manager.branch_path("main"), self.table_path)
         self.assertEqual(
             manager.branch_path("feature"),
@@ -154,37 +150,31 @@ class FileSystemBranchManagerTest(unittest.TestCase):
 
     def test_branches_empty(self):
         """Test branches returns empty list when no branches exist."""
-        from pypaimon.common.file_io import FileIO
-        file_io = FileIO.local()
-        
         manager = FileSystemBranchManager(
-            file_io=file_io,
+            file_io=self.file_io,
             table_path=self.table_path,
             snapshot_manager=None,
             tag_manager=None,
             schema_manager=None
         )
-        
+
         branches = manager.branches()
         self.assertEqual(branches, [])
 
     def test_branch_exists(self):
         """Test branch_exists method."""
-        from pypaimon.common.file_io import FileIO
-        file_io = FileIO.local()
-        
         manager = FileSystemBranchManager(
-            file_io=file_io,
+            file_io=self.file_io,
             table_path=self.table_path,
             snapshot_manager=None,
             tag_manager=None,
             schema_manager=None
         )
-        
+
         # Create a branch directory
         branch_dir = os.path.join(self.table_path, "branch", "branch-feature")
         os.makedirs(branch_dir, exist_ok=True)
-        
+
         self.assertTrue(manager.branch_exists("feature"))
         self.assertFalse(manager.branch_exists("develop"))
 
