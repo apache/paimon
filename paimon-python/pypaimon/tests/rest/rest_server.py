@@ -471,8 +471,8 @@ class RESTCatalogServer:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
-    def _table_partitions_handle(self, method: str, identifier: Identifier,
-                                   parameters: Dict[str, str]) -> Tuple[str, int]:
+    def _table_partitions_handle(
+            self, method: str, identifier: Identifier, parameters: Dict[str, str]) -> Tuple[str, int]:
         """Handle table partitions listing"""
         if method != "GET":
             return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
@@ -1111,8 +1111,8 @@ class RESTCatalogServer:
 
         return self._mock_response(response, 200)
 
-    def _generate_final_list_partitions_response(self, parameters: Dict[str, str],
-                                                   partitions: List[Partition]) -> Tuple[str, int]:
+    def _generate_final_list_partitions_response(
+            self, parameters: Dict[str, str], partitions: List[Partition]) -> Tuple[str, int]:
         """Generate final list partitions response"""
         if partitions:
             max_results = self._get_max_results(parameters)

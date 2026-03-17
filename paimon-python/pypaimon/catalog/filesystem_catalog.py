@@ -245,14 +245,6 @@ class FileSystemCatalog(Catalog):
         raise NotImplementedError("This catalog does not support commit catalog")
 
     def load_snapshot(self, identifier: Identifier):
-        """Load the snapshot of table identified by the given Identifier.
-
-        Args:
-            identifier: Path of the table
-
-        Raises:
-            NotImplementedError: FileSystemCatalog does not support version management
-        """
         raise NotImplementedError("Filesystem catalog does not support load_snapshot")
 
     def list_partitions_paged(
@@ -318,13 +310,36 @@ class FileSystemCatalog(Catalog):
                 total_buckets=len(stats['buckets']),
             ))
 
-        # Apply pattern filter
+        # Apply pattern filter with proper regex escaping
         if partition_name_pattern:
             import re
-            regex = re.compile(partition_name_pattern.replace('*', '.*'))
+            # Escape special regex chars except '*', then replace '*' with '.*'
+            escaped_pattern = re.escape(partition_name_pattern).replace(r'\*', '.*')
+            regex = re.compile(escaped_pattern)
             partitions = [
                 p for p in partitions
                 if regex.fullmatch(','.join(f'{k}={v}' for k, v in p.spec.items()))
             ]
 
-        return PagedList(elements=partitions)
+        # Sort partitions by name (partition spec string)
+        partitions.sort(key=lambda p: ','.join(f'{k}={v}' for k, v in sorted(p.spec.items())))
+
+        # Apply pagination
+        start_index = 0
+        if page_token is not None:
+            try:
+                start_index = int(page_token)
+            except ValueError:
+                # Invalid token, start from beginning
+                start_index = 0
+
+        end_index = len(partitions)
+        if max_results is not None and max_results > 0:
+            end_index = min(start_index + max_results, len(partitions))
+
+        result_partitions = partitions[start_index:end_index]
+        next_page_token = None
+        if max_results is not None and end_index < len(partitions):
+            next_page_token = str(end_index)
+
+        return PagedList(elements=result_partitions, next_page_token=next_page_token)

@@ -339,8 +339,6 @@ dt=2024-01-02,region=eu          300           524288          5         1704153
 dt=2024-01-03,region=us          200           262144          3         1704240000000  1704326400000      admin
 ```
 
-**Note:** Both filesystem and REST catalogs support listing partitions.
-
 ### Table Rename
 
 Rename a table in the catalog. Both source and target must be specified in `database.table` format.

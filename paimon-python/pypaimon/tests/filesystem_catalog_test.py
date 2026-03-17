@@ -19,6 +19,8 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock
 
+import pyarrow as pa
+
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 DatabaseNotExistException,
@@ -276,3 +278,162 @@ class FileSystemCatalogTest(unittest.TestCase):
 
         # Restore original method
         filesystem_catalog.file_io.exists = original_exists
+
+    def _create_partitioned_table_with_data(self, catalog, identifier, partitions_data):
+        """Helper to create a partitioned table and write data for each partition.
+
+        Args:
+            catalog: The catalog instance.
+            identifier: Table identifier string (e.g. 'test_db.tbl').
+            partitions_data: List of dicts, each with 'dt' and rows count.
+                e.g. [{'dt': '2024-01-01', 'rows': 2}, {'dt': '2024-01-02', 'rows': 3}]
+        """
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('col1', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        catalog.create_table(identifier, schema, True)
+        table = catalog.get_table(identifier)
+
+        for part in partitions_data:
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'dt': [part['dt']] * part['rows'],
+                'col1': list(range(part['rows'])),
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+    def test_list_partitions_paged(self):
+        """Test list_partitions_paged with real data from manifest files."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.part_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-03', 'rows': 3},
+            {'dt': '2024-01-01', 'rows': 2},
+            {'dt': '2024-01-02', 'rows': 5},
+        ])
+
+        # List all partitions
+        result = catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 3)
+        self.assertIsNone(result.next_page_token)
+
+        # Verify partitions are sorted by spec
+        specs = [p.spec['dt'] for p in result.elements]
+        self.assertEqual(specs, sorted(specs))
+
+        # Verify aggregated statistics
+        part_map = {p.spec['dt']: p for p in result.elements}
+        self.assertEqual(part_map['2024-01-01'].record_count, 2)
+        self.assertEqual(part_map['2024-01-02'].record_count, 5)
+        self.assertEqual(part_map['2024-01-03'].record_count, 3)
+        for p in result.elements:
+            self.assertGreater(p.file_size_in_bytes, 0)
+            self.assertGreater(p.file_count, 0)
+            self.assertGreater(p.last_file_creation_time, 0)
+
+    def test_list_partitions_paged_pagination(self):
+        """Test list_partitions_paged pagination with max_results and page_token."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.paged_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-01-02', 'rows': 1},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # First page: max_results=2
+        page1 = catalog.list_partitions_paged(identifier, max_results=2)
+        self.assertEqual(len(page1.elements), 2)
+        self.assertIsNotNone(page1.next_page_token)
+
+        # Second page: use next_page_token
+        page2 = catalog.list_partitions_paged(
+            identifier, max_results=2, page_token=page1.next_page_token
+        )
+        self.assertEqual(len(page2.elements), 1)
+        self.assertIsNone(page2.next_page_token)
+
+        # All specs across pages should cover all 3 partitions
+        all_specs = [p.spec['dt'] for p in page1.elements + page2.elements]
+        self.assertEqual(sorted(all_specs), ['2024-01-01', '2024-01-02', '2024-01-03'])
+
+        # max_results larger than total returns all
+        result = catalog.list_partitions_paged(identifier, max_results=100)
+        self.assertEqual(len(result.elements), 3)
+        self.assertIsNone(result.next_page_token)
+
+    def test_list_partitions_paged_pattern(self):
+        """Test list_partitions_paged with partition_name_pattern filter."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.pattern_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-02-01', 'rows': 1},
+            {'dt': '2024-02-15', 'rows': 1},
+        ])
+
+        # Exact match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2024-01-01'
+        )
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-01')
+
+        # Wildcard match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2024-02*'
+        )
+        self.assertEqual(len(result.elements), 2)
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-02-01', '2024-02-15'])
+
+        # No match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2025*'
+        )
+        self.assertEqual(len(result.elements), 0)
+
+    def test_list_partitions_paged_empty(self):
+        """Test list_partitions_paged on a table with no data."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        pa_schema = pa.schema([('dt', pa.string()), ('val', pa.int32())])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        catalog.create_table('test_db.empty_tbl', schema, False)
+
+        result = catalog.list_partitions_paged('test_db.empty_tbl')
+        self.assertEqual(len(result.elements), 0)
+        self.assertIsNone(result.next_page_token)
+
+    def test_list_partitions_paged_invalid_token(self):
+        """Test list_partitions_paged with invalid page_token falls back to start."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.token_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-01-02', 'rows': 1},
+        ])
+
+        # Invalid page_token should fall back to start
+        result = catalog.list_partitions_paged(
+            identifier, max_results=1, page_token='invalid'
+        )
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-01')
+        self.assertIsNotNone(result.next_page_token)
