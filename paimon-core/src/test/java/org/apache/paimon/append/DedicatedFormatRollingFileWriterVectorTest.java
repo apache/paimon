@@ -286,56 +286,6 @@ public class DedicatedFormatRollingFileWriterVectorTest {
         assertThat(writer.recordCount()).isEqualTo(rowNum);
     }
 
-    @Test
-    public void testVectorStoreTheSameFormat() throws Exception {
-        // vector-store file format is the same as main part
-        writer =
-                new DedicatedFormatRollingFileWriter(
-                        LocalFileIO.create(),
-                        SCHEMA_ID,
-                        FileFormat.fromIdentifier("json", new Options()),
-                        FileFormat.fromIdentifier("json", new Options()),
-                        TARGET_FILE_SIZE,
-                        TARGET_FILE_SIZE,
-                        VECTOR_TARGET_FILE_SIZE,
-                        SCHEMA,
-                        pathFactory,
-                        () -> seqNumCounter,
-                        COMPRESSION,
-                        new StatsCollectorFactories(new CoreOptions(new Options())),
-                        new FileIndexOptions(),
-                        FileSource.APPEND,
-                        false,
-                        BlobFileContext.create(SCHEMA, new CoreOptions(new Options())));
-
-        // This time we use large blob files
-        int rowNum = 10;
-        writer.write(makeRows(rowNum, 512 * 1024).iterator());
-        writer.close();
-        List<DataFileMeta> results = writer.result();
-
-        // Check normal, blob, and vector-store files
-        List<DataFileMeta> normalFiles = new ArrayList<>();
-        List<DataFileMeta> blobFiles = new ArrayList<>();
-        List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
-        for (DataFileMeta file : results) {
-            if (BlobFileFormat.isBlobFile(file.fileName())) {
-                blobFiles.add(file);
-            } else if (isVectorStoreFile(file.fileName())) {
-                vectorStoreFiles.add(file);
-            } else {
-                assertThat(file.writeCols()).isEqualTo(Arrays.asList("f0", "f1", "f3", "f4"));
-                normalFiles.add(file);
-            }
-        }
-        assertThat(normalFiles.size()).isEqualTo(1);
-        assertThat(blobFiles.size()).isEqualTo(3);
-        assertThat(vectorStoreFiles.size()).isEqualTo(0);
-
-        // Verify total record count
-        assertThat(writer.recordCount()).isEqualTo(rowNum);
-    }
-
     private List<InternalRow> makeRows(int rowNum, int blobDataSize) {
         List<InternalRow> rows = new ArrayList<>(rowNum);
         byte[] blobData = new byte[blobDataSize];

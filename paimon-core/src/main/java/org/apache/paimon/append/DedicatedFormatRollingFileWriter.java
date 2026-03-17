@@ -312,6 +312,7 @@ public class DedicatedFormatRollingFileWriter
         RowType vectorStoreRowType = new RowType(fieldsInVectorStore);
         List<String> vectorStoreColumnNames = vectorStoreRowType.getFieldNames();
         int[] vectorStoreProjection = writeSchema.projectIndexes(vectorStoreColumnNames);
+        String vectorFormat = vectorFileFormat.getFormatIdentifier();
         return new ProjectedFileWriter<>(
                 new RollingFileWriterImpl<>(
                         () ->
@@ -322,7 +323,7 @@ public class DedicatedFormatRollingFileWriter
                                                 vectorStoreRowType,
                                                 statsCollectors,
                                                 fileCompression),
-                                        pathFactory.newVectorPath(),
+                                        pathFactory.newVectorPath(vectorFormat),
                                         vectorStoreRowType,
                                         schemaId,
                                         seqNumCounterSupplier,

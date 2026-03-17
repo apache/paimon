@@ -108,7 +108,7 @@ public class DataFilePathFactory {
         return newFileName(prefix, makeExtension(compressExtension, formatIdentifier));
     }
 
-    public Path newVectorPath() {
+    public Path newVectorPath(String formatIdentifier) {
         String extension = ".vector" + makeExtension(compressExtension, formatIdentifier);
         return newPathFromName(newFileName(dataFilePrefix, extension));
     }
