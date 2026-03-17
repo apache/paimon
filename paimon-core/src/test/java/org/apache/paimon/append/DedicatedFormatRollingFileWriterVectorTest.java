@@ -38,7 +38,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.StatsCollectorFactories;
-import org.apache.paimon.utils.VectorStoreUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,10 +50,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link DataEvolutionRollingFileWriter} with vector-store. */
-public class DataEvolutionRollingFileWriterWithVectorStoreTest {
+/** Tests for {@link DedicatedFormatRollingFileWriter} with vector-store. */
+public class DedicatedFormatRollingFileWriterVectorTest {
 
     private static final int VECTOR_DIM = 12;
     private static final RowType SCHEMA =
@@ -74,7 +74,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private DataEvolutionRollingFileWriter writer;
+    private DedicatedFormatRollingFileWriter writer;
     private DataFilePathFactory pathFactory;
     private LongCounter seqNumCounter;
 
@@ -96,7 +96,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
 
         // Initialize the writer
         writer =
-                new DataEvolutionRollingFileWriter(
+                new DedicatedFormatRollingFileWriter(
                         fileIO,
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
@@ -154,7 +154,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
         // Check that vector-store files meet the target size requirement
         List<DataFileMeta> vectorStoreFiles =
                 results.stream()
-                        .filter(file -> VectorStoreUtils.isVectorStoreFile(file.fileName()))
+                        .filter(file -> isVectorStoreFile(file.fileName()))
                         .collect(java.util.stream.Collectors.toList());
 
         assertThat(vectorStoreFiles.size()).isEqualTo(3);
@@ -182,10 +182,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
 
         // Get uuid from vector-store files. The pattern is data-{uuid}-{count}.vector.json
         DataFileMeta oneVectorStoreFile =
-                results.stream()
-                        .filter(file -> VectorStoreUtils.isVectorStoreFile(file.fileName()))
-                        .findAny()
-                        .get();
+                results.stream().filter(file -> isVectorStoreFile(file.fileName())).findAny().get();
         String uuidAndCnt = oneVectorStoreFile.fileName().split(".vector.")[0];
         String prefix = uuidAndCnt.substring(0, uuidAndCnt.lastIndexOf('-') + 1); // data-{uuid}-
 
@@ -216,7 +213,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
         for (DataFileMeta file : metasResult) {
             if (BlobFileFormat.isBlobFile(file.fileName())) {
                 assertThat(file.writeCols()).isEqualTo(Collections.singletonList("f2"));
-            } else if (VectorStoreUtils.isVectorStoreFile(file.fileName())) {
+            } else if (isVectorStoreFile(file.fileName())) {
                 assertThat(file.writeCols()).isEqualTo(Arrays.asList("f3"));
             } else {
                 assertThat(file.writeCols()).isEqualTo(Arrays.asList("f0", "f1", "f4"));
@@ -239,7 +236,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
                         .field("f3", DataTypes.INT())
                         .build();
         writer =
-                new DataEvolutionRollingFileWriter(
+                new DedicatedFormatRollingFileWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
@@ -275,7 +272,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
         for (DataFileMeta file : results) {
             if (BlobFileFormat.isBlobFile(file.fileName())) {
                 blobFiles.add(file);
-            } else if (VectorStoreUtils.isVectorStoreFile(file.fileName())) {
+            } else if (isVectorStoreFile(file.fileName())) {
                 vectorStoreFiles.add(file);
             } else {
                 normalFiles.add(file);
@@ -293,7 +290,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
     public void testVectorStoreTheSameFormat() throws Exception {
         // vector-store file format is the same as main part
         writer =
-                new DataEvolutionRollingFileWriter(
+                new DedicatedFormatRollingFileWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("json", new Options()),
@@ -324,7 +321,7 @@ public class DataEvolutionRollingFileWriterWithVectorStoreTest {
         for (DataFileMeta file : results) {
             if (BlobFileFormat.isBlobFile(file.fileName())) {
                 blobFiles.add(file);
-            } else if (VectorStoreUtils.isVectorStoreFile(file.fileName())) {
+            } else if (isVectorStoreFile(file.fileName())) {
                 vectorStoreFiles.add(file);
             } else {
                 assertThat(file.writeCols()).isEqualTo(Arrays.asList("f0", "f1", "f3", "f4"));

@@ -41,8 +41,8 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SetUtils;
 import org.apache.paimon.utils.StringUtils;
-import org.apache.paimon.utils.VectorStoreUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -76,16 +76,18 @@ import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
+import static org.apache.paimon.format.FileFormat.vectorFileFormat;
 import static org.apache.paimon.table.PrimaryKeyTableUtils.createMergeFunctionFactory;
 import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.apache.paimon.table.SpecialFields.SYSTEM_FIELD_NAMES;
-import static org.apache.paimon.types.BlobType.fieldsInBlobFile;
-import static org.apache.paimon.types.BlobType.fieldsNotInBlobFile;
+import static org.apache.paimon.types.BlobType.fieldNamesInBlobFile;
 import static org.apache.paimon.types.DataTypeRoot.ARRAY;
 import static org.apache.paimon.types.DataTypeRoot.MAP;
 import static org.apache.paimon.types.DataTypeRoot.MULTISET;
 import static org.apache.paimon.types.DataTypeRoot.ROW;
 import static org.apache.paimon.types.DataTypeRoot.VECTOR;
+import static org.apache.paimon.types.VectorType.fieldNamesInVectorFile;
+import static org.apache.paimon.types.VectorType.fieldsInVectorFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -167,22 +169,13 @@ public class SchemaValidation {
         validateBlobExternalStorageFields(tableRowType, options, blobDescriptorFields);
 
         List<DataField> fieldsInNormalFile = new ArrayList<>();
-        {
-            Set<String> fieldsInBlobFile =
-                    fieldsInBlobFile(tableRowType, blobDescriptorFields).stream()
-                            .map(DataField::name)
-                            .collect(Collectors.toSet());
-            Set<String> fieldsInVectorFile =
-                    VectorStoreUtils.fieldsInVectorFile(
-                                    tableRowType, fileFormat, FileFormat.vectorFileFormat(options))
-                            .stream()
-                            .map(DataField::name)
-                            .collect(Collectors.toSet());
-            for (DataField field : tableRowType.getFields()) {
-                if (!fieldsInBlobFile.contains(field.name())
-                        && !fieldsInVectorFile.contains(field.name())) {
-                    fieldsInNormalFile.add(field);
-                }
+        Set<String> fieldsInDedicatedFile =
+                SetUtils.union(
+                        fieldNamesInBlobFile(tableRowType, blobDescriptorFields),
+                        fieldNamesInVectorFile(tableRowType, options.withVectorFormat()));
+        for (DataField field : tableRowType.getFields()) {
+            if (!fieldsInDedicatedFile.contains(field.name())) {
+                fieldsInNormalFile.add(field);
             }
         }
         fileFormat.validateDataFields(new RowType(fieldsInNormalFile));
@@ -669,18 +662,9 @@ public class SchemaValidation {
                     "The BLOB type column can not be part of partition keys.");
         }
 
-        FileFormat fileFormat = FileFormat.fileFormat(options);
-        FileFormat vectorFileFormat = FileFormat.vectorFileFormat(options);
-        if (VectorStoreUtils.isDifferentFormat(vectorFileFormat, fileFormat)) {
-            List<DataField> vectorStoreFields =
-                    VectorStoreUtils.fieldsInVectorFile(
-                            schema.logicalRowType(), fileFormat, vectorFileFormat);
-            Set<String> vectorStoreNames =
-                    vectorStoreFields.stream().map(DataField::name).collect(Collectors.toSet());
-            List<DataField> fieldsNotInBlobFile =
-                    fieldsNotInBlobFile(schema.logicalRowType(), options.blobDescriptorField());
-            Set<String> nonBlobNames =
-                    fieldsNotInBlobFile.stream().map(DataField::name).collect(Collectors.toSet());
+        FileFormat vectorFileFormat = vectorFileFormat(options);
+        if (vectorFileFormat != null) {
+            Set<String> vectorStoreNames = fieldNamesInVectorFile(schema.logicalRowType(), true);
             checkArgument(
                     schema.partitionKeys().stream().noneMatch(vectorStoreNames::contains),
                     "The vector-store columns can not be part of partition keys.");
@@ -688,9 +672,7 @@ public class SchemaValidation {
                     options.dataEvolutionEnabled(),
                     "Data evolution config must enabled for table with vector-store file format.");
 
-            List<DataField> fieldsInVectorFile =
-                    VectorStoreUtils.fieldsInVectorFile(
-                            schema.logicalRowType(), fileFormat, vectorFileFormat);
+            List<DataField> fieldsInVectorFile = fieldsInVectorFile(schema.logicalRowType(), true);
             vectorFileFormat.validateDataFields(new RowType(fieldsInVectorFile));
         }
     }

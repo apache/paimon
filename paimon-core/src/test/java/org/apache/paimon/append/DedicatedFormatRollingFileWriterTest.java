@@ -49,8 +49,8 @@ import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link DataEvolutionRollingFileWriter}. */
-public class DataEvolutionRollingFileWriterTest {
+/** Tests for {@link DedicatedFormatRollingFileWriter}. */
+public class DedicatedFormatRollingFileWriterTest {
 
     private static final RowType SCHEMA =
             RowType.builder()
@@ -65,7 +65,7 @@ public class DataEvolutionRollingFileWriterTest {
 
     @TempDir java.nio.file.Path tempDir;
 
-    private DataEvolutionRollingFileWriter writer;
+    private DedicatedFormatRollingFileWriter writer;
     private DataFilePathFactory pathFactory;
     private LongCounter seqNumCounter;
     private byte[] testBlobData;
@@ -93,7 +93,7 @@ public class DataEvolutionRollingFileWriterTest {
         // Initialize the writer
         CoreOptions options = new CoreOptions(new Options());
         writer =
-                new DataEvolutionRollingFileWriter(
+                new DedicatedFormatRollingFileWriter(
                         fileIO,
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
@@ -185,8 +185,8 @@ public class DataEvolutionRollingFileWriterTest {
         long blobTargetFileSize = 500 * 1024 * 1024L; // 2 MB for blob files
 
         // Create a new writer with different blob target file size
-        DataEvolutionRollingFileWriter blobSizeTestWriter =
-                new DataEvolutionRollingFileWriter(
+        DedicatedFormatRollingFileWriter blobSizeTestWriter =
+                new DedicatedFormatRollingFileWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
@@ -271,8 +271,8 @@ public class DataEvolutionRollingFileWriterTest {
     void testBlobFileNameFormatWithSharedUuid() throws IOException {
         long blobTargetFileSize = 2 * 1024 * 1024L; // 2 MB for blob files
 
-        DataEvolutionRollingFileWriter fileNameTestWriter =
-                new DataEvolutionRollingFileWriter(
+        DedicatedFormatRollingFileWriter fileNameTestWriter =
+                new DedicatedFormatRollingFileWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
@@ -351,8 +351,8 @@ public class DataEvolutionRollingFileWriterTest {
     void testBlobFileNameFormatWithSharedUuidNonDescriptorMode() throws IOException {
         long blobTargetFileSize = 2 * 1024 * 1024L; // 2 MB for blob files
 
-        DataEvolutionRollingFileWriter fileNameTestWriter =
-                new DataEvolutionRollingFileWriter(
+        DedicatedFormatRollingFileWriter fileNameTestWriter =
+                new DedicatedFormatRollingFileWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),
@@ -570,7 +570,7 @@ public class DataEvolutionRollingFileWriterTest {
 
         // Reinitialize writer with custom schema
         writer =
-                new DataEvolutionRollingFileWriter(
+                new DedicatedFormatRollingFileWriter(
                         LocalFileIO.create(),
                         SCHEMA_ID,
                         FileFormat.fromIdentifier("parquet", new Options()),

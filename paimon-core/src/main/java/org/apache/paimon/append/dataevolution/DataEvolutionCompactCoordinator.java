@@ -47,8 +47,9 @@ import java.util.TreeMap;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
+import static org.apache.paimon.utils.DedecatedFormatUtils.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.VectorStoreUtils.isVectorStoreFile;
 
 /** Compact coordinator to compact data evolution table. */
 public class DataEvolutionCompactCoordinator {
