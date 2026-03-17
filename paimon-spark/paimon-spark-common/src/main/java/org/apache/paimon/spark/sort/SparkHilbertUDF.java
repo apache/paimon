@@ -42,7 +42,6 @@ import org.apache.spark.sql.types.TimestampType;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.Serializable;
-import java.math.BigDecimal;
 
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
@@ -171,7 +170,12 @@ public class SparkHilbertUDF implements Serializable {
         UserDefinedFunction udf =
                 functions
                         .udf(
-                                (String value) -> ConvertBinaryUtil.convertStringToLong(value),
+                                (String value) -> {
+                                    if (value == null) {
+                                        return PRIMITIVE_EMPTY;
+                                    }
+                                    return ConvertBinaryUtil.convertStringToLong(value);
+                                },
                                 DataTypes.LongType)
                         .withName("STRING-LEXICAL-BYTES");
 
@@ -182,17 +186,13 @@ public class SparkHilbertUDF implements Serializable {
         UserDefinedFunction udf =
                 functions
                         .udf(
-                                (byte[] value) -> ConvertBinaryUtil.convertBytesToLong(value),
+                                (byte[] value) -> {
+                                    if (value == null) {
+                                        return PRIMITIVE_EMPTY;
+                                    }
+                                    return ConvertBinaryUtil.convertBytesToLong(value);
+                                },
                                 DataTypes.LongType)
-                        .withName("BYTE-TRUNCATE");
-
-        return udf;
-    }
-
-    private UserDefinedFunction decimalTypeToOrderedLongUDF() {
-        UserDefinedFunction udf =
-                functions
-                        .udf((BigDecimal value) -> value.longValue(), DataTypes.LongType)
                         .withName("BYTE-TRUNCATE");
 
         return udf;
@@ -221,7 +221,7 @@ public class SparkHilbertUDF implements Serializable {
         } else if (type instanceof TimestampType) {
             return longToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
         } else if (type instanceof DecimalType) {
-            return decimalTypeToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
+            return longToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
         } else if (type instanceof DateType) {
             return longToOrderedLongUDF().apply(column.cast(DataTypes.LongType));
         } else {
