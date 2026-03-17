@@ -25,6 +25,12 @@ import sys
 from pypaimon.common.json_util import JSON
 
 
+def cmd_table_stream(args):
+    """Execute the 'table stream' command."""
+    from pypaimon.cli.cli_table_stream import cmd_table_stream as _cmd
+    _cmd(args)
+
+
 def cmd_table_read(args):
     """
     Execute the 'table read' command.
@@ -782,6 +788,64 @@ def add_table_subcommands(table_parser):
         help='Target table identifier in format: database.table'
     )
     rename_parser.set_defaults(func=cmd_table_rename)
+
+    # table stream command
+    stream_parser = table_subparsers.add_parser(
+        'stream',
+        help='Continuously stream new rows from a table until interrupted (Ctrl+C)'
+    )
+    stream_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    stream_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Select specific columns (comma-separated, e.g., "id,name")'
+    )
+    stream_parser.add_argument(
+        '--where', '-w',
+        type=str,
+        default=None,
+        help='Filter condition in SQL-like syntax (e.g., "age > 18")'
+    )
+    stream_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
+    )
+    stream_parser.add_argument(
+        '--from',
+        dest='from_position',
+        type=str,
+        default='latest',
+        help=(
+            'Starting position: "latest" (default), "earliest", a numeric snapshot ID, '
+            'or a timestamp (e.g., "2025-01-15", "2025-01-15T10:30:00Z")'
+        )
+    )
+    stream_parser.add_argument(
+        '--poll-interval-ms',
+        type=int,
+        default=1000,
+        help='Milliseconds between snapshot polls (default: 1000)'
+    )
+    stream_parser.add_argument(
+        '--include-row-kind',
+        action='store_true',
+        default=False,
+        help='Include _row_kind column (+I, -U, +U, -D) in output'
+    )
+    stream_parser.add_argument(
+        '--consumer-id',
+        type=str,
+        default=None,
+        help='Consumer ID for persisting scan progress across invocations'
+    )
+    stream_parser.set_defaults(func=cmd_table_stream)
 
     # table alter command
     alter_parser = table_subparsers.add_parser('alter', help='Alter a table with schema changes')

@@ -80,7 +80,8 @@ class AsyncStreamingTableScan:
         bucket_filter: Optional[Callable[[int], bool]] = None,
         prefetch_enabled: bool = True,
         diff_threshold: int = 10,
-        consumer_id: Optional[str] = None
+        consumer_id: Optional[str] = None,
+        scan_from=None
     ):
         """Initialize the streaming table scan."""
         self.table = table
@@ -118,6 +119,9 @@ class AsyncStreamingTableScan:
         # Auto-select based on changelog-producer if not explicitly provided
         self.follow_up_scanner = follow_up_scanner or self._create_follow_up_scanner()
 
+        # Starting position (set via StreamReadBuilder.with_scan_from)
+        self._scan_from = scan_from
+
         # State tracking
         self.next_snapshot_id: Optional[int] = None
         self._pending_consumer_snapshot: Optional[int] = None
@@ -131,13 +135,28 @@ class AsyncStreamingTableScan:
         Yields:
             Plan objects containing splits for reading
         """
-        # Restore from consumer if available
+        # Restore from consumer if available (highest priority — overrides scan_from)
         if self.next_snapshot_id is None and self._consumer_manager:
             consumer = self._consumer_manager.consumer(self._consumer_id)
             if consumer:
                 self.next_snapshot_id = consumer.next_snapshot
 
-        # Initial scan
+        # Resolve scan_from if no position has been set yet (no consumer restore)
+        if self.next_snapshot_id is None and self._scan_from is not None:
+            scan_from = self._scan_from
+            if scan_from == "earliest":
+                earliest_snapshot = self._snapshot_manager.try_get_earliest_snapshot()
+                if earliest_snapshot is not None:
+                    self.next_snapshot_id = earliest_snapshot.id + 1
+                    self._stage_consumer()
+                    yield self._create_initial_plan(earliest_snapshot)
+                    self._flush_pending_consumer()
+                # If no snapshot exists yet, fall through to the polling loop
+            elif scan_from != "latest":
+                # Numeric snapshot ID — set directly; diff catch-up handles large gaps
+                self.next_snapshot_id = int(scan_from)
+
+        # Initial scan (default "latest" path, also taken when scan_from is None or "latest")
         if self.next_snapshot_id is None:
             latest_snapshot = self._snapshot_manager.get_latest_snapshot()
             if latest_snapshot:

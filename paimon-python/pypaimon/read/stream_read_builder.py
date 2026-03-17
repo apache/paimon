@@ -22,7 +22,7 @@ This module provides a builder for configuring streaming reads from Paimon
 tables, similar to ReadBuilder but for continuous streaming use cases.
 """
 
-from typing import Callable, List, Optional, Set
+from typing import Callable, List, Optional, Set, Union
 
 from pypaimon.common.predicate import Predicate
 from pypaimon.common.predicate_builder import PredicateBuilder
@@ -59,6 +59,7 @@ class StreamReadBuilder:
         self._include_row_kind: bool = False
         self._bucket_filter: Optional[Callable[[int], bool]] = None
         self._consumer_id: Optional[str] = None
+        self._scan_from: Optional[Union[str, int]] = None
 
     def with_filter(self, predicate: Predicate) -> 'StreamReadBuilder':
         """Set a filter predicate for the streaming read."""
@@ -88,6 +89,17 @@ class StreamReadBuilder:
     def with_consumer_id(self, consumer_id: str) -> 'StreamReadBuilder':
         """Set a consumer ID for persisting streaming read progress."""
         self._consumer_id = consumer_id
+        return self
+
+    def with_scan_from(self, position: Union[str, int]) -> 'StreamReadBuilder':
+        """Set the starting position for the streaming scan.
+
+        Args:
+            position: One of "latest" (default), "earliest", or a positive
+                integer snapshot ID. Timestamps must be resolved to a snapshot
+                ID by the caller before passing here.
+        """
+        self._scan_from = position
         return self
 
     def with_bucket_filter(
@@ -120,7 +132,8 @@ class StreamReadBuilder:
             predicate=self._predicate,
             poll_interval_ms=self._poll_interval_ms,
             bucket_filter=self._bucket_filter,
-            consumer_id=self._consumer_id
+            consumer_id=self._consumer_id,
+            scan_from=self._scan_from
         )
 
     def new_read(self) -> TableRead:
