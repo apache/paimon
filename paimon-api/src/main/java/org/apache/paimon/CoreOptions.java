@@ -4306,6 +4306,16 @@ public class CoreOptions implements Serializable {
         }
     }
 
+    public static final Integer TS_FIELD_INDEX = Integer.valueOf("ts_field_index");
+
+    public int fieldMergeMapWithKeyTimeAggTsFieldIndex() {
+        try {
+            return Integer.parseInt(String.valueOf(TS_FIELD_INDEX));
+        } catch (NumberFormatException e) {
+            return 1;
+        }
+    }
+
     /**
      * Action to take when an UPDATE (e.g. via MERGE INTO) modifies columns that are covered by a
      * global index.
