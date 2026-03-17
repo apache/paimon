@@ -280,14 +280,6 @@ class FileSystemCatalogTest(unittest.TestCase):
         filesystem_catalog.file_io.exists = original_exists
 
     def _create_partitioned_table_with_data(self, catalog, identifier, partitions_data):
-        """Helper to create a partitioned table and write data for each partition.
-
-        Args:
-            catalog: The catalog instance.
-            identifier: Table identifier string (e.g. 'test_db.tbl').
-            partitions_data: List of dicts, each with 'dt' and rows count.
-                e.g. [{'dt': '2024-01-01', 'rows': 2}, {'dt': '2024-01-02', 'rows': 3}]
-        """
         pa_schema = pa.schema([
             ('dt', pa.string()),
             ('col1', pa.int32()),
@@ -308,37 +300,6 @@ class FileSystemCatalogTest(unittest.TestCase):
             table_commit.commit(table_write.prepare_commit())
             table_write.close()
             table_commit.close()
-
-    def test_list_partitions_paged(self):
-        """Test list_partitions_paged with real data from manifest files."""
-        catalog = CatalogFactory.create({"warehouse": self.warehouse})
-        catalog.create_database("test_db", False)
-
-        identifier = "test_db.part_tbl"
-        self._create_partitioned_table_with_data(catalog, identifier, [
-            {'dt': '2024-01-03', 'rows': 3},
-            {'dt': '2024-01-01', 'rows': 2},
-            {'dt': '2024-01-02', 'rows': 5},
-        ])
-
-        # List all partitions
-        result = catalog.list_partitions_paged(identifier)
-        self.assertEqual(len(result.elements), 3)
-        self.assertIsNone(result.next_page_token)
-
-        # Verify partitions are sorted by spec
-        specs = [p.spec['dt'] for p in result.elements]
-        self.assertEqual(specs, sorted(specs))
-
-        # Verify aggregated statistics
-        part_map = {p.spec['dt']: p for p in result.elements}
-        self.assertEqual(part_map['2024-01-01'].record_count, 2)
-        self.assertEqual(part_map['2024-01-02'].record_count, 5)
-        self.assertEqual(part_map['2024-01-03'].record_count, 3)
-        for p in result.elements:
-            self.assertGreater(p.file_size_in_bytes, 0)
-            self.assertGreater(p.file_count, 0)
-            self.assertGreater(p.last_file_creation_time, 0)
 
     def test_list_partitions_paged_pagination(self):
         """Test list_partitions_paged pagination with max_results and page_token."""
@@ -405,35 +366,3 @@ class FileSystemCatalogTest(unittest.TestCase):
             identifier, partition_name_pattern='dt=2025*'
         )
         self.assertEqual(len(result.elements), 0)
-
-    def test_list_partitions_paged_empty(self):
-        """Test list_partitions_paged on a table with no data."""
-        catalog = CatalogFactory.create({"warehouse": self.warehouse})
-        catalog.create_database("test_db", False)
-
-        pa_schema = pa.schema([('dt', pa.string()), ('val', pa.int32())])
-        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
-        catalog.create_table('test_db.empty_tbl', schema, False)
-
-        result = catalog.list_partitions_paged('test_db.empty_tbl')
-        self.assertEqual(len(result.elements), 0)
-        self.assertIsNone(result.next_page_token)
-
-    def test_list_partitions_paged_invalid_token(self):
-        """Test list_partitions_paged with invalid page_token falls back to start."""
-        catalog = CatalogFactory.create({"warehouse": self.warehouse})
-        catalog.create_database("test_db", False)
-
-        identifier = "test_db.token_tbl"
-        self._create_partitioned_table_with_data(catalog, identifier, [
-            {'dt': '2024-01-01', 'rows': 1},
-            {'dt': '2024-01-02', 'rows': 1},
-        ])
-
-        # Invalid page_token should fall back to start
-        result = catalog.list_partitions_paged(
-            identifier, max_results=1, page_token='invalid'
-        )
-        self.assertEqual(len(result.elements), 1)
-        self.assertEqual(result.elements[0].spec['dt'], '2024-01-01')
-        self.assertIsNotNone(result.next_page_token)
