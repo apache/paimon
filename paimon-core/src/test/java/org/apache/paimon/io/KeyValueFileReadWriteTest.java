@@ -272,6 +272,8 @@ public class KeyValueFileReadWriteTest {
                         IOManager.create(tempDir.toString()),
                         0,
                         fileFormat,
+                        null,
+                        10,
                         10,
                         10,
                         schema,

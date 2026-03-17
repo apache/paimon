@@ -30,6 +30,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.VectorStoreUtils.isVectorStoreFile;
 
 /** Utils for row tracking commit. */
 public class RowTrackingCommitUtils {
@@ -68,6 +69,7 @@ public class RowTrackingCommitUtils {
         long start = firstRowIdStart;
         long blobStartDefault = firstRowIdStart;
         Map<String, Long> blobStarts = new HashMap<>();
+        long vectorStoreStart = firstRowIdStart;
         for (ManifestEntry entry : deltaFiles) {
             Optional<FileSource> fileSource = entry.file().fileSource();
             checkArgument(
@@ -91,6 +93,15 @@ public class RowTrackingCommitUtils {
                     }
                     rowIdAssigned.add(entry.assignFirstRowId(blobStart));
                     blobStarts.put(blobFieldName, blobStart + rowCount);
+                } else if (isVectorStoreFile(entry.file().fileName())) {
+                    if (vectorStoreStart >= start) {
+                        throw new IllegalStateException(
+                                String.format(
+                                        "This is a bug, vectorStoreStart %d should be less than start %d when assigning a vector-store entry file.",
+                                        vectorStoreStart, start));
+                    }
+                    rowIdAssigned.add(entry.assignFirstRowId(vectorStoreStart));
+                    vectorStoreStart += rowCount;
                 } else {
                     rowIdAssigned.add(entry.assignFirstRowId(start));
                     blobStartDefault = start;

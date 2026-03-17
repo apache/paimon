@@ -62,9 +62,7 @@ public class MultipleBlobTableTest extends TableTestBase {
                         .collect(Collectors.toList());
 
         RowType rowType = table.schema().logicalRowType();
-        List<FieldBunch> fieldGroups =
-                splitFieldBunches(
-                        filesMetas, file -> rowType.getField(file.writeCols().get(0)).id());
+        List<FieldBunch> fieldGroups = splitFieldBunches(filesMetas, file -> rowType);
 
         assertThat(fieldGroups.size()).isEqualTo(3);
         assertThat(fieldGroups.get(0).files().size()).isEqualTo(1);
