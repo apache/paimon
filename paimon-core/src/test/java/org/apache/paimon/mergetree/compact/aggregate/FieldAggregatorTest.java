@@ -1303,7 +1303,6 @@ public class FieldAggregatorTest {
             expectedMap.put(e.getKey(), e.getValue());
         }
 
-        // 断言
         assertThat(actual).containsExactlyInAnyOrderEntriesOf(expectedMap);
     }
 }

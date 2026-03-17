@@ -38,7 +38,7 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
     private final InternalArray.ElementGetter valueGetter;
     private final int timestampFieldIndex;
 
-    public FieldMergeMapWithKeyTimeAgg(String name, MapType dataType) {
+    public FieldMergeMapWithKeyTimeAgg(String name, MapType dataType, int timestampFieldIndex) {
         super(name, dataType);
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
@@ -51,13 +51,11 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
             throw new IllegalArgumentException("ROW type must have at least 2 fields");
         }
 
-        // 验证时间戳字段类型为STRING
         if (!rowType.getTypeAt(1).equals(DataTypes.STRING())) {
             throw new IllegalArgumentException("Timestamp field must be STRING");
         }
 
-        // 移除了未使用的valueFieldIndex
-        this.timestampFieldIndex = 1;
+        this.timestampFieldIndex = timestampFieldIndex;
     }
 
     @Override
@@ -125,8 +123,4 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
         }
     }
 
-    @Override
-    public Object retract(Object accumulator, Object retractField) {
-        return null;
-    }
 }

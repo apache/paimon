@@ -63,7 +63,8 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                 field,
                 rowType.getTypeAt(1));
 
-        return new FieldMergeMapWithKeyTimeAgg(NAME, mapType);
+        return new FieldMergeMapWithKeyTimeAgg(
+                NAME, mapType, options.fieldMergeMapWithKeyTimeAggTsFieldIndex());
     }
 
     @Override
