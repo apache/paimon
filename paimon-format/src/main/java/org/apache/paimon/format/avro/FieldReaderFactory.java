@@ -19,6 +19,7 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Blob;
 import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
@@ -165,6 +166,12 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     public FieldReader visitArray(Schema schema, @Nullable DataType elementType) {
         FieldReader elementReader = visit(schema.getElementType(), elementType);
         return new ArrayReader(elementReader);
+    }
+
+    @Override
+    public FieldReader visitArrayVector(Schema schema, @Nullable DataType elementType) {
+        FieldReader elementReader = visit(schema.getElementType(), elementType);
+        return new ArrayVectorReader(elementReader, elementType);
     }
 
     @Override
@@ -458,6 +465,22 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
                 chunkLength = decoder.arrayNext();
             }
+        }
+    }
+
+    private static class ArrayVectorReader extends ArrayReader {
+
+        private final DataType elementType;
+
+        private ArrayVectorReader(FieldReader elementReader, DataType elementType) {
+            super(elementReader);
+            this.elementType = elementType;
+        }
+
+        @Override
+        public Object read(Decoder decoder, Object reuse) throws IOException {
+            GenericArray array = (GenericArray) super.read(decoder, reuse);
+            return BinaryVector.fromInternalArray(array, elementType);
         }
     }
 
