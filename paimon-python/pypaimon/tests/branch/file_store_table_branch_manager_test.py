@@ -43,7 +43,6 @@ class TestFileStoreTableBranchManager(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         import tempfile
-        import shutil
 
         # Create temporary directory for test
         self.temp_dir = tempfile.mkdtemp()

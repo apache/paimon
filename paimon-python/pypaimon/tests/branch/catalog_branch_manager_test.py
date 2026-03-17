@@ -16,7 +16,7 @@
 #  under the License.
 
 import unittest
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 
 from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
 from pypaimon.catalog.catalog_exception import (
