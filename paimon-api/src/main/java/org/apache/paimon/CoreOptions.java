@@ -1189,6 +1189,16 @@ public class CoreOptions implements Serializable {
                                                             + "$hour:00:00'."))
                                     .build());
 
+    public static final ConfigOption<Boolean> PARTITION_TIMESTAMP_FORMAT_STRICT =
+            key("partition.timestamp-format.strict")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When enabled, if a partition value does not match the "
+                                    + "'partition.timestamp-formatter' or 'partition.timestamp-pattern' configuration, "
+                                    + "an error will be thrown during writing. "
+                                    + "This helps prevent dirty partition directories caused by incorrectly specified partition fields.");
+
     public static final ConfigOption<Boolean> PARTITION_MARK_DONE_WHEN_END_INPUT =
             ConfigOptions.key("partition.end-input-to-done")
                     .booleanType()
@@ -3239,6 +3249,10 @@ public class CoreOptions implements Serializable {
 
     public String partitionTimestampPattern() {
         return options.get(PARTITION_TIMESTAMP_PATTERN);
+    }
+
+    public boolean partitionTimestampFormatStrict() {
+        return options.get(PARTITION_TIMESTAMP_FORMAT_STRICT);
     }
 
     public String httpReportMarkDoneActionUrl() {
