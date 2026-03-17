@@ -279,7 +279,7 @@ class FileSystemBranchManager(BranchManager):
     def branches(self) -> List[str]:
         """
         List all branches.
-        
+
         Returns:
             List of branch names
         """
@@ -290,7 +290,11 @@ class FileSystemBranchManager(BranchManager):
             if not self._file_exists(branch_dir):
                 return result
 
-            for file_info in self.file_io.list_status(branch_dir):
+            file_infos = self.file_io.list_status(branch_dir)
+            if file_infos is None:
+                return result
+
+            for file_info in file_infos:
                 # Get directory name
                 dir_name = None
                 if hasattr(file_info, 'base_name'):
@@ -307,7 +311,7 @@ class FileSystemBranchManager(BranchManager):
 
         except Exception as e:
             raise RuntimeError(f"Failed to list branches: {e}") from e
-        
+
         return result
 
     def _copy_schemas_to_branch(self, branch_name: str, schema_id: int) -> None:

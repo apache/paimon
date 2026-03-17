@@ -112,13 +112,14 @@ class FileStoreTable(Table):
             )
         # Otherwise, use FileSystemBranchManager
         from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+        current_branch = self.current_branch() or "main"
         return FileSystemBranchManager(
             self.file_io,
             self.table_path,
             self.snapshot_manager(),
             self.tag_manager(),
             self.schema_manager,
-            self.current_branch()
+            current_branch
         )
 
     def create_tag(
