@@ -139,7 +139,12 @@ def cmd_table_read(args):
     if extra_where_columns:
         df = df.drop(columns=extra_where_columns, errors='ignore')
 
-    print(df.to_string(index=False))
+    output_format = getattr(args, 'format', 'table')
+    if output_format == 'json':
+        import json
+        print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
+    else:
+        print(df.to_string(index=False))
 
 
 def cmd_table_get(args):
@@ -626,8 +631,13 @@ def cmd_table_list_partitions(args):
                 'UpdatedBy': p.updated_by or '',
             })
 
-        df = pd.DataFrame(data)
-        print(df.to_string(index=False))
+        output_format = getattr(args, 'format', 'table')
+        if output_format == 'json':
+            import json
+            print(json.dumps(data, ensure_ascii=False))
+        else:
+            df = pd.DataFrame(data)
+            print(df.to_string(index=False))
 
     except NotImplementedError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -670,6 +680,13 @@ def add_table_subcommands(table_parser):
         type=int,
         default=100,
         help='Maximum number of results to display (default: 100)'
+    )
+    read_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
     )
     read_parser.set_defaults(func=cmd_table_read)
     
@@ -744,6 +761,13 @@ def add_table_subcommands(table_parser):
         type=str,
         default=None,
         help='Partition name pattern to filter partitions (e.g., "dt=2024*")'
+    )
+    list_partitions_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
     )
     list_partitions_parser.set_defaults(func=cmd_table_list_partitions)
 

@@ -85,6 +85,7 @@ paimon table read mydb.users
 - `--select, -s`: Select specific columns to read (comma-separated)
 - `--where, -w`: Filter condition in SQL-like syntax
 - `--limit, -l`: Maximum number of results to display (default: 100)
+- `--format, -f`: Output format: `table` (default) or `json`
 
 **Examples:**
 
@@ -100,6 +101,9 @@ paimon table read mydb.users --where "age > 18"
 
 # Combine select, where, and limit
 paimon table read mydb.users -s id,name -w "age >= 20 AND city = 'Beijing'" -l 50
+
+# Output as JSON (for programmatic use)
+paimon table read mydb.users --format json
 ```
 
 **WHERE Operators**
@@ -320,6 +324,7 @@ paimon table list-partitions mydb.orders
 **Options:**
 
 - `--pattern, -p`: Partition name pattern to filter partitions
+- `--format, -f`: Output format: `table` (default) or `json`
 
 **Examples:**
 
@@ -329,6 +334,9 @@ paimon table list-partitions mydb.orders
 
 # List partitions matching a pattern
 paimon table list-partitions mydb.orders --pattern "dt=2024*"
+
+# Output as JSON (for programmatic use)
+paimon table list-partitions mydb.orders --format json
 ```
 
 Output:
