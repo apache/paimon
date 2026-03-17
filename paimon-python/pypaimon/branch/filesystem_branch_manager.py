@@ -22,9 +22,7 @@ from typing import List, Optional
 from pypaimon.branch.branch_manager import BranchManager, BRANCH_PREFIX
 from pypaimon.common.file_io import FileIO
 from pypaimon.schema.schema_manager import SchemaManager
-from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
-from pypaimon.tag.tag import Tag
 from pypaimon.tag.tag_manager import TagManager
 
 logger = logging.getLogger(__name__)
@@ -235,17 +233,13 @@ class FileSystemBranchManager(BranchManager):
             branch_snapshot_manager = self._copy_with_branch(
                 self.snapshot_manager, branch_name
             )
-            branch_schema_manager = SchemaManager(self.file_io, self.table_path, branch_name)
-            branch_tag_manager = TagManager(self.file_io, self.table_path, branch_name)
-            
+
             earliest_snapshot_id = branch_snapshot_manager.try_get_earliest_snapshot()
             if earliest_snapshot_id is None:
                 raise RuntimeError(
                     f"Cannot fast forward branch {branch_name}, "
                     "because it does not have snapshot."
                 )
-            
-            earliest_schema_id = earliest_snapshot_id.schema_id()
             
             # Delete snapshot, schema, and tag from the main branch which occurs after
             # earliestSnapshotId
@@ -305,11 +299,11 @@ class FileSystemBranchManager(BranchManager):
         """
         branch_dir = self._branch_directory()
         result = []
-        
+
         try:
             if not self._file_exists(branch_dir):
                 return result
-            
+
             for file_info in self.file_io.list_status(branch_dir):
                 # Get directory name
                 dir_name = None
@@ -320,11 +314,11 @@ class FileSystemBranchManager(BranchManager):
                         dir_name = os.path.basename(file_info.path)
                     except (AttributeError, TypeError):
                         dir_name = None
-                
+
                 if dir_name and dir_name.startswith(BRANCH_PREFIX):
                     branch_name = dir_name[len(BRANCH_PREFIX):]
                     result.append(branch_name)
-                    
+
         except Exception as e:
             raise RuntimeError(f"Failed to list branches: {e}") from e
         

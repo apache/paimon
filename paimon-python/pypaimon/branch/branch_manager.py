@@ -35,7 +35,7 @@ class BranchManager:
     def create_branch(self, branch_name: str) -> None:
         """
         Create a branch from the current state.
-        
+
         Args:
             branch_name: Name of the branch to create
         """
@@ -46,7 +46,7 @@ class BranchManager:
     ) -> None:
         """
         Create a branch from a tag or current state.
-        
+
         Args:
             branch_name: Name of the branch to create
             tag_name: Optional tag name to create branch from, None for current state
@@ -58,10 +58,10 @@ class BranchManager:
     ) -> None:
         """
         Create a branch with option to ignore if the branch already exists.
-        
+
         Args:
             branch_name: The branch name
-            ignore_if_exists: If true, do nothing when branch already exists; 
+            ignore_if_exists: If true, do nothing when branch already exists;
                             if false, throw exception
         """
         self.create_branch(branch_name, None, ignore_if_exists)
@@ -74,13 +74,13 @@ class BranchManager:
     ) -> None:
         """
         Create a branch from tag with option to ignore if the branch already exists.
-        
+
         Args:
             branch_name: The branch name
             tag_name: The tag name to create branch from
-            ignore_if_exists: If true, do nothing when branch already exists; 
+            ignore_if_exists: If true, do nothing when branch already exists;
                             if false, throw exception
-        
+
         Raises:
             NotImplementedError: Subclasses must implement this method
         """
@@ -194,7 +194,7 @@ class BranchManager:
                 f"Branch name '{branch_name}' is the default branch and cannot be used."
             )
         if not branch_name or not branch_name.strip():
-            raise ValueError(f"Branch name is blank.")
+            raise ValueError("Branch name is blank.")
         if branch_name.strip().isdigit():
             raise ValueError(
                 f"Branch name cannot be pure numeric string but is '{branch_name}'."
@@ -217,7 +217,7 @@ class BranchManager:
                 f"Branch name '{branch_name}' do not use in fast-forward."
             )
         if not branch_name or not branch_name.strip():
-            raise ValueError(f"Branch name is blank.")
+            raise ValueError("Branch name is blank.")
         if branch_name == current_branch:
             raise ValueError(
                 f"Fast-forward from the current branch '{current_branch}' is not allowed."
