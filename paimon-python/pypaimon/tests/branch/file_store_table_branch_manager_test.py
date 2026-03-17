@@ -67,7 +67,16 @@ class TestFileStoreTableBranchManager(unittest.TestCase):
         for field in fields:
             field.name = getattr(field, 'name', 'unknown')
 
-        self.table_schema = TableSchema(fields, [], {}, 0, None)
+        self.table_schema = TableSchema(
+            version=TableSchema.CURRENT_VERSION,
+            id=0,
+            fields=fields,
+            highest_field_id=0,
+            partition_keys=[],
+            primary_keys=[],
+            options={},
+            comment=None
+        )
 
         # Create catalog environment (without catalog loader)
         self.catalog_environment = CatalogEnvironment.empty()
