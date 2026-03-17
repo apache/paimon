@@ -113,81 +113,66 @@ class FileSystemBranchManager(BranchManager):
         """
         return self.file_io.exists(path)
 
-    def create_branch(self, branch_name: str) -> None:
-        """Create a branch from the current state."""
-        self.create_branch(branch_name, False)
-
-    def create_branch(self, branch_name: str, ignore_if_exists: bool) -> None:
-        """
-        Create a branch from the current state.
-        
-        Args:
-            branch_name: Name of the branch to create
-            ignore_if_exists: If true, do nothing when branch already exists
-        """
-        if ignore_if_exists and self.branch_exists(branch_name):
-            return
-        
-        self._validate_branch(branch_name)
-        
-        try:
-            latest_schema = self.schema_manager.latest()
-            if latest_schema:
-                self._copy_schemas_to_branch(branch_name, latest_schema.id())
-            else:
-                raise RuntimeError("No schema found for creating branch")
-        except Exception as e:
-            raise RuntimeError(
-                f"Exception occurs when create branch '{branch_name}' "
-                f"(directory in {self.branch_path(branch_name)})."
-            ) from e
-
-    def create_branch(self, branch_name: str, tag_name: Optional[str]) -> None:
-        """Create a branch from a tag."""
-        self.create_branch(branch_name, tag_name, False)
-
     def create_branch(
-        self, branch_name: str, tag_name: Optional[str], ignore_if_exists: bool
+        self,
+        branch_name: str,
+        tag_name: Optional[str] = None,
+        ignore_if_exists: bool = False
     ) -> None:
         """
-        Create a branch from a tag with option to ignore if the branch already exists.
-        
+        Create a branch from the current state or from a tag.
+
         Args:
-            branch_name: The branch name
-            tag_name: The tag name to create branch from
+            branch_name: Name of the branch to create
+            tag_name: Optional tag name to create branch from, None for current state
             ignore_if_exists: If true, do nothing when branch already exists
         """
         if ignore_if_exists and self.branch_exists(branch_name):
             return
-        
+
         self._validate_branch(branch_name)
-        
-        tag = self.tag_manager.get_or_throw(tag_name)
-        snapshot = tag.trim_to_snapshot()
-        
-        try:
-            branch_tag_manager = TagManager(self.file_io, self.table_path, branch_name)
-            branch_snapshot_manager = self._copy_with_branch(
-                self.snapshot_manager, branch_name
-            )
-            
-            # Copy the corresponding tag, snapshot and schema files into the branch directory
-            self.file_io.copy_file(
-                self.tag_manager.tag_path(tag_name),
-                branch_tag_manager.tag_path(tag_name),
-                overwrite=True
-            )
-            self.file_io.copy_file(
-                self.snapshot_manager.get_snapshot_path(snapshot.id()),
-                branch_snapshot_manager.get_snapshot_path(snapshot.id()),
-                overwrite=True
-            )
-            self._copy_schemas_to_branch(branch_name, snapshot.schema_id())
-        except Exception as e:
-            raise RuntimeError(
-                f"Exception occurs when create branch '{branch_name}' "
-                f"(directory in {self.branch_path(branch_name)})."
-            ) from e
+
+        if tag_name is None:
+            # Create branch from current state
+            try:
+                latest_schema = self.schema_manager.latest()
+                if latest_schema:
+                    self._copy_schemas_to_branch(branch_name, latest_schema.id())
+                else:
+                    raise RuntimeError("No schema found for creating branch")
+            except Exception as e:
+                raise RuntimeError(
+                    f"Exception occurs when create branch '{branch_name}' "
+                    f"(directory in {self.branch_path(branch_name)})."
+                ) from e
+        else:
+            # Create branch from tag
+            tag = self.tag_manager.get_or_throw(tag_name)
+            snapshot = tag.trim_to_snapshot()
+
+            try:
+                branch_tag_manager = TagManager(self.file_io, self.table_path, branch_name)
+                branch_snapshot_manager = self._copy_with_branch(
+                    self.snapshot_manager, branch_name
+                )
+
+                # Copy the corresponding tag, snapshot and schema files into the branch directory
+                self.file_io.copy_file(
+                    self.tag_manager.tag_path(tag_name),
+                    branch_tag_manager.tag_path(tag_name),
+                    overwrite=True
+                )
+                self.file_io.copy_file(
+                    self.snapshot_manager.get_snapshot_path(snapshot.id()),
+                    branch_snapshot_manager.get_snapshot_path(snapshot.id()),
+                    overwrite=True
+                )
+                self._copy_schemas_to_branch(branch_name, snapshot.schema_id())
+            except Exception as e:
+                raise RuntimeError(
+                    f"Exception occurs when create branch '{branch_name}' "
+                    f"(directory in {self.branch_path(branch_name)})."
+                ) from e
 
     def drop_branch(self, branch_name: str) -> None:
         """

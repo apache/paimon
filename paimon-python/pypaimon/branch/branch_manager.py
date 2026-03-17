@@ -32,52 +32,18 @@ class BranchManager:
     Branches allow multiple lines of development on the same table.
     """
 
-    def create_branch(self, branch_name: str) -> None:
-        """
-        Create a branch from the current state.
-
-        Args:
-            branch_name: Name of the branch to create
-        """
-        self.create_branch(branch_name, None)
-
     def create_branch(
-        self, branch_name: str, tag_name: Optional[str] = None
+        self,
+        branch_name: str,
+        tag_name: Optional[str] = None,
+        ignore_if_exists: bool = False
     ) -> None:
         """
-        Create a branch from a tag or current state.
+        Create a branch from the current state or from a tag.
 
         Args:
             branch_name: Name of the branch to create
             tag_name: Optional tag name to create branch from, None for current state
-        """
-        self.create_branch(branch_name, tag_name, False)
-
-    def create_branch(
-        self, branch_name: str, ignore_if_exists: bool
-    ) -> None:
-        """
-        Create a branch with option to ignore if the branch already exists.
-
-        Args:
-            branch_name: The branch name
-            ignore_if_exists: If true, do nothing when branch already exists;
-                            if false, throw exception
-        """
-        self.create_branch(branch_name, None, ignore_if_exists)
-
-    def create_branch(
-        self,
-        branch_name: str,
-        tag_name: Optional[str],
-        ignore_if_exists: bool
-    ) -> None:
-        """
-        Create a branch from tag with option to ignore if the branch already exists.
-
-        Args:
-            branch_name: The branch name
-            tag_name: The tag name to create branch from
             ignore_if_exists: If true, do nothing when branch already exists;
                             if false, throw exception
 
