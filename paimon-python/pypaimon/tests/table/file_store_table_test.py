@@ -132,3 +132,109 @@ class FileStoreTableTest(unittest.TestCase):
         consumer = branch_consumer_manager.consumer("branch_consumer")
         self.assertIsNotNone(consumer)
         self.assertEqual(consumer.next_snapshot, 10)
+
+    def test_branch_manager(self):
+        """Test that FileStoreTable has branch_manager method."""
+        # Get branch_manager
+        branch_manager = self.table.branch_manager()
+
+        # Verify branch_manager type
+        from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+        self.assertIsInstance(branch_manager, FileSystemBranchManager)
+
+        # Verify branch_manager has correct current branch
+        from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
+        self.assertEqual(branch_manager.current_branch, DEFAULT_MAIN_BRANCH)
+
+        # Test basic branch operations
+        # Create a new branch
+        branch_manager.create_branch("feature1", ignore_if_exists=False)
+
+        # Verify branch exists
+        self.assertTrue(branch_manager.branch_exists("feature1"))
+
+        # List all branches
+        branches = branch_manager.branches()
+        self.assertIn("feature1", branches)
+
+        # Create another branch
+        branch_manager.create_branch("feature2", ignore_if_exists=False)
+        self.assertTrue(branch_manager.branch_exists("feature2"))
+
+        # Test ignore_if_exists
+        branch_manager.create_branch("feature1", ignore_if_exists=True)
+        self.assertTrue(branch_manager.branch_exists("feature1"))
+
+        # Test error when branch already exists
+        with self.assertRaises(ValueError) as context:
+            branch_manager.create_branch("feature1", ignore_if_exists=False)
+        self.assertIn("already exists", str(context.exception))
+
+        # Drop a branch
+        branch_manager.drop_branch("feature2")
+        self.assertFalse(branch_manager.branch_exists("feature2"))
+
+        # Test error when branch doesn't exist
+        with self.assertRaises(ValueError) as context:
+            branch_manager.drop_branch("non_existent")
+        self.assertIn("doesn't exist", str(context.exception))
+
+    def test_branch_manager_validation(self):
+        """Test branch_manager validation for invalid branch names."""
+        branch_manager = self.table.branch_manager()
+
+        # Test main branch validation
+        with self.assertRaises(ValueError) as context:
+            branch_manager.create_branch("main")
+        self.assertIn("default branch", str(context.exception))
+
+        # Test blank branch name
+        with self.assertRaises(ValueError) as context:
+            branch_manager.create_branch("")
+        self.assertIn("blank", str(context.exception))
+
+        # Test numeric branch name
+        with self.assertRaises(ValueError) as context:
+            branch_manager.create_branch("123")
+        self.assertIn("pure numeric", str(context.exception))
+
+    def test_branch_manager_with_catalog_loader(self):
+        """Test that branch_manager returns CatalogBranchManager when catalog loader is available."""
+        from unittest.mock import MagicMock
+        from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.catalog.catalog_loader import CatalogLoader
+
+        # Create mock catalog
+        mock_catalog = MagicMock()
+        mock_catalog.list_branches.return_value = []
+
+        # Create mock catalog loader that implements CatalogLoader interface
+        class MockCatalogLoader(CatalogLoader):
+            def load(self):
+                return mock_catalog
+
+        # Create a new table with catalog environment
+        catalog_environment = CatalogEnvironment(
+            identifier=self.table.identifier,
+            uuid=None,
+            catalog_loader=MockCatalogLoader(),
+            supports_version_management=True
+        )
+
+        # Save original catalog environment
+        original_env = self.table.catalog_environment
+
+        try:
+            # Replace catalog environment
+            self.table.catalog_environment = catalog_environment
+
+            # Get branch manager
+            branch_manager = self.table.branch_manager()
+
+            # Verify it returns CatalogBranchManager
+            self.assertIsInstance(branch_manager, CatalogBranchManager)
+
+        finally:
+            # Restore original catalog environment
+            self.table.catalog_environment = original_env
