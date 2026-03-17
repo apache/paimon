@@ -1168,5 +1168,114 @@ class CliTableTest(unittest.TestCase):
         with self.assertRaises(Exception):
             self.catalog.get_table('test_db.rename_source')
 
+    @classmethod
+    def _create_partitioned_table(cls):
+        """Create a partitioned test table and insert sample data."""
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('region', pa.string()),
+            ('id', pa.int32()),
+            ('value', pa.string())
+        ])
+
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt', 'region'])
+        cls.catalog.create_table('test_db.partitioned', schema, True)
+
+        table = cls.catalog.get_table('test_db.partitioned')
+
+        # Write data for partition dt=2024-01-01, region=us
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'dt': ['2024-01-01', '2024-01-01'],
+            'region': ['us', 'us'],
+            'id': [1, 2],
+            'value': ['a', 'b'],
+        }, schema=pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Write data for partition dt=2024-01-02, region=eu
+        write_builder = table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data = pa.Table.from_pydict({
+            'dt': ['2024-01-02', '2024-01-02', '2024-01-02'],
+            'region': ['eu', 'eu', 'eu'],
+            'id': [3, 4, 5],
+            'value': ['c', 'd', 'e'],
+        }, schema=pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+    def test_cli_table_list_partitions(self):
+        """Test list-partitions command with real partitioned table."""
+        self._create_partitioned_table()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.partitioned']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                # Verify header columns
+                self.assertIn('Partition', output)
+                self.assertIn('RecordCount', output)
+                self.assertIn('FileSizeInBytes', output)
+                self.assertIn('FileCount', output)
+                # Verify partition specs
+                self.assertIn('dt=2024-01-01,region=us', output)
+                self.assertIn('dt=2024-01-02,region=eu', output)
+
+    def test_cli_table_list_partitions_with_pattern(self):
+        """Test list-partitions command with --pattern filter."""
+        self._create_partitioned_table()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.partitioned',
+                    '--pattern', 'dt=2024-01-01*']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('dt=2024-01-01,region=us', output)
+                self.assertNotIn('dt=2024-01-02', output)
+
+    def test_cli_table_list_partitions_empty(self):
+        """Test list-partitions on non-partitioned table (no snapshot = empty)."""
+        # Create a table with no data
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('val', pa.string())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema)
+        self.catalog.create_table('test_db.empty_part', schema, True)
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.empty_part']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                self.assertIn('No partitions found', output)
+
+
 if __name__ == '__main__':
     unittest.main()

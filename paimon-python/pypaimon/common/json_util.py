@@ -101,10 +101,12 @@ class JSON:
             field_type = field_info.type
             if origin_type is Union and len(args) == 2:
                 field_type = args[0]
+                origin_type = getattr(field_type, '__origin__', None)
+                args = getattr(field_type, '__args__', None)
             if is_dataclass(field_type):
                 type_mapping[json_name] = field_type
-            elif origin_type in (list, List) and is_dataclass(args[0]):
-                type_mapping[json_name] = field_info.type
+            elif origin_type in (list, List) and args and is_dataclass(args[0]):
+                type_mapping[json_name] = field_type
 
         # Map JSON data to field names
         kwargs = {}

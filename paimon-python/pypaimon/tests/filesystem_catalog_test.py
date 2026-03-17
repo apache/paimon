@@ -19,6 +19,8 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock
 
+import pyarrow as pa
+
 from pypaimon import CatalogFactory, Schema
 from pypaimon.catalog.catalog_exception import (DatabaseAlreadyExistException,
                                                 DatabaseNotExistException,
@@ -276,3 +278,91 @@ class FileSystemCatalogTest(unittest.TestCase):
 
         # Restore original method
         filesystem_catalog.file_io.exists = original_exists
+
+    def _create_partitioned_table_with_data(self, catalog, identifier, partitions_data):
+        pa_schema = pa.schema([
+            ('dt', pa.string()),
+            ('col1', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema, partition_keys=['dt'])
+        catalog.create_table(identifier, schema, True)
+        table = catalog.get_table(identifier)
+
+        for part in partitions_data:
+            write_builder = table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+            data = pa.Table.from_pydict({
+                'dt': [part['dt']] * part['rows'],
+                'col1': list(range(part['rows'])),
+            }, schema=pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+    def test_list_partitions_paged_pagination(self):
+        """Test list_partitions_paged pagination with max_results and page_token."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.paged_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-01-02', 'rows': 1},
+            {'dt': '2024-01-03', 'rows': 1},
+        ])
+
+        # First page: max_results=2
+        page1 = catalog.list_partitions_paged(identifier, max_results=2)
+        self.assertEqual(len(page1.elements), 2)
+        self.assertIsNotNone(page1.next_page_token)
+
+        # Second page: use next_page_token
+        page2 = catalog.list_partitions_paged(
+            identifier, max_results=2, page_token=page1.next_page_token
+        )
+        self.assertEqual(len(page2.elements), 1)
+        self.assertIsNone(page2.next_page_token)
+
+        # All specs across pages should cover all 3 partitions
+        all_specs = [p.spec['dt'] for p in page1.elements + page2.elements]
+        self.assertEqual(sorted(all_specs), ['2024-01-01', '2024-01-02', '2024-01-03'])
+
+        # max_results larger than total returns all
+        result = catalog.list_partitions_paged(identifier, max_results=100)
+        self.assertEqual(len(result.elements), 3)
+        self.assertIsNone(result.next_page_token)
+
+    def test_list_partitions_paged_pattern(self):
+        """Test list_partitions_paged with partition_name_pattern filter."""
+        catalog = CatalogFactory.create({"warehouse": self.warehouse})
+        catalog.create_database("test_db", False)
+
+        identifier = "test_db.pattern_tbl"
+        self._create_partitioned_table_with_data(catalog, identifier, [
+            {'dt': '2024-01-01', 'rows': 1},
+            {'dt': '2024-02-01', 'rows': 1},
+            {'dt': '2024-02-15', 'rows': 1},
+        ])
+
+        # Exact match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2024-01-01'
+        )
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec['dt'], '2024-01-01')
+
+        # Wildcard match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2024-02*'
+        )
+        self.assertEqual(len(result.elements), 2)
+        specs = sorted(p.spec['dt'] for p in result.elements)
+        self.assertEqual(specs, ['2024-02-01', '2024-02-15'])
+
+        # No match
+        result = catalog.list_partitions_paged(
+            identifier, partition_name_pattern='dt=2025*'
+        )
+        self.assertEqual(len(result.elements), 0)

@@ -309,6 +309,36 @@ Successfully imported 3 rows into 'mydb.users'.
 - Data types should be compatible with the table schema
 - The import operation appends data to the existing table
 
+### Table List Partitions
+
+List partitions of a Paimon table. Supports optional pattern filtering to match specific partitions.
+
+```shell
+paimon table list-partitions mydb.orders
+```
+
+**Options:**
+
+- `--pattern, -p`: Partition name pattern to filter partitions
+
+**Examples:**
+
+```shell
+# List all partitions
+paimon table list-partitions mydb.orders
+
+# List partitions matching a pattern
+paimon table list-partitions mydb.orders --pattern "dt=2024*"
+```
+
+Output:
+```
+              Partition  RecordCount  FileSizeInBytes  FileCount  LastFileCreationTime       UpdatedAt  UpdatedBy
+dt=2024-01-01,region=us          500          1048576         10         1704067200000  1704153600000      admin
+dt=2024-01-02,region=eu          300           524288          5         1704153600000  1704240000000      user1
+dt=2024-01-03,region=us          200           262144          3         1704240000000  1704326400000      admin
+```
+
 ### Table Rename
 
 Rename a table in the catalog. Both source and target must be specified in `database.table` format.

@@ -26,7 +26,7 @@ import uuid
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.api.api_response import ConfigResponse
+from pypaimon.api.api_response import ConfigResponse, Partition
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.common.options import Options
 from pypaimon.catalog.catalog_context import CatalogContext
@@ -275,3 +275,73 @@ class RESTBaseTest(unittest.TestCase):
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
         table_commit.close()
+
+    def test_list_partitions_paged(self):
+        """Test list_partitions_paged returns partitions from server store."""
+        identifier = Identifier.from_string('default.test_reader_iterator')
+
+        # Add test partitions to server store
+        p1 = Partition(
+            spec={"dt": "p1"},
+            record_count=4,
+            file_size_in_bytes=1024,
+            file_count=1,
+            last_file_creation_time=1000,
+            total_buckets=1,
+            done=False,
+        )
+        p2 = Partition(
+            spec={"dt": "p2"},
+            record_count=4,
+            file_size_in_bytes=2048,
+            file_count=1,
+            last_file_creation_time=2000,
+            total_buckets=1,
+            done=True,
+        )
+        p3 = Partition(
+            spec={"dt": "p3"},
+            record_count=2,
+            file_size_in_bytes=512,
+            file_count=1,
+            last_file_creation_time=3000,
+            total_buckets=1,
+            done=False,
+        )
+        self.server.table_partitions_store[identifier.get_full_name()] = [p1, p2, p3]
+
+        # Test: list all partitions
+        result = self.rest_catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 3)
+
+        # Test: list with max_results
+        result = self.rest_catalog.list_partitions_paged(identifier, max_results=2)
+        self.assertEqual(len(result.elements), 2)
+        self.assertIsNotNone(result.next_page_token)
+
+        # Test: list next page using page_token
+        result2 = self.rest_catalog.list_partitions_paged(
+            identifier, max_results=2, page_token=result.next_page_token
+        )
+        self.assertEqual(len(result2.elements), 1)
+        self.assertIsNone(result2.next_page_token)
+
+        # Test: list with pattern filter
+        result = self.rest_catalog.list_partitions_paged(
+            identifier, partition_name_pattern="dt=p1"
+        )
+        self.assertEqual(len(result.elements), 1)
+        self.assertEqual(result.elements[0].spec, {"dt": "p1"})
+
+        # Test: list with pattern using wildcard
+        result = self.rest_catalog.list_partitions_paged(
+            identifier, partition_name_pattern="dt=p%"
+        )
+        self.assertEqual(len(result.elements), 3)
+
+    def test_list_partitions_paged_empty(self):
+        """Test list_partitions_paged returns empty when no partitions."""
+        identifier = Identifier.from_string('default.test_reader_iterator')
+        result = self.rest_catalog.list_partitions_paged(identifier)
+        self.assertEqual(len(result.elements), 0)
+        self.assertIsNone(result.next_page_token)
