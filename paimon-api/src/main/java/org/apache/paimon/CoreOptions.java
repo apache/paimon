@@ -4358,6 +4358,7 @@ public class CoreOptions implements Serializable {
         }
     }
 
+
     public static final Integer TS_FIELD_INDEX = Integer.valueOf("ts_field_index");
 
     public int fieldMergeMapWithKeyTimeAggTsFieldIndex() {
