@@ -98,5 +98,9 @@ class Identifier:
     def get_branch_name(self) -> Optional[str]:
         return self.branch
 
+    def get_branch_name_or_default(self) -> str:
+        """Get branch name or return default 'main' if branch is None."""
+        return self.branch if self.branch else "main"
+
     def is_system_table(self) -> bool:
         return self.object.startswith('$')

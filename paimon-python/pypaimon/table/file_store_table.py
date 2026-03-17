@@ -100,6 +100,28 @@ class FileStoreTable(Table):
         from pypaimon import TagManager
         return TagManager(self.file_io, self.table_path, self.current_branch())
 
+    def branch_manager(self):
+        """Get the branch manager for this table."""
+        # If catalog environment has a catalog loader, use CatalogBranchManager
+        catalog_loader = self.catalog_environment.catalog_loader
+        if catalog_loader is not None:
+            from pypaimon.branch.catalog_branch_manager import CatalogBranchManager
+            return CatalogBranchManager(
+                catalog_loader,
+                self.identifier
+            )
+        # Otherwise, use FileSystemBranchManager
+        from pypaimon.branch.filesystem_branch_manager import FileSystemBranchManager
+        current_branch = self.current_branch() or "main"
+        return FileSystemBranchManager(
+            self.file_io,
+            self.table_path,
+            self.snapshot_manager(),
+            self.tag_manager(),
+            self.schema_manager,
+            current_branch
+        )
+
     def create_tag(
             self,
             tag_name: str,
