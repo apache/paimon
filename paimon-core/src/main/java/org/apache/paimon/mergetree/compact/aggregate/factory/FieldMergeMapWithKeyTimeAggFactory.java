@@ -21,9 +21,10 @@ package org.apache.paimon.mergetree.compact.aggregate.factory;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapWithKeyTimeAgg;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -57,14 +58,26 @@ public class FieldMergeMapWithKeyTimeAggFactory implements FieldAggregatorFactor
                 field,
                 rowType.getFieldCount());
 
-        checkArgument(
-                DataTypes.STRING().equals(rowType.getTypeAt(1)),
-                "The second field (timestamp) of ROW in field '%s' must be STRING, but was '%s'",
-                field,
-                rowType.getTypeAt(1));
+        int tsFieldIndex = resolveTsFieldIndex(rowType, options, field);
+        return new FieldMergeMapWithKeyTimeAgg(NAME, mapType, tsFieldIndex);
+    }
 
-        return new FieldMergeMapWithKeyTimeAgg(
-                NAME, mapType, options.fieldMergeMapWithKeyTimeAggTsFieldIndex());
+    private int resolveTsFieldIndex(RowType rowType, CoreOptions options, @Nullable String field) {
+        String tsFieldName = options.fieldMergeMapTsField(field);
+        int tsFieldIndex;
+        if (tsFieldName == null) {
+            // default to the last field
+            tsFieldIndex = rowType.getFieldCount() - 1;
+        } else {
+            tsFieldIndex = rowType.getFieldIndex(tsFieldName);
+            checkArgument(
+                    tsFieldIndex >= 0,
+                    "Timestamp field '%s' not found in ROW type for field '%s'. Available fields: %s",
+                    tsFieldName,
+                    field,
+                    rowType.getFieldNames());
+        }
+        return tsFieldIndex;
     }
 
     @Override

@@ -22,9 +22,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
-import org.apache.paimon.types.RowType;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -42,19 +40,6 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
         super(name, dataType);
         this.keyGetter = InternalArray.createElementGetter(dataType.getKeyType());
         this.valueGetter = InternalArray.createElementGetter(dataType.getValueType());
-
-        if (!(dataType.getValueType() instanceof RowType)) {
-            throw new IllegalArgumentException("Value type must be ROW<value, timestamp>");
-        }
-        RowType rowType = (RowType) dataType.getValueType();
-        if (rowType.getFieldCount() < 2) {
-            throw new IllegalArgumentException("ROW type must have at least 2 fields");
-        }
-
-        if (!rowType.getTypeAt(1).equals(DataTypes.STRING())) {
-            throw new IllegalArgumentException("Timestamp field must be STRING");
-        }
-
         this.timestampFieldIndex = timestampFieldIndex;
     }
 

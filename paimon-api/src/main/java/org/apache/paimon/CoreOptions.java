@@ -86,6 +86,8 @@ public class CoreOptions implements Serializable {
 
     public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
 
+    public static final String MERGE_MAP_TS_FIELD = "ts-field";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -4358,14 +4360,11 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    public static final Integer TS_FIELD_INDEX = Integer.valueOf("ts_field_index");
-
-    public int fieldMergeMapWithKeyTimeAggTsFieldIndex() {
-        try {
-            return Integer.parseInt(String.valueOf(TS_FIELD_INDEX));
-        } catch (NumberFormatException e) {
-            return 1;
-        }
+    public String fieldMergeMapTsField(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_TS_FIELD)
+                        .stringType()
+                        .noDefaultValue());
     }
 
     /**
