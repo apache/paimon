@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS ts_table (
  - When defining `vector-field` columns, you must provide the vector dimension; otherwise, the CREATE TABLE statement will fail;
  - Currently, only Flink SQL supports this configuration; other engines have not been implemented yet.
 
-## Specify File Format for Vector
+## Dedicated File Format for Vector
 
 When mapping `VECTOR` type to the file format layer, the ideal storage format is `FixedSizeList`. Currently, this is only supported for certain file formats (such as `lance`) through the `paimon-arrow` integration. This means that to use `VECTOR` type, you must specify a particular format via `file.format`, which has a global impact. In particular, this may be unfavorable for scalars and multimodal (Blob) data.
 
@@ -161,7 +161,3 @@ CREATE TABLE IF NOT EXISTS ts_table (
     'data-evolution.enabled' = 'true'
 );
 ```
-
-**Notes**:
- - If `vector.file.format` is the same as `file.format`, the data will be stored together and not separately;
- - Only supported for Append tables, not primary key tables, and requires `row-tracking.enabled` and `data-evolution.enabled` to be enabled.

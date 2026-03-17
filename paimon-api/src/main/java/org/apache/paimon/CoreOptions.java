@@ -3676,6 +3676,10 @@ public class CoreOptions implements Serializable {
         return normalizeFileFormat(options.get(VECTOR_FILE_FORMAT));
     }
 
+    public boolean withVectorFormat() {
+        return options.contains(VECTOR_FILE_FORMAT);
+    }
+
     public Set<String> vectorField() {
         String vectorFields = options.get(CoreOptions.VECTOR_FIELD);
         if (vectorFields == null || vectorFields.trim().isEmpty()) {

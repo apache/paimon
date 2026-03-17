@@ -107,10 +107,11 @@ public abstract class FileFormat {
         return FileFormat.fromIdentifier(options.fileFormatString(), options.toConfiguration());
     }
 
+    @Nullable
     public static FileFormat vectorFileFormat(CoreOptions options) {
         String vectorFileFormat = options.vectorFileFormatString();
         if (vectorFileFormat == null) {
-            return fileFormat(options);
+            return null;
         }
         return FileFormat.fromIdentifier(vectorFileFormat, options.toConfiguration());
     }

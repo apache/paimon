@@ -59,36 +59,14 @@ public class DataFilePathFactory {
             boolean fileSuffixIncludeCompression,
             String fileCompression,
             @Nullable ExternalPathProvider externalPathProvider) {
-        this(
-                parent,
-                UUID.randomUUID().toString(),
-                new AtomicInteger(0),
-                formatIdentifier,
-                dataFilePrefix,
-                changelogFilePrefix,
-                fileSuffixIncludeCompression,
-                compressFileExtension(fileCompression),
-                externalPathProvider);
-    }
-
-    private DataFilePathFactory(
-            Path parent,
-            String uuid,
-            AtomicInteger pathCount,
-            String formatIdentifier,
-            String dataFilePrefix,
-            String changelogFilePrefix,
-            boolean fileSuffixIncludeCompression,
-            @Nullable String compressExtension,
-            @Nullable ExternalPathProvider externalPathProvider) {
         this.parent = parent;
-        this.uuid = uuid;
-        this.pathCount = pathCount;
+        this.uuid = UUID.randomUUID().toString();
+        this.pathCount = new AtomicInteger(0);
         this.formatIdentifier = formatIdentifier;
         this.dataFilePrefix = dataFilePrefix;
         this.changelogFilePrefix = changelogFilePrefix;
         this.fileSuffixIncludeCompression = fileSuffixIncludeCompression;
-        this.compressExtension = compressExtension;
+        this.compressExtension = compressFileExtension(fileCompression);
         this.externalPathProvider = externalPathProvider;
     }
 
@@ -130,7 +108,12 @@ public class DataFilePathFactory {
         return newFileName(prefix, makeExtension(compressExtension, formatIdentifier));
     }
 
-    protected String makeExtension(String compressExtension, String formatIdentifier) {
+    public Path newVectorPath(String formatIdentifier) {
+        String extension = ".vector" + makeExtension(compressExtension, formatIdentifier);
+        return newPathFromName(newFileName(dataFilePrefix, extension));
+    }
+
+    private String makeExtension(String compressExtension, String formatIdentifier) {
         String extension;
         if (compressExtension != null && isTextFormat(formatIdentifier)) {
             extension = "." + formatIdentifier + "." + compressExtension;
@@ -153,7 +136,7 @@ public class DataFilePathFactory {
         return new Path(parent, fileName);
     }
 
-    protected String newFileName(String prefix, String extension) {
+    private String newFileName(String prefix, String extension) {
         return prefix + uuid + "-" + pathCount.getAndIncrement() + extension;
     }
 
@@ -242,29 +225,5 @@ public class DataFilePathFactory {
             return hadoopOptional.get().fileExtension();
         }
         return compression;
-    }
-
-    public DataFilePathFactory vectorStorePathFactory(String formatIdentifier) {
-        return new VectorStoreWrapper(this, formatIdentifier);
-    }
-
-    private static class VectorStoreWrapper extends DataFilePathFactory {
-        private VectorStoreWrapper(DataFilePathFactory base, String formatIdentifier) {
-            super(
-                    base.parent,
-                    base.uuid,
-                    base.pathCount,
-                    formatIdentifier,
-                    base.dataFilePrefix,
-                    base.changelogFilePrefix,
-                    base.fileSuffixIncludeCompression,
-                    base.compressExtension,
-                    base.externalPathProvider);
-        }
-
-        @Override
-        protected String makeExtension(String compressExtension, String formatIdentifier) {
-            return ".vector" + super.makeExtension(compressExtension, formatIdentifier);
-        }
     }
 }

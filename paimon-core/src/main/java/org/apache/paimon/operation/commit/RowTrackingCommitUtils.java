@@ -29,8 +29,8 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.VectorStoreUtils.isVectorStoreFile;
 
 /** Utils for row tracking commit. */
 public class RowTrackingCommitUtils {

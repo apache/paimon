@@ -55,9 +55,8 @@ public class VectorStoreTableTest extends TableTestBase {
 
     private static final int VECTOR_DIM = 12;
 
-    private AtomicInteger uniqueIdGen = new AtomicInteger(0);
-
-    private Map<Integer, InternalRow> rowsWritten = new HashMap<>();
+    private final AtomicInteger uniqueIdGen = new AtomicInteger(0);
+    private final Map<Integer, InternalRow> rowsWritten = new HashMap<>();
 
     @Test
     public void testBasic() throws Exception {
