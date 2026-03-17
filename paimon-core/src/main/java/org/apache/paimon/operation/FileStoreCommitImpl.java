@@ -1014,19 +1014,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
 
         if (!success) {
-            // commit fails, should clean up the files
             long commitTime = (System.currentTimeMillis() - startMillis) / 1000;
             LOG.warn(
                     "Atomic commit failed for snapshot #{} by user {} "
                             + "with identifier {} and kind {} after {} seconds. "
-                            + "Clean up and try again.",
+                            + "Skip clean up and try again.",
                     newSnapshotId,
                     commitUser,
                     identifier,
                     commitKind.name(),
                     commitTime);
-            commitCleaner.cleanUpNoReuseTmpManifests(
-                    baseManifestList, mergeBeforeManifests, mergeAfterManifests);
             return RetryCommitResult.forCommitFail(latestSnapshot, baseDataFiles, null);
         }
 
