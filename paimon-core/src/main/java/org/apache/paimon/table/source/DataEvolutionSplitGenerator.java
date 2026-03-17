@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.BinPacking;
 import org.apache.paimon.utils.RangeHelper;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Function;
@@ -34,12 +35,17 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
     private final long targetSplitSize;
     private final long openFileCost;
     private final boolean countBlobSize;
+    private final boolean forceSplitRowRangeContigous;
 
     public DataEvolutionSplitGenerator(
-            long targetSplitSize, long openFileCost, boolean countBlobSize) {
+            long targetSplitSize,
+            long openFileCost,
+            boolean countBlobSize,
+            boolean forceSplitRowRangeContigous) {
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
         this.countBlobSize = countBlobSize;
+        this.forceSplitRowRangeContigous = forceSplitRowRangeContigous;
     }
 
     @Override
@@ -64,23 +70,77 @@ public class DataEvolutionSplitGenerator implements SplitGenerator {
                                                                 : meta.fileSize())
                                         .sum(),
                                 openFileCost);
+        if (forceSplitRowRangeContigous) {
+            return packByContiguousRanges(ranges, weightFunc);
+        }
         return BinPacking.packForOrdered(ranges, weightFunc, targetSplitSize).stream()
-                .map(
-                        f -> {
-                            boolean rawConvertible = f.stream().allMatch(file -> file.size() == 1);
-                            List<DataFileMeta> groupFiles =
-                                    f.stream()
-                                            .flatMap(Collection::stream)
-                                            .collect(Collectors.toList());
-                            return rawConvertible
-                                    ? SplitGroup.rawConvertibleGroup(groupFiles)
-                                    : SplitGroup.nonRawConvertibleGroup(groupFiles);
-                        })
+                .map(this::toPackedSplitGroup)
                 .collect(Collectors.toList());
     }
 
     @Override
     public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         return splitForBatch(files);
+    }
+
+    private SplitGroup toPackedSplitGroup(List<List<DataFileMeta>> fileGroups) {
+        boolean rawConvertible = fileGroups.stream().allMatch(file -> file.size() == 1);
+        List<DataFileMeta> groupFiles =
+                fileGroups.stream().flatMap(Collection::stream).collect(Collectors.toList());
+        return rawConvertible
+                ? SplitGroup.rawConvertibleGroup(groupFiles)
+                : SplitGroup.nonRawConvertibleGroup(groupFiles);
+    }
+
+    private List<SplitGroup> packByContiguousRanges(
+            List<List<DataFileMeta>> ranges, Function<List<DataFileMeta>, Long> weightFunc) {
+        if (ranges.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<SplitGroup> result = new ArrayList<>();
+        List<List<DataFileMeta>> currentSegment = new ArrayList<>();
+        long currentMaxRowId = Long.MIN_VALUE;
+
+        for (List<DataFileMeta> rangeFiles : ranges) {
+            long minRowId = minRowId(rangeFiles);
+            long maxRowId = maxRowId(rangeFiles);
+            if (currentSegment.isEmpty() || areContiguous(currentMaxRowId, minRowId)) {
+                currentSegment.add(rangeFiles);
+                currentMaxRowId = maxRowId;
+            } else {
+                result.addAll(
+                        BinPacking.packForOrdered(currentSegment, weightFunc, targetSplitSize)
+                                .stream()
+                                .map(this::toPackedSplitGroup)
+                                .collect(Collectors.toList()));
+                currentSegment = new ArrayList<>();
+                currentSegment.add(rangeFiles);
+                currentMaxRowId = maxRowId;
+            }
+        }
+
+        result.addAll(
+                BinPacking.packForOrdered(currentSegment, weightFunc, targetSplitSize).stream()
+                        .map(this::toPackedSplitGroup)
+                        .collect(Collectors.toList()));
+        return result;
+    }
+
+    private long minRowId(List<DataFileMeta> files) {
+        return files.stream()
+                .mapToLong(f -> f.nonNullRowIdRange().from)
+                .min()
+                .orElse(Long.MAX_VALUE);
+    }
+
+    private long maxRowId(List<DataFileMeta> files) {
+        return files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().orElse(Long.MIN_VALUE);
+    }
+
+    private boolean areContiguous(long previousMaxRowId, long currentMinRowId) {
+        // Contiguous means no gap between adjacent ranges.
+        // e.g. previous max == current min (as requested) or previous max + 1 == current min.
+        return previousMaxRowId >= currentMinRowId - 1;
     }
 }

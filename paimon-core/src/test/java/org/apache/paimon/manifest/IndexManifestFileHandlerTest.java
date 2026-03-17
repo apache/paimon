@@ -21,7 +21,9 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,6 +44,8 @@ public class IndexManifestFileHandlerTest {
     public void testUnawareMode() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        RowType tableRowType = fileStore.schema().logicalRowType();
+        Options options = new Options(fileStore.schema().options());
 
         IndexManifestFile indexManifestFile =
                 new IndexManifestFile.Factory(
@@ -49,10 +53,18 @@ public class IndexManifestFileHandlerTest {
                                 FileFormat.manifestFormat(fileStore.options()),
                                 "zstd",
                                 fileStore.pathFactory(),
-                                null)
+                                null,
+                                tableRowType,
+                                options)
                         .create();
         IndexManifestFileHandler indexManifestFileHandler =
-                new IndexManifestFileHandler(indexManifestFile, BucketMode.BUCKET_UNAWARE);
+                new IndexManifestFileHandler(
+                        fileStore.fileIO(),
+                        indexManifestFile,
+                        BucketMode.BUCKET_UNAWARE,
+                        tableRowType,
+                        options,
+                        fileStore.pathFactory().globalIndexFileFactory());
 
         IndexManifestEntry entry1 =
                 new IndexManifestEntry(
@@ -77,6 +89,8 @@ public class IndexManifestFileHandlerTest {
     public void testHashFixedBucket() throws Exception {
         TestAppendFileStore fileStore =
                 TestAppendFileStore.createAppendStore(tempDir, new HashMap<>());
+        RowType tableRowType = fileStore.schema().logicalRowType();
+        Options options = new Options(fileStore.schema().options());
 
         IndexManifestFile indexManifestFile =
                 new IndexManifestFile.Factory(
@@ -84,10 +98,18 @@ public class IndexManifestFileHandlerTest {
                                 FileFormat.manifestFormat(fileStore.options()),
                                 "zstd",
                                 fileStore.pathFactory(),
-                                null)
+                                null,
+                                tableRowType,
+                                options)
                         .create();
         IndexManifestFileHandler indexManifestFileHandler =
-                new IndexManifestFileHandler(indexManifestFile, BucketMode.HASH_FIXED);
+                new IndexManifestFileHandler(
+                        fileStore.fileIO(),
+                        indexManifestFile,
+                        BucketMode.HASH_FIXED,
+                        tableRowType,
+                        options,
+                        fileStore.pathFactory().globalIndexFileFactory());
 
         IndexManifestEntry entry1 =
                 new IndexManifestEntry(

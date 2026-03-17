@@ -66,4 +66,25 @@ public class BTreeIndexOptions {
                     .intType()
                     .defaultValue(4096)
                     .withDescription("The max parallelism of Flink/Spark for building BTreeIndex.");
+
+    public static final ConfigOption<Integer> BTREE_INDEX_COMPACTION_MIN_FILES =
+            ConfigOptions.key("btree-index.compaction.min-files")
+                    .intType()
+                    .defaultValue(2)
+                    .withDescription(
+                            "Minimum number of contiguous btree global index files required to trigger one compaction unit.");
+
+    public static final ConfigOption<Integer> BTREE_INDEX_COMPACTION_MAX_FILES =
+            ConfigOptions.key("btree-index.compaction.max-files")
+                    .intType()
+                    .defaultValue(16)
+                    .withDescription(
+                            "Maximum number of source files picked by one btree global index compaction unit.");
+
+    public static final ConfigOption<String> BTREE_INDEX_COMPACTION_STRATEGY =
+            ConfigOptions.key("btree-index.compaction.strategy")
+                    .stringType()
+                    .defaultValue("size-tiered")
+                    .withDescription(
+                            "Compaction strategy for btree global index. Currently only skeleton support, future options may include levelled.");
 }

@@ -49,6 +49,7 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.commit.CommitRollback;
 import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -226,7 +227,9 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
                 FileFormat.manifestFormat(options),
                 options.manifestCompression(),
                 pathFactory(),
-                readManifestCache);
+                readManifestCache,
+                schema.logicalRowType(),
+                new Options(schema.options()));
     }
 
     @Override

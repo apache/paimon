@@ -37,14 +37,17 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -146,6 +149,75 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         Assertions.assertEquals(2, metasByParts.size());
 
         metasByParts.forEach(this::assertFilesNonOverlapping);
+    }
+
+    @Test
+    public void testCalcRowRangesDoNotMergeGaps() {
+        List<Range> ranges =
+                BTreeGlobalIndexBuilder.calcRowRanges(
+                        Arrays.asList(
+                                mockSplit(0, 10), mockSplit(1000, 2000), mockSplit(2001, 2050)));
+        Assertions.assertEquals(Arrays.asList(new Range(0, 10), new Range(1000, 2050)), ranges);
+    }
+
+    @Test
+    public void testIncrementalScanExcludeIndexedRanges() throws Exception {
+        write();
+
+        FileStoreTable table = getTableDefault();
+        RowType partType = table.rowType().project("dt");
+        Predicate p0Predicate =
+                PartitionPredicate.createPartitionPredicate(
+                        partType, Collections.singletonMap("dt", BinaryString.fromString("p0")));
+
+        // Build index for partition p0 only first.
+        createIndex(PartitionPredicate.fromPredicate(partType, p0Predicate));
+
+        BTreeGlobalIndexBuilder incrementalBuilder =
+                new BTreeGlobalIndexBuilder(table).withIndexField("f0").withIndexType("btree");
+        List<DataSplit> incrementalSplits = incrementalBuilder.scan();
+        List<Range> incrementalRanges = BTreeGlobalIndexBuilder.calcRowRanges(incrementalSplits);
+
+        // p0 consumes [0, 999], so incremental should only scan non-indexed range [1000, 1999].
+        Assertions.assertEquals(
+                Collections.singletonList(new Range(PART_ROW_NUM, PART_ROW_NUM * 2 - 1)),
+                incrementalRanges);
+
+        List<CommitMessage> commitMessages = incrementalBuilder.build(incrementalSplits, ioManager);
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(commitMessages);
+        }
+
+        Map<BinaryRow, List<Pair<String, FileStats>>> metasByParts = gatherIndexMetas(table);
+        Assertions.assertEquals(2, metasByParts.size());
+        metasByParts.forEach(this::assertFilesNonOverlapping);
+    }
+
+    private static org.apache.paimon.table.source.DataSplit mockSplit(long from, long to) {
+        org.apache.paimon.io.DataFileMeta dataFileMeta =
+                org.apache.paimon.io.DataFileMeta.forAppend(
+                        "mock-file",
+                        1L,
+                        to - from + 1,
+                        org.apache.paimon.stats.SimpleStats.EMPTY_STATS,
+                        from,
+                        to,
+                        0L,
+                        Collections.<String>emptyList(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        from,
+                        null);
+        return org.apache.paimon.table.source.DataSplit.builder()
+                .withSnapshot(1L)
+                .withPartition(BinaryRow.EMPTY_ROW)
+                .withBucket(0)
+                .withBucketPath("mock-bucket-path")
+                .withDataFiles(Collections.singletonList(dataFileMeta))
+                .rawConvertible(false)
+                .build();
     }
 
     private Map<BinaryRow, List<Pair<String, FileStats>>> gatherIndexMetas(FileStoreTable table) {

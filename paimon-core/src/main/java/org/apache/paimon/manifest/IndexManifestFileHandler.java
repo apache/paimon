@@ -19,12 +19,18 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.globalindex.GlobalIndexCompactorUtils;
 import org.apache.paimon.index.DeletionVectorMeta;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -44,13 +50,26 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** IndexManifestFile Handler. */
 public class IndexManifestFileHandler {
 
+    private final FileIO fileIO;
     private final IndexManifestFile indexManifestFile;
-
     private final BucketMode bucketMode;
+    private final RowType tableRowType;
+    private final Options options;
+    private final IndexPathFactory globalIndexPathFactory;
 
-    IndexManifestFileHandler(IndexManifestFile indexManifestFile, BucketMode bucketMode) {
+    IndexManifestFileHandler(
+            FileIO fileIO,
+            IndexManifestFile indexManifestFile,
+            BucketMode bucketMode,
+            RowType tableRowType,
+            Options options,
+            IndexPathFactory globalIndexPathFactory) {
+        this.fileIO = fileIO;
         this.indexManifestFile = indexManifestFile;
         this.bucketMode = bucketMode;
+        this.tableRowType = tableRowType;
+        this.options = options;
+        this.globalIndexPathFactory = globalIndexPathFactory;
     }
 
     String write(@Nullable String previousIndexManifest, List<IndexManifestEntry> newIndexFiles) {
@@ -64,17 +83,22 @@ public class IndexManifestFileHandler {
 
         Map<String, List<IndexManifestEntry>> previous = separateIndexEntries(entries);
         Map<String, List<IndexManifestEntry>> current = separateIndexEntries(newIndexFiles);
+        Set<String> newIndexes = current.keySet();
 
         List<IndexManifestEntry> indexEntries = new ArrayList<>();
         Set<String> indexes = new HashSet<>();
         indexes.addAll(previous.keySet());
-        indexes.addAll(current.keySet());
+        indexes.addAll(newIndexes);
         for (String indexName : indexes) {
-            indexEntries.addAll(
-                    getIndexManifestFileCombine(indexName)
-                            .combine(
-                                    previous.getOrDefault(indexName, Collections.emptyList()),
-                                    current.getOrDefault(indexName, Collections.emptyList())));
+            if (newIndexes.contains(indexName)) {
+                indexEntries.addAll(
+                        getIndexManifestFileCombine(indexName)
+                                .combine(
+                                        previous.getOrDefault(indexName, Collections.emptyList()),
+                                        current.getOrDefault(indexName, Collections.emptyList())));
+            } else {
+                indexEntries.addAll(previous.get(indexName));
+            }
         }
 
         return indexManifestFile.writeWithoutRolling(indexEntries);
@@ -93,7 +117,8 @@ public class IndexManifestFileHandler {
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
         if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
-            return new GlobalFileNameCombiner();
+            return new GlobalIndexCombiner(
+                    indexType, fileIO, tableRowType, options, globalIndexPathFactory);
         }
 
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
@@ -197,11 +222,34 @@ public class IndexManifestFileHandler {
     }
 
     /** We combine the previous and new index files by file name. */
-    static class GlobalFileNameCombiner implements IndexManifestFileCombiner {
+    static class GlobalIndexCombiner implements IndexManifestFileCombiner {
+
+        private final String indexType;
+        private final FileIO fileIO;
+        private final RowType tableRowType;
+        private final Options options;
+        private final IndexPathFactory indexPathFactory;
+
+        GlobalIndexCombiner(
+                String indexType,
+                FileIO fileIO,
+                RowType tableRowType,
+                Options options,
+                IndexPathFactory indexPathFactory) {
+            this.indexType = indexType;
+            this.fileIO = fileIO;
+            this.tableRowType = tableRowType;
+            this.options = options;
+            this.indexPathFactory = indexPathFactory;
+        }
 
         @Override
         public List<IndexManifestEntry> combine(
                 List<IndexManifestEntry> prevIndexFiles, List<IndexManifestEntry> newIndexFiles) {
+            if (newIndexFiles.isEmpty()) {
+                return prevIndexFiles;
+            }
+
             Map<String, IndexManifestEntry> indexEntries = new HashMap<>();
             for (IndexManifestEntry entry : prevIndexFiles) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
@@ -222,7 +270,19 @@ public class IndexManifestFileHandler {
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
             }
-            return new ArrayList<>(indexEntries.values());
+
+            List<IndexManifestEntry> compactBefore = new ArrayList<>(indexEntries.values());
+            return GlobalIndexCompactorUtils.load(indexType)
+                    .map(factory -> factory.create(fileIO, tableRowType, options, indexPathFactory))
+                    .map(
+                            compactor -> {
+                                try {
+                                    return compactor.compact(compactBefore);
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            })
+                    .orElse(compactBefore);
         }
     }
 

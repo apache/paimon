@@ -93,7 +93,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                     .computeIfAbsent(fieldId, k -> new HashMap<>())
                     .computeIfAbsent(indexType, k -> new HashMap<>())
                     .computeIfAbsent(
-                            new Range(meta.rowRangeStart(), meta.rowRangeStart()),
+                            new Range(meta.rowRangeStart(), meta.rowRangeEnd()),
                             k -> new ArrayList<>())
                     .add(entry.indexFile());
         }

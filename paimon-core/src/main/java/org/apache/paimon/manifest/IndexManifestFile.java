@@ -23,6 +23,8 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexPathFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -39,6 +41,10 @@ import java.util.List;
 /** Index manifest file. */
 public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
 
+    private final RowType tableRowType;
+    private final Options options;
+    private final IndexPathFactory globalIndexPathFactory;
+
     private IndexManifestFile(
             FileIO fileIO,
             RowType schema,
@@ -46,7 +52,10 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             FormatWriterFactory writerFactory,
             String compression,
             PathFactory pathFactory,
-            @Nullable SegmentsCache<Path> cache) {
+            @Nullable SegmentsCache<Path> cache,
+            RowType tableRowType,
+            Options options,
+            IndexPathFactory globalIndexPathFactory) {
         super(
                 fileIO,
                 new IndexManifestEntrySerializer(),
@@ -56,6 +65,10 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                 compression,
                 pathFactory,
                 cache);
+
+        this.tableRowType = tableRowType;
+        this.options = options;
+        this.globalIndexPathFactory = globalIndexPathFactory;
     }
 
     public Path indexManifestFilePath(String fileName) {
@@ -71,7 +84,9 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         if (newIndexFiles.isEmpty()) {
             return previousIndexManifest;
         }
-        IndexManifestFileHandler handler = new IndexManifestFileHandler(this, bucketMode);
+        IndexManifestFileHandler handler =
+                new IndexManifestFileHandler(
+                        fileIO, this, bucketMode, tableRowType, options, globalIndexPathFactory);
         return handler.write(previousIndexManifest, newIndexFiles);
     }
 
@@ -83,18 +98,24 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         private final String compression;
         private final FileStorePathFactory pathFactory;
         @Nullable private final SegmentsCache<Path> cache;
+        private final RowType rowType;
+        private final Options options;
 
         public Factory(
                 FileIO fileIO,
                 FileFormat fileFormat,
                 String compression,
                 FileStorePathFactory pathFactory,
-                @Nullable SegmentsCache<Path> cache) {
+                @Nullable SegmentsCache<Path> cache,
+                RowType rowType,
+                Options options) {
             this.fileIO = fileIO;
             this.fileFormat = fileFormat;
             this.compression = compression;
             this.pathFactory = pathFactory;
             this.cache = cache;
+            this.rowType = rowType;
+            this.options = options;
         }
 
         public IndexManifestFile create() {
@@ -106,7 +127,10 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
                     fileFormat.createWriterFactory(schema),
                     compression,
                     pathFactory.indexManifestFileFactory(),
-                    cache);
+                    cache,
+                    rowType,
+                    options,
+                    pathFactory.globalIndexFileFactory());
         }
     }
 }

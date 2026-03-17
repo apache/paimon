@@ -271,7 +271,7 @@ public class Range implements Serializable {
         return "[" + from + ", " + to + ']';
     }
 
-    // Returns the union of the two ranges or null if there are elements between them.
+    // Returns the union of the two ranges or null if there is no element between them.
     public static Range union(Range left, Range right) {
         if (left.from <= right.from) {
             if (left.to + 1 >= right.from) {
@@ -283,7 +283,7 @@ public class Range implements Serializable {
         return null;
     }
 
-    // Returns the intersection of the two ranges of null if they are not overlapped.
+    // Returns the intersection of the two ranges or null if they are not overlapped.
     public static Range intersection(Range left, Range right) {
         if (left.from <= right.from) {
             if (left.to >= right.from) {
