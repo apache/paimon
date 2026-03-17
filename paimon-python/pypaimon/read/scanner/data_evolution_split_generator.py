@@ -23,7 +23,7 @@ from pypaimon.globalindex.range import Range
 from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.manifest.schema.manifest_entry import ManifestEntry
 from pypaimon.read.scanner.split_generator import AbstractSplitGenerator
-from pypaimon.read.split import Split
+from pypaimon.read.split import DataSplit, Split
 from pypaimon.read.sliced_split import SlicedSplit
 
 
@@ -104,8 +104,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 for pack in packed_files
             ]
 
-            splits += self._build_split_from_pack(
-                flatten_packed_files, sorted_entries_list, False
+            splits += self._build_split_from_pack_for_data_evolution(
+                flatten_packed_files, packed_files, sorted_entries_list
             )
 
         if self.start_pos_of_this_subtask is not None or self.idx_of_this_subtask is not None:
@@ -115,6 +115,60 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
         if self.row_ranges:
             splits = self._wrap_to_indexed_splits(splits)
 
+        return splits
+
+    def _build_split_from_pack_for_data_evolution(
+        self,
+        flatten_packed_files: List[List[DataFileMeta]],
+        packed_files: List[List[List[DataFileMeta]]],
+        file_entries: List[ManifestEntry]
+    ) -> List[Split]:
+        """
+        Build splits from packed files for data evolution tables.
+        raw_convertible is True only when each range (pack) contains exactly one file.
+        """
+        splits = []
+        for i, file_group in enumerate(flatten_packed_files):
+            # In Java: rawConvertible = f.stream().allMatch(file -> file.size() == 1)
+            # This means raw_convertible is True only when each range contains exactly one file
+            pack = packed_files[i] if i < len(packed_files) else []
+            raw_convertible = all(len(sub_pack) == 1 for sub_pack in pack)
+
+            file_paths = []
+            total_file_size = 0
+            total_record_count = 0
+
+            for data_file in file_group:
+                data_file.set_file_path(
+                    self.table.table_path,
+                    file_entries[0].partition,
+                    file_entries[0].bucket
+                )
+                file_paths.append(data_file.file_path)
+                total_file_size += data_file.file_size
+                total_record_count += data_file.row_count
+
+            if file_paths:
+                # Get deletion files for this split
+                data_deletion_files = None
+                if self.deletion_files_map:
+                    data_deletion_files = self._get_deletion_files_for_split(
+                        file_group,
+                        file_entries[0].partition,
+                        file_entries[0].bucket
+                    )
+
+                split = DataSplit(
+                    files=file_group,
+                    partition=file_entries[0].partition,
+                    bucket=file_entries[0].bucket,
+                    file_paths=file_paths,
+                    row_count=total_record_count,
+                    file_size=total_file_size,
+                    raw_convertible=raw_convertible,
+                    data_deletion_files=data_deletion_files
+                )
+                splits.append(split)
         return splits
 
     def _wrap_to_sliced_splits(self, splits: List[Split], plan_start_pos: int, plan_end_pos: int) -> List[Split]:

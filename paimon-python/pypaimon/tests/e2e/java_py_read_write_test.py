@@ -35,9 +35,9 @@ else:
 
 def get_file_format_params():
     if sys.version_info[:2] == (3, 6):
-        return [('parquet',)]
+        return [('parquet',), ('orc',), ('avro',)]
     else:
-        return [('parquet',), ('lance',)]
+        return [('parquet',), ('orc',), ('avro',), ('lance',)]
 
 
 class JavaPyReadWriteTest(unittest.TestCase):
@@ -50,28 +50,34 @@ class JavaPyReadWriteTest(unittest.TestCase):
         })
         cls.catalog.create_database('default', True)
 
-    def test_py_write_read_append_table(self):
+    @parameterized.expand(get_file_format_params())
+    def test_py_write_read_append_table(self, file_format):
         pa_schema = pa.schema([
             ('id', pa.int32()),
             ('name', pa.string()),
             ('category', pa.string()),
-            ('value', pa.float64())
+            ('value', pa.float64()),
+            ('ts', pa.timestamp('us')),
+            ('ts_ltz', pa.timestamp('us', tz='UTC'))
         ])
 
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             partition_keys=['category'],
-            options={'dynamic-partition-overwrite': 'false'}
+            options={'dynamic-partition-overwrite': 'false', 'file.format': file_format}
         )
 
-        self.catalog.create_table('default.mixed_test_append_tablep', schema, False)
-        table = self.catalog.get_table('default.mixed_test_append_tablep')
+        table_name = f'default.mixed_test_append_tablep_{file_format}'
+        self.catalog.create_table(table_name, schema, False)
+        table = self.catalog.get_table(table_name)
 
         initial_data = pd.DataFrame({
             'id': [1, 2, 3, 4, 5, 6],
             'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
             'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
-            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
+            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+            'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
         })
         # Write initial data
         write_builder = table.new_batch_write_builder()
@@ -95,8 +101,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
         actual_names = set(initial_result['name'].tolist())
         self.assertEqual(actual_names, expected_names)
 
-    def test_read_append_table(self):
-        table = self.catalog.get_table('default.mixed_test_append_tablej')
+    @parameterized.expand(get_file_format_params())
+    def test_read_append_table(self, file_format):
+        table = self.catalog.get_table('default.mixed_test_append_tablej_' + file_format)
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
@@ -105,12 +112,23 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     @parameterized.expand(get_file_format_params())
     def test_py_write_read_pk_table(self, file_format):
-        pa_schema = pa.schema([
-            ('id', pa.int32()),
-            ('name', pa.string()),
-            ('category', pa.string()),
-            ('value', pa.float64())
-        ])
+        # Lance format doesn't support timestamp, so exclude timestamp columns
+        if file_format == 'lance':
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+                ('category', pa.string()),
+                ('value', pa.float64())
+            ])
+        else:
+            pa_schema = pa.schema([
+                ('id', pa.int32()),
+                ('name', pa.string()),
+                ('category', pa.string()),
+                ('value', pa.float64()),
+                ('ts', pa.timestamp('us')),
+                ('ts_ltz', pa.timestamp('us', tz='UTC'))
+            ])
 
         table_name = f'default.mixed_test_pk_tablep_{file_format}'
         schema = Schema.from_pyarrow_schema(
@@ -120,7 +138,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
             options={
                 'dynamic-partition-overwrite': 'false',
                 'bucket': '2',
-                'file.format': file_format
+                'file.format': file_format,
+                "orc.timestamp-ltz.legacy.type": "false"
             }
         )
 
@@ -135,12 +154,23 @@ class JavaPyReadWriteTest(unittest.TestCase):
         self.catalog.create_table(table_name, schema, False)
         table = self.catalog.get_table(table_name)
 
-        initial_data = pd.DataFrame({
-            'id': [1, 2, 3, 4, 5, 6],
-            'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
-            'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
-            'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
-        })
+        # Lance format doesn't support timestamp, so exclude timestamp columns
+        if file_format == 'lance':
+            initial_data = pd.DataFrame({
+                'id': [1, 2, 3, 4, 5, 6],
+                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0]
+            })
+        else:
+            initial_data = pd.DataFrame({
+                'id': [1, 2, 3, 4, 5, 6],
+                'name': ['Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'],
+                'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
+                'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
+                'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
+                'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
+            })
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
@@ -163,12 +193,11 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
     @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):
-        # For parquet, read from Java-written table (no format suffix)
-        # For lance, read from Java-written table (with format suffix)
-        if file_format == 'parquet':
-            table_name = 'default.mixed_test_pk_tablej'
-        else:
-            table_name = f'default.mixed_test_pk_tablej_{file_format}'
+        # Skip ORC format for Python < 3.8 due to pyarrow limitation with TIMESTAMP_INSTANT
+        if sys.version_info[:2] < (3, 8) and file_format == 'orc':
+            self.skipTest("Skipping ORC format for Python < 3.8 (pyarrow does not support TIMESTAMP_INSTANT)")
+        
+        table_name = f'default.mixed_test_pk_tablej_{file_format}'
         table = self.catalog.get_table(table_name)
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
@@ -178,6 +207,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
 
         # Verify data
         self.assertEqual(len(res), 6)
+        if file_format != "lance":
+            self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
+            self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
         # Data order may vary due to partitioning/bucketing, so compare as sets
         expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
         actual_names = set(res['name'].tolist())

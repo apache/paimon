@@ -76,6 +76,9 @@ class IndexedSplit(Split):
         """
         return sum(r.count() for r in self._row_ranges)
 
+    def merged_row_count(self):
+        return self.row_count
+
     # Delegate other properties to data_split
 
     @property

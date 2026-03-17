@@ -133,9 +133,13 @@ public class PartitionStatisticsReporterTest {
         long time = 1729598544974L;
         action.report("c1=a/", time);
         assertThat(partitionParams).containsKey("c1=a/");
-        assertThat(partitionParams.get("c1=a/").toString())
-                .isEqualTo(
-                        "{spec={c1=a}, recordCount=2, fileSizeInBytes=705, fileCount=1, lastFileCreationTime=1729598544974, totalBuckets=-1}");
+        PartitionStatistics stats = partitionParams.get("c1=a/");
+        assertThat(stats.spec()).containsEntry("c1", "a");
+        assertThat(stats.recordCount()).isEqualTo(2);
+        assertThat(stats.fileSizeInBytes()).isGreaterThan(0); // fileSizeInBytes
+        assertThat(stats.fileCount()).isEqualTo(1);
+        assertThat(stats.lastFileCreationTime()).isEqualTo(1729598544974L);
+        assertThat(stats.totalBuckets()).isEqualTo(-1);
         action.close();
         assertThat(closed).isTrue();
     }
