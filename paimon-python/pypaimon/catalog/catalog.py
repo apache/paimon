@@ -226,7 +226,7 @@ class Catalog(ABC):
             "list_partitions_paged is not supported by this catalog."
         )
 
-def create_branch(
+    def create_branch(
             self,
             identifier: Identifier,
             branch_name: str,
