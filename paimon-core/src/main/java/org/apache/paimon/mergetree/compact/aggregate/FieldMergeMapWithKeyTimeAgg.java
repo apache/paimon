@@ -122,5 +122,4 @@ public class FieldMergeMapWithKeyTimeAgg extends FieldAggregator {
             }
         }
     }
-
 }

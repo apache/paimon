@@ -1225,7 +1225,7 @@ public class FieldAggregatorTest {
                         DataTypes.ROW(
                                 DataTypes.FIELD(0, "actual_value", DataTypes.STRING()),
                                 DataTypes.FIELD(1, "dbsync_ts", DataTypes.STRING())));
-        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType);
+        FieldMergeMapWithKeyTimeAgg agg = new FieldMergeMapWithKeyTimeAgg("test", mapType, 1);
 
         GenericMap map1 =
                 createTestMap(
