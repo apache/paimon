@@ -148,27 +148,35 @@ class TableUpsertByKey:
 
         Partition key columns are stripped from *upsert_keys* before matching
         because all rows within this partition share the same partition values.
+
+        The scan reads partition data in batches and filters against the input
+        key set on-the-fly, so only matching key → _ROW_ID pairs are kept in
+        memory (instead of the entire partition's key set).
         """
         # Strip partition columns – they are constant inside one partition
         partition_key_set = set(self.table.partition_keys)
         match_keys = [k for k in upsert_keys if k not in partition_key_set]
 
-        # 1. Scan this partition to build key -> _ROW_ID
-        key_to_row_id = self._build_key_to_row_id_map(match_keys, partition_spec)
-
-        # 2. Build composite key tuples for partition rows
+        # 1. Build input key tuples and a lookup set
         key_columns = [partition_data[k].to_pylist() for k in match_keys]
         input_key_tuples = [
             tuple(col[i] for col in key_columns)
             for i in range(partition_data.num_rows)
         ]
 
-        # 3. Per-partition duplicate check
-        if len(input_key_tuples) != len(set(input_key_tuples)):
+        # 2. Per-partition duplicate check
+        input_key_set = set(input_key_tuples)
+        if len(input_key_tuples) != len(input_key_set):
             raise ValueError(
                 f"Input data contains duplicate values in upsert_keys columns "
                 f"{match_keys} within partition {partition_spec}."
             )
+
+        # 3. Scan partition in batches, build key → _ROW_ID only for
+        #    keys present in the input (avoids full-partition materialisation).
+        key_to_row_id = self._build_key_to_row_id_map(
+            match_keys, partition_spec, input_key_set
+        )
 
         # 4. Split into matched (update) vs unmatched (append)
         matched_indices: List[int] = []
@@ -255,58 +263,68 @@ class TableUpsertByKey:
         # key may legally appear in different partitions.
 
     def _build_key_to_row_id_map(
-            self, upsert_keys: List[str],
-            partition_spec: Optional[Dict[str, Any]] = None
+            self,
+            match_keys: List[str],
+            partition_spec: Optional[Dict[str, Any]],
+            input_key_set: set,
     ) -> Dict[_KeyTuple, int]:
         """
-        Read the table (scoped to the given partition if specified) and build
-        a mapping from composite key tuple to _ROW_ID.
+        Scan the partition in batches and collect key → _ROW_ID only for
+        rows whose composite key is in *input_key_set*.
+
+        ``is_in`` predicates on each key column are pushed to the scan so
+        that files whose stats do not overlap the input values are pruned
+        entirely.
 
         Args:
-            upsert_keys: Column names used as the composite match key.
-            partition_spec: Dict of partition_key -> value to restrict the scan.
-                            Pass an empty dict (or None) for non-partitioned tables.
+            match_keys:     Column names used as the composite match key
+                            (partition columns already stripped).
+            partition_spec:  Dict of partition_key → value to restrict the scan.
+                             Pass an empty dict (or None) for non-partitioned tables.
+            input_key_set:   Set of composite key tuples from the input data.
         """
         read_builder = self.table.new_read_builder()
+        predicate_builder = read_builder.new_predicate_builder()
 
-        # Apply partition predicate to limit the scan to the target partition
+        # Scan predicates: partition equality + per-column is_in for file pruning
+        predicates = []
         if partition_spec:
-            predicate_builder = read_builder.new_predicate_builder()
-            sub_predicates = [
+            predicates.extend([
                 predicate_builder.equal(k, v)
                 for k, v in partition_spec.items()
-            ]
-            partition_predicate = predicate_builder.and_predicates(sub_predicates)
-            read_builder = read_builder.with_filter(partition_predicate)
+            ])
+        for idx, key in enumerate(match_keys):
+            distinct_values = list({kt[idx] for kt in input_key_set})
+            predicates.append(predicate_builder.is_in(key, distinct_values))
+
+        if predicates:
+            read_builder = read_builder.with_filter(
+                predicate_builder.and_predicates(predicates)
+            )
 
         scan = read_builder.new_scan()
         splits = scan.plan().splits()
-
         if not splits:
             return {}
 
-        # Build read_type: include all upsert_key fields + _ROW_ID
-        key_fields = [self.table.field_dict[k] for k in upsert_keys]
+        # Read only the key columns + _ROW_ID
+        key_fields = [self.table.field_dict[k] for k in match_keys]
         read_type = key_fields + [SpecialFields.ROW_ID]
 
         table_read = TableRead(
-            table=self.table,
-            predicate=None,
-            read_type=read_type
+            table=self.table, predicate=None, read_type=read_type
         )
 
-        existing_data = table_read.to_arrow(splits)
-        if existing_data is None or existing_data.num_rows == 0:
-            return {}
-
-        key_columns = [existing_data[k].to_pylist() for k in upsert_keys]
-        row_ids = existing_data[SpecialFields.ROW_ID.name].to_pylist()
-
+        # Stream batches and filter against input_key_set on-the-fly
         key_to_row_id: Dict[_KeyTuple, int] = {}
-        for i, row_id in enumerate(row_ids):
-            key_tuple = tuple(col[i] for col in key_columns)
-            # In case of duplicates (which should not normally occur), keep the last one
-            key_to_row_id[key_tuple] = row_id
+        row_id_col = SpecialFields.ROW_ID.name
+        for batch in table_read.to_arrow_batch_reader(splits):
+            batch_key_cols = [batch.column(k).to_pylist() for k in match_keys]
+            batch_row_ids = batch.column(row_id_col).to_pylist()
+            for j, row_id in enumerate(batch_row_ids):
+                key_tuple = tuple(col[j] for col in batch_key_cols)
+                if key_tuple in input_key_set:
+                    key_to_row_id[key_tuple] = row_id
 
         return key_to_row_id
 
