@@ -310,8 +310,16 @@ public class AppendOnlyWriter implements BatchRecordWriter, MemoryOwner {
     }
 
     private RollingFileWriter<InternalRow, DataFileMeta> createRollingRowWriter() {
-        if (blobContext != null
-                || !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty()) {
+        boolean hasVectorFields =
+                !fieldsInVectorFile(writeSchema, vectorFileFormat != null).isEmpty();
+        boolean useDedicatedWriter =
+                blobContext != null
+                        || (hasVectorFields
+                                && vectorFileFormat != null
+                                && !fileFormat
+                                        .getFormatIdentifier()
+                                        .equals(vectorFileFormat.getFormatIdentifier()));
+        if (useDedicatedWriter) {
             return new DedicatedFormatRollingFileWriter(
                     fileIO,
                     schemaId,
