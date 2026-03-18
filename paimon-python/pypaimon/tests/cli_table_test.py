@@ -1254,6 +1254,81 @@ class CliTableTest(unittest.TestCase):
                 self.assertIn('dt=2024-01-01,region=us', output)
                 self.assertNotIn('dt=2024-01-02', output)
 
+    def test_cli_table_read_format_json(self):
+        """Test table read with --format json output."""
+        import json
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users', '--format', 'json']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                rows = json.loads(output)
+                self.assertIsInstance(rows, list)
+                self.assertGreaterEqual(len(rows), 5)
+                names = {r['name'] for r in rows}
+                self.assertIn('Alice', names)
+                self.assertIn('Bob', names)
+                for r in rows:
+                    self.assertIn('id', r)
+                    self.assertIn('name', r)
+                    self.assertIn('age', r)
+                    self.assertIn('city', r)
+
+    def test_cli_table_read_format_json_with_select(self):
+        """Test table read with --format json and --select."""
+        import json
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'read', 'test_db.users',
+                    '--select', 'name,age', '--format', 'json']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                rows = json.loads(output)
+                self.assertIsInstance(rows, list)
+                for r in rows:
+                    self.assertIn('name', r)
+                    self.assertIn('age', r)
+                    self.assertNotIn('id', r)
+                    self.assertNotIn('city', r)
+
+    def test_cli_table_list_partitions_format_json(self):
+        """Test list-partitions with --format json output."""
+        import json
+        self._create_partitioned_table()
+
+        with patch('sys.argv',
+                   ['paimon', '-c', self.config_file,
+                    'table', 'list-partitions', 'test_db.partitioned',
+                    '--format', 'json']):
+            with patch('sys.stdout', new_callable=StringIO) as mock_stdout:
+                try:
+                    main()
+                except SystemExit:
+                    pass
+
+                output = mock_stdout.getvalue()
+                rows = json.loads(output)
+                self.assertIsInstance(rows, list)
+                self.assertEqual(len(rows), 2)
+                for r in rows:
+                    self.assertIn('Partition', r)
+                    self.assertIn('RecordCount', r)
+                    self.assertIn('FileSizeInBytes', r)
+                    self.assertIn('FileCount', r)
+                partitions = {r['Partition'] for r in rows}
+                self.assertIn('dt=2024-01-01,region=us', partitions)
+                self.assertIn('dt=2024-01-02,region=eu', partitions)
+
     def test_cli_table_list_partitions_empty(self):
         """Test list-partitions on non-partitioned table (no snapshot = empty)."""
         # Create a table with no data

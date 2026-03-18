@@ -24,6 +24,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -38,6 +40,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.operation.commit.ConflictDetection;
 import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -79,6 +82,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -1040,6 +1044,107 @@ public class FileStoreCommitTest {
         }
         long id = store.snapshotManager().latestSnapshot().id();
         assertThat(id).isEqualTo(2);
+    }
+
+    @Test
+    public void testCommitRetryAfterFalseSuccessDoesNotCleanManifest() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue kv = gen.next();
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        long identifier = 17L;
+        store.commitDataImpl(
+                Collections.singletonList(kv),
+                gen::getPartition,
+                value -> 0,
+                false,
+                identifier,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ManifestCommittable committable = checkNotNull(committableRef.get());
+        String commitUser = "retry-false-success";
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        commitUser,
+                        new FalseSuccessSnapshotCommit(
+                                new RenamingSnapshotCommit(
+                                        store.snapshotManager(), Lock.empty())))) {
+            commit.commit(committable, false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(latestSnapshot.commitUser()).isEqualTo(commitUser);
+        assertThat(latestSnapshot.commitIdentifier()).isEqualTo(identifier);
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(1);
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store, String commitUser, SnapshotCommit snapshotCommit) {
+        String tableName = store.options().path().getName();
+        return new FileStoreCommitImpl(
+                snapshotCommit,
+                store.fileIO(),
+                new SchemaManager(store.fileIO(), store.options().path()),
+                tableName,
+                commitUser,
+                store.partitionType(),
+                store.options(),
+                store.pathFactory(),
+                store.snapshotManager(),
+                store.manifestFileFactory(),
+                store.manifestListFactory(),
+                store.indexManifestFileFactory(),
+                store::newScan,
+                store.newStatsFileHandler(),
+                store.bucketMode(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                scanner ->
+                        new ConflictDetection(
+                                tableName,
+                                commitUser,
+                                store.partitionType(),
+                                store.pathFactory(),
+                                store.newKeyComparator(),
+                                store.bucketMode(),
+                                store.options().deletionVectorsEnabled(),
+                                store.options().dataEvolutionEnabled(),
+                                store.newIndexFileHandler(),
+                                store.snapshotManager(),
+                                scanner),
+                null);
+    }
+
+    private static class FalseSuccessSnapshotCommit implements SnapshotCommit {
+
+        private final SnapshotCommit delegate;
+        private boolean firstCommit = true;
+
+        private FalseSuccessSnapshotCommit(SnapshotCommit delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public boolean commit(
+                Snapshot snapshot,
+                String branch,
+                List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                throws Exception {
+            boolean committed = delegate.commit(snapshot, branch, statistics);
+            if (firstCommit) {
+                firstCommit = false;
+                assertThat(committed).isTrue();
+                return false;
+            }
+            return committed;
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
+        }
     }
 
     private TestFileStore createStore(boolean failing, Map<String, String> options)

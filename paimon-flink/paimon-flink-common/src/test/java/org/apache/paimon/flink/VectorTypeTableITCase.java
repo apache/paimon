@@ -167,6 +167,7 @@ public class VectorTypeTableITCase extends CatalogITCaseBase {
                         + ") WITH ("
                         + "    'file.format' = 'json',"
                         + "    'file.compression' = 'none',"
+                        + "    'vector-field' = 'embed',"
                         + "    'field.embed.vector-dim' = '%d'"
                         + ")",
                 testTblName, testVector.length);
