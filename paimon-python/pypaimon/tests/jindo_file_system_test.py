@@ -128,6 +128,28 @@ class JindoFileSystemTest(unittest.TestCase):
         self.assertEqual(file_info.type, pafs.FileType.File)
         self.assertEqual(file_info.size, 10)
 
+    def test_write_and_read_small_file_with_context(self):
+        """Test writing and reading a small file (10 bytes) with random data using context manager."""
+        test_file = self._get_test_path("small-file-with-context.txt")
+        test_data = os.urandom(10)
+
+        # Write file using context manager
+        with self.fs.open_output_stream(test_file) as out_stream:
+            out_stream.write(test_data)
+
+        # Read file
+        with self.fs.open_input_file(test_file) as in_file:
+            read_data = in_file.read()
+
+        # Verify data correctness
+        self.assertEqual(test_data, read_data)
+        self.assertEqual(len(read_data), 10)
+
+        # Verify file info
+        file_info = self.fs.get_file_info(test_file)
+        self.assertEqual(file_info.type, pafs.FileType.File)
+        self.assertEqual(file_info.size, 10)
+
     def test_write_and_read_large_file(self):
         """Test writing and reading a large file (20MB) with random data."""
         test_file = self._get_test_path("large-file.bin")
