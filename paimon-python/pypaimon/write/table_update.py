@@ -27,6 +27,7 @@ from pypaimon.manifest.schema.data_file_meta import DataFileMeta
 from pypaimon.read.split import DataSplit
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.table_update_by_row_id import TableUpdateByRowId
+from pypaimon.write.table_upsert_by_key import TableUpsertByKey
 from pypaimon.write.writer.data_writer import DataWriter
 from pypaimon.write.writer.append_only_data_writer import AppendOnlyDataWriter
 
@@ -126,6 +127,24 @@ class TableUpdate:
         update_by_row_id = TableUpdateByRowId(self.table, self.commit_user)
         update_by_row_id.update_columns(table, self.update_cols)
         return update_by_row_id.commit_messages
+
+    def upsert_by_arrow_with_key(self, table: pa.Table, upsert_keys: List[str]) -> List[CommitMessage]:
+        """Upsert rows into an append-only table by one or more key columns.
+
+        For each row in the input Arrow table:
+        - If a row with the same composite upsert_keys value already exists -> update that row
+          in-place.
+        - If no matching row exists -> append as a new row.
+
+        Args:
+            table: Input Arrow table containing rows to upsert.
+            upsert_keys: One or more column names used together as a composite match key.
+
+        Returns:
+            List of CommitMessages to be committed.
+        """
+        upsert = TableUpsertByKey(self.table, self.commit_user)
+        return upsert.upsert(table, upsert_keys, self.update_cols)
 
 
 class ShardTableUpdator:
