@@ -130,11 +130,20 @@ class DataFileMeta:
             file_path=file_path,
         )
 
-    def set_file_path(self, table_path: str, partition: GenericRow, bucket: int):
+    @staticmethod
+    def _is_null_or_whitespace_only(value) -> bool:
+        if value is None:
+            return True
+        s = str(value)
+        return len(s) == 0 or s.isspace()
+
+    def set_file_path(self, table_path: str, partition: GenericRow, bucket: int,
+                     default_part_value: str = "__DEFAULT_PARTITION__"):
         path_builder = table_path.rstrip('/')
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
-            path_builder = f"{path_builder}/{field_name}={str(field_value)}"
+            part_value = default_part_value if self._is_null_or_whitespace_only(field_value) else str(field_value)
+            path_builder = f"{path_builder}/{field_name}={part_value}"
         path_builder = f"{path_builder}/bucket-{str(bucket)}/{self.file_name}"
         self.file_path = path_builder
 

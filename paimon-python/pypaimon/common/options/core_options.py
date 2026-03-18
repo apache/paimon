@@ -404,6 +404,16 @@ class CoreOptions:
         )
     )
 
+    PARTITION_DEFAULT_NAME: ConfigOption[str] = (
+        ConfigOptions.key("partition.default-name")
+        .string_type()
+        .default_value("__DEFAULT_PARTITION__")
+        .with_description(
+            "The default partition name in case the dynamic partition"
+            " column value is null/empty string."
+        )
+    )
+
     def __init__(self, options: Options):
         self.options = options
 
