@@ -71,6 +71,18 @@ public class GlobalIndexBuilderUtils {
         return results;
     }
 
+    /**
+     * Adjust rowsPerShard if the estimated shard count exceeds maxShard. Returns the adjusted
+     * rowsPerShard value.
+     */
+    public static long adjustRowsPerShard(long rowsPerShard, long totalRowCount, int maxShard) {
+        long estimatedShards = (totalRowCount + rowsPerShard - 1) / rowsPerShard;
+        if (estimatedShards > maxShard) {
+            return (totalRowCount + maxShard - 1) / maxShard;
+        }
+        return rowsPerShard;
+    }
+
     public static GlobalIndexWriter createIndexWriter(
             FileStoreTable table, String indexType, DataField indexField, Options options)
             throws IOException {

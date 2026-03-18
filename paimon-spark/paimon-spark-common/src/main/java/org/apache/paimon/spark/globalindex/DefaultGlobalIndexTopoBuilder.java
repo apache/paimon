@@ -21,6 +21,7 @@ package org.apache.paimon.spark.globalindex;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -55,6 +56,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -85,6 +87,18 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         checkArgument(
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
+
+        Integer maxShard = tableOptions.getOptional(GLOBAL_INDEX_BUILD_MAX_SHARD).orElse(null);
+        if (maxShard != null) {
+            checkArgument(
+                    maxShard > 0, "Option 'global-index.build.max-shard' must be greater than 0.");
+            List<ManifestEntry> entries =
+                    table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
+            long totalRowCount = entries.stream().mapToLong(e -> e.file().rowCount()).sum();
+            rowsPerShard =
+                    GlobalIndexBuilderUtils.adjustRowsPerShard(
+                            rowsPerShard, totalRowCount, maxShard);
+        }
 
         // generate splits for each partition && shard
         Map<BinaryRow, List<IndexedSplit>> splits = split(table, partitionPredicate, rowsPerShard);

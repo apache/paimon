@@ -645,6 +645,12 @@ under the License.
             <td>The max parallelism of Flink/Spark for building global index.</td>
         </tr>
         <tr>
+            <td><h5>global-index.build.max-shard</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The max number of shards for building global index. If the number of shards calculated by 'global-index.row-count-per-shard' exceeds this value, 'global-index.row-count-per-shard' will be recalculated as total-row-count / max-shard.</td>
+        </tr>
+        <tr>
             <td><h5>global-index.column-update-action</h5></td>
             <td style="word-wrap: break-word;">THROW_ERROR</td>
             <td><p>Enum</p></td>

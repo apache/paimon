@@ -145,6 +145,9 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             InternalArray array = (InternalArray) fieldData;
             checkDimension(array.size());
             for (int i = 0; i < dim; i++) {
+                if (array.isNullAt(i)) {
+                    throw new IllegalArgumentException("Vector element at index " + i + " is null");
+                }
                 writeBuf.putFloat(array.getFloat(i));
             }
         } else {

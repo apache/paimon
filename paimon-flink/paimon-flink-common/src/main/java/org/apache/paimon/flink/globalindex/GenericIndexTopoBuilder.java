@@ -29,12 +29,14 @@ import org.apache.paimon.flink.sink.NoopCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -62,6 +64,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
@@ -79,43 +82,57 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class GenericIndexTopoBuilder {
 
-    /**
-     * Builds a generic global index from the given manifest entries. The entries can come from a
-     * full scan or an incremental scan (only non-indexed row ranges), allowing callers to implement
-     * custom scan strategies.
-     *
-     * @param env Flink execution environment
-     * @param table the target table
-     * @param indexColumn the column to build index on
-     * @param indexType the index type identifier (e.g. "lumina-vector-ann")
-     * @param entries manifest entries to build index from (full or incremental)
-     * @param mergedOptions merged table + user options
-     */
     public static void buildIndex(
             StreamExecutionEnvironment env,
             FileStoreTable table,
             String indexColumn,
             String indexType,
-            List<ManifestEntry> entries,
-            Options mergedOptions)
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
             throws Exception {
+        buildIndex(
+                env,
+                () -> new GenericGlobalIndexBuilder(table),
+                table,
+                indexColumn,
+                indexType,
+                partitionPredicate,
+                userOptions);
+    }
+
+    /**
+     * Core method that builds a generic global index using a {@link GenericGlobalIndexBuilder}
+     * supplier.
+     *
+     * @param env Flink execution environment
+     * @param indexBuilderSupplier supplier for the index builder (encapsulates scan strategy)
+     * @param table the target table
+     * @param indexColumn the column to build index on
+     * @param indexType the index type identifier (e.g. "lumina-vector-ann")
+     * @param partitionPredicate optional partition filter
+     * @param userOptions user-provided options (merged with table options)
+     */
+    public static void buildIndex(
+            StreamExecutionEnvironment env,
+            Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
+            FileStoreTable table,
+            String indexColumn,
+            String indexType,
+            PartitionPredicate partitionPredicate,
+            Options userOptions)
+            throws Exception {
+        GenericGlobalIndexBuilder indexBuilder = indexBuilderSupplier.get();
+        if (partitionPredicate != null) {
+            indexBuilder.withPartitionPredicate(partitionPredicate);
+        }
+
+        List<ManifestEntry> entries = indexBuilder.scan();
+
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
         RowType projectedRowType = rowType.project(Collections.singletonList(indexColumn));
 
-        // Validate table configuration
-        checkArgument(
-                table.coreOptions().bucket() == -1,
-                "Generic global index only supports unaware-bucket tables (bucket = -1), "
-                        + "but table '%s' has bucket = %d.",
-                table.name(),
-                table.coreOptions().bucket());
-        checkArgument(
-                !table.coreOptions().deletionVectorsEnabled(),
-                "Generic global index does not support tables with deletion vectors enabled. "
-                        + "Table '%s' has 'deletion-vectors.enabled' = true, which may cause "
-                        + "deleted rows to be indexed.",
-                table.name());
+        Options mergedOptions = new Options(table.options(), userOptions.toMap());
 
         long rowsPerShard =
                 mergedOptions
@@ -124,6 +141,17 @@ public class GenericIndexTopoBuilder {
         checkArgument(
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
+
+        Integer maxShard =
+                mergedOptions.getOptional(CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD).orElse(null);
+        if (maxShard != null) {
+            checkArgument(
+                    maxShard > 0, "Option 'global-index.build.max-shard' must be greater than 0.");
+            long totalRowCount = entries.stream().mapToLong(e -> e.file().rowCount()).sum();
+            rowsPerShard =
+                    GlobalIndexBuilderUtils.adjustRowsPerShard(
+                            rowsPerShard, totalRowCount, maxShard);
+        }
 
         // Compute shard tasks at file level from the provided entries
         List<ShardTask> shardTasks = computeShardTasks(table, entries, rowsPerShard);
