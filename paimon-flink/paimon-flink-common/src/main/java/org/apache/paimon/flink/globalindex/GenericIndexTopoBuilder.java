@@ -67,7 +67,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -159,16 +158,11 @@ public class GenericIndexTopoBuilder {
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
-        Optional<Integer> maxShardOpt =
-                mergedOptions.getOptional(CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD);
-        if (maxShardOpt.isPresent()) {
-            int maxShard = maxShardOpt.get();
-            checkArgument(
-                    maxShard > 0, "Option 'global-index.build.max-shard' must be greater than 0.");
-            rowsPerShard =
-                    GlobalIndexBuilderUtils.adjustRowsPerShard(
-                            rowsPerShard, totalRowCount, maxShard);
-        }
+        int maxShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD);
+        checkArgument(
+                maxShard > 0, "Option 'global-index.build.max-shard' must be greater than 0.");
+        rowsPerShard =
+                GlobalIndexBuilderUtils.adjustRowsPerShard(rowsPerShard, totalRowCount, maxShard);
 
         // Compute shard tasks at file level from the provided entries
         List<ShardTask> shardTasks = computeShardTasks(table, entries, rowsPerShard);

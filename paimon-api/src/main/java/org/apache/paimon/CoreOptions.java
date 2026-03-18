@@ -2282,7 +2282,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> GLOBAL_INDEX_BUILD_MAX_SHARD =
             key("global-index.build.max-shard")
                     .intType()
-                    .noDefaultValue()
+                    .defaultValue(32)
                     .withDescription(
                             "The max number of shards for building global index. "
                                     + "If the number of shards calculated by 'global-index.row-count-per-shard' "
