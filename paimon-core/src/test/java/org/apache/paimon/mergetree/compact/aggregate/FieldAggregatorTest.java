@@ -509,8 +509,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldAvgIntAgg() {
         FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new IntType(), null, null);
-        FieldAvgAgg.Accumulator result =
-                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10);
+        FieldAvgAgg.Accumulator result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10);
         assertThat(result.sum).isEqualTo(10);
         assertThat(result.count).isEqualTo(1);
 
@@ -526,8 +525,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldAvgByteAgg() {
         FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new TinyIntType(), null, null);
-        FieldAvgAgg.Accumulator result =
-                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, (byte) 10);
+        FieldAvgAgg.Accumulator result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, (byte) 10);
         assertThat(result.sum).isEqualTo((byte) 10);
         assertThat(result.count).isEqualTo(1);
 
@@ -576,8 +574,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldAvgFloatAgg() {
         FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new FloatType(), null, null);
-        FieldAvgAgg.Accumulator result =
-                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10.0f);
+        FieldAvgAgg.Accumulator result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10.0f);
         assertThat(result.sum).isEqualTo(10.0f);
         assertThat(result.count).isEqualTo(1);
 
@@ -593,8 +590,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldAvgDoubleAgg() {
         FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new DoubleType(), null, null);
-        FieldAvgAgg.Accumulator result =
-                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10.0);
+        FieldAvgAgg.Accumulator result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10.0);
         assertThat(result.sum).isEqualTo(10.0);
         assertThat(result.count).isEqualTo(1);
 
@@ -627,8 +623,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldAvgAggWithNull() {
         FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new IntType(), null, null);
-        FieldAvgAgg.Accumulator result =
-                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10);
+        FieldAvgAgg.Accumulator result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10);
         assertThat(result).isNotNull();
         assertThat(result.sum).isEqualTo(10);
         assertThat(result.count).isEqualTo(1);
