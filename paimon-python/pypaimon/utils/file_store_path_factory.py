@@ -91,7 +91,11 @@ class FileStorePathFactory:
         if partition:
             partition_parts = []
             for i, field_name in enumerate(self.partition_keys):
-                partition_parts.append(f"{field_name}={partition[i]}")
+                val = partition[i]
+                if val is None or (isinstance(val, str) and
+                                   (len(val) == 0 or val.isspace())):
+                    val = self.default_part_value
+                partition_parts.append(f"{field_name}={val}")
             if partition_parts:
                 relative_parts = partition_parts + relative_parts
 
