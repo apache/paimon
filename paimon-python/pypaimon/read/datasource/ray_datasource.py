@@ -137,16 +137,19 @@ class RayDatasource(Datasource):
             from pypaimon.read.table_read import TableRead
             worker_table_read = TableRead(table, predicate, read_type)
 
-            arrow_table = worker_table_read.to_arrow(splits)
+            batch_reader = worker_table_read.to_arrow_batch_reader(splits)
+            has_data = False
+            for batch in iter(batch_reader.read_next_batch, None):
+                if batch.num_rows == 0:
+                    continue
+                has_data = True
+                yield pyarrow.Table.from_batches([batch], schema=schema)
 
-            if arrow_table is not None and arrow_table.num_rows > 0:
-                return [arrow_table]
-            else:
-                empty_table = pyarrow.Table.from_arrays(
+            if not has_data:
+                yield pyarrow.Table.from_arrays(
                     [pyarrow.array([], type=field.type) for field in schema],
                     schema=schema
                 )
-                return [empty_table]
 
         # Use partial to create read function without capturing self
         get_read_task = partial(
