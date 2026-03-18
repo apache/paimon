@@ -31,6 +31,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
+import org.apache.spark.sql.sources.AlwaysFalse;
+import org.apache.spark.sql.sources.AlwaysTrue;
 import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
@@ -227,6 +229,36 @@ public class SparkFilterConverterTest {
 
         assertThat(dateExpression).isEqualTo(rawExpression);
         assertThat(localDateExpression).isEqualTo(rawExpression);
+    }
+
+    @Test
+    public void testAlwaysTrue() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "id", new IntType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        AlwaysTrue alwaysTrue = AlwaysTrue.apply();
+        Predicate expectedAlwaysTrue = builder.alwaysTrue();
+        Predicate actualAlwaysTrue = converter.convert(alwaysTrue);
+        assertThat(actualAlwaysTrue).isEqualTo(expectedAlwaysTrue);
+        assertThat(actualAlwaysTrue.test(GenericRow.of(1))).isTrue();
+        assertThat(actualAlwaysTrue.test(GenericRow.of((Object) null))).isTrue();
+    }
+
+    @Test
+    public void testAlwaysFalse() {
+        RowType rowType =
+                new RowType(Collections.singletonList(new DataField(0, "id", new IntType())));
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        AlwaysFalse alwaysFalse = AlwaysFalse.apply();
+        Predicate expectedAlwaysFalse = builder.alwaysFalse();
+        Predicate actualAlwaysFalse = converter.convert(alwaysFalse);
+        assertThat(actualAlwaysFalse).isEqualTo(expectedAlwaysFalse);
+        assertThat(actualAlwaysFalse.test(GenericRow.of(1))).isFalse();
+        assertThat(actualAlwaysFalse.test(GenericRow.of((Object) null))).isFalse();
     }
 
     @Test

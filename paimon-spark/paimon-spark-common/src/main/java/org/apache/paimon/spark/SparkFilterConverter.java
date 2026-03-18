@@ -23,6 +23,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.spark.sql.sources.AlwaysFalse;
+import org.apache.spark.sql.sources.AlwaysTrue;
 import org.apache.spark.sql.sources.And;
 import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
@@ -68,7 +70,9 @@ public class SparkFilterConverter {
                     "Not",
                     "StringStartsWith",
                     "StringEndsWith",
-                    "StringContains");
+                    "StringContains",
+                    "AlwaysTrue",
+                    "AlwaysFalse");
 
     private final RowType rowType;
     private final PredicateBuilder builder;
@@ -171,9 +175,12 @@ public class SparkFilterConverter {
             int index = fieldIndex(contains.attribute());
             Object literal = convertLiteral(index, contains.value());
             return builder.contains(index, literal);
+        } else if (filter instanceof AlwaysTrue) {
+            return builder.alwaysTrue();
+        } else if (filter instanceof AlwaysFalse) {
+            return builder.alwaysFalse();
         }
 
-        // TODO: AlwaysTrue, AlwaysFalse
         throw new UnsupportedOperationException(
                 filter + " is unsupported. Support Filters: " + SUPPORT_FILTERS);
     }
