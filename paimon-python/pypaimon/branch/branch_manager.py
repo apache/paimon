@@ -18,10 +18,11 @@
 import logging
 from typing import List, Optional
 
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
+
 logger = logging.getLogger(__name__)
 
 BRANCH_PREFIX = "branch-"
-DEFAULT_MAIN_BRANCH = "main"
 
 
 class BranchManager:
