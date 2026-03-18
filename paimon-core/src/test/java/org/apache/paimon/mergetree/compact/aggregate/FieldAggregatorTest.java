@@ -40,6 +40,8 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFact
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
+import org.apache.paimon.mergetree.compact.aggregate.FieldAvgAgg;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAvgAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldProductAggFactory;
@@ -503,6 +505,139 @@ public class FieldAggregatorTest {
     private static Decimal toDecimal(int i) {
         return Decimal.fromBigDecimal(
                 new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);
+    }
+
+    @Test
+    public void testFieldAvgIntAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new IntType(), null, null);
+        FieldAvgAgg.Accumulator result =
+                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10);
+        assertThat(result.sum).isEqualTo(10);
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, 20);
+        assertThat(result.sum).isEqualTo(30);
+        assertThat(result.count).isEqualTo(2);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.retract(result, 10);
+        assertThat(result.sum).isEqualTo(20);
+        assertThat(result.count).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldAvgByteAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new TinyIntType(), null, null);
+        FieldAvgAgg.Accumulator result =
+                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, (byte) 10);
+        assertThat(result.sum).isEqualTo((byte) 10);
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, (byte) 20);
+        assertThat(result.sum).isEqualTo((byte) 30);
+        assertThat(result.count).isEqualTo(2);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.retract(result, (byte) 10);
+        assertThat(result.sum).isEqualTo((byte) 20);
+        assertThat(result.count).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldAvgShortAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new SmallIntType(), null, null);
+        FieldAvgAgg.Accumulator result =
+                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, (short) 10);
+        assertThat(result.sum).isEqualTo((short) 10);
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, (short) 20);
+        assertThat(result.sum).isEqualTo((short) 30);
+        assertThat(result.count).isEqualTo(2);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.retract(result, (short) 10);
+        assertThat(result.sum).isEqualTo((short) 20);
+        assertThat(result.count).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldAvgLongAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new BigIntType(), null, null);
+        FieldAvgAgg.Accumulator result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10L);
+        assertThat(result.sum).isEqualTo(10L);
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, 20L);
+        assertThat(result.sum).isEqualTo(30L);
+        assertThat(result.count).isEqualTo(2);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.retract(result, 10L);
+        assertThat(result.sum).isEqualTo(20L);
+        assertThat(result.count).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldAvgFloatAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new FloatType(), null, null);
+        FieldAvgAgg.Accumulator result =
+                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10.0f);
+        assertThat(result.sum).isEqualTo(10.0f);
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, 20.0f);
+        assertThat(result.sum).isEqualTo(30.0f);
+        assertThat(result.count).isEqualTo(2);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.retract(result, 10.0f);
+        assertThat(result.sum).isEqualTo(20.0f);
+        assertThat(result.count).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldAvgDoubleAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new DoubleType(), null, null);
+        FieldAvgAgg.Accumulator result =
+                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10.0);
+        assertThat(result.sum).isEqualTo(10.0);
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, 20.0);
+        assertThat(result.sum).isEqualTo(30.0);
+        assertThat(result.count).isEqualTo(2);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.retract(result, 10.0);
+        assertThat(result.sum).isEqualTo(20.0);
+        assertThat(result.count).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldAvgDecimalAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new DecimalType(), null, null);
+        FieldAvgAgg.Accumulator result =
+                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, toDecimal(10));
+        assertThat(result.sum).isEqualTo(toDecimal(10));
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, toDecimal(20));
+        assertThat(result.sum).isEqualTo(toDecimal(30));
+        assertThat(result.count).isEqualTo(2);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.retract(result, toDecimal(10));
+        assertThat(result.sum).isEqualTo(toDecimal(20));
+        assertThat(result.count).isEqualTo(1);
+    }
+
+    @Test
+    public void testFieldAvgAggWithNull() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAggFactory().create(new IntType(), null, null);
+        FieldAvgAgg.Accumulator result =
+                (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(null, 10);
+        assertThat(result).isNotNull();
+        assertThat(result.sum).isEqualTo(10);
+        assertThat(result.count).isEqualTo(1);
+
+        result = (FieldAvgAgg.Accumulator) fieldAvgAgg.agg(result, null);
+        assertThat(result).isNotNull();
+        assertThat(result.sum).isEqualTo(10);
+        assertThat(result.count).isEqualTo(1);
     }
 
     @Test

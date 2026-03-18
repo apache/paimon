@@ -36,5 +36,6 @@ org.apache.paimon.mergetree.compact.aggregate.factory.FieldProductAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap32AggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldRoaringBitmap64AggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldSumAggFactory
+org.apache.paimon.mergetree.compact.aggregate.factory.FieldAvgAggFactory
 org.apache.paimon.mergetree.compact.aggregate.factory.FieldThetaSketchAggFactory
 org.apache.paimon.rest.RESTCatalogFactory
