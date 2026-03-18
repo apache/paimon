@@ -98,7 +98,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                 GlobalIndexBuilderUtils.adjustRowsPerShard(rowsPerShard, totalRowCount, maxShard);
 
         // generate splits for each partition && shard
-        Map<BinaryRow, List<IndexedSplit>> splits = split(table, partitionPredicate, rowsPerShard);
+        Map<BinaryRow, List<IndexedSplit>> splits = split(table, entries, rowsPerShard);
 
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark.sparkContext());
         List<Pair<byte[], byte[]>> taskList = new ArrayList<>();
@@ -150,11 +150,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
     }
 
     private static Map<BinaryRow, List<IndexedSplit>> split(
-            FileStoreTable table, PartitionPredicate partitions, long rowsPerShard) {
+            FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard) {
         FileStorePathFactory pathFactory = table.store().pathFactory();
-        // Get all manifest entries from the table scan
-        List<ManifestEntry> entries =
-                table.store().newScan().withPartitionFilter(partitions).plan().files();
 
         // Group manifest entries by partition
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =

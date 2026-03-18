@@ -510,8 +510,9 @@ public class GenericIndexTopoBuilder {
                                 new Committable(
                                         BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessage)));
             } catch (Exception e) {
-                closeWriterQuietly(indexWriter);
                 throw e;
+            } finally {
+                closeWriterQuietly(indexWriter);
             }
         }
 

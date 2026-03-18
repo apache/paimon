@@ -2287,7 +2287,8 @@ public class CoreOptions implements Serializable {
                             "The max number of shards for building global index. "
                                     + "If the number of shards calculated by 'global-index.row-count-per-shard' "
                                     + "exceeds this value, 'global-index.row-count-per-shard' will be "
-                                    + "recalculated as total-row-count / max-shard.");
+                                    + "recalculated as ceil(total-row-count / max-shard) to guarantee "
+                                    + "the shard count does not exceed max-shard.");
 
     public static final ConfigOption<Integer> GLOBAL_INDEX_BUILD_MAX_PARALLELISM =
             key("global-index.build.max-parallelism")
