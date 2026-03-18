@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
 import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -101,13 +102,22 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                         partitionPredicate,
                         userOptions);
             } else {
+                Options mergedOptions = new Options(table.options(), userOptions.toMap());
+
+                // Full scan of all manifest entries
+                List<ManifestEntry> entries =
+                        table.store()
+                                .newScan()
+                                .withPartitionFilter(partitionPredicate)
+                                .plan()
+                                .files();
                 GenericIndexTopoBuilder.buildIndex(
                         procedureContext.getExecutionEnvironment(),
                         table,
                         indexColumn,
                         indexType,
-                        partitionPredicate,
-                        userOptions);
+                        entries,
+                        mergedOptions);
             }
         } catch (Exception e) {
             throw new RuntimeException(

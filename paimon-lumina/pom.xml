@@ -31,6 +31,17 @@ under the License.
     <artifactId>paimon-lumina</artifactId>
     <name>Paimon : Lumina Index</name>
 
+    <distributionManagement>
+        <repository>
+            <id>releases</id>
+            <url>http://mvnrepo.alibaba-inc.com/mvn/repository</url>
+        </repository>
+        <snapshotRepository>
+            <id>releases</id>
+            <url>http://mvnrepo.alibaba-inc.com/mvn/repository</url>
+        </snapshotRepository>
+    </distributionManagement>
+
     <repositories>
         <repository>
             <id>lumina</id>

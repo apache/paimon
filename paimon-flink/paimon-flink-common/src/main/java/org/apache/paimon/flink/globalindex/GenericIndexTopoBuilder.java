@@ -35,7 +35,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -74,21 +73,31 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /**
  * Builds a Flink topology for creating generic (non-btree) global indexes with parallelism. Each
  * shard becomes an independent Flink task. Files are assigned to shards at file level (like Spark),
- * so each shard only reads the files it needs with no redundant I/O.
+ * so each shard only contains the files whose row ID ranges overlap with its shard range. When a
+ * file spans multiple shard boundaries, it is included in each overlapping shard and rows outside
+ * the shard's range are filtered during reading.
  */
 public class GenericIndexTopoBuilder {
 
     /**
-     * Builds a generic global index using a parallel Flink topology. Each shard is processed as an
-     * independent task.
+     * Builds a generic global index from the given manifest entries. The entries can come from a
+     * full scan or an incremental scan (only non-indexed row ranges), allowing callers to implement
+     * custom scan strategies.
+     *
+     * @param env Flink execution environment
+     * @param table the target table
+     * @param indexColumn the column to build index on
+     * @param indexType the index type identifier (e.g. "lumina-vector-ann")
+     * @param entries manifest entries to build index from (full or incremental)
+     * @param mergedOptions merged table + user options
      */
     public static void buildIndex(
             StreamExecutionEnvironment env,
             FileStoreTable table,
             String indexColumn,
             String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions)
+            List<ManifestEntry> entries,
+            Options mergedOptions)
             throws Exception {
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
@@ -108,7 +117,6 @@ public class GenericIndexTopoBuilder {
                         + "deleted rows to be indexed.",
                 table.name());
 
-        Options mergedOptions = new Options(table.options(), userOptions.toMap());
         long rowsPerShard =
                 mergedOptions
                         .getOptional(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
@@ -117,8 +125,8 @@ public class GenericIndexTopoBuilder {
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
-        // Scan manifest entries and compute shard tasks at file level
-        List<ShardTask> shardTasks = computeShardTasks(table, partitionPredicate, rowsPerShard);
+        // Compute shard tasks at file level from the provided entries
+        List<ShardTask> shardTasks = computeShardTasks(table, entries, rowsPerShard);
         if (shardTasks.isEmpty()) {
             return;
         }
@@ -127,6 +135,9 @@ public class GenericIndexTopoBuilder {
                 mergedOptions
                         .getOptional(CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM)
                         .orElse(CoreOptions.GLOBAL_INDEX_BUILD_MAX_PARALLELISM.defaultValue());
+        checkArgument(
+                maxParallelism > 0,
+                "Option 'global-index.build.max-parallelism' must be greater than 0.");
         int parallelism = Math.min(shardTasks.size(), maxParallelism);
 
         // Build Flink topology
@@ -158,19 +169,15 @@ public class GenericIndexTopoBuilder {
     }
 
     /**
-     * Compute shard tasks at file level. Each shard only contains the files whose row ID ranges
-     * overlap with the shard's range. A file spanning multiple shard boundaries is included in each
-     * overlapping shard.
+     * Compute shard tasks at file level from the given manifest entries. Each shard only contains
+     * the files whose row ID ranges overlap with its shard range. A file spanning multiple shard
+     * boundaries is included in each overlapping shard.
      */
     static List<ShardTask> computeShardTasks(
-            FileStoreTable table, PartitionPredicate partitionPredicate, long rowsPerShard)
+            FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard)
             throws IOException {
         int partitionFieldSize = table.partitionKeys().size();
         BinaryRowSerializer serializer = new BinaryRowSerializer(partitionFieldSize);
-
-        // Get all manifest entries
-        List<ManifestEntry> entries =
-                table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
 
         // Group by partition
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
