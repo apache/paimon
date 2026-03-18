@@ -23,6 +23,7 @@ import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.table.functions.ScalarFunction;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -469,6 +470,67 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
 
         testBatchRead(
                 "SELECT id, name, `value` FROM T$row_tracking where _ROW_ID in (1, 2, 3, 7, 8, 11, 15, 18)",
+                expected);
+    }
+
+    @ParameterizedTest(name = "use default db = {0}, invoker - {1}")
+    @MethodSource("testArguments")
+    public void testSelfMerge(boolean inDefault, String invoker) throws Exception {
+        String targetDb = inDefault ? database : "test_db";
+        if (!inDefault) {
+            // create target table in a new database
+            sEnv.executeSql("DROP TABLE T");
+            sEnv.executeSql("CREATE DATABASE test_db");
+            sEnv.executeSql("USE test_db");
+            bEnv.executeSql("USE test_db");
+            prepareTargetTable();
+        }
+
+        List<Row> expected =
+                Arrays.asList(
+                        changelogRow("+I", 2, "name2_test_udf"),
+                        changelogRow("+I", 3, "name3_test_udf"),
+                        changelogRow("+I", 4, "name4_test_udf"),
+                        changelogRow("+I", 8, "name8_test_udf"),
+                        changelogRow("+I", 9, "name9_test_udf"),
+                        changelogRow("+I", 12, "name12_test_udf"),
+                        changelogRow("+I", 16, "name16_test_udf"),
+                        changelogRow("+I", 19, "name19_test_udf"));
+
+        String udfName =
+                "org.apache.paimon.flink.action.DataEvolutionMergeIntoActionITCase$StringConcatUdf";
+        String createFuncSql = "CREATE TEMPORARY FUNCTION concat_string AS";
+        String createViewSql =
+                String.format(
+                        "CREATE TEMPORARY VIEW SS AS SELECT _ROW_ID, concat_string(name) AS name FROM `%s`.`T$row_tracking`",
+                        targetDb);
+        if (invoker.equals("action")) {
+            DataEvolutionMergeIntoActionBuilder builder =
+                    builder(warehouse, targetDb, "T")
+                            .withMergeCondition("TempT._ROW_ID=SS._ROW_ID")
+                            .withMatchedUpdateSet("TempT.name=SS.name")
+                            .withSourceTable("SS")
+                            .withTargetAlias("TempT")
+                            .withSourceSqls(
+                                    String.format("%s '%s'", createFuncSql, udfName), createViewSql)
+                            .withSinkParallelism(2);
+
+            builder.build().run();
+        } else {
+            String procedureStatement =
+                    String.format(
+                            "CALL sys.data_evolution_merge_into('%s.T', 'TempT', '%s',"
+                                    + " 'SS', 'TempT._ROW_ID=SS._ROW_ID', 'name=SS.name', 2)",
+                            targetDb,
+                            String.format("%s ''%s''", createFuncSql, udfName)
+                                    + ";"
+                                    + createViewSql);
+
+            executeSQL(procedureStatement, false, true);
+        }
+
+        testBatchRead(
+                "SELECT id, name FROM T$row_tracking where _ROW_ID in (1, 2, 3, 7, 8, 11, 15, 18)",
                 expected);
     }
 
@@ -919,5 +981,13 @@ public class DataEvolutionMergeIntoActionITCase extends ActionITCaseBase {
             hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
         }
         return new String(hexChars);
+    }
+
+    /** The test udf to test udf in merge into situation. */
+    public static class StringConcatUdf extends ScalarFunction {
+
+        public String eval(String input) {
+            return input + "_test_udf";
+        }
     }
 }
