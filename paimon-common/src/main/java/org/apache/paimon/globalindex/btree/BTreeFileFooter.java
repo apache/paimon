@@ -32,8 +32,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class BTreeFileFooter {
 
     public static final int MAGIC_NUMBER = 198732882;
-    public static final int ENCODED_LENGTH = 48;
+    public static final int CURRENT_VERSION = 1;
+    public static final int ENCODED_LENGTH = 52;
 
+    private final int version;
     @Nullable private final BloomFilterHandle bloomFilterHandle;
     private final BlockHandle indexBlockHandle;
     @Nullable private final BlockHandle nullBitmapHandle;
@@ -42,9 +44,22 @@ public class BTreeFileFooter {
             @Nullable BloomFilterHandle bloomFilterHandle,
             BlockHandle indexBlockHandle,
             BlockHandle nullBitmapHandle) {
+        this(CURRENT_VERSION, bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
+    }
+
+    public BTreeFileFooter(
+            int version,
+            @Nullable BloomFilterHandle bloomFilterHandle,
+            BlockHandle indexBlockHandle,
+            BlockHandle nullBitmapHandle) {
+        this.version = version;
         this.bloomFilterHandle = bloomFilterHandle;
         this.indexBlockHandle = indexBlockHandle;
         this.nullBitmapHandle = nullBitmapHandle;
+    }
+
+    public int getVersion() {
+        return version;
     }
 
     @Nullable
@@ -62,6 +77,16 @@ public class BTreeFileFooter {
     }
 
     public static BTreeFileFooter readFooter(MemorySliceInput sliceInput) {
+        // read version and verify magic number
+        sliceInput.setPosition(ENCODED_LENGTH - 8);
+
+        int version = sliceInput.readInt();
+        int magicNumber = sliceInput.readInt();
+        checkArgument(
+                magicNumber == MAGIC_NUMBER, "File is not a btree index file (bad magic number)");
+
+        sliceInput.setPosition(0);
+
         // read bloom filter and index handles
         @Nullable
         BloomFilterHandle bloomFilterHandle =
@@ -80,14 +105,7 @@ public class BTreeFileFooter {
             nullBitmapHandle = null;
         }
 
-        // skip padding
-        sliceInput.setPosition(ENCODED_LENGTH - 4);
-
-        // verify magic number
-        int magicNumber = sliceInput.readInt();
-        checkArgument(magicNumber == MAGIC_NUMBER, "File is not a table (bad magic number)");
-
-        return new BTreeFileFooter(bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
+        return new BTreeFileFooter(version, bloomFilterHandle, indexBlockHandle, nullBitmapHandle);
     }
 
     public static MemorySlice writeFooter(BTreeFileFooter footer) {
@@ -119,7 +137,8 @@ public class BTreeFileFooter {
             sliceOutput.writeInt(footer.nullBitmapHandle.size());
         }
 
-        // write magic number
+        // write version and magic number
+        sliceOutput.writeInt(footer.version);
         sliceOutput.writeInt(MAGIC_NUMBER);
     }
 }
