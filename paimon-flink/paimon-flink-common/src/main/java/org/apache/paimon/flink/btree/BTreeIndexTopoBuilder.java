@@ -170,15 +170,15 @@ public class BTreeIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        buildIndex(
+        if (buildIndex(
                 env,
                 () -> new BTreeGlobalIndexBuilder(table),
                 table,
                 Collections.singletonList(indexColumn),
                 partitionPredicate,
-                userOptions);
-
-        env.execute("Create btree global index for table: " + table.name());
+                userOptions)) {
+            env.execute("Create btree global index for table: " + table.name());
+        }
     }
 
     protected static DataStream<Committable> executeForPartitionRange(
