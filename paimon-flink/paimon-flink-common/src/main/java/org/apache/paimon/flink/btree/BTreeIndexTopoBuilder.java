@@ -72,7 +72,7 @@ import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitB
 /** The {@link BTreeIndexTopoBuilder} for BTree index in Flink. */
 public class BTreeIndexTopoBuilder {
 
-    public static void buildIndex(
+    public static boolean buildIndex(
             StreamExecutionEnvironment env,
             Supplier<BTreeGlobalIndexBuilder> indexBuilderSupplier,
             FileStoreTable table,
@@ -90,12 +90,12 @@ public class BTreeIndexTopoBuilder {
 
             List<DataSplit> splits = splitByContiguousRowRange(indexBuilder.scan());
             if (splits.isEmpty()) {
-                return;
+                return false;
             }
             Map<BinaryRow, Map<Range, List<DataSplit>>> partitionRangeSplits =
                     groupSplitsByRange(splits);
             if (partitionRangeSplits.isEmpty()) {
-                return;
+                return false;
             }
 
             // 2. Select necessary columns (index field + ROW_ID)
@@ -160,10 +160,10 @@ public class BTreeIndexTopoBuilder {
             commit(table, allCommitMessages);
         }
 
-        env.execute("Create btree global index for table: " + table.name());
+        return true;
     }
 
-    public static void buildIndex(
+    public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
             FileStoreTable table,
             String indexColumn,
@@ -177,6 +177,8 @@ public class BTreeIndexTopoBuilder {
                 Collections.singletonList(indexColumn),
                 partitionPredicate,
                 userOptions);
+
+        env.execute("Create btree global index for table: " + table.name());
     }
 
     protected static DataStream<Committable> executeForPartitionRange(
