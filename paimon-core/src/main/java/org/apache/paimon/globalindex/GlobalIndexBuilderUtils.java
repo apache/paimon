@@ -76,11 +76,16 @@ public class GlobalIndexBuilderUtils {
      * rowsPerShard value.
      */
     public static long adjustRowsPerShard(long rowsPerShard, long totalRowCount, int maxShard) {
-        long estimatedShards = (totalRowCount + rowsPerShard - 1) / rowsPerShard;
+        long estimatedShards = ceilDivision(totalRowCount, rowsPerShard);
         if (estimatedShards > maxShard) {
-            return (totalRowCount + maxShard - 1) / maxShard;
+            return ceilDivision(totalRowCount, maxShard);
         }
         return rowsPerShard;
+    }
+
+    /** Integer ceiling division: returns ceil(a / b) for positive a and b. */
+    private static long ceilDivision(long a, long b) {
+        return (a + b - 1) / b;
     }
 
     public static GlobalIndexWriter createIndexWriter(

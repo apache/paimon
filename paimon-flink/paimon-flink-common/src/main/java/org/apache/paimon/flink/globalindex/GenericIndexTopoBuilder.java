@@ -67,6 +67,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -80,10 +81,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Builds a Flink topology for creating generic (non-btree) global indexes with parallelism. Each
- * shard becomes an independent Flink task. Files are assigned to shards at file level (like Spark),
- * so each shard only contains the files whose row ID ranges overlap with its shard range. When a
- * file spans multiple shard boundaries, it is included in each overlapping shard and rows outside
- * the shard's range are filtered during reading.
+ * shard becomes an independent Flink task. Files are assigned to shards at file level, so each
+ * shard only contains the files whose row ID ranges overlap with its shard range. When a file spans
+ * multiple shard boundaries, it is included in each overlapping shard and rows outside the shard's
+ * range are filtered during reading.
  */
 public class GenericIndexTopoBuilder {
 
@@ -108,8 +109,7 @@ public class GenericIndexTopoBuilder {
     }
 
     /**
-     * Core method that builds a generic global index using a {@link GenericGlobalIndexBuilder}
-     * supplier.
+     * Builds a generic global index using a {@link GenericGlobalIndexBuilder} supplier.
      *
      * @param env Flink execution environment
      * @param indexBuilderSupplier supplier for the index builder (encapsulates scan strategy)
@@ -154,17 +154,15 @@ public class GenericIndexTopoBuilder {
 
         Options mergedOptions = new Options(table.options(), userOptions.toMap());
 
-        long rowsPerShard =
-                mergedOptions
-                        .getOptional(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
-                        .orElse(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD.defaultValue());
+        long rowsPerShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD);
         checkArgument(
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
-        Integer maxShard =
-                mergedOptions.getOptional(CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD).orElse(null);
-        if (maxShard != null) {
+        Optional<Integer> maxShardOpt =
+                mergedOptions.getOptional(CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD);
+        if (maxShardOpt.isPresent()) {
+            int maxShard = maxShardOpt.get();
             checkArgument(
                     maxShard > 0, "Option 'global-index.build.max-shard' must be greater than 0.");
             rowsPerShard =
@@ -234,8 +232,7 @@ public class GenericIndexTopoBuilder {
      * boundaries is included in each overlapping shard.
      */
     static List<ShardTask> computeShardTasks(
-            FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard)
-            throws IOException {
+            FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard) {
         // Group by partition (bucket is always 0 for unaware-bucket tables)
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
                 entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
