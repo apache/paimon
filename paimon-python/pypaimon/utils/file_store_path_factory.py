@@ -21,6 +21,13 @@ from pypaimon.common.external_path_provider import ExternalPathProvider
 from pypaimon.table.bucket_mode import BucketMode
 
 
+def _is_null_or_whitespace_only(value) -> bool:
+    if value is None:
+        return True
+    s = str(value)
+    return len(s) == 0 or s.isspace()
+
+
 class FileStorePathFactory:
     MANIFEST_PATH = "manifest"
     MANIFEST_PREFIX = "manifest-"
@@ -92,9 +99,10 @@ class FileStorePathFactory:
             partition_parts = []
             for i, field_name in enumerate(self.partition_keys):
                 val = partition[i]
-                if val is None or (isinstance(val, str) and
-                                   (len(val) == 0 or val.isspace())):
+                if _is_null_or_whitespace_only(val):
                     val = self.default_part_value
+                else:
+                    val = str(val)
                 partition_parts.append(f"{field_name}={val}")
             if partition_parts:
                 relative_parts = partition_parts + relative_parts
