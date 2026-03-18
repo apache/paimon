@@ -40,6 +40,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -133,7 +134,11 @@ public class GenericIndexTopoBuilder {
 
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
-        RowType projectedRowType = rowType.project(Collections.singletonList(indexColumn));
+        // Project indexColumn + _ROW_ID so we can read the actual row ID from data
+        List<String> readColumns = new ArrayList<>();
+        readColumns.add(indexColumn);
+        readColumns.add(SpecialFields.ROW_ID.name());
+        RowType projectedRowType = SpecialFields.rowTypeWithRowId(rowType).project(readColumns);
 
         Options mergedOptions = new Options(table.options(), userOptions.toMap());
 
@@ -221,7 +226,7 @@ public class GenericIndexTopoBuilder {
         int partitionFieldSize = table.partitionKeys().size();
         BinaryRowSerializer serializer = new BinaryRowSerializer(partitionFieldSize);
 
-        // Group by partition
+        // Group by partition (bucket is always 0 for unaware-bucket tables)
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
                 entries.stream().collect(Collectors.groupingBy(ManifestEntry::partition));
 
@@ -427,33 +432,26 @@ public class GenericIndexTopoBuilder {
             InternalRow.FieldGetter getter =
                     InternalRow.createFieldGetter(
                             indexField.type(), projectedRowType.getFieldIndex(indexField.name()));
+            int rowIdFieldIndex = projectedRowType.getFieldIndex(SpecialFields.ROW_ID.name());
 
             GlobalIndexSingletonWriter indexWriter =
                     (GlobalIndexSingletonWriter)
                             createIndexWriter(table, indexType, indexField, mergedOptions);
 
             try {
-                // Compute the absolute row ID of the first row in this split
-                long splitFirstRowId =
-                        task.split.dataFiles().stream()
-                                .mapToLong(DataFileMeta::nonNullFirstRowId)
-                                .min()
-                                .orElse(0);
-
                 try (RecordReader<InternalRow> reader =
                                 readBuilder.newRead().createReader(task.split);
                         CloseableIterator<InternalRow> iter = reader.toCloseableIterator()) {
-                    long currentRowId = splitFirstRowId;
                     while (iter.hasNext()) {
                         InternalRow row = iter.next();
-                        // Only write rows within this shard's range
-                        if (currentRowId >= task.shardRange.from
-                                && currentRowId <= task.shardRange.to) {
-                            indexWriter.write(getter.getFieldOrNull(row));
-                        }
-                        currentRowId++;
+                        long currentRowId = row.getLong(rowIdFieldIndex);
+
                         if (currentRowId > task.shardRange.to) {
                             break;
+                        }
+                        // Only write rows within this shard's range
+                        if (currentRowId >= task.shardRange.from) {
+                            indexWriter.write(getter.getFieldOrNull(row));
                         }
                     }
                 }
