@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.globalindex;
 
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.table.FileStoreTable;
@@ -25,6 +26,7 @@ import org.apache.paimon.table.FileStoreTable;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -77,5 +79,14 @@ public class GenericGlobalIndexBuilder implements Serializable {
                 table.name());
 
         return table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
+    }
+
+    /**
+     * Returns old index file entries that should be deleted after new indexes are built. Called
+     * after {@link #scan()}. Default returns empty list (full builds don't delete). Subclasses
+     * override for merge/rebuild scenarios.
+     */
+    public List<IndexManifestEntry> deletedIndexEntries() {
+        return Collections.emptyList();
     }
 }

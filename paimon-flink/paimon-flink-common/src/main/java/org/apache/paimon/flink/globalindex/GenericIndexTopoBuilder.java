@@ -34,6 +34,7 @@ import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
@@ -70,6 +71,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
 import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
 import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
+import static org.apache.paimon.io.DataIncrement.deleteIndexIncrement;
 import static org.apache.paimon.io.DataIncrement.indexIncrement;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -127,6 +129,7 @@ public class GenericIndexTopoBuilder {
         }
 
         List<ManifestEntry> entries = indexBuilder.scan();
+        List<IndexManifestEntry> deletedIndexEntries = indexBuilder.deletedIndexEntries();
 
         RowType rowType = table.rowType();
         DataField indexField = rowType.getField(indexColumn);
@@ -190,6 +193,17 @@ public class GenericIndexTopoBuilder {
                                         projectedRowType,
                                         mergedOptions))
                         .setParallelism(parallelism);
+
+        if (!deletedIndexEntries.isEmpty()) {
+            List<Committable> deleteCommittables = createDeleteCommittables(deletedIndexEntries);
+            DataStream<Committable> deletes =
+                    env.fromData(
+                                    new CommittableTypeInfo(),
+                                    deleteCommittables.toArray(new Committable[0]))
+                            .name("Index Delete Source")
+                            .setParallelism(1);
+            built = built.union(deletes);
+        }
 
         commit(table, indexType, built);
 
@@ -319,6 +333,22 @@ public class GenericIndexTopoBuilder {
 
         return new ShardTask(
                 dataSplit, new Range(rangeFrom, rangeTo), partitionBytes, partitionFieldSize);
+    }
+
+    private static List<Committable> createDeleteCommittables(
+            List<IndexManifestEntry> deletedEntries) {
+        List<Committable> committables = new ArrayList<>();
+        for (IndexManifestEntry entry : deletedEntries) {
+            CommitMessage msg =
+                    new CommitMessageImpl(
+                            entry.partition(),
+                            entry.bucket(),
+                            null,
+                            deleteIndexIncrement(Collections.singletonList(entry.indexFile())),
+                            emptyIncrement());
+            committables.add(new Committable(BatchWriteBuilder.COMMIT_IDENTIFIER, msg));
+        }
+        return committables;
     }
 
     private static void commit(

@@ -411,6 +411,87 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
         assertThat(totalRowCount).isEqualTo(50L);
     }
 
+    @Test
+    public void testDeletedIndexEntriesDefault() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_DEL_DEFAULT (id INT, v ARRAY<FLOAT>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'lumina.index.dimension' = '3', "
+                        + "'lumina.distance.metric' = 'l2'"
+                        + ")");
+
+        FileStoreTable table = paimonTable("T_DEL_DEFAULT");
+        GenericGlobalIndexBuilder builder = new GenericGlobalIndexBuilder(table);
+        assertThat(builder.deletedIndexEntries()).isEmpty();
+    }
+
+    @Test
+    public void testDeletedIndexEntriesAtomicCommit() throws Exception {
+        sql(
+                "CREATE TABLE T_DEL_ATOMIC (id INT, v ARRAY<FLOAT>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'lumina.index.dimension' = '3', "
+                        + "'lumina.distance.metric' = 'l2'"
+                        + ")");
+
+        sql("INSERT INTO T_DEL_ATOMIC VALUES " + vectorValues(0, 100, 3));
+
+        // First build: create initial index
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.T_DEL_ATOMIC', "
+                        + "index_column => 'v', "
+                        + "index_type => '"
+                        + INDEX_TYPE
+                        + "')");
+
+        FileStoreTable table = paimonTable("T_DEL_ATOMIC");
+        List<IndexManifestEntry> oldEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> INDEX_TYPE.equals(e.indexFile().indexType()))
+                        .collect(Collectors.toList());
+        assertThat(oldEntries).isNotEmpty();
+
+        List<String> oldFileNames =
+                oldEntries.stream().map(e -> e.indexFile().fileName()).collect(Collectors.toList());
+
+        // Second build: use a custom builder that reports old entries as deletedIndexEntries
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        GenericIndexTopoBuilder.buildIndex(
+                env,
+                () ->
+                        new GenericGlobalIndexBuilder(table) {
+                            @Override
+                            public List<IndexManifestEntry> deletedIndexEntries() {
+                                return oldEntries;
+                            }
+                        },
+                table,
+                "v",
+                INDEX_TYPE,
+                null,
+                new Options(table.options()));
+
+        // After the atomic commit, old index files should be deleted and new ones created
+        List<IndexManifestEntry> newEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> INDEX_TYPE.equals(e.indexFile().indexType()))
+                        .collect(Collectors.toList());
+
+        assertThat(newEntries).isNotEmpty();
+        long totalRowCount = newEntries.stream().mapToLong(e -> e.indexFile().rowCount()).sum();
+        assertThat(totalRowCount).isEqualTo(100L);
+
+        // New files should be different from old files (old ones were deleted)
+        List<String> newFileNames =
+                newEntries.stream().map(e -> e.indexFile().fileName()).collect(Collectors.toList());
+        assertThat(newFileNames).doesNotContainAnyElementsOf(oldFileNames);
+    }
+
     // -- Helpers --
 
     private List<IndexFileMeta> getVectorIndexFiles(FileStoreTable table) {
