@@ -21,11 +21,11 @@ import os
 import tempfile
 import unittest
 
-from pypaimon.branch.branch_manager import BranchManager, DEFAULT_MAIN_BRANCH
+from pypaimon.branch.branch_manager import BranchManager
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.options.options import Options
 from pypaimon.schema.schema_manager import SchemaManager
-from pypaimon.schema.table_schema import TableSchema
 
 
 class TestSchemaManagerBranch(unittest.TestCase):
