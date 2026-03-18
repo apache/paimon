@@ -2120,6 +2120,17 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether enable perform clustering before write phase when incremental clustering is enabled.");
 
+    public static final ConfigOption<ClusteringIncrementalMode> CLUSTERING_INCREMENTAL_MODE =
+            key("clustering.incremental.mode")
+                    .enumType(ClusteringIncrementalMode.class)
+                    .defaultValue(ClusteringIncrementalMode.GLOBAL_SORT)
+                    .withDescription(
+                            "The sort mode for incremental clustering compaction. "
+                                    + "'global-sort' (default) performs a global range shuffle so output files are globally ordered. "
+                                    + "'local-sort' skips the global shuffle and only sorts rows within each compaction task, "
+                                    + "producing files that are internally ordered. "
+                                    + "'local-sort' is cheaper and sufficient for Parquet lookup optimizations.");
+
     @Immutable
     public static final ConfigOption<Boolean> ROW_TRACKING_ENABLED =
             key("row-tracking.enabled")
@@ -3534,6 +3545,10 @@ public class CoreOptions implements Serializable {
         return options.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE);
     }
 
+    public ClusteringIncrementalMode clusteringIncrementalMode() {
+        return options.get(CLUSTERING_INCREMENTAL_MODE);
+    }
+
     public boolean bucketClusterEnabled() {
         return !bucketAppendOrdered()
                 && !deletionVectorsEnabled()
@@ -4259,6 +4274,44 @@ public class CoreOptions implements Serializable {
             }
 
             throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");
+        }
+    }
+
+    /** The incremental clustering mode for append table. */
+    public enum ClusteringIncrementalMode implements DescribedEnum {
+        /**
+         * Perform a global range shuffle before sorting, so that rows with the same key range land
+         * in the same file. This produces globally ordered output but requires network shuffling.
+         */
+        GLOBAL_SORT(
+                "global-sort",
+                "Perform global range shuffle and then local sort. Output files are globally ordered but require network shuffling."),
+
+        /**
+         * Sort rows only within each compaction task (no global shuffle). Every output file is
+         * internally ordered by the clustering columns, which is sufficient for per-file Parquet
+         * lookup optimizations.
+         */
+        LOCAL_SORT(
+                "local-sort",
+                "Sort rows only within each compaction task without global shuffle. Every output file is internally ordered.");
+
+        private final String value;
+        private final String description;
+
+        ClusteringIncrementalMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
         }
     }
 
