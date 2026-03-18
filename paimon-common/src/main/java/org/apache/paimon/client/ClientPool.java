@@ -65,11 +65,17 @@ public interface ClientPool<C, E extends Exception> {
                     continue;
                 }
                 try {
+                    client = reconnect(client);
                     return action.run(client);
                 } finally {
                     clients.addFirst(client);
                 }
             }
+        }
+
+        /** Validate and potentially replace a client before use. */
+        protected C reconnect(C client) {
+            return client;
         }
 
         @Override
