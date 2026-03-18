@@ -32,6 +32,8 @@ public interface WritableBooleanVector extends WritableColumnVector, BooleanColu
 
     void setBooleans(int rowId, byte src);
 
+    void appendBoolean(boolean v);
+
     /** Fill the column vector with the provided value. */
     void fill(boolean value);
 }

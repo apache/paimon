@@ -21,7 +21,10 @@ from dataclasses import dataclass
 from typing import Dict, Generic, List, Optional
 
 from pypaimon.common.json_util import T, json_field
+from pypaimon.common.options import Options
 from pypaimon.schema.schema import Schema
+from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.snapshot.table_snapshot import TableSnapshot
 
 
 @dataclass
@@ -36,6 +39,18 @@ class RESTResponse(ABC):
 
 @dataclass
 class ErrorResponse(RESTResponse):
+    """Error response"""
+    RESOURCE_TYPE_DATABASE = "DATABASE"
+    RESOURCE_TYPE_TABLE = "TABLE"
+    RESOURCE_TYPE_VIEW = "VIEW"
+    RESOURCE_TYPE_FUNCTION = "FUNCTION"
+    RESOURCE_TYPE_COLUMN = "COLUMN"
+    RESOURCE_TYPE_SNAPSHOT = "SNAPSHOT"
+    RESOURCE_TYPE_TAG = "TAG"
+    RESOURCE_TYPE_BRANCH = "BRANCH"
+    RESOURCE_TYPE_DEFINITION = "DEFINITION"
+    RESOURCE_TYPE_DIALECT = "DIALECT"
+
     resource_type: Optional[str] = json_field("resourceType", default=None)
     resource_name: Optional[str] = json_field("resourceName", default=None)
     message: Optional[str] = json_field("message", default=None)
@@ -115,6 +130,37 @@ class ListDatabasesResponse(PagedResponse[str]):
         return self.databases
 
     def get_next_page_token(self) -> str:
+        return self.next_page_token
+
+
+@dataclass
+class Partition(PartitionStatistics):
+    """Partition data model matching Java org.apache.paimon.partition.Partition."""
+
+    FIELD_DONE = "done"
+    FIELD_OPTIONS = "options"
+
+    done: bool = json_field(FIELD_DONE, default=False)
+    created_at: Optional[int] = json_field("createdAt", default=None)
+    created_by: Optional[str] = json_field("createdBy", default=None)
+    updated_at: Optional[int] = json_field("updatedAt", default=None)
+    updated_by: Optional[str] = json_field("updatedBy", default=None)
+    options: Optional[Dict[str, str]] = json_field(FIELD_OPTIONS, default=None)
+
+
+@dataclass
+class ListPartitionsResponse(PagedResponse['Partition']):
+    """Response for listing partitions."""
+    FIELD_PARTITIONS = "partitions"
+
+    partitions: Optional[List[Partition]] = json_field(FIELD_PARTITIONS)
+    next_page_token: Optional[str] = json_field(
+        PagedResponse.FIELD_NEXT_PAGE_TOKEN)
+
+    def data(self) -> Optional[List[Partition]]:
+        return self.partitions
+
+    def get_next_page_token(self) -> Optional[str]:
         return self.next_page_token
 
 
@@ -243,9 +289,9 @@ class ConfigResponse(RESTResponse):
 
     defaults: Dict[str, str] = json_field(FILED_DEFAULTS)
 
-    def merge(self, options: Dict[str, str]) -> Dict[str, str]:
+    def merge(self, options: Options) -> Options:
         merged = options.copy()
-        merged.update(self.defaults)
+        merged.data.update(self.defaults)
         return merged
 
 
@@ -266,3 +312,18 @@ class CommitTableResponse(RESTResponse):
 
     def is_success(self) -> bool:
         return self.success
+
+
+@dataclass
+class GetTableSnapshotResponse(RESTResponse):
+    """Response for getting table snapshot."""
+
+    FIELD_SNAPSHOT = "snapshot"
+
+    snapshot: Optional[TableSnapshot] = json_field(FIELD_SNAPSHOT, default=None)
+
+    def __init__(self, snapshot: Optional[TableSnapshot] = None):
+        self.snapshot = snapshot
+
+    def get_snapshot(self) -> Optional[TableSnapshot]:
+        return self.snapshot

@@ -21,7 +21,7 @@ package org.apache.paimon.flink.sink.listener;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.partition.PartitionStatistics;
 import org.apache.paimon.partition.actions.AddDonePartitionAction;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 
 import org.junit.jupiter.api.Test;
 
@@ -41,8 +41,8 @@ class AddDonePartitionActionTest {
     public void test() throws Exception {
         AtomicBoolean closed = new AtomicBoolean(false);
         Set<String> donePartitions = new HashSet<>();
-        PartitionHandler partitionHandler =
-                new PartitionHandler() {
+        PartitionModification partitionModification =
+                new PartitionModification() {
 
                     @Override
                     public void close() throws Exception {
@@ -66,13 +66,9 @@ class AddDonePartitionActionTest {
                     @Override
                     public void alterPartitions(List<PartitionStatistics> partitions)
                             throws Catalog.TableNotExistException {}
-
-                    @Override
-                    public void markDonePartitions(List<Map<String, String>> partitions)
-                            throws Catalog.TableNotExistException {}
                 };
 
-        AddDonePartitionAction action = new AddDonePartitionAction(partitionHandler);
+        AddDonePartitionAction action = new AddDonePartitionAction(partitionModification);
 
         // test normal
         action.markDone("dt=20201202");

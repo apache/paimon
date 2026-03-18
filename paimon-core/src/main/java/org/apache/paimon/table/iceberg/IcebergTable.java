@@ -50,6 +50,7 @@ public interface IcebergTable extends Table {
         private String location;
         private Map<String, String> options;
         private String comment;
+        private String uuid;
 
         public Builder identifier(Identifier identifier) {
             this.identifier = identifier;
@@ -86,9 +87,14 @@ public interface IcebergTable extends Table {
             return this;
         }
 
+        public Builder uuid(String uuid) {
+            this.uuid = uuid;
+            return this;
+        }
+
         public IcebergTable build() {
             return new IcebergTableImpl(
-                    identifier, fileIO, rowType, partitionKeys, location, options, comment);
+                    identifier, fileIO, rowType, partitionKeys, location, options, comment, uuid);
         }
     }
 }

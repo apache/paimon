@@ -20,7 +20,6 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.LookupLocalFileType;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
@@ -102,6 +101,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -124,7 +124,6 @@ import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PARQUET;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT_PER_LEVEL;
-import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE;
 import static org.apache.paimon.CoreOptions.METADATA_STATS_MODE_PER_LEVEL;
@@ -144,6 +143,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.SortValue.NullOrdering.NULLS_LAST;
 import static org.apache.paimon.predicate.SortValue.SortDirection.ASCENDING;
 import static org.apache.paimon.predicate.SortValue.SortDirection.DESCENDING;
+import static org.apache.paimon.table.SpecialFields.KEY_FIELD_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -250,6 +250,33 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         file = ((DataSplit) table.newScan().plan().splits().get(0)).dataFiles().get(0);
         assertThat(file.level()).isEqualTo(5);
         assertThat(file.valueStats().maxValues().getFieldCount()).isGreaterThan(4);
+
+        if (file.valueStatsCols() == null) {
+            int expectedFieldCount = table.schema().fields().size();
+            int actualFieldCount = file.valueStats().minValues().getFieldCount();
+            assertThat(actualFieldCount)
+                    .as(
+                            "When value_stats_cols is null, value_stats field count should match table.fields count. "
+                                    + "This ensures value_stats does NOT contain system fields.")
+                    .isEqualTo(expectedFieldCount);
+        } else {
+            for (String fieldName : Objects.requireNonNull(file.valueStatsCols())) {
+                boolean isSystemField =
+                        fieldName.startsWith(KEY_FIELD_PREFIX)
+                                || SpecialFields.isSystemField(fieldName);
+                assertThat(isSystemField)
+                        .as("value_stats_cols should NOT contain system field: " + fieldName)
+                        .isFalse();
+            }
+            assertThat(file.valueStats().minValues().getFieldCount())
+                    .as("value_stats field count should match value_stats_cols size")
+                    .isEqualTo(Objects.requireNonNull(file.valueStatsCols()).size());
+        }
+
+        assertThat(file.valueStats().minValues().getFieldCount())
+                .isEqualTo(file.valueStats().maxValues().getFieldCount());
+        assertThat(file.valueStats().nullCounts().size())
+                .isEqualTo(file.valueStats().minValues().getFieldCount());
     }
 
     @Test
@@ -1684,18 +1711,19 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
                             options.set("partial-update.remove-record-on-sequence-group", "seq2");
                         },
                         rowType);
-        FileStoreTable wrongTable =
-                createFileStoreTable(
-                        options -> {
-                            options.set("merge-engine", "partial-update");
-                            options.set("fields.seq1.sequence-group", "b");
-                            options.set("fields.seq2.sequence-group", "c,d");
-                            options.set("partial-update.remove-record-on-sequence-group", "b");
-                        },
-                        rowType);
-        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
 
-        assertThatThrownBy(() -> wrongTable.newWrite(""))
+        assertThatThrownBy(
+                        () ->
+                                createFileStoreTable(
+                                        options -> {
+                                            options.set("merge-engine", "partial-update");
+                                            options.set("fields.seq1.sequence-group", "b");
+                                            options.set("fields.seq2.sequence-group", "c,d");
+                                            options.set(
+                                                    "partial-update.remove-record-on-sequence-group",
+                                                    "b");
+                                        },
+                                        rowType))
                 .hasMessageContaining(
                         "field 'b' defined in 'partial-update.remove-record-on-sequence-group' option must be part of sequence groups");
 
@@ -1703,6 +1731,8 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
         TableRead read = table.newRead();
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
+        Function<InternalRow, String> rowToString = row -> internalRowToString(row, rowType);
+
         // 1. Inserts
         write.write(GenericRow.of(1, 1, 10, 1, 20, 20, 1));
         write.write(GenericRow.of(1, 1, 11, 2, 25, 25, 0));
@@ -2281,11 +2311,7 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     @Test
     public void testTableQueryForLookupLocalSortFile() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(
-                        options -> {
-                            options.set(CHANGELOG_PRODUCER, LOOKUP);
-                            options.set(LOOKUP_LOCAL_FILE_TYPE, LookupLocalFileType.SORT);
-                        });
+                createFileStoreTable(options -> options.set(CHANGELOG_PRODUCER, LOOKUP));
         innerTestTableQuery(table);
     }
 
@@ -2553,6 +2579,17 @@ public class PrimaryKeySimpleTableTest extends SimpleTableTestBase {
     @Test
     public void writeSinglePartition() throws Exception {
         testWritePreemptMemory(true);
+    }
+
+    @Test
+    public void testSwitchBranch() throws Exception {
+        String branchName = "fallback";
+        FileStoreTable mainTable =
+                createFileStoreTable(options -> options.set(BUCKET, BucketMode.POSTPONE_BUCKET));
+        mainTable.createBranch(branchName);
+        FileStoreTable branchTable = mainTable.switchToBranch(branchName);
+        assertThat(branchTable.catalogEnvironment().identifier().getBranchName())
+                .isEqualTo(branchName);
     }
 
     private void testWritePreemptMemory(boolean singlePartition) throws Exception {

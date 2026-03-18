@@ -60,6 +60,24 @@ public class DataIncrement {
                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     }
 
+    public static DataIncrement indexIncrement(List<IndexFileMeta> indexFiles) {
+        return new DataIncrement(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                indexFiles,
+                Collections.emptyList());
+    }
+
+    public static DataIncrement deleteIndexIncrement(List<IndexFileMeta> indexFiles) {
+        return new DataIncrement(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                indexFiles);
+    }
+
     public List<DataFileMeta> newFiles() {
         return newFiles;
     }

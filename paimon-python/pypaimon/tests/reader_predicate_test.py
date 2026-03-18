@@ -25,7 +25,10 @@ import pyarrow as pa
 
 from pypaimon import CatalogFactory
 from pypaimon import Schema
+from pypaimon.common.predicate_builder import PredicateBuilder
+from pypaimon.read import push_down_utils
 from pypaimon.read.split import Split
+from pypaimon.schema.data_types import AtomicType, DataField
 
 
 class ReaderPredicateTest(unittest.TestCase):
@@ -80,3 +83,35 @@ class ReaderPredicateTest(unittest.TestCase):
         splits: list[Split] = read_builder.new_scan().plan().splits()
         self.assertEqual(len(splits), 1)
         self.assertEqual(splits[0].partition.to_dict().get("pt"), 1003)
+
+    def test_trim_predicate(self):
+        predicate_builder = self.table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.between('pt', 1002, 1003)
+        p2 = predicate_builder.and_predicates([predicate_builder.equal('pt', 1003), predicate_builder.equal('a', 3)])
+        predicate = predicate_builder.and_predicates([p1, p2])
+        pred = push_down_utils.trim_predicate_by_fields(predicate, self.table.partition_keys)
+        self.assertEqual(len(pred.literals), 2)
+        self.assertEqual(pred.literals[0].field, 'pt')
+        self.assertEqual(pred.literals[1].field, 'pt')
+
+    def test_remove_row_id_filter(self):
+        fields = [
+            DataField(0, '_ROW_ID', AtomicType('BIGINT')),
+            DataField(1, 'f0', AtomicType('INT')),
+        ]
+        pb = PredicateBuilder(fields)
+        and_pred = pb.and_predicates([pb.equal('_ROW_ID', 1), pb.greater_than('f0', 5)])
+        result = push_down_utils.remove_row_id_filter(and_pred)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.field, 'f0')
+        self.assertEqual(result.method, 'greaterThan')
+        or_mixed = pb.or_predicates([pb.equal('_ROW_ID', 1), pb.greater_than('f0', 5)])
+        result = push_down_utils.remove_row_id_filter(or_mixed)
+        self.assertIsNotNone(result, "OR: strip _ROW_ID child, keep f0>5 (same as Java)")
+        self.assertEqual(result.field, 'f0')
+        self.assertEqual(result.method, 'greaterThan')
+        or_no_row_id = pb.or_predicates([pb.greater_than('f0', 5), pb.less_than('f0', 10)])
+        result = push_down_utils.remove_row_id_filter(or_no_row_id)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.method, 'or')
+        self.assertEqual(len(result.literals), 2)

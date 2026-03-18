@@ -21,7 +21,7 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowPartitionComputer;
 
@@ -46,7 +46,7 @@ public abstract class DynamicPartitionLoader extends PartitionLoader {
     protected transient Comparator<InternalRow> comparator;
     protected transient LocalDateTime lastRefresh;
 
-    DynamicPartitionLoader(FileStoreTable table, Duration refreshInterval) {
+    DynamicPartitionLoader(Table table, Duration refreshInterval) {
         super(table);
         this.refreshInterval = refreshInterval;
     }
@@ -92,7 +92,7 @@ public abstract class DynamicPartitionLoader extends PartitionLoader {
         }
     }
 
-    protected abstract List<BinaryRow> getMaxPartitions();
+    public abstract List<BinaryRow> getMaxPartitions();
 
     private void logNewPartitions() {
         String partitionsStr = partitionsToString(partitions);

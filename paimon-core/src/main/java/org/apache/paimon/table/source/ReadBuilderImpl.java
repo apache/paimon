@@ -23,12 +23,16 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -59,6 +63,8 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Filter<Integer> bucketFilter;
 
     private @Nullable RowType readType;
+    private @Nullable RowRangeIndex rowRangeIndex;
+    private @Nullable VectorSearch vectorSearch;
 
     private boolean dropStats = false;
 
@@ -75,11 +81,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public RowType readType() {
-        if (readType != null) {
-            return readType;
-        } else {
-            return table.rowType();
-        }
+        return readType != null ? readType : table.rowType();
     }
 
     @Override
@@ -144,6 +146,28 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withRowRanges(List<Range> indices) {
+        if (indices == null) {
+            this.rowRangeIndex = null;
+            return this;
+        }
+        this.rowRangeIndex = RowRangeIndex.create(indices);
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        this.rowRangeIndex = rowRangeIndex;
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
+        this.vectorSearch = vectorSearch;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withBucket(int bucket) {
         this.specifiedBucket = bucket;
         return this;
@@ -182,7 +206,12 @@ public class ReadBuilderImpl implements ReadBuilder {
         // `filter` may contains partition related predicate, but `partitionFilter` will overwrite
         // it if `partitionFilter` is not null. So we must avoid to put part of partition filter in
         // `filter`, another part in `partitionFilter`
-        scan.withFilter(filter).withReadType(readType).withPartitionFilter(partitionFilter);
+        scan.withFilter(filter)
+                .withReadType(readType)
+                .withPartitionFilter(partitionFilter)
+                .withRowRangeIndex(rowRangeIndex)
+                .withVectorSearch(vectorSearch);
+
         checkState(
                 bucketFilter == null || shardIndexOfThisSubtask == null,
                 "Bucket filter and shard configuration cannot be used together. "

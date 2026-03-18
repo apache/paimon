@@ -19,7 +19,8 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.Table
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.connector.write.WriteBuilder
@@ -27,10 +28,12 @@ import org.apache.spark.sql.sources._
 
 import scala.collection.JavaConverters._
 
-abstract class BaseWriteBuilder(table: FileStoreTable)
+abstract class BaseWriteBuilder(table: Table)
   extends WriteBuilder
   with ExpressionHelper
   with SQLConfHelper {
+
+  def partitionRowType(): RowType
 
   protected def failWithReason(filter: Filter): Unit = {
     throw new RuntimeException(
@@ -59,16 +62,14 @@ abstract class BaseWriteBuilder(table: FileStoreTable)
     //
     // Fast fail for other custom filters which through v2 write interface, e.g.,
     // `dataframe.writeTo(T).overwrite(...)`
-    val partitionRowType = table.schema.logicalPartitionType()
     val partitionNames = partitionRowType.getFieldNames.asScala
     val allReferences = filters.flatMap(_.references)
-    val containsDataColumn = allReferences.exists {
-      reference => !partitionNames.exists(conf.resolver.apply(reference, _))
-    }
+    val containsDataColumn =
+      allReferences.exists(reference => !partitionNames.exists(conf.resolver.apply(reference, _)))
     if (containsDataColumn) {
       throw new RuntimeException(
-        s"Only support Overwrite filters on partition column ${partitionNames.mkString(
-            ", ")}, but got ${filters.mkString(", ")}.")
+        s"Only support Overwrite filters on partition column ${partitionNames.mkString(", ")}, " +
+          s"but got ${filters.mkString(", ")}.")
     }
     if (allReferences.distinct.length < allReferences.length) {
       // fail with `part = 1 and part = 2`

@@ -55,7 +55,6 @@ import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.hive.utils.HiveUtils.createPredicate;
 import static org.apache.paimon.hive.utils.HiveUtils.extractTagName;
-import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 
 /** Generator to generate hive input splits. */
 public class HiveSplitGenerator {
@@ -81,7 +80,7 @@ public class HiveSplitGenerator {
         List<PaimonInputSplit> splits = new ArrayList<>();
         // locations may contain multiple partitions
         for (String location : locations.split(",")) {
-            if (!location.startsWith(table.location().toUri().toString())) {
+            if (!location.startsWith(table.location().toString())) {
                 // Hive create dummy file for empty table or partition. If this location doesn't
                 // belong to this table, nothing to do.
                 continue;
@@ -158,7 +157,7 @@ public class HiveSplitGenerator {
         }
     }
 
-    private static List<DataSplit> packSplits(
+    public static List<DataSplit> packSplits(
             FileStoreTable table, JobConf jobConf, List<DataSplit> splits, int numSplits) {
         if (table.coreOptions().deletionVectorsEnabled()) {
             return splits;
@@ -172,9 +171,9 @@ public class HiveSplitGenerator {
         List<DataSplit> toPack = new ArrayList<>();
         int numFiles = 0;
         for (DataSplit split : splits) {
-            if (split instanceof FallbackReadFileStoreTable.FallbackDataSplit) {
+            if (split instanceof FallbackReadFileStoreTable.FallbackSplit) {
                 dataSplits.add(split);
-            } else if (split.beforeFiles().isEmpty() && split.rawConvertible()) {
+            } else if (split.rawConvertible()) {
                 numFiles += split.dataFiles().size();
                 toPack.add(split);
             } else {
@@ -201,8 +200,9 @@ public class HiveSplitGenerator {
                     numFilesAfterPacked += newSplit.dataFiles().size();
                     dataSplits.add(newSplit);
                 }
-                current = split;
                 bin.clear();
+                current = split;
+                bin.addAll(split.dataFiles());
             }
         }
         if (!bin.isEmpty()) {
@@ -235,16 +235,23 @@ public class HiveSplitGenerator {
             JobConf jobConf, List<DataSplit> splits, int numSplits, long openCostInBytes) {
         long maxSize = HiveConf.getLongVar(jobConf, HiveConf.ConfVars.MAPREDMAXSPLITSIZE);
         long minSize = HiveConf.getLongVar(jobConf, HiveConf.ConfVars.MAPREDMINSPLITSIZE);
-        long totalSize = 0;
-        for (DataSplit split : splits) {
-            totalSize +=
-                    split.dataFiles().stream()
-                            .map(f -> Math.max(f.fileSize(), openCostInBytes))
-                            .reduce(Long::sum)
-                            .orElse(0L);
+        long avgSize;
+        long splitSize;
+        if (numSplits > 0) {
+            long totalSize = 0;
+            for (DataSplit split : splits) {
+                totalSize +=
+                        split.dataFiles().stream()
+                                .map(f -> Math.max(f.fileSize(), openCostInBytes))
+                                .reduce(Long::sum)
+                                .orElse(0L);
+            }
+            avgSize = totalSize / numSplits;
+            splitSize = Math.min(maxSize, Math.max(avgSize, minSize));
+        } else {
+            avgSize = 0;
+            splitSize = Math.min(maxSize, minSize);
         }
-        long avgSize = totalSize / numSplits;
-        long splitSize = Math.min(maxSize, Math.max(avgSize, minSize));
         LOG.info(
                 "Currently, minSplitSize: {}, maxSplitSize: {}, avgSize: {}, finalSplitSize: {}.",
                 minSize,

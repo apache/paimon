@@ -746,15 +746,15 @@ public class BranchSqlITCase extends CatalogITCaseBase {
         sql("INSERT INTO t$branch_b1 VALUES (1, 4, 'S3'), (2, 2, 'S4')");
 
         assertThat(collectResult("SELECT `partition`, record_count, file_count FROM t$partitions"))
-                .containsExactlyInAnyOrder("+I[{1}, 3, 3]", "+I[{2}, 3, 2]");
+                .containsExactlyInAnyOrder("+I[a=1, 3, 3]", "+I[a=2, 3, 2]");
         assertThat(
                         collectResult(
                                 "SELECT `partition`, record_count, file_count FROM t$branch_b1$partitions"))
-                .containsExactlyInAnyOrder("+I[{1}, 2, 2]", "+I[{2}, 3, 2]");
+                .containsExactlyInAnyOrder("+I[a=1, 2, 2]", "+I[a=2, 3, 2]");
         assertThat(
                         collectResult(
                                 "SELECT `partition`, record_count, file_count FROM t$partitions /*+ OPTIONS('branch'='b1') */"))
-                .containsExactlyInAnyOrder("+I[{1}, 2, 2]", "+I[{2}, 3, 2]");
+                .containsExactlyInAnyOrder("+I[a=1, 2, 2]", "+I[a=2, 3, 2]");
     }
 
     @Test

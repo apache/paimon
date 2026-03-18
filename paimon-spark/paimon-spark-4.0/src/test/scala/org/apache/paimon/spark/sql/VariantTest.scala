@@ -18,4 +18,16 @@
 
 package org.apache.paimon.spark.sql
 
-class VariantTest extends VariantTestBase {}
+import org.apache.spark.SparkConf
+
+class VariantTest extends VariantTestBase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.variant.inferShreddingSchema", "false")
+  }
+}
+
+class VariantInferShreddingTest extends VariantTestBase {
+  override protected def sparkConf: SparkConf = {
+    super.sparkConf.set("spark.paimon.variant.inferShreddingSchema", "true")
+  }
+}

@@ -25,6 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.In;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -71,15 +72,19 @@ public interface BucketSelectConverter {
             for (Predicate orPredicate : splitOr(andPredicate)) {
                 if (orPredicate instanceof LeafPredicate) {
                     LeafPredicate leaf = (LeafPredicate) orPredicate;
-                    if (reference == null || reference == leaf.index()) {
-                        reference = leaf.index();
-                        if (leaf.function().equals(Equal.INSTANCE)
-                                || leaf.function().equals(In.INSTANCE)) {
-                            values.addAll(
-                                    leaf.literals().stream()
-                                            .filter(Objects::nonNull)
-                                            .collect(Collectors.toList()));
-                            continue;
+                    Optional<FieldRef> fieldRefOptional = leaf.fieldRefOptional();
+                    if (fieldRefOptional.isPresent()) {
+                        FieldRef fieldRef = fieldRefOptional.get();
+                        if (reference == null || reference == fieldRef.index()) {
+                            reference = fieldRef.index();
+                            if (leaf.function().equals(Equal.INSTANCE)
+                                    || leaf.function().equals(In.INSTANCE)) {
+                                values.addAll(
+                                        leaf.literals().stream()
+                                                .filter(Objects::nonNull)
+                                                .collect(Collectors.toList()));
+                                continue;
+                            }
                         }
                     }
                 }

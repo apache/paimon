@@ -20,18 +20,23 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.types.DataType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
 /** A {@link LeafFunction} to eval in. */
-public class In extends LeafFunction {
+public class In extends LeafNAryFunction {
 
     private static final long serialVersionUID = 1L;
 
+    public static final String NAME = "IN";
+
     public static final In INSTANCE = new In();
 
+    @JsonCreator
     private In() {}
 
     @Override
@@ -76,5 +81,10 @@ public class In extends LeafFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitIn(fieldRef, literals);
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

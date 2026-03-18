@@ -27,6 +27,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.shade.guava30.com.google.common.base.Supplier;
 import org.apache.paimon.shade.guava30.com.google.common.base.Suppliers;
 
+import java.util.Optional;
+
 /** Factory to create a {@link PartitionExpireStrategy}. */
 public interface PartitionExpireStrategyFactory {
 
@@ -36,7 +38,7 @@ public interface PartitionExpireStrategyFactory {
             CoreOptions options,
             RowType partitionType);
 
-    Supplier<PartitionExpireStrategyFactory> INSTANCE =
+    Supplier<Optional<PartitionExpireStrategyFactory>> INSTANCE =
             Suppliers.memoize(
                     () ->
                             FactoryUtil.discoverSingletonFactory(

@@ -54,9 +54,4 @@ public class RowDataKeyAndBucketExtractor implements KeyAndBucketExtractor<RowDa
     public BinaryRow trimmedPrimaryKey() {
         return wrapped.trimmedPrimaryKey();
     }
-
-    @Override
-    public BinaryRow logPrimaryKey() {
-        return wrapped.logPrimaryKey();
-    }
 }

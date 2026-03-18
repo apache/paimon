@@ -23,8 +23,6 @@ import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
 
-import java.util.Objects
-
 /** A Spark [[Batch]] for paimon. */
 case class PaimonBatch(
     inputPartitions: Seq[PaimonInputPartition],
@@ -38,5 +36,4 @@ case class PaimonBatch(
 
   override def createReaderFactory(): PartitionReaderFactory =
     PaimonPartitionReaderFactory(readBuilder, metadataColumns, blobAsDescriptor)
-
 }

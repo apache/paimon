@@ -30,6 +30,7 @@ import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.utils.ExceptionUtils;
@@ -51,6 +52,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
+    @Nullable private CompactionMetrics.Reporter metricsReporter;
 
     public MergeTreeCompactRewriter(
             FileReaderFactory<KeyValue> readerFactory,
@@ -104,7 +106,13 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
 
         List<DataFileMeta> before = extractFilesFromSections(sections);
         notifyRewriteCompactBefore(before);
-        return new CompactResult(before, writer.result());
+        List<DataFileMeta> after = writer.result();
+        after = notifyRewriteCompactAfter(after);
+        if (metricsReporter != null) {
+            metricsReporter.reportSortBufferMetrics(
+                    mergeSorter.sortBufferUsedBytes(), mergeSorter.sortBufferTotalBytes());
+        }
+        return new CompactResult(before, after);
     }
 
     protected <T> RecordReader<T> readerForMergeTree(
@@ -120,4 +128,12 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     }
 
     protected void notifyRewriteCompactBefore(List<DataFileMeta> files) {}
+
+    protected List<DataFileMeta> notifyRewriteCompactAfter(List<DataFileMeta> files) {
+        return files;
+    }
+
+    public void setMetricsReporter(@Nullable CompactionMetrics.Reporter reporter) {
+        this.metricsReporter = reporter;
+    }
 }

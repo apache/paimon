@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.sink.CommitMessage;
 
 /**
  * MultiTableCommittable produced by {@link PrepareCommitOperator}. This type of Committable will
@@ -30,20 +31,12 @@ public class MultiTableCommittable {
     private final String database;
     private final String table;
     private final long checkpointId;
-
-    private final Committable.Kind kind;
-
-    private final Object wrappedCommittable;
+    private final CommitMessage commitMessage;
 
     public MultiTableCommittable(
-            String database,
-            String table,
-            long checkpointId,
-            Committable.Kind kind,
-            Object wrappedCommittable) {
+            String database, String table, long checkpointId, CommitMessage commitMessage) {
         this.checkpointId = checkpointId;
-        this.kind = kind;
-        this.wrappedCommittable = wrappedCommittable;
+        this.commitMessage = commitMessage;
         this.database = database;
         this.table = table;
     }
@@ -53,8 +46,7 @@ public class MultiTableCommittable {
                 id.getDatabaseName(),
                 id.getObjectName(),
                 committable.checkpointId(),
-                committable.kind(),
-                committable.wrappedCommittable());
+                committable.commitMessage());
     }
 
     public String getDatabase() {
@@ -69,12 +61,8 @@ public class MultiTableCommittable {
         return checkpointId;
     }
 
-    public Committable.Kind kind() {
-        return kind;
-    }
-
-    public Object wrappedCommittable() {
-        return wrappedCommittable;
+    public CommitMessage commitMessage() {
+        return commitMessage;
     }
 
     @Override
@@ -82,39 +70,8 @@ public class MultiTableCommittable {
         return "MultiTableCommittable{"
                 + "checkpointId="
                 + checkpointId
-                + ", kind="
-                + kind
-                + ", wrappedCommittable="
-                + wrappedCommittable
+                + ", commitMessage="
+                + commitMessage
                 + '}';
-    }
-
-    /** Kind of the produced Committable. */
-    public enum Kind {
-        FILE((byte) 0),
-
-        LOG_OFFSET((byte) 1);
-
-        private final byte value;
-
-        Kind(byte value) {
-            this.value = value;
-        }
-
-        public byte toByteValue() {
-            return value;
-        }
-
-        public static Kind fromByteValue(byte value) {
-            switch (value) {
-                case 0:
-                    return FILE;
-                case 1:
-                    return LOG_OFFSET;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unsupported byte value '" + value + "' for value kind.");
-            }
-        }
     }
 }

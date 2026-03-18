@@ -21,18 +21,21 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 from urllib.parse import urlparse
 
-from pypaimon.api.api_request import (CreateDatabaseRequest,
+if TYPE_CHECKING:
+    from pypaimon.catalog.rest.rest_token import RESTToken
+
+from pypaimon.api.api_request import (AlterTableRequest, CreateDatabaseRequest,
                                       CreateTableRequest, RenameTableRequest)
 from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        GetTableResponse, ListDatabasesResponse,
-                                       ListTablesResponse, PagedList,
-                                       RESTResponse)
+                                       ListPartitionsResponse, ListTablesResponse,
+                                       PagedList, Partition,
+                                       RESTResponse, ErrorResponse)
 from pypaimon.api.resource_paths import ResourcePaths
 from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
@@ -44,28 +47,9 @@ from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon import Schema
+from pypaimon.schema.schema_change import Actions, SchemaChange
+from pypaimon.schema.schema_manager import SchemaManager
 from pypaimon.schema.table_schema import TableSchema
-
-
-@dataclass
-class ErrorResponse(RESTResponse):
-    """Error response"""
-    RESOURCE_TYPE_DATABASE = "database"
-    RESOURCE_TYPE_TABLE = "table"
-    RESOURCE_TYPE_VIEW = "view"
-    RESOURCE_TYPE_FUNCTION = "function"
-    RESOURCE_TYPE_COLUMN = "column"
-    RESOURCE_TYPE_SNAPSHOT = "snapshot"
-    RESOURCE_TYPE_TAG = "tag"
-    RESOURCE_TYPE_BRANCH = "branch"
-    RESOURCE_TYPE_DEFINITION = "definition"
-    RESOURCE_TYPE_DIALECT = "dialect"
-
-    resource_type: Optional[str]
-    resource_name: Optional[str]
-    message: str
-    code: int
-
 
 # Constants
 DEFAULT_MAX_RESULTS = 100
@@ -74,6 +58,7 @@ AUTHORIZATION_HEADER_KEY = "Authorization"
 # REST API parameter constants
 DATABASE_NAME_PATTERN = "databaseNamePattern"
 TABLE_NAME_PATTERN = "tableNamePattern"
+TABLE_TYPE = "tableType"
 VIEW_NAME_PATTERN = "viewNamePattern"
 FUNCTION_NAME_PATTERN = "functionNamePattern"
 PARTITION_NAME_PATTERN = "partitionNamePattern"
@@ -89,6 +74,105 @@ SNAPSHOT_CLEAN_EMPTY_DIRECTORIES = "snapshot.clean-empty-directories"
 # Table types
 FORMAT_TABLE = "FORMAT_TABLE"
 OBJECT_TABLE = "OBJECT_TABLE"
+
+
+def _dict_to_schema_change(change_dict: dict) -> SchemaChange:
+    from pypaimon.schema.schema_change import (
+        SetOption, RemoveOption, UpdateComment, AddColumn, RenameColumn,
+        DropColumn, UpdateColumnType, UpdateColumnNullability,
+        UpdateColumnComment, UpdateColumnDefaultValue, UpdateColumnPosition, Move, MoveType
+    )
+
+    action = change_dict.get(Actions.FIELD_ACTION)
+    if action == Actions.SET_OPTION_ACTION:
+        return SetOption(key=change_dict["key"], value=change_dict["value"])
+    elif action == Actions.REMOVE_OPTION_ACTION:
+        return RemoveOption(key=change_dict["key"])
+    elif action == Actions.UPDATE_COMMENT_ACTION:
+        return UpdateComment(comment=change_dict.get("comment"))
+    elif action == Actions.ADD_COLUMN_ACTION:
+        from pypaimon.schema.data_types import DataTypeParser
+        data_type_value = change_dict.get("dataType") or change_dict.get(AddColumn.FIELD_DATA_TYPE)
+        if data_type_value is None:
+            raise ValueError(f"Missing dataType field in AddColumn change: {change_dict}")
+        data_type = DataTypeParser.parse_data_type(data_type_value)
+        move = None
+        if "move" in change_dict and change_dict["move"] is not None:
+            move_dict = change_dict["move"]
+            if isinstance(move_dict, dict):
+                move_type_str = move_dict.get("type") or move_dict.get(Move.FIELD_TYPE)
+                if move_type_str is None:
+                    raise ValueError(f"Missing type field in Move: {move_dict}")
+                move_type = MoveType(move_type_str)
+                field_name = move_dict.get("fieldName") or move_dict.get(Move.FIELD_FIELD_NAME)
+                if field_name is None:
+                    raise ValueError(f"Missing fieldName field in Move: {move_dict}")
+                reference_field = (
+                    move_dict.get("referenceFieldName") or
+                    move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME)
+                )
+                move = Move(
+                    field_name=field_name,
+                    reference_field_name=reference_field,
+                    type=move_type
+                )
+        field_names = change_dict.get("fieldNames") or change_dict.get(AddColumn.FIELD_FIELD_NAMES)
+        if field_names is None:
+            raise ValueError(f"Missing fieldNames field in AddColumn change: {change_dict}")
+        return AddColumn(
+            field_names=field_names,
+            data_type=data_type,
+            comment=change_dict.get("comment") or change_dict.get(AddColumn.FIELD_COMMENT),
+            move=move
+        )
+    elif action == Actions.RENAME_COLUMN_ACTION:
+        return RenameColumn(field_names=change_dict["fieldNames"], new_name=change_dict["newName"])
+    elif action == Actions.DROP_COLUMN_ACTION:
+        return DropColumn(field_names=change_dict["fieldNames"])
+    elif action == Actions.UPDATE_COLUMN_TYPE_ACTION:
+        from pypaimon.schema.data_types import DataTypeParser
+        new_type = DataTypeParser.parse_data_type(change_dict["newDataType"])
+        return UpdateColumnType(
+            field_names=change_dict["fieldNames"],
+            new_data_type=new_type,
+            keep_nullability=change_dict.get("keepNullability", False)
+        )
+    elif action == Actions.UPDATE_COLUMN_NULLABILITY_ACTION:
+        return UpdateColumnNullability(
+            field_names=change_dict["fieldNames"],
+            new_nullability=change_dict["newNullability"]
+        )
+    elif action == Actions.UPDATE_COLUMN_COMMENT_ACTION:
+        return UpdateColumnComment(
+            field_names=change_dict["fieldNames"],
+            new_comment=change_dict.get("newComment")
+        )
+    elif action == Actions.UPDATE_COLUMN_DEFAULT_VALUE_ACTION:
+        return UpdateColumnDefaultValue(
+            field_names=change_dict["fieldNames"],
+            new_default_value=change_dict["newDefaultValue"]
+        )
+    elif action == Actions.UPDATE_COLUMN_POSITION_ACTION:
+        move_dict = change_dict.get("move") or change_dict.get(UpdateColumnPosition.FIELD_MOVE)
+        if move_dict is None:
+            raise ValueError(f"Missing move field in UpdateColumnPosition change: {change_dict}")
+        if not isinstance(move_dict, dict):
+            raise ValueError(f"move field must be a dict in UpdateColumnPosition change: {change_dict}")
+        move_type_str = move_dict.get("type") or move_dict.get(Move.FIELD_TYPE)
+        if move_type_str is None:
+            raise ValueError(f"Missing type field in Move: {move_dict}")
+        move_type = MoveType(move_type_str)
+        field_name = move_dict.get("fieldName") or move_dict.get(Move.FIELD_FIELD_NAME)
+        if field_name is None:
+            raise ValueError(f"Missing fieldName field in Move: {move_dict}")
+        move = Move(
+            field_name=field_name,
+            reference_field_name=move_dict.get("referenceFieldName") or move_dict.get(Move.FIELD_REFERENCE_FIELD_NAME),
+            type=move_type
+        )
+        return UpdateColumnPosition(move=move)
+    else:
+        raise ValueError(f"Unknown schema change action: {action}")
 
 
 class RESTCatalogServer:
@@ -112,6 +196,7 @@ class RESTCatalogServer:
         self.table_partitions_store: Dict[str, List] = {}
         self.no_permission_databases: List[str] = []
         self.no_permission_tables: List[str] = []
+        self.table_token_store: Dict[str, "RESTToken"] = {}
 
         # Initialize mock catalog (simplified)
         self.data_path = data_path
@@ -253,9 +338,9 @@ class RESTCatalogServer:
                 source = self.table_metadata_store.get(source_table.get_full_name())
                 self.table_metadata_store.update({destination_table.get_full_name(): source})
                 source_table_dir = (Path(self.data_path) / self.warehouse
-                                    / source_table.database_name / source_table.object_name)
+                                    / source_table.get_database_name() / source_table.get_object_name())
                 destination_table_dir = (Path(self.data_path) / self.warehouse
-                                         / destination_table.database_name / destination_table.object_name)
+                                         / destination_table.get_database_name() / destination_table.get_object_name())
                 if not source_table_dir.exists():
                     destination_table_dir.mkdir(parents=True)
                 else:
@@ -297,6 +382,8 @@ class RESTCatalogServer:
 
                     if resource_type == ResourcePaths.TABLES:
                         return self._handle_table_resource(method, path_parts, identifier, data, parameters)
+                    elif resource_type == ResourcePaths.PARTITIONS:
+                        return self._table_partitions_handle(method, identifier, parameters)
 
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
 
@@ -352,7 +439,7 @@ class RESTCatalogServer:
                 table_name_part = table_parts[0]
                 branch_part = table_parts[1]
                 # Recreate identifier without branch for lookup
-                lookup_identifier = Identifier.create(identifier.database_name, table_name_part)
+                lookup_identifier = Identifier.create(identifier.get_database_name(), table_name_part)
             else:
                 lookup_identifier = identifier
                 branch_part = None
@@ -368,13 +455,33 @@ class RESTCatalogServer:
             # Basic table operations (GET, DELETE, etc.)
             return self._table_handle(method, data, lookup_identifier)
         elif len(path_parts) == 4:
-            # Extended operations (e.g., commit)
+            # Extended operations (e.g., commit, token, snapshot)
             operation = path_parts[3]
             if operation == "commit":
                 return self._table_commit_handle(method, data, lookup_identifier, branch_part)
+            elif operation == "token":
+                return self._table_token_handle(method, lookup_identifier)
+            elif operation == "rollback":
+                return self._table_rollback_handle(method, data, lookup_identifier)
+            elif operation == "snapshot":
+                return self._table_snapshot_handle(method, lookup_identifier)
+            elif operation == ResourcePaths.PARTITIONS:
+                return self._table_partitions_handle(method, lookup_identifier, parameters)
             else:
                 return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
         return self._mock_response(ErrorResponse(None, None, "Not Found", 404), 404)
+
+    def _table_partitions_handle(
+            self, method: str, identifier: Identifier, parameters: Dict[str, str]) -> Tuple[str, int]:
+        """Handle table partitions listing"""
+        if method != "GET":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        partitions = self._list_partitions(identifier, parameters)
+        return self._generate_final_list_partitions_response(parameters, partitions)
 
     def _databases_api_handler(self, method: str, data: str,
                                parameters: Dict[str, str]) -> Tuple[str, int]:
@@ -428,12 +535,17 @@ class RESTCatalogServer:
                 if create_table.identifier.get_full_name() in self.table_metadata_store:
                     raise TableAlreadyExistException(create_table.identifier)
                 table_metadata = self._create_table_metadata(
-                    create_table.identifier, 1, create_table.schema, str(uuid.uuid4()), False
+                    create_table.identifier, 0, create_table.schema, str(uuid.uuid4()), False
                 )
                 self.table_metadata_store.update({create_table.identifier.get_full_name(): table_metadata})
-                table_dir = Path(self.data_path) / self.warehouse / database_name / create_table.identifier.object_name
+                table_dir = (
+                    Path(self.data_path) / self.warehouse / database_name /
+                    create_table.identifier.get_object_name() / 'schema'
+                )
                 if not table_dir.exists():
                     table_dir.mkdir(parents=True)
+                with open(table_dir / "schema-0", "w") as f:
+                    f.write(JSON.to_json(table_metadata.schema, indent=2))
                 return self._mock_response("", 200)
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
 
@@ -443,17 +555,16 @@ class RESTCatalogServer:
             if identifier.get_full_name() not in self.table_metadata_store:
                 raise TableNotExistException(identifier)
             table_metadata = self.table_metadata_store[identifier.get_full_name()]
-            table_path = f'file://{self.data_path}/{self.warehouse}/{identifier.database_name}/{identifier.object_name}'
+            table_path = (f'file://{self.data_path}/{self.warehouse}/'
+                          f'{identifier.get_database_name()}/{identifier.get_object_name()}')
             schema = table_metadata.schema.to_schema()
             response = self.mock_table(identifier, table_metadata, table_path, schema)
             return self._mock_response(response, 200)
-        #
-        # elif method == "POST":
-        #     # Alter table
-        #     request_body = JSON.from_json(data, AlterTableRequest)
-        #     self._alter_table_impl(identifier, request_body.get_changes())
-        #     return self._mock_response("", 200)
-
+        elif method == "POST":
+            # Alter table
+            request_body = JSON.from_json(data, AlterTableRequest)
+            self._alter_table_impl(identifier, request_body.changes)
+            return self._mock_response("", 200)
         elif method == "DELETE":
             # Drop table
             if identifier.get_full_name() not in self.table_metadata_store:
@@ -468,6 +579,44 @@ class RESTCatalogServer:
             return self._mock_response("", 200)
 
         return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+    def _table_token_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
+        if method != "GET":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        from pypaimon.api.api_response import GetTableTokenResponse
+
+        token_key = identifier.get_full_name()
+        if token_key in self.table_token_store:
+            rest_token = self.table_token_store[token_key]
+            response = GetTableTokenResponse(
+                token=rest_token.token,
+                expires_at_millis=rest_token.expire_at_millis
+            )
+        else:
+            default_token = {
+                "akId": "akId" + str(int(time.time() * 1000)),
+                "akSecret": "akSecret" + str(int(time.time() * 1000))
+            }
+            response = GetTableTokenResponse(
+                token=default_token,
+                expires_at_millis=int(time.time() * 1000) + 3600_000  # 1 hour from now
+            )
+
+        return self._mock_response(response, 200)
+
+    def set_table_token(self, identifier: Identifier, token: "RESTToken") -> None:
+        self.table_token_store[identifier.get_full_name()] = token
+
+    def get_table_token(self, identifier: Identifier) -> Optional["RESTToken"]:
+        return self.table_token_store.get(identifier.get_full_name())
+
+    def reset_table_token(self, identifier: Identifier) -> None:
+        if identifier.get_full_name() in self.table_token_store:
+            del self.table_token_store[identifier.get_full_name()]
 
     def _table_commit_handle(self, method: str, data: str, identifier: Identifier,
                              branch: str = None) -> Tuple[str, int]:
@@ -512,6 +661,165 @@ class RESTCatalogServer:
                 ErrorResponse(None, None, f"Commit failed: {str(e)}", 500), 500
             )
 
+    def _table_rollback_handle(self, method: str, data: str,
+                               identifier: Identifier) -> Tuple[str, int]:
+        """Handle table rollback operations"""
+        if method != "POST":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        try:
+            import json as json_module
+            from pypaimon.table.instant import Instant, SnapshotInstant, TagInstant
+
+            request_dict = json_module.loads(data)
+            instant_dict = request_dict.get("instant")
+            from_snapshot = request_dict.get("fromSnapshot")
+
+            instant = Instant.from_dict(instant_dict)
+
+            if isinstance(instant, SnapshotInstant):
+                return self._rollback_table_by_snapshot(
+                    identifier, instant.snapshot_id, from_snapshot)
+            elif isinstance(instant, TagInstant):
+                return self._rollback_table_by_tag(identifier, instant.tag_name)
+            else:
+                return self._mock_response(
+                    ErrorResponse(None, None, "Unknown instant type", 400), 400)
+
+        except Exception as e:
+            self.logger.error(f"Error in rollback operation: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            return self._mock_response(
+                ErrorResponse(None, None, f"Rollback failed: {str(e)}", 500), 500)
+
+    def _rollback_table_by_snapshot(self, identifier: Identifier, snapshot_id: int,
+                                    from_snapshot: Optional[int]) -> Tuple[str, int]:
+        """Rollback table to a specific snapshot ID by delegating to table.rollback_to()."""
+        table = self._get_file_table(identifier)
+
+        snapshot_mgr = table.snapshot_manager()
+        snapshot = snapshot_mgr.get_snapshot_by_id(snapshot_id)
+        if snapshot is None:
+            return self._mock_response(
+                ErrorResponse(ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                              str(snapshot_id), "", 404), 404)
+
+        latest = snapshot_mgr.get_latest_snapshot()
+        if latest is None:
+            return self._mock_response(
+                ErrorResponse(None, None, "No latest snapshot found", 500), 500)
+
+        if from_snapshot is not None and from_snapshot != latest.id:
+            return self._mock_response(
+                ErrorResponse(None, None,
+                              f"Latest snapshot {latest.id} is not {from_snapshot}",
+                              500), 500)
+
+        table.rollback_to(snapshot_id)
+        return self._mock_response("", 200)
+
+    def _rollback_table_by_tag(self, identifier: Identifier,
+                               tag_name: str) -> Tuple[str, int]:
+        """Rollback table to a specific tag by delegating to table.rollback_to()."""
+        table = self._get_file_table(identifier)
+
+        tag_mgr = table.tag_manager()
+        if not tag_mgr.tag_exists(tag_name):
+            return self._mock_response(
+                ErrorResponse(ErrorResponse.RESOURCE_TYPE_TAG,
+                              tag_name, "", 404), 404)
+
+        table.rollback_to(tag_name)
+        return self._mock_response("", 200)
+
+    def _table_snapshot_handle(self, method: str, identifier: Identifier) -> Tuple[str, int]:
+        """Handle table snapshot operations.
+
+        Args:
+            method: HTTP method
+            identifier: Table identifier
+
+        Returns:
+            Tuple of (response JSON, HTTP status code)
+        """
+        if method != "GET":
+            return self._mock_response(ErrorResponse(None, None, "Method Not Allowed", 405), 405)
+
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        table_metadata = self.table_metadata_store[identifier.get_full_name()]
+        if table_metadata.is_external:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_TABLE,
+                identifier.get_full_name(),
+                "external paimon table does not support get table snapshot in rest server",
+                501)
+            return self._mock_response(response, 404)
+
+        # Get the table and snapshot manager to retrieve snapshot
+        table = self._get_file_table(identifier)
+        snapshot_manager = table.snapshot_manager()
+
+        # Get latest snapshot
+        snapshot = snapshot_manager.get_latest_snapshot()
+
+        if snapshot is None:
+            response = ErrorResponse(
+                ErrorResponse.RESOURCE_TYPE_SNAPSHOT,
+                identifier.get_database_name(),
+                "No Snapshot",
+                404)
+            return self._mock_response(response, 404)
+
+        from pypaimon.api.api_response import GetTableSnapshotResponse
+        from pypaimon.snapshot.table_snapshot import TableSnapshot
+
+        table_snapshot = TableSnapshot(
+            snapshot=snapshot,
+            record_count=snapshot.total_record_count,
+            file_size_in_bytes=0,
+            file_count=0,
+            last_file_creation_time=snapshot.time_millis
+        )
+        response = GetTableSnapshotResponse(table_snapshot)
+        return self._mock_response(response, 200)
+
+    def _get_file_table(self, identifier: Identifier):
+        """Construct a FileStoreTable from the metadata store.
+
+        loads the schema from the metadata store, builds a CatalogEnvironment
+        (without catalog loader so rollback goes through local file cleanup),
+        and returns a FileStoreTable.
+        """
+        from pypaimon.catalog.catalog_environment import CatalogEnvironment
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.options.options import Options
+        from pypaimon.table.file_store_table import FileStoreTable
+
+        table_metadata = self.table_metadata_store.get(identifier.get_full_name())
+        if table_metadata is None:
+            raise TableNotExistException(identifier)
+
+        table_schema = table_metadata.schema
+        table_path = (
+            f'file://{self.data_path}/{self.warehouse}/'
+            f'{identifier.get_database_name()}/{identifier.get_object_name()}')
+
+        catalog_env = CatalogEnvironment(
+            identifier=identifier,
+            uuid=table_metadata.uuid,
+            catalog_loader=None,
+            supports_version_management=False
+        )
+
+        file_io = FileIO.get(table_path, Options({}))
+        return FileStoreTable(file_io, identifier, table_path, table_schema, catalog_env)
+
     def _write_snapshot_files(self, identifier: Identifier, snapshot, statistics):
         """Write snapshot and related files to the file system"""
         import json
@@ -519,7 +827,8 @@ class RESTCatalogServer:
         import uuid
 
         # Construct table path: {warehouse}/{database}/{table}
-        table_path = os.path.join(self.data_path, self.warehouse, identifier.database_name, identifier.object_name)
+        table_path = os.path.join(self.data_path, self.warehouse, identifier.get_database_name(),
+                                  identifier.get_object_name())
 
         # Create directory structure
         snapshot_dir = os.path.join(table_path, "snapshot")
@@ -534,11 +843,12 @@ class RESTCatalogServer:
             "schemaId": getattr(snapshot, 'schema_id', 0),
             "baseManifestList": getattr(snapshot, 'base_manifest_list', f"manifest-list-{uuid.uuid4()}"),
             "deltaManifestList": getattr(snapshot, 'delta_manifest_list', f"manifest-list-{uuid.uuid4()}"),
+            "totalRecordCount": getattr(snapshot, 'total_record_count'),
+            "deltaRecordCount": getattr(snapshot, 'delta_record_count'),
             "commitUser": getattr(snapshot, 'commit_user', 'rest-server'),
             "commitIdentifier": getattr(snapshot, 'commit_identifier', 1),
             "commitKind": getattr(snapshot, 'commit_kind', 'APPEND'),
-            "timeMillis": getattr(snapshot, 'time_millis', 1703721600000),
-            "logOffsets": getattr(snapshot, 'log_offsets', {})
+            "timeMillis": getattr(snapshot, 'time_millis', 1703721600000)
         }
 
         with open(snapshot_file, 'w') as f:
@@ -621,6 +931,8 @@ class RESTCatalogServer:
         """Get paging key for entity"""
         if isinstance(entity, str):
             return entity
+        elif isinstance(entity, Partition):
+            return "/".join(f"{k}={v}" for k, v in sorted(entity.spec.items()))
         elif hasattr(entity, 'get_name'):
             return entity.get_name()
         elif hasattr(entity, 'get_full_name'):
@@ -657,10 +969,56 @@ class RESTCatalogServer:
 
         return '^' + ''.join(regex) + '$'
 
+    def _alter_table_impl(self, identifier: Identifier, changes: List) -> None:
+        if identifier.get_full_name() not in self.table_metadata_store:
+            raise TableNotExistException(identifier)
+
+        schema_changes = []
+        for change in changes:
+            if isinstance(change, dict):
+                try:
+                    schema_changes.append(_dict_to_schema_change(change))
+                except (KeyError, TypeError) as e:
+                    raise ValueError(f"Failed to convert change dict to SchemaChange: {change}, error: {e}") from e
+            else:
+                schema_changes.append(change)
+
+        table_metadata = self.table_metadata_store[identifier.get_full_name()]
+
+        table_path = (
+            Path(self.data_path) / self.warehouse /
+            identifier.get_database_name() / identifier.get_object_name()
+        )
+        schema_manager = SchemaManager(self._get_file_io(), str(table_path))
+        new_schema = schema_manager.commit_changes(schema_changes)
+
+        updated_metadata = TableMetadata(
+            schema=new_schema,
+            is_external=table_metadata.is_external,
+            uuid=table_metadata.uuid
+        )
+        self.table_metadata_store[identifier.get_full_name()] = updated_metadata
+
+    def _get_file_io(self):
+        """Get FileIO instance for SchemaManager"""
+        from pypaimon.common.file_io import FileIO
+        from pypaimon.common.options import Options
+        warehouse_path = str(Path(self.data_path) / self.warehouse)
+        options = Options({"warehouse": warehouse_path})
+        return FileIO.get(warehouse_path, options)
+
     def _create_table_metadata(self, identifier: Identifier, schema_id: int,
                                schema: Schema, uuid_str: str, is_external: bool) -> TableMetadata:
         """Create table metadata"""
         options = schema.options.copy()
+
+        fields = schema.fields
+        if schema.primary_keys:
+            pk_set = set(schema.primary_keys)
+            for field in fields:
+                if field.name in pk_set:
+                    field.type.nullable = False
+
         table_schema = TableSchema(
             version=TableSchema.CURRENT_VERSION,
             id=schema_id,
@@ -682,16 +1040,43 @@ class RESTCatalogServer:
     def _list_tables(self, database_name: str, parameters: Dict[str, str]) -> List[str]:
         """List tables in database"""
         table_name_pattern = parameters.get(TABLE_NAME_PATTERN)
+        table_type = parameters.get(TABLE_TYPE)
         tables = []
 
         for full_name, metadata in self.table_metadata_store.items():
             identifier = Identifier.from_string(full_name)
+            metadata_table_type = (
+                metadata.schema.options.get(TYPE, "table")
+                if metadata and metadata.schema and metadata.schema.options
+                else "table"
+            )
+            table_type_matches = (
+                not table_type
+                or metadata_table_type == table_type
+            )
             if (identifier.get_database_name() == database_name and
-                    (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
-                                                                        table_name_pattern))):
+                table_type_matches and
+                (not table_name_pattern or self._match_name_pattern(identifier.get_table_name(),
+                                                                    table_name_pattern))):
                 tables.append(identifier.get_table_name())
 
         return tables
+
+    def _list_partitions(self, identifier: Identifier, parameters: Dict[str, str]) -> List[Partition]:
+        """List partitions for a table from the partitions store."""
+        partition_name_pattern = parameters.get(PARTITION_NAME_PATTERN)
+        partitions = self.table_partitions_store.get(identifier.get_full_name(), [])
+        if partition_name_pattern:
+            partitions = [
+                p for p in partitions
+                if self._match_partition_name_pattern(p, partition_name_pattern)
+            ]
+        return partitions
+
+    def _match_partition_name_pattern(self, partition: Partition, pattern: str) -> bool:
+        """Match partition spec against a name pattern."""
+        partition_name = "/".join(f"{k}={v}" for k, v in sorted(partition.spec.items()))
+        return self._match_name_pattern(partition_name, pattern)
 
     # Response generation methods
     def _generate_final_list_databases_response(self, parameters: Dict[str, str],
@@ -723,6 +1108,22 @@ class RESTCatalogServer:
             )
         else:
             response = ListTablesResponse(tables=[], next_page_token=None)
+
+        return self._mock_response(response, 200)
+
+    def _generate_final_list_partitions_response(
+            self, parameters: Dict[str, str], partitions: List[Partition]) -> Tuple[str, int]:
+        """Generate final list partitions response"""
+        if partitions:
+            max_results = self._get_max_results(parameters)
+            page_token = parameters.get(PAGE_TOKEN)
+            paged_partitions = self._build_paged_entities(partitions, max_results, page_token)
+            response = ListPartitionsResponse(
+                partitions=paged_partitions.elements,
+                next_page_token=paged_partitions.next_page_token
+            )
+        else:
+            response = ListPartitionsResponse(partitions=[], next_page_token=None)
 
         return self._mock_response(response, 200)
 

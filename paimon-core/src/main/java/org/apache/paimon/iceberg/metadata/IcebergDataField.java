@@ -42,6 +42,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
@@ -78,6 +79,7 @@ public class IcebergDataField {
     @JsonIgnore private DataType dataType;
 
     @JsonProperty(FIELD_DOC)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String doc;
 
     public IcebergDataField(DataField dataField) {
@@ -174,14 +176,14 @@ public class IcebergDataField {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 int timestampPrecision = ((TimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
-                        timestampPrecision > 3 && timestampPrecision <= 9,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9.");
+                        timestampPrecision >= 3 && timestampPrecision <= 9,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
                 return timestampPrecision >= 7 ? "timestamp_ns" : "timestamp";
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 int timestampLtzPrecision = ((LocalZonedTimestampType) dataType).getPrecision();
                 Preconditions.checkArgument(
-                        timestampLtzPrecision > 3 && timestampLtzPrecision <= 9,
-                        "Paimon Iceberg compatibility only support timestamp type with precision from 4 to 9.");
+                        timestampLtzPrecision >= 3 && timestampLtzPrecision <= 9,
+                        "Paimon Iceberg compatibility only support timestamp type with precision from 3 to 9.");
                 return timestampLtzPrecision >= 7 ? "timestamptz_ns" : "timestamptz";
             case ARRAY:
                 ArrayType arrayType = (ArrayType) dataType;

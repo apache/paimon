@@ -24,16 +24,24 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -41,6 +49,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -161,6 +170,96 @@ public class ManifestsTableTest extends TableTestBase {
                 "Specified parameter scan.snapshot-id = 3 is not exist, you can set it in range from 1 to 2");
     }
 
+    @Test
+    public void testFilterBySchemaIdEqual() throws Exception {
+        List<InternalRow> expectedRow = getExpectedResult(2L);
+        List<InternalRow> result = readWithFilter(manifestsTable, schemaIdEqual(0L));
+        assertThat(result).containsExactlyElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testFilterBySchemaIdEqualNoMatch() throws Exception {
+        List<InternalRow> result = readWithFilter(manifestsTable, schemaIdEqual(999L));
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterBySchemaIdRange() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        Predicate predicate =
+                PredicateBuilder.and(builder.greaterOrEqual(4, 0L), builder.lessOrEqual(4, 0L));
+        List<InternalRow> expectedRow = getExpectedResult(2L);
+        List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+        assertThat(result).containsExactlyElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testFilterBySchemaIdGreaterThan() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        List<InternalRow> result = readWithFilter(manifestsTable, builder.greaterThan(4, 0L));
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    public void testFilterBySchemaIdIn() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        Predicate predicate = builder.in(4, Arrays.asList(0L, 1L));
+        List<InternalRow> expectedRow = getExpectedResult(2L);
+        List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+        assertThat(result).containsExactlyElementsOf(expectedRow);
+    }
+
+    @Test
+    public void testFilterBySchemaIdInNoMatch() throws Exception {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        Predicate predicate = builder.in(4, Arrays.asList(998L, 999L));
+        List<InternalRow> result = readWithFilter(manifestsTable, predicate);
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void testManifestCreationTimeTimestamp() throws Exception {
+        Identifier identifier = identifier("T_CreationTime");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("pt", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .option("bucket", "1")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table testTable = catalog.getTable(identifier);
+
+        write(testTable, GenericRow.of(1, 1, 1), GenericRow.of(2, 2, 2));
+
+        FileStoreScan scan = ((FileStoreTable) testTable).store().newScan();
+        FileStoreScan.Plan plan = scan.plan();
+        List<ManifestEntry> entries = plan.files();
+
+        int creationTimesFound = 0;
+        for (org.apache.paimon.manifest.ManifestEntry entry : entries) {
+            if (entry.file().creationTime() != null) {
+                creationTimesFound++;
+                org.apache.paimon.data.Timestamp creationTime = entry.file().creationTime();
+                assertThat(creationTime).isNotNull();
+                long epochMillis = entry.file().creationTimeEpochMillis();
+                assertThat(epochMillis).isPositive();
+                long expectedEpochMillis = creationTime.getMillisecond();
+                java.time.ZoneId systemZone = java.time.ZoneId.systemDefault();
+                java.time.ZoneOffset offset =
+                        systemZone
+                                .getRules()
+                                .getOffset(java.time.Instant.ofEpochMilli(expectedEpochMillis));
+                expectedEpochMillis = expectedEpochMillis - (offset.getTotalSeconds() * 1000L);
+                assertThat(epochMillis).isEqualTo(expectedEpochMillis);
+            }
+        }
+
+        assertThat(creationTimesFound).isPositive();
+    }
+
     private List<InternalRow> getExpectedResult(long snapshotId) {
         if (!snapshotManager.snapshotExists(snapshotId)) {
             return Collections.emptyList();
@@ -191,8 +290,25 @@ public class ManifestsTableTest extends TableTestBase {
                                             manifestFileMeta
                                                     .partitionStats()
                                                     .maxValues()
-                                                    .getInt(0)))));
+                                                    .getInt(0))),
+                            manifestFileMeta.minRowId(),
+                            manifestFileMeta.maxRowId()));
         }
         return expectedRow;
+    }
+
+    private Predicate schemaIdEqual(long schemaId) {
+        PredicateBuilder builder = new PredicateBuilder(ManifestsTable.TABLE_TYPE);
+        return builder.equal(4, schemaId);
+    }
+
+    private List<InternalRow> readWithFilter(Table table, Predicate predicate) throws Exception {
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+        RecordReader<InternalRow> reader =
+                readBuilder.newRead().createReader(readBuilder.newScan().plan());
+        InternalRowSerializer serializer = new InternalRowSerializer(table.rowType());
+        List<InternalRow> rows = new ArrayList<>();
+        reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        return rows;
     }
 }

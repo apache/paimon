@@ -33,7 +33,6 @@ public class ManifestCommittable {
 
     private final long identifier;
     @Nullable private final Long watermark;
-    private final Map<Integer, Long> logOffsets;
     private final Map<String, String> properties;
     private final List<CommitMessage> commitMessages;
 
@@ -44,44 +43,28 @@ public class ManifestCommittable {
     public ManifestCommittable(long identifier, @Nullable Long watermark) {
         this.identifier = identifier;
         this.watermark = watermark;
-        this.logOffsets = new HashMap<>();
         this.commitMessages = new ArrayList<>();
         this.properties = new HashMap<>();
     }
 
     public ManifestCommittable(
-            long identifier,
-            @Nullable Long watermark,
-            Map<Integer, Long> logOffsets,
-            List<CommitMessage> commitMessages) {
-        this(identifier, watermark, logOffsets, commitMessages, new HashMap<>());
+            long identifier, @Nullable Long watermark, List<CommitMessage> commitMessages) {
+        this(identifier, watermark, commitMessages, new HashMap<>());
     }
 
     public ManifestCommittable(
             long identifier,
             @Nullable Long watermark,
-            Map<Integer, Long> logOffsets,
             List<CommitMessage> commitMessages,
             Map<String, String> properties) {
         this.identifier = identifier;
         this.watermark = watermark;
-        this.logOffsets = logOffsets;
         this.commitMessages = commitMessages;
         this.properties = properties;
     }
 
     public void addFileCommittable(CommitMessage commitMessage) {
         commitMessages.add(commitMessage);
-    }
-
-    public void addLogOffset(int bucket, long offset, boolean allowDuplicate) {
-        if (!allowDuplicate && logOffsets.containsKey(bucket)) {
-            throw new RuntimeException(
-                    String.format(
-                            "bucket-%d appears multiple times, which is not possible.", bucket));
-        }
-        long newOffset = Math.max(logOffsets.getOrDefault(bucket, offset), offset);
-        logOffsets.put(bucket, newOffset);
     }
 
     public void addProperty(String key, String value) {
@@ -95,10 +78,6 @@ public class ManifestCommittable {
     @Nullable
     public Long watermark() {
         return watermark;
-    }
-
-    public Map<Integer, Long> logOffsets() {
-        return logOffsets;
     }
 
     public List<CommitMessage> fileCommittables() {
@@ -120,14 +99,13 @@ public class ManifestCommittable {
         ManifestCommittable that = (ManifestCommittable) o;
         return Objects.equals(identifier, that.identifier)
                 && Objects.equals(watermark, that.watermark)
-                && Objects.equals(logOffsets, that.logOffsets)
                 && Objects.equals(commitMessages, that.commitMessages)
                 && Objects.equals(properties, that.properties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(identifier, watermark, logOffsets, commitMessages, properties);
+        return Objects.hash(identifier, watermark, commitMessages, properties);
     }
 
     @Override
@@ -136,9 +114,8 @@ public class ManifestCommittable {
                 "ManifestCommittable {"
                         + "identifier = %s, "
                         + "watermark = %s, "
-                        + "logOffsets = %s, "
                         + "commitMessages = %s, "
                         + "properties = %s}",
-                identifier, watermark, logOffsets, commitMessages, properties);
+                identifier, watermark, commitMessages, properties);
     }
 }

@@ -21,6 +21,7 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.variant.GenericVariant;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -175,6 +176,25 @@ abstract class RowCompactedSerializerTest extends SerializerTestInstance<Interna
                             DataTypes.STRING(),
                             DataTypes.ARRAY(DataTypes.INT()),
                             DataTypes.MAP(DataTypes.INT(), DataTypes.INT())));
+        }
+    }
+
+    static final class VariantTypesTest extends RowCompactedSerializerTest {
+        public VariantTypesTest() {
+            super(getRowSerializer(), getData());
+        }
+
+        private static InternalRow[] getData() {
+            return new GenericRow[] {
+                GenericRow.of(null, null),
+                GenericRow.of(
+                        GenericVariant.fromJson("{\"age\":27,\"city\":\"Beijing\"}"),
+                        GenericVariant.fromJson("{\"age\":29,\"city\":\"Shanghai\"}"))
+            };
+        }
+
+        private static RowCompactedSerializer getRowSerializer() {
+            return new RowCompactedSerializer(RowType.of(DataTypes.VARIANT(), DataTypes.VARIANT()));
         }
     }
 

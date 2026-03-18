@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.DelegateCatalog;
 import org.apache.paimon.catalog.PropertyChange;
-import org.apache.paimon.format.csv.CsvOptions;
 import org.apache.paimon.function.Function;
 import org.apache.paimon.function.FunctionDefinition;
 import org.apache.paimon.options.Options;
@@ -39,11 +38,13 @@ import org.apache.paimon.spark.catalog.functions.PaimonFunctions;
 import org.apache.paimon.spark.catalog.functions.V1FunctionConverter;
 import org.apache.paimon.spark.utils.CatalogUtils;
 import org.apache.paimon.table.FormatTable;
+import org.apache.paimon.table.iceberg.IcebergTable;
+import org.apache.paimon.table.lance.LanceTable;
+import org.apache.paimon.table.object.ObjectTable;
 import org.apache.paimon.types.BlobType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.ExceptionUtils;
-import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.spark.sql.PaimonSparkSession$;
 import org.apache.spark.sql.SparkSession;
@@ -61,7 +62,6 @@ import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
-import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
@@ -69,16 +69,6 @@ import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
-import org.apache.spark.sql.execution.PaimonFormatTable;
-import org.apache.spark.sql.execution.PartitionedCSVTable;
-import org.apache.spark.sql.execution.PartitionedJsonTable;
-import org.apache.spark.sql.execution.PartitionedOrcTable;
-import org.apache.spark.sql.execution.PartitionedParquetTable;
-import org.apache.spark.sql.execution.datasources.csv.CSVFileFormat;
-import org.apache.spark.sql.execution.datasources.json.JsonFileFormat;
-import org.apache.spark.sql.execution.datasources.orc.OrcFileFormat;
-import org.apache.spark.sql.execution.datasources.parquet.ParquetFileFormat;
-import org.apache.spark.sql.execution.datasources.v2.FileTable;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -93,7 +83,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
@@ -138,7 +127,8 @@ public class SparkCatalog extends SparkBaseCatalog
         this.catalogName = name;
         CatalogContext catalogContext =
                 CatalogContext.create(
-                        Options.fromMap(options), sparkSession.sessionState().newHadoopConf());
+                        Options.fromMap(options.asCaseSensitiveMap()),
+                        sparkSession.sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
         this.defaultDatabase =
                 options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
@@ -466,7 +456,7 @@ public class SparkCatalog extends SparkBaseCatalog
     private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Map<String, String> normalizedProperties = new HashMap<>(properties);
-        String blobFieldName = properties.get(CoreOptions.BLOB_FIELD.key());
+        List<String> blobFields = CoreOptions.blobField(properties);
         String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (!usePaimon(provider)) {
             if (isFormatTable(provider)) {
@@ -500,7 +490,7 @@ public class SparkCatalog extends SparkBaseCatalog
         for (StructField field : schema.fields()) {
             String name = field.name();
             DataType type;
-            if (Objects.equals(blobFieldName, name)) {
+            if (blobFields.contains(name)) {
                 checkArgument(
                         field.dataType() instanceof org.apache.spark.sql.types.BinaryType,
                         "The type of blob field must be binary");
@@ -661,101 +651,23 @@ public class SparkCatalog extends SparkBaseCatalog
     protected org.apache.spark.sql.connector.catalog.Table loadSparkTable(
             Identifier ident, Map<String, String> extraOptions) throws NoSuchTableException {
         try {
-            org.apache.paimon.table.Table paimonTable =
-                    catalog.getTable(toIdentifier(ident, catalogName));
-            if (paimonTable instanceof FormatTable) {
-                return toSparkFormatTable(ident, (FormatTable) paimonTable);
+            org.apache.paimon.catalog.Identifier tblIdent = toIdentifier(ident, catalogName);
+            org.apache.paimon.table.Table table =
+                    copyWithSQLConf(
+                            catalog.getTable(tblIdent), catalogName, tblIdent, extraOptions);
+            if (table instanceof FormatTable) {
+                return toSparkFormatTable(ident, (FormatTable) table);
+            } else if (table instanceof IcebergTable) {
+                return new SparkIcebergTable(table);
+            } else if (table instanceof LanceTable) {
+                return new SparkLanceTable(table);
+            } else if (table instanceof ObjectTable) {
+                return new SparkObjectTable(table);
             } else {
-                return new SparkTable(
-                        copyWithSQLConf(
-                                paimonTable,
-                                catalogName,
-                                toIdentifier(ident, catalogName),
-                                extraOptions));
+                return new SparkTable(table);
             }
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
-        }
-    }
-
-    private static Table toSparkFormatTable(Identifier ident, FormatTable formatTable) {
-        SparkSession spark = PaimonSparkSession$.MODULE$.active();
-        StructType schema = SparkTypeUtils.fromPaimonRowType(formatTable.rowType());
-        StructType partitionSchema =
-                SparkTypeUtils.fromPaimonRowType(
-                        TypeUtils.project(formatTable.rowType(), formatTable.partitionKeys()));
-        List<String> pathList = new ArrayList<>();
-        pathList.add(formatTable.location());
-        Map<String, String> optionsMap = formatTable.options();
-        CoreOptions coreOptions = new CoreOptions(optionsMap);
-        if (coreOptions.formatTableImplementationIsPaimon()) {
-            return new PaimonFormatTable(
-                    spark,
-                    new CaseInsensitiveStringMap(optionsMap),
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    schema,
-                    partitionSchema,
-                    formatTable,
-                    ident.name());
-        }
-        Options options = Options.fromMap(formatTable.options());
-        return convertToFileTable(
-                formatTable, ident, pathList, options, spark, schema, partitionSchema);
-    }
-
-    private static FileTable convertToFileTable(
-            FormatTable formatTable,
-            Identifier ident,
-            List<String> pathList,
-            Options options,
-            SparkSession spark,
-            StructType schema,
-            StructType partitionSchema) {
-        CaseInsensitiveStringMap dsOptions = new CaseInsensitiveStringMap(options.toMap());
-        if (formatTable.format() == FormatTable.Format.CSV) {
-            options.set("sep", options.get(CsvOptions.FIELD_DELIMITER));
-            dsOptions = new CaseInsensitiveStringMap(options.toMap());
-            return new PartitionedCSVTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    CSVFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.ORC) {
-            return new PartitionedOrcTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    OrcFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.PARQUET) {
-            return new PartitionedParquetTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    ParquetFileFormat.class,
-                    partitionSchema);
-        } else if (formatTable.format() == FormatTable.Format.JSON) {
-            return new PartitionedJsonTable(
-                    ident.name(),
-                    spark,
-                    dsOptions,
-                    scala.collection.JavaConverters.asScalaBuffer(pathList).toSeq(),
-                    scala.Option.apply(schema),
-                    JsonFileFormat.class,
-                    partitionSchema);
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unsupported format table "
-                            + ident.name()
-                            + " format "
-                            + formatTable.format().name());
         }
     }
 

@@ -28,6 +28,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.reader.RecordReader;
@@ -75,6 +76,7 @@ public abstract class TableTestBase {
     protected Catalog catalog;
     protected String database;
     @TempDir public java.nio.file.Path tempPath;
+    protected IOManager ioManager;
 
     @BeforeEach
     public void beforeEach() throws Catalog.DatabaseAlreadyExistException {
@@ -82,6 +84,7 @@ public abstract class TableTestBase {
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(warehouse));
         catalog.createDatabase(database, true);
+        this.ioManager = new IOManagerImpl(tempPath.toString());
     }
 
     @AfterEach

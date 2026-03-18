@@ -78,7 +78,7 @@ To move the records into the correct bucket and make them readable,
 you need to run a compaction job.
 See `compact` [procedure]({{< ref "flink/procedures" >}}).
 The bucket number for the partitions compacted for the first time
-is configured by the option `postpone.default-bucket-num`, whose default value is `4`.
+is configured by the option `postpone.default-bucket-num`, whose default value is `1`.
 
 Finally, when you feel that the bucket number of some partition is too small,
 you can also run a rescale job.

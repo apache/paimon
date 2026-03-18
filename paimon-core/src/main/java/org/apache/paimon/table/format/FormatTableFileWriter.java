@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.TwoPhaseOutputStream;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
@@ -30,28 +31,27 @@ import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
+import static org.apache.paimon.utils.PartitionPathUtils.generatePartitionPathUtil;
 
 /** File writer for format table. */
 public class FormatTableFileWriter {
 
     private final FileIO fileIO;
-    private RowType rowType;
-    private RowType partitionType;
+    private RowType writeRowType;
     private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
     protected final Map<BinaryRow, FormatTableRecordWriter> writers;
     protected final CoreOptions options;
 
     public FormatTableFileWriter(
-            FileIO fileIO, RowType rowType, CoreOptions options, RowType partitionType) {
+            FileIO fileIO, RowType writeRowType, CoreOptions options, RowType partitionType) {
         this.fileIO = fileIO;
-        this.rowType = rowType;
-        this.partitionType = partitionType;
+        this.writeRowType = writeRowType;
         this.fileFormat = fileFormat(options);
         this.writers = new HashMap<>();
         this.options = options;
@@ -65,14 +65,17 @@ public class FormatTableFileWriter {
                         options.changelogFilePrefix(),
                         options.legacyPartitionName(),
                         options.fileSuffixIncludeCompression(),
-                        options.fileCompression(),
+                        options.formatTableFileCompression(),
                         options.dataFilePathDirectory(),
                         null,
-                        false);
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        options.indexFileInDataFileDir(),
+                        null);
     }
 
     public void withWriteType(RowType writeType) {
-        this.rowType = writeType;
+        this.writeRowType = writeType;
     }
 
     public void write(BinaryRow partition, InternalRow data) throws Exception {
@@ -101,18 +104,22 @@ public class FormatTableFileWriter {
     }
 
     private FormatTableRecordWriter createWriter(BinaryRow partition) {
-        RowType writeRowType =
-                rowType.project(
-                        rowType.getFieldNames().stream()
-                                .filter(name -> !partitionType.getFieldNames().contains(name))
-                                .collect(Collectors.toList()));
+        Path parent = pathFactory.root();
+        if (partition.getFieldCount() > 0) {
+            LinkedHashMap<String, String> partValues =
+                    pathFactory.partitionComputer().generatePartValues(partition);
+            parent =
+                    new Path(
+                            parent,
+                            generatePartitionPathUtil(
+                                    partValues, options.formatTablePartitionOnlyValueInPath()));
+        }
         return new FormatTableRecordWriter(
                 fileIO,
                 fileFormat,
                 options.targetFileSize(false),
-                pathFactory.createFormatTableDataFilePathFactory(
-                        partition, options.formatTablePartitionOnlyValueInPath()),
+                pathFactory.createDataFilePathFactory(parent, null),
                 writeRowType,
-                options.fileCompression());
+                options.formatTableFileCompression());
     }
 }

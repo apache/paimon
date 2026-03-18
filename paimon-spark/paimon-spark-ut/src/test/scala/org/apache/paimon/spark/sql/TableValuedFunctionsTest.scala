@@ -137,7 +137,8 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
             checkAnswer(
               sql(
                 s"SELECT * FROM paimon_incremental_between_timestamp('$catalogName.$dbName.t', '$t1String', '$t3String') ORDER BY id"),
-              Seq(Row(2), Row(3), Row(4)))
+              Seq(Row(2), Row(3), Row(4))
+            )
           }
         }
     }
@@ -156,30 +157,15 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
 
       write.write(GenericRow.of(1, BinaryString.fromString("a")))
       var commitMessages = write.prepareCommit(false, 0)
-      commit.commit(
-        new ManifestCommittable(
-          0,
-          utcMills("2024-12-02T10:00:00"),
-          Collections.emptyMap[Integer, java.lang.Long],
-          commitMessages))
+      commit.commit(new ManifestCommittable(0, utcMills("2024-12-02T10:00:00"), commitMessages))
 
       write.write(GenericRow.of(2, BinaryString.fromString("b")))
       commitMessages = write.prepareCommit(false, 1)
-      commit.commit(
-        new ManifestCommittable(
-          1,
-          utcMills("2024-12-03T10:00:00"),
-          Collections.emptyMap[Integer, java.lang.Long],
-          commitMessages))
+      commit.commit(new ManifestCommittable(1, utcMills("2024-12-03T10:00:00"), commitMessages))
 
       write.write(GenericRow.of(3, BinaryString.fromString("c")))
       commitMessages = write.prepareCommit(false, 2)
-      commit.commit(
-        new ManifestCommittable(
-          2,
-          utcMills("2024-12-05T10:00:00"),
-          Collections.emptyMap[Integer, java.lang.Long],
-          commitMessages))
+      commit.commit(new ManifestCommittable(2, utcMills("2024-12-05T10:00:00"), commitMessages))
 
       checkAnswer(
         sql(s"SELECT * FROM paimon_incremental_to_auto_tag('t', '2024-12-01') ORDER BY a"),
@@ -355,6 +341,27 @@ class TableValuedFunctionsTest extends PaimonHiveTestBase {
       checkAnswer(
         sql("SELECT * FROM paimon_incremental_query('`t$audit_log`', 'tag1', 'tag2') ORDER BY id"),
         Seq())
+    }
+  }
+
+  test("incremental query by tag with LIMIT") {
+    sql("use paimon")
+    withTable("t") {
+      spark.sql("""
+                  |CREATE TABLE t (a INT, b INT, c STRING)
+                  |USING paimon
+                  |TBLPROPERTIES ('primary-key'='a,b', 'bucket' = '2')
+                  |PARTITIONED BY (a)
+                  |""".stripMargin)
+      spark.sql("INSERT INTO t VALUES (1, 1, '1'), (2, 2, '2')")
+      sql("CALL sys.create_tag('t', 'tag1')")
+      spark.sql("INSERT INTO t VALUES (1, 3, '3'), (2, 4, '4')")
+      sql("CALL sys.create_tag('t', 'tag2')")
+
+      checkAnswer(
+        spark.sql(
+          "SELECT * FROM paimon_incremental_query('t', 'tag1', 'tag2') ORDER BY a, b LIMIT 5"),
+        Seq(Row(1, 3, "3"), Row(2, 4, "4")))
     }
   }
 

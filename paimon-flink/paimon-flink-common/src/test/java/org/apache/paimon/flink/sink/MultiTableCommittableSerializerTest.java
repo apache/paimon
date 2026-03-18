@@ -50,7 +50,7 @@ class MultiTableCommittableSerializerTest {
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
                 new CommitMessageImpl(row(0), 1, 2, dataIncrement, compactIncrement);
-        Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
+        Committable committable = new Committable(9, commitMessage);
 
         Arrays.asList(Tuple2.of("测试数据库", "用户信息表"), Tuple2.of("database", "table"))
                 .forEach(
@@ -64,7 +64,8 @@ class MultiTableCommittableSerializerTest {
                             try {
                                 deserializeCommittable =
                                         serializer.deserialize(
-                                                2, serializer.serialize(multiTableCommittable));
+                                                serializer.getVersion(),
+                                                serializer.serialize(multiTableCommittable));
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }
@@ -83,7 +84,7 @@ class MultiTableCommittableSerializerTest {
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
                 new CommitMessageImpl(row(0), 1, 2, newFilesIncrement, compactIncrement);
-        Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
+        Committable committable = new Committable(9, commitMessage);
 
         Arrays.asList(Tuple2.of("测试数据库", "用户信息表"), Tuple2.of("database", "table"))
                 .forEach(

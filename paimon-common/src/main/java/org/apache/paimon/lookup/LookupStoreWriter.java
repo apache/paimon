@@ -18,15 +18,12 @@
 
 package org.apache.paimon.lookup;
 
-import org.apache.paimon.lookup.LookupStoreFactory.Context;
-
+import java.io.Closeable;
 import java.io.IOException;
 
 /** Writer to prepare binary file. */
-public interface LookupStoreWriter {
+public interface LookupStoreWriter extends Closeable {
 
     /** Put key value to store. */
     void put(byte[] key, byte[] value) throws IOException;
-
-    Context close() throws IOException;
 }

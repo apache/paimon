@@ -19,7 +19,8 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions.BucketFunctionType
-import org.apache.paimon.predicate.{Predicate, TopN}
+import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.{Predicate, TopN, VectorSearch}
 import org.apache.paimon.spark.commands.BucketExpression.quote
 import org.apache.paimon.table.{BucketMode, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{DataSplit, Split}
@@ -29,7 +30,6 @@ import org.apache.spark.sql.connector.expressions._
 import org.apache.spark.sql.connector.expressions.filter.{Predicate => SparkPredicate}
 import org.apache.spark.sql.connector.read.{SupportsReportOrdering, SupportsReportPartitioning, SupportsRuntimeV2Filtering}
 import org.apache.spark.sql.connector.read.partitioning.{KeyGroupedPartitioning, Partitioning, UnknownPartitioning}
-import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
@@ -37,13 +37,13 @@ import scala.collection.JavaConverters._
 case class PaimonScan(
     table: InnerTable,
     requiredSchema: StructType,
-    filters: Seq[Predicate],
-    reservedFilters: Seq[Filter],
-    override val pushDownLimit: Option[Int],
-    override val pushDownTopN: Option[TopN],
+    pushedPartitionFilters: Seq[PartitionPredicate],
+    pushedDataFilters: Seq[Predicate],
+    override val pushedLimit: Option[Int],
+    override val pushedTopN: Option[TopN],
+    override val pushedVectorSearch: Option[VectorSearch],
     bucketedScanDisabled: Boolean = false)
-  extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
-  with SupportsRuntimeV2Filtering
+  extends PaimonBaseScan(table)
   with SupportsReportPartitioning
   with SupportsReportOrdering {
 
@@ -86,11 +86,9 @@ case class PaimonScan(
     }
   }
 
-  /**
-   * Extract the bucket number from the splits only if all splits have the same totalBuckets number.
-   */
+  /** Extract the bucket number from the splits only if all splits have the same totalBuckets number. */
   private def extractBucketNumber(): Option[Int] = {
-    val splits = getOriginSplits
+    val splits = inputSplits
     if (splits.exists(!_.isInstanceOf[DataSplit])) {
       None
     } else {
@@ -111,15 +109,14 @@ case class PaimonScan(
   // Since Spark 3.3
   override def outputPartitioning: Partitioning = {
     extractBucketTransform
-      .map(bucket => new KeyGroupedPartitioning(Array(bucket), lazyInputPartitions.size))
+      .map(bucket => new KeyGroupedPartitioning(Array(bucket), inputPartitions.size))
       .getOrElse(new UnknownPartitioning(0))
   }
 
   // Since Spark 3.4
   override def outputOrdering(): Array[SortOrder] = {
     if (
-      !shouldDoBucketedScan || lazyInputPartitions.exists(
-        !_.isInstanceOf[PaimonBucketedInputPartition])
+      !shouldDoBucketedScan || inputPartitions.exists(!_.isInstanceOf[PaimonBucketedInputPartition])
     ) {
       return Array.empty
     }
@@ -132,7 +129,7 @@ case class PaimonScan(
       return Array.empty
     }
 
-    val allSplitsKeepOrdering = lazyInputPartitions.toSeq
+    val allSplitsKeepOrdering = inputPartitions.toSeq
       .map(_.asInstanceOf[PaimonBucketedInputPartition])
       .map(_.splits.asInstanceOf[Seq[DataSplit]])
       .forall {
@@ -161,7 +158,7 @@ case class PaimonScan(
       .toArray
   }
 
-  override def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
+  override protected def getInputPartitions(splits: Array[Split]): Seq[PaimonInputPartition] = {
     if (!shouldDoBucketedScan || splits.exists(!_.isInstanceOf[DataSplit])) {
       return super.getInputPartitions(splits)
     }
@@ -174,32 +171,5 @@ case class PaimonScan(
           PaimonBucketedInputPartition(groupedSplits, bucket)
       }
       .toSeq
-  }
-
-  // Since Spark 3.2
-  override def filterAttributes(): Array[NamedReference] = {
-    val requiredFields = readBuilder.readType().getFieldNames.asScala
-    table
-      .partitionKeys()
-      .asScala
-      .toArray
-      .filter(requiredFields.contains)
-      .map(fieldReference)
-  }
-
-  override def filter(predicates: Array[SparkPredicate]): Unit = {
-    val converter = SparkV2FilterConverter(table.rowType())
-    val partitionKeys = table.partitionKeys().asScala.toSeq
-    val partitionFilter = predicates.flatMap {
-      case p if SparkV2FilterConverter.isSupportedRuntimeFilter(p, partitionKeys) =>
-        converter.convert(p)
-      case _ => None
-    }
-    if (partitionFilter.nonEmpty) {
-      readBuilder.withFilter(partitionFilter.toList.asJava)
-      // set inputPartitions null to trigger to get the new splits.
-      inputPartitions = null
-      inputSplits = null
-    }
   }
 }

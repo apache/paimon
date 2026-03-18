@@ -102,7 +102,8 @@ public class ExternalBuffer implements RowBuffer {
         }
     }
 
-    private long getDiskUsage() {
+    @VisibleForTesting
+    public long getDiskUsage() {
         long bytes = 0;
 
         for (ChannelWithMeta spillChannelID : spilledChannelIDs) {
@@ -161,11 +162,11 @@ public class ExternalBuffer implements RowBuffer {
                                 : segment.size();
                 channelWriterOutputView.write(segment, 0, bufferSize);
             }
+            channelWriterOutputView.close();
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
                     inMemoryBuffer.size(),
-                    channelWriterOutputView.getNumBytes());
-            channelWriterOutputView.close();
+                    channelWriterOutputView.getWriteBytes());
         } catch (IOException e) {
             channelWriterOutputView.closeAndDelete();
             throw e;
@@ -175,7 +176,7 @@ public class ExternalBuffer implements RowBuffer {
                 new ChannelWithMeta(
                         channel,
                         inMemoryBuffer.getNumRecordBuffers(),
-                        channelWriterOutputView.getNumBytes()));
+                        channelWriterOutputView.getWriteBytes()));
 
         inMemoryBuffer.reset();
     }

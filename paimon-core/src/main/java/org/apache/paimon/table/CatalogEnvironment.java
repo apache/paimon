@@ -28,6 +28,7 @@ import org.apache.paimon.catalog.CatalogSnapshotCommit;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.RenamingSnapshotCommit;
 import org.apache.paimon.catalog.SnapshotCommit;
+import org.apache.paimon.catalog.TableRollback;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.source.TableQueryAuth;
 import org.apache.paimon.tag.SnapshotLoaderImpl;
@@ -37,7 +38,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Collections;
 import java.util.Optional;
 
 /** Catalog environment in table which contains log factory, metastore client factory. */
@@ -52,6 +52,7 @@ public class CatalogEnvironment implements Serializable {
     @Nullable private final CatalogLockContext lockContext;
     @Nullable private final CatalogContext catalogContext;
     private final boolean supportsVersionManagement;
+    private final boolean supportsPartitionModification;
 
     public CatalogEnvironment(
             @Nullable Identifier identifier,
@@ -60,7 +61,8 @@ public class CatalogEnvironment implements Serializable {
             @Nullable CatalogLockFactory lockFactory,
             @Nullable CatalogLockContext lockContext,
             @Nullable CatalogContext catalogContext,
-            boolean supportsVersionManagement) {
+            boolean supportsVersionManagement,
+            boolean supportsPartitionModification) {
         this.identifier = identifier;
         this.uuid = uuid;
         this.catalogLoader = catalogLoader;
@@ -68,10 +70,11 @@ public class CatalogEnvironment implements Serializable {
         this.lockContext = lockContext;
         this.catalogContext = catalogContext;
         this.supportsVersionManagement = supportsVersionManagement;
+        this.supportsPartitionModification = supportsPartitionModification;
     }
 
     public static CatalogEnvironment empty() {
-        return new CatalogEnvironment(null, null, null, null, null, null, false);
+        return new CatalogEnvironment(null, null, null, null, null, null, false, false);
     }
 
     @Nullable
@@ -85,12 +88,24 @@ public class CatalogEnvironment implements Serializable {
     }
 
     @Nullable
-    public PartitionHandler partitionHandler() {
+    public PartitionModification partitionModification() {
+        if (catalogLoader == null) {
+            return null;
+        }
+        if (!supportsPartitionModification) {
+            return null;
+        }
+        Catalog catalog = catalogLoader.load();
+        return PartitionModification.create(catalog, identifier);
+    }
+
+    @Nullable
+    public PartitionMarkDone partitionMarkDone() {
         if (catalogLoader == null) {
             return null;
         }
         Catalog catalog = catalogLoader.load();
-        return PartitionHandler.create(catalog, identifier);
+        return PartitionMarkDone.create(catalog, identifier);
     }
 
     public boolean supportsVersionManagement() {
@@ -111,6 +126,21 @@ public class CatalogEnvironment implements Serializable {
             snapshotCommit = new RenamingSnapshotCommit(snapshotManager, lock);
         }
         return snapshotCommit;
+    }
+
+    @Nullable
+    public TableRollback catalogTableRollback() {
+        if (catalogLoader != null && supportsVersionManagement) {
+            Catalog catalog = catalogLoader.load();
+            return (instant, fromSnapshot) -> {
+                try {
+                    catalog.rollbackTo(identifier, instant, fromSnapshot);
+                } catch (Catalog.TableNotExistException e) {
+                    throw new RuntimeException(e);
+                }
+            };
+        }
+        return null;
     }
 
     @Nullable
@@ -149,12 +179,13 @@ public class CatalogEnvironment implements Serializable {
                 lockFactory,
                 lockContext,
                 catalogContext,
-                supportsVersionManagement);
+                supportsVersionManagement,
+                supportsPartitionModification);
     }
 
     public TableQueryAuth tableQueryAuth(CoreOptions options) {
         if (!options.queryAuthEnabled() || catalogLoader == null) {
-            return select -> Collections.emptyList();
+            return select -> null;
         }
         return select -> {
             try (Catalog catalog = catalogLoader.load()) {

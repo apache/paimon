@@ -27,6 +27,12 @@ under the License.
     </thead>
     <tbody>
         <tr>
+            <td><h5>read.allow.fullScan</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to allow full scan when reading a partitioned table.</td>
+        </tr>
+        <tr>
             <td><h5>read.changelog</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -69,6 +75,12 @@ under the License.
             <td>Whether to verify SparkSession is initialized with required configurations.</td>
         </tr>
         <tr>
+            <td><h5>source.split.target-size-with-column-pruning</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to adjust the target split size based on pruned (projected) columns. If enabled, split size estimation uses only the columns actually being read.</td>
+        </tr>
+        <tr>
             <td><h5>write.merge-schema</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -84,7 +96,7 @@ under the License.
             <td><h5>write.use-v2-write</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
-            <td>If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE and TableCapability.ACCEPT_ANY_SCHEMA.</td>
+            <td>If true, v2 write will be used. Currently, only HASH_FIXED and BUCKET_UNAWARE bucket modes are supported. Will fall back to v1 write for other bucket modes. Currently, Spark V2 write does not support TableCapability.STREAMING_WRITE.</td>
         </tr>
     </tbody>
 </table>

@@ -170,6 +170,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         context,
                         false,
                         Collections.emptyMap(),
+                        null,
                         eagerInit,
                         tableFilter);
     }

@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -54,7 +55,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
             } else {
                 throw new IllegalArgumentException(
                         "By default, First row merge engine can not accept DELETE/UPDATE_BEFORE records.\n"
-                                + "You can config 'first-row.ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
+                                + "You can config 'ignore-delete' to ignore the DELETE/UPDATE_BEFORE records.");
             }
         }
 
@@ -82,7 +83,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
         private final boolean ignoreDelete;
 
         public Factory(boolean ignoreDelete) {
@@ -90,7 +91,7 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
         }
 
         @Override
-        public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+        public MergeFunction<KeyValue> create(@Nullable RowType readType) {
             return new FirstRowMergeFunction(ignoreDelete);
         }
     }

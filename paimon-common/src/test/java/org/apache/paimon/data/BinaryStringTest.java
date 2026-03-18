@@ -35,6 +35,8 @@ import java.util.Random;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.paimon.data.BinaryString.EMPTY_UTF8;
 import static org.apache.paimon.data.BinaryString.blankString;
+import static org.apache.paimon.data.BinaryString.concat;
+import static org.apache.paimon.data.BinaryString.concatWs;
 import static org.apache.paimon.data.BinaryString.fromBytes;
 import static org.apache.paimon.utils.DecimalUtils.castFrom;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -219,6 +221,42 @@ public class BinaryStringTest {
         assertThat(binaryString2.toString()).isEqualTo("abcdeb");
         assertThat(binaryString1.compareTo(binaryString2)).isEqualTo(-1);
         assertThat(binaryString2.compareTo(binaryString1)).isEqualTo(1);
+    }
+
+    @TestTemplate
+    void concatTest() {
+        assertThat(concat()).isEqualTo(EMPTY_UTF8);
+        assertThat(concat((BinaryString) null)).isNull();
+        assertThat(concat(EMPTY_UTF8)).isEqualTo(EMPTY_UTF8);
+        assertThat(concat(fromString("ab"))).isEqualTo(fromString("ab"));
+        assertThat(concat(fromString("a"), fromString("b"))).isEqualTo(fromString("ab"));
+        assertThat(concat(fromString("a"), fromString("b"), fromString("c")))
+                .isEqualTo(fromString("abc"));
+        assertThat(concat(fromString("a"), null, fromString("c"))).isNull();
+        assertThat(concat(fromString("a"), null, null)).isNull();
+        assertThat(concat(null, null, null)).isNull();
+        assertThat(concat(fromString("数据"), fromString("砖头"))).isEqualTo(fromString("数据砖头"));
+    }
+
+    @TestTemplate
+    void concatWsTest() {
+        // Returns empty if the separator is null
+        assertThat(concatWs(null, (BinaryString) null)).isNull();
+        assertThat(concatWs(null, fromString("a"))).isNull();
+
+        // If separator is null, concatWs should skip all null inputs and never return null.
+        BinaryString sep = fromString("哈哈");
+        assertThat(concatWs(sep, EMPTY_UTF8)).isEqualTo(EMPTY_UTF8);
+        assertThat(concatWs(sep, fromString("ab"))).isEqualTo(fromString("ab"));
+        assertThat(concatWs(sep, fromString("a"), fromString("b"))).isEqualTo(fromString("a哈哈b"));
+        assertThat(concatWs(sep, fromString("a"), fromString("b"), fromString("c")))
+                .isEqualTo(fromString("a哈哈b哈哈c"));
+        assertThat(concatWs(sep, fromString("a"), null, fromString("c")))
+                .isEqualTo(fromString("a哈哈c"));
+        assertThat(concatWs(sep, fromString("a"), null, null)).isEqualTo(fromString("a"));
+        assertThat(concatWs(sep, null, null, null)).isEqualTo(EMPTY_UTF8);
+        assertThat(concatWs(sep, fromString("数据"), fromString("砖头")))
+                .isEqualTo(fromString("数据哈哈砖头"));
     }
 
     @TestTemplate

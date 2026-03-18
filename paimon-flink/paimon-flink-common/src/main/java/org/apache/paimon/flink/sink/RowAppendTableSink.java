@@ -32,18 +32,14 @@ public class RowAppendTableSink extends AppendTableSink<InternalRow> {
     private static final long serialVersionUID = 1L;
 
     public RowAppendTableSink(
-            FileStoreTable table,
-            Map<String, String> overwritePartitions,
-            LogSinkFunction logSinkFunction,
-            Integer parallelism) {
-        super(table, overwritePartitions, logSinkFunction, parallelism);
+            FileStoreTable table, Map<String, String> overwritePartitions, Integer parallelism) {
+        super(table, overwritePartitions, parallelism);
     }
 
     @Override
     protected OneInputStreamOperatorFactory<InternalRow, Committable> createWriteOperatorFactory(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return createNoStateRowWriteOperatorFactory(
-                table, logSinkFunction, writeProvider, commitUser);
+        return createNoStateRowWriteOperatorFactory(table, writeProvider, commitUser);
     }
 
     @Override

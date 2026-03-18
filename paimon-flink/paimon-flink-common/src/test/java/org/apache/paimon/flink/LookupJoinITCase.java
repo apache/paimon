@@ -1163,16 +1163,18 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testMaxPtAndOverwrite() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testMaxPtAndOverwrite(boolean refreshPartitionQuickly) throws Exception {
         sql(
                 "CREATE TABLE PARTITIONED_DIM (pt INT, k INT, v INT) "
                         + "PARTITIONED BY (`pt`) WITH ("
                         + "'bucket' = '2', "
                         + "'bucket-key' = 'k', "
                         + "'lookup.dynamic-partition' = 'max_pt()', "
-                        + "'lookup.dynamic-partition.refresh-interval' = '99999 s', "
-                        + "'continuous.discovery-interval'='1 ms')");
+                        + "'lookup.dynamic-partition.refresh-interval' = '%s', "
+                        + "'continuous.discovery-interval'='1 ms')",
+                refreshPartitionQuickly ? "10 ms" : "99999 s");
         sql(
                 "INSERT INTO PARTITIONED_DIM VALUES (1, 1, 101), (1, 2, 102), (2, 1, 201), (2, 2, 202)");
 
@@ -1192,6 +1194,28 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         result = iterator.collect(3);
         assertThat(result)
                 .containsExactlyInAnyOrder(Row.of(1, 211), Row.of(2, 212), Row.of(3, 213));
+
+        // overwrite old partition
+        sql(
+                "INSERT OVERWRITE PARTITIONED_DIM PARTITION (pt = 1) VALUES (1, 111), (2, 112), (3, 113)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(Row.of(1, 211), Row.of(2, 212), Row.of(3, 213));
+
+        // overwrite new MAX partition
+        sql(
+                "INSERT OVERWRITE PARTITIONED_DIM PARTITION (pt = 3) VALUES (1, 301), (2, 302), (3, 303)");
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+        result = iterator.collect(3);
+        if (refreshPartitionQuickly) {
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of(1, 301), Row.of(2, 302), Row.of(3, 303));
+        } else {
+            // MAX_PT isn't changed
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of(1, 211), Row.of(2, 212), Row.of(3, 213));
+        }
     }
 
     @Test

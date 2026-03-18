@@ -21,7 +21,8 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.{SparkConnectorOptions, SparkTable}
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
-import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand, PaimonTruncateTableCommand}
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonDropPartitions
+import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonShowColumnsCommand}
 import org.apache.paimon.spark.util.OptionUtils
 import org.apache.paimon.table.FileStoreTable
 
@@ -33,13 +34,13 @@ import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.catalyst.util.TypeUtils.toSQLId
 import org.apache.spark.sql.connector.catalog.TableCapability
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Implicits, DataSourceV2Relation}
 import org.apache.spark.sql.types._
 
 import scala.collection.mutable
 
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
-
+  import DataSourceV2Implicits._
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
 
     case a @ PaimonV2WriteCommand(table) if !paimonWriteResolved(a.query, table) =>
@@ -60,6 +61,11 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
     case s @ ShowColumns(PaimonRelation(table), _, _) if s.resolved =>
       PaimonShowColumnsCommand(table)
+
+    case d @ PaimonDropPartitions(ResolvedTable(_, _, table: SparkTable, _), parts, _, _)
+        if d.resolved =>
+      PaimonDropPartitions.validate(table, parts.asResolvedPartitionSpecs)
+      d
   }
 
   private def writeOptions(v2WriteCommand: V2WriteCommand): Map[String, String] = {
@@ -324,9 +330,6 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan match {
-      case t @ TruncateTable(PaimonRelation(table)) if t.resolved =>
-        PaimonTruncateTableCommand(table, Map.empty)
-
       case a @ AnalyzeTable(
             ResolvedTable(catalog, identifier, table: SparkTable, _),
             partitionSpec,

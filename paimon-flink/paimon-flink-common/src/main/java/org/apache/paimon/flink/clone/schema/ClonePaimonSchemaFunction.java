@@ -31,6 +31,8 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
@@ -44,10 +46,12 @@ public class ClonePaimonSchemaFunction
         extends ProcessFunction<Tuple2<Identifier, Identifier>, CloneSchemaInfo> {
 
     private static final long serialVersionUID = 1L;
+    private static final Logger LOG = LoggerFactory.getLogger(ClonePaimonSchemaFunction.class);
 
     private final Map<String, String> sourceCatalogConfig;
     private final Map<String, String> targetCatalogConfig;
     private final String preferFileFormat;
+    private final boolean cloneIfExists;
 
     private transient Catalog sourceCatalog;
     private transient Catalog targetCatalog;
@@ -55,10 +59,12 @@ public class ClonePaimonSchemaFunction
     public ClonePaimonSchemaFunction(
             Map<String, String> sourceCatalogConfig,
             Map<String, String> targetCatalogConfig,
-            String preferFileFormat) {
+            String preferFileFormat,
+            boolean cloneIfExists) {
         this.sourceCatalogConfig = sourceCatalogConfig;
         this.targetCatalogConfig = targetCatalogConfig;
         this.preferFileFormat = preferFileFormat;
+        this.cloneIfExists = cloneIfExists;
     }
 
     /**
@@ -119,6 +125,18 @@ public class ClonePaimonSchemaFunction
 
         if (!StringUtils.isNullOrWhitespaceOnly(preferFileFormat)) {
             builder.option(CoreOptions.FILE_FORMAT.key(), preferFileFormat);
+        }
+
+        try {
+            targetCatalog.getTable(tuple.f1);
+            if (!cloneIfExists) {
+                LOG.info(
+                        "Target table '{}' already exists and clone_if_exists is false, skipping clone operation.",
+                        tuple.f1);
+                return;
+            }
+        } catch (Catalog.TableNotExistException e) {
+            // Table does not exist, proceed to create
         }
 
         targetCatalog.createTable(tuple.f1, builder.build(), true);

@@ -183,6 +183,27 @@ public class MySqlActionUtils {
         mySqlConfig
                 .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_BACKFILL_SKIP)
                 .ifPresent(sourceBuilder::skipSnapshotBackfill);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.SCAN_SNAPSHOT_FETCH_SIZE)
+                .ifPresent(sourceBuilder::fetchSize);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_LOWER_BOUND)
+                .ifPresent(sourceBuilder::distributionFactorLower);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.CHUNK_KEY_EVEN_DISTRIBUTION_FACTOR_UPPER_BOUND)
+                .ifPresent(sourceBuilder::distributionFactorUpper);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_UNBOUNDED_CHUNK_FIRST)
+                .ifPresent(sourceBuilder::assignUnboundedChunkFirst);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.CHUNK_META_GROUP_SIZE)
+                .ifPresent(sourceBuilder::splitMetaGroupSize);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.PARSE_ONLINE_SCHEMA_CHANGES)
+                .ifPresent(sourceBuilder::parseOnLineSchemaChanges);
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.USE_LEGACY_JSON_FORMAT)
+                .ifPresent(sourceBuilder::useLegacyJsonFormat);
 
         String startupMode = mySqlConfig.get(MySqlSourceOptions.SCAN_STARTUP_MODE);
         // see

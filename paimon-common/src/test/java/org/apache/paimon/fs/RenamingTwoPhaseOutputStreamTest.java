@@ -61,7 +61,7 @@ public class RenamingTwoPhaseOutputStreamTest {
         assertThat(fileIO.exists(targetPath)).isFalse();
 
         // Commit the file
-        committer.commit();
+        committer.commit(fileIO);
 
         // Now target file should exist with correct content
         assertThat(fileIO.exists(targetPath)).isTrue();
@@ -83,7 +83,7 @@ public class RenamingTwoPhaseOutputStreamTest {
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
 
         // Discard instead of commit
-        committer.discard();
+        committer.discard(fileIO);
 
         // Target file should not exist
         assertThat(fileIO.exists(targetPath)).isFalse();
@@ -112,10 +112,10 @@ public class RenamingTwoPhaseOutputStreamTest {
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
 
         // First commit should succeed
-        committer.commit();
+        committer.commit(fileIO);
 
         // Second commit should throw
-        assertThatThrownBy(committer::commit).isInstanceOf(IOException.class);
+        assertThatThrownBy(() -> committer.commit(fileIO)).isInstanceOf(IOException.class);
     }
 
     @Test
@@ -132,7 +132,7 @@ public class RenamingTwoPhaseOutputStreamTest {
         assertThat(stream.getPos()).isEqualTo(12);
 
         TwoPhaseOutputStream.Committer committer = stream.closeForCommit();
-        committer.commit();
+        committer.commit(fileIO);
 
         // Verify final content
         byte[] content = Files.readAllBytes(Paths.get(targetPath.toString()));

@@ -18,6 +18,11 @@
 
 package org.apache.paimon.data.variant;
 
+import org.apache.paimon.types.DataType;
+
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+
 /**
  * A Variant represents a type that contain one of: 1) Primitive: A type and corresponding value
  * (e.g. INT, STRING); 2) Array: An ordered list of Variant values; 3) Object: An unordered
@@ -43,7 +48,12 @@ public interface Variant {
     byte[] value();
 
     /** Parses the variant to json. */
-    String toJson();
+    default String toJson() {
+        return toJson(ZoneOffset.UTC);
+    }
+
+    /** Parses the variant to json with zoneId. */
+    String toJson(ZoneId zoneId);
 
     /**
      * Extracts a sub-variant value according to a path which start with a `$`. e.g.
@@ -51,8 +61,10 @@ public interface Variant {
      * <p>access object's field: `$.key` or `$['key']` or `$["key"]`.
      *
      * <p>access array's first elem: `$.array[0]`
+     *
+     * <p>and then cast the value to the target type.
      */
-    Object variantGet(String path);
+    Object variantGet(String path, DataType dataType, VariantCastArgs castArgs);
 
     /** Returns the size of the variant in bytes. */
     long sizeInBytes();

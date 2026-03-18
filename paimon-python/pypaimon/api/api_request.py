@@ -23,8 +23,10 @@ from typing import Dict, List, Optional
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import json_field
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
+from pypaimon.table.instant import Instant
 
 
 class RESTRequest(ABC):
@@ -69,10 +71,26 @@ class CreateTableRequest(RESTRequest):
 
 @dataclass
 class CommitTableRequest(RESTRequest):
-    FIELD_TABLE_UUID = "tableUuid"
+    FIELD_TABLE_ID = "tableId"
     FIELD_SNAPSHOT = "snapshot"
     FIELD_STATISTICS = "statistics"
 
-    table_uuid: Optional[str] = json_field(FIELD_TABLE_UUID)
+    table_id: Optional[str] = json_field(FIELD_TABLE_ID)
     snapshot: Snapshot = json_field(FIELD_SNAPSHOT)
     statistics: List[PartitionStatistics] = json_field(FIELD_STATISTICS)
+
+
+@dataclass
+class AlterTableRequest(RESTRequest):
+    FIELD_CHANGES = "changes"
+
+    changes: List[SchemaChange] = json_field(FIELD_CHANGES)
+
+
+@dataclass
+class RollbackTableRequest(RESTRequest):
+    FIELD_INSTANT = "instant"
+    FIELD_FROM_SNAPSHOT = "fromSnapshot"
+
+    instant: Instant = json_field(FIELD_INSTANT)
+    from_snapshot: Optional[int] = json_field(FIELD_FROM_SNAPSHOT)

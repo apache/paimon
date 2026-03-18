@@ -21,6 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -59,7 +60,8 @@ public class IndexManifestEntry {
                                     7,
                                     "_DELETIONS_VECTORS_RANGES",
                                     new ArrayType(true, DeletionVectorMeta.SCHEMA)),
-                            new DataField(8, "_EXTERNAL_PATH", newStringType(true))));
+                            new DataField(8, "_EXTERNAL_PATH", newStringType(true)),
+                            new DataField(9, "_GLOBAL_INDEX", GlobalIndexMeta.SCHEMA)));
 
     private final FileKind kind;
     private final BinaryRow partition;

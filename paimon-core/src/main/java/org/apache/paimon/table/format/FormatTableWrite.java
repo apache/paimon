@@ -21,6 +21,7 @@ package org.apache.paimon.table.format;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.casting.DefaultValueRow;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BlobConsumer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -33,6 +34,7 @@ import org.apache.paimon.table.sink.FormatTableRowPartitionKeyExtractor;
 import org.apache.paimon.table.sink.TableWrite;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -42,12 +44,13 @@ import java.util.stream.Collectors;
 /** {@link TableWrite} implementation for format table. */
 public class FormatTableWrite implements BatchTableWrite {
 
-    private RowType rowType;
+    private final RowType rowType;
     private final FormatTableFileWriter write;
     private final FormatTableRowPartitionKeyExtractor partitionKeyExtractor;
 
     private final int[] notNullFieldIndex;
     private final @Nullable DefaultValueRow defaultValueRow;
+    private final ProjectedRow projectedRow;
 
     public FormatTableWrite(
             FileIO fileIO,
@@ -56,7 +59,6 @@ public class FormatTableWrite implements BatchTableWrite {
             RowType partitionType,
             List<String> partitionKeys) {
         this.rowType = rowType;
-        this.write = new FormatTableFileWriter(fileIO, rowType, options, partitionType);
         this.partitionKeyExtractor =
                 new FormatTableRowPartitionKeyExtractor(rowType, partitionKeys);
         List<String> notNullColumnNames =
@@ -66,12 +68,13 @@ public class FormatTableWrite implements BatchTableWrite {
                         .collect(Collectors.toList());
         this.notNullFieldIndex = rowType.getFieldIndices(notNullColumnNames);
         this.defaultValueRow = DefaultValueRow.create(rowType);
-    }
-
-    @Override
-    public BatchTableWrite withWriteType(RowType writeType) {
-        write.withWriteType(writeType);
-        return this;
+        RowType writeRowType =
+                rowType.project(
+                        rowType.getFieldNames().stream()
+                                .filter(name -> !partitionType.getFieldNames().contains(name))
+                                .collect(Collectors.toList()));
+        this.projectedRow = ProjectedRow.from(writeRowType, rowType);
+        this.write = new FormatTableFileWriter(fileIO, writeRowType, options, partitionType);
     }
 
     @Override
@@ -91,24 +94,12 @@ public class FormatTableWrite implements BatchTableWrite {
         }
         row = defaultValueRow == null ? row : defaultValueRow.replaceRow(row);
         BinaryRow partition = partitionKeyExtractor.partition(row);
-        write.write(partition, row);
+        write.write(partition, projectedRow.replaceRow(row));
     }
 
     @Override
     public List<CommitMessage> prepareCommit() throws Exception {
         return write.prepareCommit();
-    }
-
-    public void commit(List<CommitMessage> commitMessages) throws Exception {
-        for (CommitMessage commitMessage : commitMessages) {
-            if (commitMessage instanceof TwoPhaseCommitMessage) {
-                TwoPhaseCommitMessage twoPhaseCommitMessage = (TwoPhaseCommitMessage) commitMessage;
-                twoPhaseCommitMessage.getCommitter().commit();
-            } else {
-                throw new RuntimeException(
-                        "Unsupported commit message type: " + commitMessage.getClass().getName());
-            }
-        }
     }
 
     @Override
@@ -127,8 +118,18 @@ public class FormatTableWrite implements BatchTableWrite {
     }
 
     @Override
-    public TableWrite withIOManager(IOManager ioManager) {
+    public TableWrite withBlobConsumer(BlobConsumer blobConsumer) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public BatchTableWrite withIOManager(IOManager ioManager) {
         return this;
+    }
+
+    @Override
+    public BatchTableWrite withWriteType(RowType writeType) {
+        throw new UnsupportedOperationException();
     }
 
     @Override

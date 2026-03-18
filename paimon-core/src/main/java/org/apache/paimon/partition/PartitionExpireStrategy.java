@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Strategy for partition expiration. */
 public abstract class PartitionExpireStrategy {
@@ -80,18 +81,23 @@ public abstract class PartitionExpireStrategy {
             RowType partitionType,
             @Nullable CatalogLoader catalogLoader,
             @Nullable Identifier identifier) {
-        switch (options.partitionExpireStrategy()) {
-            case UPDATE_TIME:
+        Optional<PartitionExpireStrategyFactory> custom =
+                PartitionExpireStrategyFactory.INSTANCE.get();
+        if (custom.isPresent()) {
+            try {
+                return custom.get().create(catalogLoader, identifier, options, partitionType);
+            } catch (UnsupportedOperationException ignored) {
+            }
+        }
+
+        String strategy = options.partitionExpireStrategy();
+        switch (strategy) {
+            case "update-time":
                 return new PartitionUpdateTimeExpireStrategy(options, partitionType);
-            case VALUES_TIME:
+            case "values-time":
                 return new PartitionValuesTimeExpireStrategy(options, partitionType);
-            case CUSTOM:
-                return PartitionExpireStrategyFactory.INSTANCE
-                        .get()
-                        .create(catalogLoader, identifier, options, partitionType);
             default:
-                throw new IllegalArgumentException(
-                        "Unknown partitionExpireStrategy: " + options.partitionExpireStrategy());
+                throw new IllegalArgumentException("Unknown partitionExpireStrategy: " + strategy);
         }
     }
 }

@@ -80,6 +80,7 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
 
     @Override
     protected void setRoot(CdcSourceRecord record) {
+        super.setRoot(record); // Store current record for metadata access
         keyRecord = (GenericRecord) record.getKey();
         valueRecord = (GenericRecord) record.getValue();
     }
@@ -155,10 +156,11 @@ public class DebeziumAvroRecordParser extends AbstractRecordParser {
                             record.get(fieldName),
                             ZoneOffset.UTC);
             resultMap.put(fieldName, transformed);
-            schemaBuilder.column(fieldName, avroToPaimonDataType(schema));
+            schemaBuilder.column(fieldName, avroToPaimonDataType(schema), field.doc());
         }
 
         evalComputedColumns(resultMap, schemaBuilder);
+        evalMetadataColumns(resultMap, schemaBuilder);
         return resultMap;
     }
 

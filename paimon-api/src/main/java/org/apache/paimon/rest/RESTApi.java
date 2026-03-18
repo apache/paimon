@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.consumer.ConsumerInfo;
 import org.apache.paimon.function.FunctionChange;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.Partition;
@@ -42,11 +43,14 @@ import org.apache.paimon.rest.requests.CreateBranchRequest;
 import org.apache.paimon.rest.requests.CreateDatabaseRequest;
 import org.apache.paimon.rest.requests.CreateFunctionRequest;
 import org.apache.paimon.rest.requests.CreateTableRequest;
+import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ForwardBranchRequest;
+import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
+import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -58,9 +62,11 @@ import org.apache.paimon.rest.responses.GetFunctionResponse;
 import org.apache.paimon.rest.responses.GetTableResponse;
 import org.apache.paimon.rest.responses.GetTableSnapshotResponse;
 import org.apache.paimon.rest.responses.GetTableTokenResponse;
+import org.apache.paimon.rest.responses.GetTagResponse;
 import org.apache.paimon.rest.responses.GetVersionSnapshotResponse;
 import org.apache.paimon.rest.responses.GetViewResponse;
 import org.apache.paimon.rest.responses.ListBranchesResponse;
+import org.apache.paimon.rest.responses.ListConsumersResponse;
 import org.apache.paimon.rest.responses.ListDatabasesResponse;
 import org.apache.paimon.rest.responses.ListFunctionDetailsResponse;
 import org.apache.paimon.rest.responses.ListFunctionsGloballyResponse;
@@ -70,6 +76,7 @@ import org.apache.paimon.rest.responses.ListSnapshotsResponse;
 import org.apache.paimon.rest.responses.ListTableDetailsResponse;
 import org.apache.paimon.rest.responses.ListTablesGloballyResponse;
 import org.apache.paimon.rest.responses.ListTablesResponse;
+import org.apache.paimon.rest.responses.ListTagsResponse;
 import org.apache.paimon.rest.responses.ListViewDetailsResponse;
 import org.apache.paimon.rest.responses.ListViewsGloballyResponse;
 import org.apache.paimon.rest.responses.ListViewsResponse;
@@ -103,6 +110,7 @@ import static org.apache.paimon.rest.RESTFunctionValidator.checkFunctionName;
 import static org.apache.paimon.rest.RESTFunctionValidator.isValidFunctionName;
 import static org.apache.paimon.rest.RESTUtil.extractPrefixMap;
 import static org.apache.paimon.rest.auth.AuthProviderFactory.createAuthProvider;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * REST API for REST Catalog.
@@ -144,6 +152,7 @@ public class RESTApi {
     public static final String VIEW_NAME_PATTERN = "viewNamePattern";
     public static final String FUNCTION_NAME_PATTERN = "functionNamePattern";
     public static final String PARTITION_NAME_PATTERN = "partitionNamePattern";
+    public static final String TAG_NAME_PREFIX = "tagNamePrefix";
 
     public static final long TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000L;
 
@@ -417,6 +426,28 @@ public class RESTApi {
     }
 
     /**
+     * List table details for a database.
+     *
+     * <p>Gets an array of table details for a database. There is no guarantee of a specific
+     * ordering of the elements in the array.
+     *
+     * @param databaseName name of database.
+     * @return a list of table details.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the database not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this database
+     */
+    public List<GetTableResponse> listTableDetails(String databaseName) {
+        return listDataFromPageApi(
+                queryParams ->
+                        client.get(
+                                resourcePaths.tableDetails(databaseName),
+                                queryParams,
+                                ListTableDetailsResponse.class,
+                                restAuthFunction));
+    }
+
+    /**
      * List table for a catalog.
      *
      * <p>Gets an array of table for a catalog. There is no guarantee of a specific ordering of the
@@ -471,6 +502,19 @@ public class RESTApi {
                 resourcePaths.table(identifier.getDatabaseName(), identifier.getObjectName()),
                 GetTableResponse.class,
                 restAuthFunction);
+    }
+
+    /**
+     * Get table by tableId.
+     *
+     * @param tableId id of the table.
+     * @return {@link GetTableResponse}
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public GetTableResponse getTableById(String tableId) {
+        return client.get(resourcePaths.table(tableId), GetTableResponse.class, restAuthFunction);
     }
 
     /**
@@ -554,6 +598,57 @@ public class RESTApi {
     }
 
     /**
+     * Get paged consumers list of the table.
+     *
+     * @param identifier path of the table to list consumers
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @return a list of the consumers with provided page size(@param maxResults) in this table and
+     *     next page token.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<ConsumerInfo> listConsumersPaged(
+            Identifier identifier, @Nullable Integer maxResults, @Nullable String pageToken) {
+        ListConsumersResponse response =
+                client.get(
+                        resourcePaths.consumers(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(maxResults, pageToken),
+                        ListConsumersResponse.class,
+                        restAuthFunction);
+        List<ConsumerInfo> consumers = response.getConsumers();
+        if (consumers == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(consumers, response.getNextPageToken());
+    }
+
+    /**
+     * Reset consumer for table.
+     *
+     * @param identifier database name and table name.
+     * @param consumerId consumer id
+     * @param nextSnapshotId next snapshot id. If null, the consumer will be deleted.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void resetConsumer(
+            Identifier identifier, String consumerId, @Nullable Long nextSnapshotId) {
+        ResetConsumerRequest request = new ResetConsumerRequest(consumerId, nextSnapshotId);
+        client.post(
+                resourcePaths.resetConsumer(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
+    }
+
+    /**
      * Commit snapshot for table.
      *
      * @param identifier database name and table name.
@@ -592,7 +687,23 @@ public class RESTApi {
      *     this table
      */
     public void rollbackTo(Identifier identifier, Instant instant) {
-        RollbackTableRequest request = new RollbackTableRequest(instant);
+        rollbackTo(identifier, instant, null);
+    }
+
+    /**
+     * Rollback instant for table.
+     *
+     * @param identifier database name and table name.
+     * @param instant instant to rollback
+     * @param fromSnapshot snapshot from, success only occurs when the latest snapshot is this
+     *     snapshot.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or the snapshot
+     *     or the tag not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void rollbackTo(Identifier identifier, Instant instant, @Nullable Long fromSnapshot) {
+        RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
         client.post(
                 resourcePaths.rollbackTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
@@ -652,21 +763,19 @@ public class RESTApi {
      *
      * @param identifier database name and table name.
      * @param select select columns, null if select all
-     * @return additional filter for row level access control
+     * @return additional filter for row level access control and column masking rules
      * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
      * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
      *     this table
      */
-    public List<String> authTableQuery(Identifier identifier, @Nullable List<String> select) {
+    public AuthTableQueryResponse authTableQuery(
+            Identifier identifier, @Nullable List<String> select) {
         AuthTableQueryRequest request = new AuthTableQueryRequest(select);
-        AuthTableQueryResponse response =
-                client.post(
-                        resourcePaths.authTable(
-                                identifier.getDatabaseName(), identifier.getObjectName()),
-                        request,
-                        AuthTableQueryResponse.class,
-                        restAuthFunction);
-        return response.filter();
+        return client.post(
+                resourcePaths.authTable(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                AuthTableQueryResponse.class,
+                restAuthFunction);
     }
 
     /**
@@ -770,6 +879,38 @@ public class RESTApi {
     }
 
     /**
+     * List partitions by partition names for table.
+     *
+     * @param identifier database name and table name.
+     * @param partitionSpecs partition specs to be queried
+     * @return a list of partitions matching the given partition specs
+     * @throws IllegalArgumentException if the number of partition specs exceeds 1000
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public List<Partition> listPartitionsByNames(
+            Identifier identifier, List<Map<String, String>> partitionSpecs) {
+        checkArgument(
+                partitionSpecs.size() <= 1000,
+                "The number of partition specs must not exceed 1000, but got %s",
+                partitionSpecs.size());
+        ListPartitionsByNamesRequest request = new ListPartitionsByNamesRequest(partitionSpecs);
+        ListPartitionsResponse response =
+                client.post(
+                        resourcePaths.listPartitionsByNames(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        request,
+                        ListPartitionsResponse.class,
+                        restAuthFunction);
+        List<Partition> partitions = response.getPartitions();
+        if (partitions == null) {
+            return emptyList();
+        }
+        return partitions;
+    }
+
+    /**
      * Create branch for table.
      *
      * @param identifier database name and table name.
@@ -844,6 +985,100 @@ public class RESTApi {
             return emptyList();
         }
         return response.branches();
+    }
+
+    /**
+     * Get tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @return {@link GetTagResponse}
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the tag not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public GetTagResponse getTag(Identifier identifier, String tagName) {
+        return client.get(
+                resourcePaths.tag(
+                        identifier.getDatabaseName(), identifier.getObjectName(), tagName),
+                GetTagResponse.class,
+                restAuthFunction);
+    }
+
+    /**
+     * Create tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @param snapshotId optional snapshot id, if not provided uses latest snapshot
+     * @param timeRetained optional time retained as string (e.g., "1d", "12h", "30m")
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table or snapshot not
+     *     exists
+     * @throws AlreadyExistsException Exception thrown on HTTP 409 means the tag already exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void createTag(
+            Identifier identifier,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained) {
+        CreateTagRequest request = new CreateTagRequest(tagName, snapshotId, timeRetained);
+        client.post(
+                resourcePaths.tags(identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
+    }
+
+    /**
+     * Get paged list names of tags under this table. An empty list is returned if none tag exists.
+     *
+     * @param identifier database name and table name.
+     * @param maxResults Optional parameter indicating the maximum number of results to include in
+     *     the result. If maxResults is not specified or set to 0, will return the default number of
+     *     max results.
+     * @param pageToken Optional parameter indicating the next page token allows list to be start
+     *     from a specific point.
+     * @param tagNamePrefix A prefix for tag names. All tags will be returned if not set or empty.
+     * @return {@link PagedList}: elements and nextPageToken.
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public PagedList<String> listTagsPaged(
+            Identifier identifier,
+            @Nullable Integer maxResults,
+            @Nullable String pageToken,
+            @Nullable String tagNamePrefix) {
+        ListTagsResponse response =
+                client.get(
+                        resourcePaths.tags(
+                                identifier.getDatabaseName(), identifier.getObjectName()),
+                        buildPagedQueryParams(
+                                maxResults, pageToken, Pair.of(TAG_NAME_PREFIX, tagNamePrefix)),
+                        ListTagsResponse.class,
+                        restAuthFunction);
+        List<String> tags = response.tags();
+        if (tags == null) {
+            return new PagedList<>(emptyList(), null);
+        }
+        return new PagedList<>(tags, response.getNextPageToken());
+    }
+
+    /**
+     * Delete tag for table.
+     *
+     * @param identifier database name and table name.
+     * @param tagName tag name
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the tag not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void deleteTag(Identifier identifier, String tagName) {
+        client.delete(
+                resourcePaths.tag(
+                        identifier.getDatabaseName(), identifier.getObjectName(), tagName),
+                restAuthFunction);
     }
 
     /**

@@ -21,11 +21,13 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.format.SimpleStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.conf.PlainParquetConfiguration;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
@@ -48,8 +50,9 @@ public class ParquetUtil {
      *     minimum value, maximum value)
      */
     public static Pair<Map<String, Statistics<?>>, SimpleStatsExtractor.FileInfo>
-            extractColumnStats(FileIO fileIO, Path path, long length) throws IOException {
-        try (ParquetFileReader reader = getParquetReader(fileIO, path, length)) {
+            extractColumnStats(FileIO fileIO, Path path, long length, Options options)
+                    throws IOException {
+        try (ParquetFileReader reader = getParquetReader(fileIO, path, length, options)) {
             ParquetMetadata parquetMetadata = reader.getFooter();
             List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
             Map<String, Statistics<?>> resultStats = new HashMap<>();
@@ -77,14 +80,21 @@ public class ParquetUtil {
      *
      * @param path the path of parquet file to be read
      * @param length the length of parquet file to be read
+     * @param options the configuration
      * @return parquet reader, used for reading footer, status, etc.
      */
-    public static ParquetFileReader getParquetReader(FileIO fileIO, Path path, long length)
-            throws IOException {
+    public static ParquetFileReader getParquetReader(
+            FileIO fileIO, Path path, long length, Options options) throws IOException {
         return new ParquetFileReader(
                 ParquetInputFile.fromPath(fileIO, path, length),
-                ParquetReadOptions.builder().build(),
+                getParquetReadOptionsBuilder(options).build(),
                 null);
+    }
+
+    public static ParquetReadOptions.Builder getParquetReadOptionsBuilder(Options options) {
+        PlainParquetConfiguration parquetConfiguration =
+                new PlainParquetConfiguration(options.toMap());
+        return ParquetReadOptions.builder(parquetConfiguration);
     }
 
     static void assertStatsClass(

@@ -24,15 +24,14 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 
-import scala.collection.JavaConverters._
-
 object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
 
   override val operation: RowLevelOp = Delete
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
-      case d @ DeleteFromTable(PaimonRelation(table), condition) if d.resolved =>
+      case d @ DeleteFromTable(PaimonRelation(table), condition)
+          if d.resolved && shouldFallbackToV1Delete(table, condition) =>
         checkPaimonTable(table.getTable)
 
         table.getTable match {

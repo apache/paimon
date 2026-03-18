@@ -20,6 +20,10 @@ package org.apache.paimon.lookup.sort;
 
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.memory.MemorySlice;
@@ -51,14 +55,17 @@ public class SortLookupStoreFactory implements LookupStoreFactory {
     }
 
     @Override
-    public SortLookupStoreReader createReader(File file, Context context) throws IOException {
-        return new SortLookupStoreReader(
-                comparator, file, blockSize, (SortContext) context, cacheManager);
+    public SortLookupStoreReader createReader(File file) throws IOException {
+        Path filePath = new Path(file.getAbsolutePath());
+        SeekableInputStream input = LocalFileIO.INSTANCE.newInputStream(filePath);
+        return new SortLookupStoreReader(comparator, filePath, file.length(), input, cacheManager);
     }
 
     @Override
     public SortLookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
             throws IOException {
-        return new SortLookupStoreWriter(file, blockSize, bloomFilter, compressionFactory);
+        Path filePath = new Path(file.getAbsolutePath());
+        PositionOutputStream out = LocalFileIO.INSTANCE.newOutputStream(filePath, true);
+        return new SortLookupStoreWriter(out, blockSize, bloomFilter, compressionFactory);
     }
 }

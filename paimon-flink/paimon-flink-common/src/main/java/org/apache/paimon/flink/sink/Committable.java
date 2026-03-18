@@ -18,31 +18,26 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.table.sink.CommitMessage;
+
 /** Committable produced by {@link PrepareCommitOperator}. */
 public class Committable {
 
     private final long checkpointId;
 
-    private final Kind kind;
+    private final CommitMessage commitMessage;
 
-    private final Object wrappedCommittable;
-
-    public Committable(long checkpointId, Kind kind, Object wrappedCommittable) {
+    public Committable(long checkpointId, CommitMessage commitMessage) {
         this.checkpointId = checkpointId;
-        this.kind = kind;
-        this.wrappedCommittable = wrappedCommittable;
+        this.commitMessage = commitMessage;
     }
 
     public long checkpointId() {
         return checkpointId;
     }
 
-    public Kind kind() {
-        return kind;
-    }
-
-    public Object wrappedCommittable() {
-        return wrappedCommittable;
+    public CommitMessage commitMessage() {
+        return commitMessage;
     }
 
     @Override
@@ -50,39 +45,8 @@ public class Committable {
         return "Committable{"
                 + "checkpointId="
                 + checkpointId
-                + ", kind="
-                + kind
-                + ", wrappedCommittable="
-                + wrappedCommittable
+                + ", commitMessage="
+                + commitMessage
                 + '}';
-    }
-
-    /** Kind of the produced Committable. */
-    public enum Kind {
-        FILE((byte) 0),
-
-        LOG_OFFSET((byte) 1);
-
-        private final byte value;
-
-        Kind(byte value) {
-            this.value = value;
-        }
-
-        public byte toByteValue() {
-            return value;
-        }
-
-        public static Kind fromByteValue(byte value) {
-            switch (value) {
-                case 0:
-                    return FILE;
-                case 1:
-                    return LOG_OFFSET;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unsupported byte value '" + value + "' for value kind.");
-            }
-        }
     }
 }

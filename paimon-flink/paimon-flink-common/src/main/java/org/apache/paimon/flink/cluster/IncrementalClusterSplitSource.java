@@ -27,6 +27,7 @@ import org.apache.paimon.flink.source.SimpleSourceSplit;
 import org.apache.paimon.flink.source.operator.ReadOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Pair;
@@ -46,15 +47,17 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 
 /** Source for Incremental Clustering. */
 public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<Split> {
-    private static final long serialVersionUID = 1L;
 
-    private final Split[] splits;
+    private static final long serialVersionUID = 2L;
 
-    public IncrementalClusterSplitSource(Split[] splits) {
+    private final List<Split> splits;
+
+    public IncrementalClusterSplitSource(List<Split> splits) {
         this.splits = splits;
     }
 
@@ -72,7 +75,7 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
     private class Reader extends AbstractNonCoordinatedSourceReader<Split> {
 
         @Override
-        public InputStatus pollNext(ReaderOutput<Split> output) throws Exception {
+        public InputStatus pollNext(ReaderOutput<Split> output) {
             for (Split split : splits) {
                 DataSplit dataSplit = (DataSplit) split;
                 output.collect(dataSplit);
@@ -85,11 +88,12 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
             StreamExecutionEnvironment env,
             FileStoreTable table,
             Map<String, String> partitionSpec,
-            DataSplit[] splits,
+            List<DataSplit> splits,
+            @Nullable CommitMessage dvCommitMessage,
             @Nullable Integer parallelism) {
         DataStream<Split> source =
                 env.fromSource(
-                                new IncrementalClusterSplitSource(splits),
+                                new IncrementalClusterSplitSource((List) splits),
                                 WatermarkStrategy.noWatermarks(),
                                 String.format(
                                         "Incremental-cluster split generator: %s - %s",
@@ -112,12 +116,13 @@ public class IncrementalClusterSplitSource extends AbstractNonCoordinatedSource<
                                         table.fullName(), partitionSpec),
                                 InternalTypeInfo.of(
                                         LogicalTypeConversion.toLogicalType(table.rowType())),
-                                new ReadOperator(table::newRead, null, null)),
+                                new ReadOperator(table::newRead, null, null))
+                        .setParallelism(partitioned.getParallelism()),
                 source.forward()
                         .transform(
                                 "Remove files to be clustered",
                                 new CommittableTypeInfo(),
-                                new RemoveClusterBeforeFilesOperator())
+                                new RemoveClusterBeforeFilesOperator(dvCommitMessage))
                         .forceNonParallel());
     }
 }

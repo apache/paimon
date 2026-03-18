@@ -32,14 +32,8 @@ Clone supports cloning tables to Paimon tables.
 2. Clone is reentrant, but it requires existing tables to contain all fields from the source table and have the
    same partition fields.
 
-Currently, clone supports:
-1. Clone Hive tables in Hive Catalog to Paimon Catalog, supports Parquet, ORC, Avro formats, target table will
-   be append table.
-2. Clone Hudi tables in Hive Catalog to Paimon Catalog, target table will be append table.
-
-The source table below is currently under development:
-1. Clone Paimon tables to Paimon tables, target table can be primary table or append table.
-2. Clone Iceberg tables in Hive Catalog to Paimon Catalog, target table will be append table.
+Currently, clone supports clone Hive tables in Hive Catalog to Paimon Catalog, supports Parquet, ORC, Avro formats,
+target table will be append table.
 
 ## Clone Hive Table
 
@@ -92,16 +86,3 @@ clone \
 "--included_tables" and "--excluded_tables" are optional parameters, which are used to specify the tables that need or don't need to be cloned. 
 The format is `<database1>.<table1>,<database2>.<table2>,<database3>.<table3>`.
 "--excluded_tables" has higher priority than "--included_tables" if you specified both.
-
-
-## Clone Hudi Tables
-
-Clone Hudi needs dependency: [hudi-flink1.18-bundle-0.15.0.jar](https://repo1.maven.org/maven2/org/apache/hudi/hudi-flink1.18-bundle/0.15.0/hudi-flink1.18-bundle-0.15.0.jar)
-
-The execution method is the same as the Hive table mentioned above.
-
-## Clone Iceberg Tables
-
-Clone Iceberg needs dependency: [iceberg-flink-runtime-1.20-1.8.1.jar](https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-flink-runtime-1.20/1.8.1/iceberg-flink-runtime-1.20-1.8.1.jar)
-
-The execution method is the same as the Hive table mentioned above.

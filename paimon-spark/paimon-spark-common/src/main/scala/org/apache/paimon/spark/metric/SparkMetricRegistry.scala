@@ -46,6 +46,8 @@ case class SparkMetricRegistry() extends MetricRegistry {
         val metrics = group.getMetrics
         Array(
           PaimonPlanningDurationTaskMetric(gauge[Long](metrics, ScanMetrics.LAST_SCAN_DURATION)),
+          PaimonScannedSnapshotIdTaskMetric(
+            gauge[Long](metrics, ScanMetrics.LAST_SCANNED_SNAPSHOT_ID)),
           PaimonScannedManifestsTaskMetric(
             gauge[Long](metrics, ScanMetrics.LAST_SCANNED_MANIFESTS)),
           PaimonSkippedTableFilesTaskMetric(
@@ -76,9 +78,11 @@ case class SparkMetricRegistry() extends MetricRegistry {
         val metrics = group.getMetrics
         Array(
           PaimonCommitDurationTaskMetric(gauge[Long](metrics, CommitMetrics.LAST_COMMIT_DURATION)),
-          PaimonAppendedTableFilesTaskMetric(
-            gauge[Long](metrics, CommitMetrics.LAST_TABLE_FILES_APPENDED)),
-          PaimonAppendedRecordsTaskMetric(
+          PaimonAddedTableFilesTaskMetric(
+            gauge[Long](metrics, CommitMetrics.LAST_TABLE_FILES_ADDED)),
+          PaimonDeletedTableFilesTaskMetric(
+            gauge[Long](metrics, CommitMetrics.LAST_TABLE_FILES_DELETED)),
+          PaimonInsertedRecordsTaskMetric(
             gauge[Long](metrics, CommitMetrics.LAST_DELTA_RECORDS_APPENDED)),
           PaimonAppendedChangelogFilesTaskMetric(
             gauge[Long](metrics, CommitMetrics.LAST_CHANGELOG_FILES_APPENDED)),

@@ -31,6 +31,8 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogUtil;
 import org.apache.iceberg.MetadataUpdate;
+import org.apache.iceberg.PartitionField;
+import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SnapshotRef;
@@ -41,6 +43,8 @@ import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.RESTCatalog;
+import org.apache.iceberg.types.Types;
+import org.apache.iceberg.types.Types.NestedField;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -141,7 +145,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         try {
             if (!tableExists()) {
                 LOG.info("Table {} does not exist, create it.", icebergTableIdentifier);
-                icebergTable = createTable();
+                icebergTable = createTable(newMetadata);
                 updatdeBuilder =
                         updatesForCorrectBase(
                                 ((BaseTable) icebergTable).operations().current(),
@@ -240,7 +244,7 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
 
     private TableMetadata.Builder updatesForIncorrectBase(TableMetadata newMetadata) {
         LOG.info("the base metadata is incorrect, we'll recreate the iceberg table.");
-        icebergTable = recreateTable();
+        icebergTable = recreateTable(newMetadata);
         return updatesForCorrectBase(
                 ((BaseTable) icebergTable).operations().current(), newMetadata, true);
     }
@@ -267,15 +271,50 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         restCatalog.createNamespace(Namespace.of(icebergDatabaseName));
     }
 
-    private Table createTable() {
-        /* Here we create iceberg table with an emptySchema. This is because:
-        When creating table, fieldId in iceberg will be forced to start from 1, while fieldId in paimon usually start from 0.
-        If we directly use the schema extracted from paimon to create iceberg table, the fieldId will be in disorder, and this
-        may cause incorrectness when reading by iceberg reader. So we use an emptySchema here, and add the corresponding
-        schemas later.
+    private Table createTable(TableMetadata newMetadata) {
+        /*
+        Handles fieldId incompatibility between Paimon (starts at 0) and Iceberg (starts at 1).
+
+        Direct schema conversion shifts all fieldIds by +1, causing field disorder. While
+        schemas can be updated post-creation to start at fieldId 0, creating an empty schema
+        first triggers partition evolution issues that break some query engines.
+
+        Strategy based on partition field position:
+        - fieldId = 0: Creates empty schema first, partition evolution unavoidable
+        - fieldId > 0: Creates dummy schema with offset fields and gap filling to preserve the partition spec
         */
-        Schema emptySchema = new Schema();
-        return restCatalog.createTable(icebergTableIdentifier, emptySchema);
+        PartitionSpec spec = newMetadata.spec();
+        boolean isPartitionedWithZeroFieldId =
+                spec.fields().stream().anyMatch(f -> f.sourceId() == 0);
+        if (spec.isUnpartitioned() || isPartitionedWithZeroFieldId) {
+            if (isPartitionedWithZeroFieldId) {
+                LOG.info(
+                        "Partition fieldId = 0. The Iceberg REST committer will use partition evolution to support Iceberg compatibility with the Paimon schema. If you want to avoid this, use a non-zero fieldId partition field");
+            }
+            Schema emptySchema = new Schema();
+            return restCatalog.createTable(icebergTableIdentifier, emptySchema);
+        } else {
+            LOG.info(
+                    "Partition fieldId > 0. In order to avoid partition evlolution, dummy schema will be created first");
+
+            int size =
+                    spec.fields().stream().mapToInt(PartitionField::sourceId).max().orElseThrow();
+            // prefill the schema with dummy fields
+            NestedField[] columns = new NestedField[size];
+            for (int idx = 0; idx < size; idx++) {
+                int fieldId = idx + 1;
+                columns[idx] =
+                        NestedField.optional(fieldId, "f" + fieldId, Types.BooleanType.get());
+            }
+            // find and set partition fields with offset -1, so they align correctly after table
+            // creation
+            for (PartitionField f : spec.fields()) {
+                columns[f.sourceId() - 1] = newMetadata.schema().findField(f.sourceId());
+            }
+
+            Schema dummySchema = new Schema(columns);
+            return restCatalog.createTable(icebergTableIdentifier, dummySchema, spec);
+        }
     }
 
     private Table getTable() {
@@ -287,10 +326,10 @@ public class IcebergRestMetadataCommitter implements IcebergMetadataCommitter {
         restCatalog.dropTable(icebergTableIdentifier, false);
     }
 
-    private Table recreateTable() {
+    private Table recreateTable(TableMetadata newMetadata) {
         try {
             dropTable();
-            return createTable();
+            return createTable(newMetadata);
         } catch (Exception e) {
             throw new RuntimeException("Fail to recreate iceberg table.", e);
         }

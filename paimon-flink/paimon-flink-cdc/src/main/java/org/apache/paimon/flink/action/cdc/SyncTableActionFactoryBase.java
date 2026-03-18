@@ -29,6 +29,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN_PREFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.SYNC_PKEYS_FROM_SOURCE_SCHEMA;
@@ -64,6 +65,11 @@ public abstract class SyncTableActionFactoryBase
         }
 
         if (params.has(METADATA_COLUMN)) {
+            // Parse optional prefix first
+            if (params.has(METADATA_COLUMN_PREFIX)) {
+                action.withMetadataColumnPrefix(params.get(METADATA_COLUMN_PREFIX));
+            }
+
             List<String> metadataColumns =
                     new ArrayList<>(params.getMultiParameter(METADATA_COLUMN));
             if (metadataColumns.size() == 1) {

@@ -17,6 +17,7 @@
 ################################################################################
 
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -26,8 +27,12 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
+from pypaimon.manifest.schema.manifest_entry import ManifestEntry
+from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
+from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.write.file_store_commit import RetryResult
 
 
 class AoReaderTest(unittest.TestCase):
@@ -38,7 +43,7 @@ class AoReaderTest(unittest.TestCase):
         cls.catalog = CatalogFactory.create({
             'warehouse': cls.warehouse
         })
-        cls.catalog.create_database('default', False)
+        cls.catalog.create_database('default', True)
 
         cls.pa_schema = pa.schema([
             ('user_id', pa.int32()),
@@ -52,6 +57,10 @@ class AoReaderTest(unittest.TestCase):
             'behavior': ['a', 'b', 'c', None, 'e', 'f', 'g', 'h'],
             'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=cls.pa_schema)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_parquet_ao_reader(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -83,6 +92,37 @@ class AoReaderTest(unittest.TestCase):
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
 
+    def test_lance_ao_reader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
+        self.catalog.create_table('default.test_append_only_lance', schema, False)
+        table = self.catalog.get_table('default.test_append_only_lance')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    def test_lance_ao_reader_with_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
+        self.catalog.create_table('default.test_append_only_lance_filter', schema, False)
+        table = self.catalog.get_table('default.test_append_only_lance_filter')
+        self._write_test_table(table)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.less_than('user_id', 7)
+        p2 = predicate_builder.greater_or_equal('user_id', 2)
+        p3 = predicate_builder.between('user_id', 0, 6)  # [2/b, 3/c, 4/d, 5/e, 6/f] left
+        p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])  # [3/c, 4/d, 6/f] left
+        p5 = predicate_builder.is_in('dt', ['p1'])  # exclude 3/c
+        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d
+        g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
+        read_builder = table.new_read_builder().with_filter(g1)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            self.expected.slice(5, 1)  # 6/f
+        ])
+        self.assertEqual(actual.sort_by('user_id'), expected)
+
     def test_append_only_multi_write_once_commit(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
         self.catalog.create_table('default.test_append_only_multi_once_commit', schema, False)
@@ -113,6 +153,62 @@ class AoReaderTest(unittest.TestCase):
         table_write.close()
         table_commit.close()
 
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    def test_commit_retry_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
+        self.catalog.create_table('default.test_commit_retry_filter', schema, False)
+        table = self.catalog.get_table('default.test_commit_retry_filter')
+        write_builder = table.new_batch_write_builder()
+
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+        data1 = {
+            'user_id': [1, 2, 3, 4],
+            'item_id': [1001, 1002, 1003, 1004],
+            'behavior': ['a', 'b', 'c', None],
+            'dt': ['p1', 'p1', 'p2', 'p1'],
+        }
+        pa_table1 = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        data2 = {
+            'user_id': [5, 6, 7, 8],
+            'item_id': [1005, 1006, 1007, 1008],
+            'behavior': ['e', 'f', 'g', 'h'],
+            'dt': ['p2', 'p1', 'p2', 'p2'],
+        }
+        pa_table2 = pa.Table.from_pydict(data2, schema=self.pa_schema)
+
+        table_write.write_arrow(pa_table1)
+        table_write.write_arrow(pa_table2)
+
+        messages = table_write.prepare_commit()
+        table_commit.commit(messages)
+        table_write.close()
+
+        snapshot_manager = SnapshotManager(table)
+        latest_snapshot = snapshot_manager.get_latest_snapshot()
+        commit_entries = []
+        for msg in messages:
+            partition = GenericRow(list(msg.partition), table.partition_keys_fields)
+            for file in msg.new_files:
+                commit_entries.append(ManifestEntry(
+                    kind=0,
+                    partition=partition,
+                    bucket=msg.bucket,
+                    total_buckets=table.total_buckets,
+                    file=file
+                ))
+        # mock retry
+        success = table_commit.file_store_commit._try_commit_once(
+            RetryResult(None),
+            "APPEND",
+            commit_entries,
+            BATCH_COMMIT_IDENTIFIER,
+            latest_snapshot)
+        self.assertTrue(success.is_success())
+        table_commit.close()
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
@@ -290,17 +386,17 @@ class AoReaderTest(unittest.TestCase):
         t1 = snapshot_manager.get_snapshot_by_id(1).time_millis
         t2 = snapshot_manager.get_snapshot_by_id(2).time_millis
         # test 1
-        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp - 1) + ',' + str(timestamp)})
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(timestamp - 1) + ',' + str(timestamp)})
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder)
         self.assertEqual(len(actual), 0)
         # test 2
-        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(timestamp) + ',' + str(t2)})
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(timestamp) + ',' + str(t2)})
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(self.expected, actual)
         # test 3
-        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: str(t1) + ',' + str(t2)})
+        table = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): str(t1) + ',' + str(t2)})
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
         expected = self.expected.slice(4, 4)
@@ -330,7 +426,7 @@ class AoReaderTest(unittest.TestCase):
         t10 = snapshot_manager.get_snapshot_by_id(10).time_millis
         t20 = snapshot_manager.get_snapshot_by_id(20).time_millis
 
-        table_inc = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP: f"{t10},{t20}"})
+        table_inc = table.copy({CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP.key(): f"{t10},{t20}"})
         read_builder = table_inc.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
 
@@ -341,6 +437,107 @@ class AoReaderTest(unittest.TestCase):
             'dt': ['p1' if i % 2 == 1 else 'p2' for i in range(11, 21)],
         }, schema=self.pa_schema).sort_by('user_id')
         self.assertEqual(expected, actual)
+
+    def test_concurrent_writes_with_retry(self):
+        """Test concurrent writes to verify retry mechanism works correctly."""
+        import threading
+
+        # Run the test 10 times to verify stability
+        iter_num = 5
+        for test_iteration in range(iter_num):
+            # Create a unique table for each iteration
+            table_name = f'default.test_concurrent_writes_{test_iteration}'
+            schema = Schema.from_pyarrow_schema(self.pa_schema)
+            self.catalog.create_table(table_name, schema, False)
+            table = self.catalog.get_table(table_name)
+
+            write_results = []
+            write_errors = []
+
+            def write_data(thread_id, start_user_id):
+                """Write data in a separate thread."""
+                try:
+                    threading.current_thread().name = f"Iter{test_iteration}-Thread-{thread_id}"
+                    write_builder = table.new_batch_write_builder()
+                    table_write = write_builder.new_write()
+                    table_commit = write_builder.new_commit()
+
+                    # Create unique data for this thread
+                    data = {
+                        'user_id': list(range(start_user_id, start_user_id + 5)),
+                        'item_id': [1000 + i for i in range(start_user_id, start_user_id + 5)],
+                        'behavior': [f'thread{thread_id}_{i}' for i in range(5)],
+                        'dt': ['p1' if i % 2 == 0 else 'p2' for i in range(5)],
+                    }
+                    pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+
+                    table_write.write_arrow(pa_table)
+                    commit_messages = table_write.prepare_commit()
+
+                    table_commit.commit(commit_messages)
+                    table_write.close()
+                    table_commit.close()
+
+                    write_results.append({
+                        'thread_id': thread_id,
+                        'start_user_id': start_user_id,
+                        'success': True
+                    })
+                except Exception as e:
+                    write_errors.append({
+                        'thread_id': thread_id,
+                        'error': str(e)
+                    })
+
+            # Create and start multiple threads
+            threads = []
+            num_threads = 10
+            for i in range(num_threads):
+                thread = threading.Thread(
+                    target=write_data,
+                    args=(i, i * 10)
+                )
+                threads.append(thread)
+                thread.start()
+
+            # Wait for all threads to complete
+            for thread in threads:
+                thread.join()
+
+            # Verify all writes succeeded (retry mechanism should handle conflicts)
+            self.assertEqual(num_threads, len(write_results),
+                             f"Iteration {test_iteration}: Expected {num_threads} successful writes, "
+                             f"got {len(write_results)}. Errors: {write_errors}")
+            self.assertEqual(0, len(write_errors),
+                             f"Iteration {test_iteration}: Expected no errors, but got: {write_errors}")
+
+            read_builder = table.new_read_builder()
+            actual = self._read_test_table(read_builder).sort_by('user_id')
+
+            # Verify data rows
+            self.assertEqual(num_threads * 5, actual.num_rows,
+                             f"Iteration {test_iteration}: Expected {num_threads * 5} rows")
+
+            # Verify user_id
+            user_ids = actual.column('user_id').to_pylist()
+            expected_user_ids = []
+            for i in range(num_threads):
+                expected_user_ids.extend(range(i * 10, i * 10 + 5))
+            expected_user_ids.sort()
+
+            self.assertEqual(user_ids, expected_user_ids,
+                             f"Iteration {test_iteration}: User IDs mismatch")
+
+            # Verify snapshot count (should have num_threads snapshots)
+            snapshot_manager = SnapshotManager(table)
+            latest_snapshot = snapshot_manager.get_latest_snapshot()
+            self.assertIsNotNone(latest_snapshot,
+                                 f"Iteration {test_iteration}: Latest snapshot should not be None")
+            self.assertEqual(latest_snapshot.id, num_threads,
+                             f"Iteration {test_iteration}: Expected snapshot ID {num_threads}, "
+                             f"got {latest_snapshot.id}")
+
+            print(f"✓ Iteration {test_iteration + 1}/{iter_num} completed successfully")
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()

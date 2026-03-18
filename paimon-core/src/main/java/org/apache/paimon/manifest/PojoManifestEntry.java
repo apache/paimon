@@ -92,6 +92,16 @@ public class PojoManifestEntry implements ManifestEntry {
     }
 
     @Override
+    public long rowCount() {
+        return file.rowCount();
+    }
+
+    @Override
+    public @Nullable Long firstRowId() {
+        return file.firstRowId();
+    }
+
+    @Override
     public int totalBuckets() {
         return totalBuckets;
     }
@@ -133,6 +143,11 @@ public class PojoManifestEntry implements ManifestEntry {
     public PojoManifestEntry assignFirstRowId(long firstRowId) {
         return new PojoManifestEntry(
                 kind, partition, bucket, totalBuckets, file.assignFirstRowId(firstRowId));
+    }
+
+    @Override
+    public ManifestEntry upgrade(int newLevel) {
+        return new PojoManifestEntry(kind, partition, bucket, totalBuckets, file.upgrade(newLevel));
     }
 
     @Override

@@ -18,14 +18,11 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.manifest.PartitionEntry
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.stats.{ColStats, Statistics}
 import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.table.sink.BatchWriteBuilder
-import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.utils.Preconditions.checkState
 
 import org.apache.spark.sql.{PaimonStatsUtils, Row, SparkSession}
@@ -37,7 +34,6 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.types.{DataType, Decimal, DecimalType, TimestampType}
 
 import java.util
-import java.util.UUID
 
 import scala.collection.JavaConverters._
 

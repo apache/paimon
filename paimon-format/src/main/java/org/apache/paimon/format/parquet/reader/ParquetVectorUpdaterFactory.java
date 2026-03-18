@@ -57,6 +57,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Dictionary;
@@ -218,12 +219,25 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public UpdaterFactory visit(BlobType blobType) {
-            throw new RuntimeException("Blob type is not supported");
+            // Physical representation is bytes (same as VARBINARY); higher-level Row#getBlob()
+            // interprets serialized BlobDescriptor when needed.
+            return c -> {
+                if (c.getPrimitiveType().getPrimitiveTypeName()
+                        == PrimitiveType.PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY) {
+                    return new FixedLenByteArrayUpdater(c.getPrimitiveType().getTypeLength());
+                }
+                return new BinaryUpdater();
+            };
         }
 
         @Override
         public UpdaterFactory visit(ArrayType arrayType) {
             throw new RuntimeException("Array type is not supported");
+        }
+
+        @Override
+        public UpdaterFactory visit(VectorType vectorType) {
+            throw new RuntimeException("Vector type is not supported");
         }
 
         @Override

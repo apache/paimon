@@ -354,6 +354,11 @@ public class DeletionVectorsIndexFileTest {
         Path dir = new Path(tempPath.toUri());
         return new IndexPathFactory() {
             @Override
+            public Path toPath(String fileName) {
+                return new Path(dir, fileName);
+            }
+
+            @Override
             public Path newPath() {
                 return new Path(dir, UUID.randomUUID().toString());
             }
@@ -361,11 +366,6 @@ public class DeletionVectorsIndexFileTest {
             @Override
             public boolean isExternalPath() {
                 return false;
-            }
-
-            @Override
-            public Path toPath(IndexFileMeta file) {
-                return new Path(dir, file.fileName());
             }
         };
     }

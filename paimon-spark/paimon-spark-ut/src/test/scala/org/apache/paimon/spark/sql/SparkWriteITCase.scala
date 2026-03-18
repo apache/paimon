@@ -59,7 +59,8 @@ class SparkWriteITCase extends PaimonSparkTestBase {
                   |) TBLPROPERTIES (
                   | 'bucket' = '-2',
                   | 'primary-key' = 'id',
-                  | 'file.format' = 'parquet'
+                  | 'file.format' = 'parquet',
+                  | 'postpone.batch-write-fixed-bucket' = 'false'
                   |)
                   |""".stripMargin)
 

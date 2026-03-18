@@ -80,9 +80,9 @@ public interface SupportView extends WithPaimonCatalog {
         }
     }
 
-    default void dropView(Identifier ident, Boolean ignoreIfExists) {
+    default void dropView(Identifier ident, Boolean ignoreIfNotExists) {
         try {
-            paimonCatalog().dropView(toIdentifier(ident, paimonCatalogName()), ignoreIfExists);
+            paimonCatalog().dropView(toIdentifier(ident, paimonCatalogName()), ignoreIfNotExists);
         } catch (Catalog.ViewNotExistException e) {
             throw new RuntimeException("view not exists: " + ident, e);
         }

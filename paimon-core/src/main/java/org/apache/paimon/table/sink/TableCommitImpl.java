@@ -159,6 +159,18 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
+    public TableCommitImpl appendCommitCheckConflict(boolean appendCommitCheckConflict) {
+        commit.appendCommitCheckConflict(appendCommitCheckConflict);
+        return this;
+    }
+
+    @Override
+    public TableCommitImpl rowIdCheckConflict(@Nullable Long rowIdCheckFromSnapshot) {
+        commit.rowIdCheckConflict(rowIdCheckFromSnapshot);
+        return this;
+    }
+
+    @Override
     public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;
@@ -350,31 +362,22 @@ public class TableCommitImpl implements InnerTableCommit {
             throw new RuntimeException(maintainError.get());
         }
 
-        executor.execute(
-                () -> {
-                    try {
-                        maintain(identifier, doExpire);
-                    } catch (Throwable t) {
-                        LOG.error("Executing maintain encountered an error.", t);
-                        maintainError.compareAndSet(null, t);
-                    }
-                });
+        if (batchCommitted) {
+            maintain(identifier, doExpire);
+        } else {
+            executor.execute(
+                    () -> {
+                        try {
+                            maintain(identifier, doExpire);
+                        } catch (Throwable t) {
+                            LOG.error("Executing maintain encountered an error.", t);
+                            maintainError.compareAndSet(null, t);
+                        }
+                    });
+        }
     }
 
     private void maintain(long identifier, boolean doExpire) {
-        // expire consumer first to avoid preventing snapshot expiration
-        if (doExpire && consumerExpireTime != null) {
-            consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
-        }
-
-        if (doExpire && expireSnapshots != null) {
-            expireSnapshots.run();
-        }
-
-        if (doExpire && partitionExpire != null) {
-            partitionExpire.expire(identifier);
-        }
-
         if (tagAutoManager != null) {
             TagAutoCreation tagAutoCreation = tagAutoManager.getTagAutoCreation();
             if (tagAutoCreation != null) {
@@ -385,6 +388,20 @@ public class TableCommitImpl implements InnerTableCommit {
             if (doExpire && tagTimeExpire != null) {
                 tagTimeExpire.expire();
             }
+        }
+
+        if (doExpire && partitionExpire != null) {
+            partitionExpire.expire(identifier);
+        }
+
+        // expire consumer first to avoid preventing snapshot expiration
+        if (doExpire && consumerExpireTime != null) {
+            consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
+        }
+
+        // snapshot expiration usually take the most time, so put it at the end
+        if (doExpire && expireSnapshots != null) {
+            expireSnapshots.run();
         }
     }
 

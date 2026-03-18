@@ -44,7 +44,7 @@ class PaimonSink(
       InsertInto
     }
     val newData = PaimonUtils.createNewDataFrame(data)
-    WriteIntoPaimonTable(originTable, saveMode, newData, options, batchId).run(
+    WriteIntoPaimonTable(originTable, saveMode, newData, options, Some(batchId)).run(
       sqlContext.sparkSession)
   }
 }

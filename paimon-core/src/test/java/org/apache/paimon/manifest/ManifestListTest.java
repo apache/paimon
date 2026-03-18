@@ -140,6 +140,8 @@ public class ManifestListTest {
                             null,
                             null,
                             null,
+                            null,
+                            null,
                             null));
         }
         return result;
@@ -173,7 +175,10 @@ public class ManifestListTest {
                 CoreOptions.FILE_COMPRESSION.defaultValue(),
                 null,
                 null,
-                false);
+                CoreOptions.ExternalPathStrategy.NONE,
+                null,
+                false,
+                null);
     }
 
     private ManifestList createManifestList(String pathStr) {

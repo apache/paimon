@@ -20,25 +20,30 @@ package org.apache.paimon.s3;
 
 import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.MultiPartUploadTwoPhaseOutputStream;
+import org.apache.paimon.fs.Path;
 
-import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
-import com.amazonaws.services.s3.model.PartETag;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.CompletedPart;
 
 import java.io.IOException;
 
-/** S3 implementation of TwoPhaseOutputStream using multipart upload. */
+/** S3 implementation of TwoPhaseOutputStream using multipart upload (AWS SDK v2). */
 public class S3TwoPhaseOutputStream
-        extends MultiPartUploadTwoPhaseOutputStream<PartETag, CompleteMultipartUploadResult> {
+        extends MultiPartUploadTwoPhaseOutputStream<
+                CompletedPart, CompleteMultipartUploadResponse> {
 
     public S3TwoPhaseOutputStream(
-            MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore,
-            org.apache.hadoop.fs.Path hadoopPath)
+            MultiPartUploadStore<CompletedPart, CompleteMultipartUploadResponse>
+                    multiPartUploadStore,
+            org.apache.hadoop.fs.Path hadoopPath,
+            Path targetPath)
             throws IOException {
-        super(multiPartUploadStore, hadoopPath);
+        super(multiPartUploadStore, hadoopPath, targetPath);
     }
 
     @Override
-    public long partSizeThreshold() {
-        return 5L << 20;
+    public Committer committer() {
+        return new S3MultiPartUploadCommitter(
+                uploadId, uploadedParts, objectName, position, targetPath);
     }
 }

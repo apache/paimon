@@ -100,6 +100,7 @@ Current supported aggregate functions and data types are:
   The listagg function concatenates multiple string values into a single string.
   It supports STRING data type.
   Each field not part of the primary keys can be given a list agg delimiter, specified by the fields.<field-name>.list-agg-delimiter table property, otherwise it will use "," as default.
+  You can use `fields.<field-name>.distinct=true` to deduplicate values split by the `fields.<field-name>.list-agg-delimiter`.
 
 ### bool_and
   The bool_and function evaluates whether all values in a boolean set are true.
@@ -307,7 +308,7 @@ public static class BitmapContainsUDF extends ScalarFunction {
 
   Use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
 
-  Use `fields.<field-name>.count-limit=<Interger>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
+  Use `fields.<field-name>.count-limit=<Integer>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
   sequentially up to limit; but if nested-key is specified, it cannot guarantee the correctness of the aggregation result. This option can be used to
   avoid abnormal input.
 
@@ -374,6 +375,11 @@ public static class BitmapContainsUDF extends ScalarFunction {
   {{< /tab >}}
 
   {{< /tabs >}}
+
+### nested_partial_update
+  The nested_partial_update function collects multiple rows into one array<row> (so-called 'nested table'). It supports
+  ARRAY<ROW> data types. You need to use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the
+  nested table. The values in each row are written by partial updating some columns.
 
 ### collect
   The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.

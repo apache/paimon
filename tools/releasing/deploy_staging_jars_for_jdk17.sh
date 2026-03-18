@@ -43,10 +43,10 @@ fi
 cd ${PROJECT_ROOT}
 
 echo "Building spark4 module"
-${MVN} clean install -Pdocs-and-source,spark4 -DskipTests -pl paimon-spark/paimon-spark-4.0 -am $CUSTOM_OPTIONS
+${MVN} clean install -ntp -Pdocs-and-source,spark4 -DskipTests -pl paimon-spark/paimon-spark-4.0 -am $CUSTOM_OPTIONS
 
 echo "Deploying spark4 module to repository.apache.org"
-${MVN} deploy -Papache-release,docs-and-source,spark4 -DskipTests -DretryFailedDeploymentCount=10 \
+${MVN} deploy -ntp -Papache-release,docs-and-source,spark4 -DskipTests -DretryFailedDeploymentCount=10 \
  -pl org.apache.paimon:paimon-spark-common_2.13,org.apache.paimon:paimon-spark4-common,org.apache.paimon:paimon-spark-4.0 $CUSTOM_OPTIONS
 
 cd ${CURR_DIR}

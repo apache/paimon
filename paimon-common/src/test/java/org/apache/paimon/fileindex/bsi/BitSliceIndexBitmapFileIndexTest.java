@@ -39,7 +39,7 @@ public class BitSliceIndexBitmapFileIndexTest {
     public void testBitSliceIndexMix() {
         IntType intType = new IntType();
         FieldRef fieldRef = new FieldRef(0, "", intType);
-        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType, null);
+        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType);
         FileIndexWriter writer = bsiFileIndex.createWriter();
 
         Object[] arr = {1, 2, null, -2, -2, -1, null, 2, 0, 5, null};
@@ -111,7 +111,7 @@ public class BitSliceIndexBitmapFileIndexTest {
     public void testBitSliceIndexPositiveOnly() {
         IntType intType = new IntType();
         FieldRef fieldRef = new FieldRef(0, "", intType);
-        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType, null);
+        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType);
         FileIndexWriter writer = bsiFileIndex.createWriter();
 
         Object[] arr = {0, 1, null, 3, 4, 5, 6, 0, null};
@@ -183,7 +183,7 @@ public class BitSliceIndexBitmapFileIndexTest {
     public void testBitSliceIndexNegativeOnly() {
         IntType intType = new IntType();
         FieldRef fieldRef = new FieldRef(0, "", intType);
-        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType, null);
+        BitSliceIndexBitmapFileIndex bsiFileIndex = new BitSliceIndexBitmapFileIndex(intType);
         FileIndexWriter writer = bsiFileIndex.createWriter();
 
         Object[] arr = {null, -1, null, -3, -4, -5, -6, -1, null};

@@ -24,6 +24,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestAppendFileStore;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
+import org.apache.paimon.catalog.RenamingSnapshotCommit;
+import org.apache.paimon.catalog.SnapshotCommit;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.BucketedDvMaintainer;
 import org.apache.paimon.deletionvectors.DeletionVector;
@@ -38,7 +40,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.operation.FileStoreCommitImpl.RetryResult;
+import org.apache.paimon.operation.commit.ConflictDetection;
+import org.apache.paimon.operation.commit.RetryCommitResult;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -79,12 +82,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
-import static org.apache.paimon.operation.commit.ConflictDetection.mustConflictCheck;
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.stats.SimpleStats.EMPTY_STATS;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
@@ -446,84 +449,41 @@ public class FileStoreCommitTest {
     }
 
     @Test
-    public void testSnapshotAddLogOffset() throws Exception {
-        TestFileStore store = createStore(false, 2);
-
-        // commit 1
-        Map<Integer, Long> offsets = new HashMap<>();
-        offsets.put(0, 1L);
-        offsets.put(1, 3L);
-        Snapshot snapshot =
-                store.commitData(generateDataList(10), gen::getPartition, kv -> 0, offsets).get(0);
-        assertThat(snapshot.logOffsets()).isEqualTo(offsets);
-
-        // commit 2
-        offsets = new HashMap<>();
-        offsets.put(1, 8L);
-        snapshot =
-                store.commitData(generateDataList(10), gen::getPartition, kv -> 0, offsets).get(0);
-        Map<Integer, Long> expected = new HashMap<>();
-        expected.put(0, 1L);
-        expected.put(1, 8L);
-        assertThat(snapshot.logOffsets()).isEqualTo(expected);
-    }
-
-    @Test
     public void testSnapshotRecordCount() throws Exception {
         TestFileStore store = createStore(false);
 
         // commit 1
         Snapshot snapshot1 =
-                store.commitData(
-                                generateDataList(10),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(10), gen::getPartition, kv -> 0).get(0);
         long deltaRecordCount1 = snapshot1.deltaRecordCount();
         assertThat(deltaRecordCount1).isNotEqualTo(0L);
         assertThat(snapshot1.totalRecordCount()).isEqualTo(deltaRecordCount1);
-        assertThat(snapshot1.changelogRecordCount()).isEqualTo(0L);
+        assertThat(snapshot1.changelogRecordCount()).isNull();
 
         // commit 2
         Snapshot snapshot2 =
-                store.commitData(
-                                generateDataList(20),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(20), gen::getPartition, kv -> 0).get(0);
         long deltaRecordCount2 = snapshot2.deltaRecordCount();
         assertThat(deltaRecordCount2).isNotEqualTo(0L);
         assertThat(snapshot2.totalRecordCount())
                 .isEqualTo(snapshot1.totalRecordCount() + deltaRecordCount2);
-        assertThat(snapshot2.changelogRecordCount()).isEqualTo(0L);
+        assertThat(snapshot2.changelogRecordCount()).isNull();
 
         // commit 3
         Snapshot snapshot3 =
-                store.commitData(
-                                generateDataList(30),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(30), gen::getPartition, kv -> 0).get(0);
         long deltaRecordCount3 = snapshot3.deltaRecordCount();
         assertThat(deltaRecordCount3).isNotEqualTo(0L);
         assertThat(snapshot3.totalRecordCount())
                 .isEqualTo(snapshot2.totalRecordCount() + deltaRecordCount3);
-        assertThat(snapshot3.changelogRecordCount()).isEqualTo(0L);
+        assertThat(snapshot3.changelogRecordCount()).isNull();
     }
 
     @Test
     public void testCommitEmpty() throws Exception {
         TestFileStore store = createStore(false, 2);
         Snapshot snapshot =
-                store.commitData(
-                                generateDataList(10),
-                                gen::getPartition,
-                                kv -> 0,
-                                Collections.emptyMap())
-                        .get(0);
+                store.commitData(generateDataList(10), gen::getPartition, kv -> 0).get(0);
 
         // not commit empty new files
         store.commitDataImpl(
@@ -634,8 +594,7 @@ public class FileStoreCommitTest {
         store.commitData(
                 data.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
                 gen::getPartition,
-                kv -> 0,
-                Collections.singletonMap(0, 1L));
+                kv -> 0);
 
         // generate partitions to be dropped
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -820,7 +779,7 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
         StatsFileHandler statsFileHandler = store.newStatsFileHandler();
         FileStoreCommitImpl fileStoreCommit = store.newCommit();
-        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
 
         // Analyze and check
@@ -839,7 +798,7 @@ public class FileStoreCommitTest {
         assertThat(readStats.get()).isEqualTo(fakeStats);
 
         // New snapshot will inherit last snapshot's stats
-        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
@@ -849,7 +808,7 @@ public class FileStoreCommitTest {
                 new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
         newFields.add(new DataField(-1, "newField", DataTypes.INT()));
         store.mergeSchema(new RowType(false, newFields), true);
-        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isEmpty();
 
@@ -937,8 +896,7 @@ public class FileStoreCommitTest {
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         // commit 1
-        Snapshot snapshot1 =
-                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        Snapshot snapshot1 = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
         // commit 2
         Snapshot snapshot2 =
                 store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
@@ -970,8 +928,7 @@ public class FileStoreCommitTest {
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         // commit 1
-        Snapshot snapshot1 =
-                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        Snapshot snapshot1 = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
         // overwrite commit 2
         Snapshot snapshot2 =
                 store.overwriteData(keyValues, s -> partition, kv -> 0, Collections.emptyMap())
@@ -1001,8 +958,7 @@ public class FileStoreCommitTest {
         List<KeyValue> keyValues = generateDataList(1);
         BinaryRow partition = gen.getPartition(keyValues.get(0));
         // commit 1
-        Snapshot snapshot =
-                store.commitData(keyValues, s -> partition, kv -> 0, Collections.emptyMap()).get(0);
+        Snapshot snapshot = store.commitData(keyValues, s -> partition, kv -> 0).get(0);
 
         for (int i = 0; i < 100; i++) {
             snapshot =
@@ -1066,28 +1022,129 @@ public class FileStoreCommitTest {
                     0,
                     null,
                     Collections.emptyMap(),
-                    Collections.emptyMap(),
                     Snapshot.CommitKind.APPEND,
+                    false,
                     firstLatest,
-                    mustConflictCheck(),
+                    true,
                     null);
             // Compact
             commit.tryCommitOnce(
-                    new RetryResult(firstLatest, Collections.emptyList(), null),
+                    RetryCommitResult.forCommitFail(firstLatest, Collections.emptyList(), null),
                     Collections.emptyList(),
                     Collections.emptyList(),
                     Collections.emptyList(),
                     0,
                     null,
                     Collections.emptyMap(),
-                    Collections.emptyMap(),
                     Snapshot.CommitKind.COMPACT,
+                    false,
                     store.snapshotManager().latestSnapshot(),
-                    mustConflictCheck(),
+                    true,
                     null);
         }
         long id = store.snapshotManager().latestSnapshot().id();
         assertThat(id).isEqualTo(2);
+    }
+
+    @Test
+    public void testCommitRetryAfterFalseSuccessDoesNotCleanManifest() throws Exception {
+        TestFileStore store = createStore(false);
+        KeyValue kv = gen.next();
+        AtomicReference<ManifestCommittable> committableRef = new AtomicReference<>();
+        long identifier = 17L;
+        store.commitDataImpl(
+                Collections.singletonList(kv),
+                gen::getPartition,
+                value -> 0,
+                false,
+                identifier,
+                null,
+                Collections.emptyList(),
+                (commit, committable) -> committableRef.set(committable));
+
+        ManifestCommittable committable = checkNotNull(committableRef.get());
+        String commitUser = "retry-false-success";
+        try (FileStoreCommitImpl commit =
+                newCommitWithSnapshotCommit(
+                        store,
+                        commitUser,
+                        new FalseSuccessSnapshotCommit(
+                                new RenamingSnapshotCommit(
+                                        store.snapshotManager(), Lock.empty())))) {
+            commit.commit(committable, false);
+        }
+
+        Snapshot latestSnapshot = checkNotNull(store.snapshotManager().latestSnapshot());
+        assertThat(latestSnapshot.commitUser()).isEqualTo(commitUser);
+        assertThat(latestSnapshot.commitIdentifier()).isEqualTo(identifier);
+        assertThat(store.readKvsFromSnapshot(latestSnapshot.id())).hasSize(1);
+    }
+
+    private FileStoreCommitImpl newCommitWithSnapshotCommit(
+            TestFileStore store, String commitUser, SnapshotCommit snapshotCommit) {
+        String tableName = store.options().path().getName();
+        return new FileStoreCommitImpl(
+                snapshotCommit,
+                store.fileIO(),
+                new SchemaManager(store.fileIO(), store.options().path()),
+                tableName,
+                commitUser,
+                store.partitionType(),
+                store.options(),
+                store.pathFactory(),
+                store.snapshotManager(),
+                store.manifestFileFactory(),
+                store.manifestListFactory(),
+                store.indexManifestFileFactory(),
+                store::newScan,
+                store.newStatsFileHandler(),
+                store.bucketMode(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                scanner ->
+                        new ConflictDetection(
+                                tableName,
+                                commitUser,
+                                store.partitionType(),
+                                store.pathFactory(),
+                                store.newKeyComparator(),
+                                store.bucketMode(),
+                                store.options().deletionVectorsEnabled(),
+                                store.options().dataEvolutionEnabled(),
+                                store.newIndexFileHandler(),
+                                store.snapshotManager(),
+                                scanner),
+                null);
+    }
+
+    private static class FalseSuccessSnapshotCommit implements SnapshotCommit {
+
+        private final SnapshotCommit delegate;
+        private boolean firstCommit = true;
+
+        private FalseSuccessSnapshotCommit(SnapshotCommit delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public boolean commit(
+                Snapshot snapshot,
+                String branch,
+                List<org.apache.paimon.partition.PartitionStatistics> statistics)
+                throws Exception {
+            boolean committed = delegate.commit(snapshot, branch, statistics);
+            if (firstCommit) {
+                firstCommit = false;
+                assertThat(committed).isTrue();
+                return false;
+            }
+            return committed;
+        }
+
+        @Override
+        public void close() throws Exception {
+            delegate.close();
+        }
     }
 
     private TestFileStore createStore(boolean failing, Map<String, String> options)

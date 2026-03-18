@@ -192,7 +192,9 @@ public class ReadTable {
         // 3. Distribute these splits to different tasks
 
         // 4. Read a split in task
-        TableRead read = readBuilder.newRead();
+        // You can use executeFilter to do filter per record.
+        // By default, only capable of performing coarse-grained filtering.
+        TableRead read = readBuilder.newRead().executeFilter();
         RecordReader<InternalRow> reader = read.createReader(splits);
         reader.forEachRemaining(System.out::println);
     }
@@ -304,7 +306,9 @@ public class StreamReadTable {
             // can be restored in scan.restore(state) after fail over
 
             // 3. Read a split in task
-            TableRead read = readBuilder.newRead();
+            // You can use executeFilter to do filter per record.
+            // By default, only capable of performing coarse-grained filtering.
+            TableRead read = readBuilder.newRead().executeFilter();
             RecordReader<InternalRow> reader = read.createReader(splits);
             reader.forEachRemaining(System.out::println);
 
@@ -406,17 +410,19 @@ public class StreamWriteTable {
 
 ## Predicate Types
 
-| SQL Predicate| Paimon Predicate                                             | 
-|:-------------|:-------------------------------------------------------------|
-| and          | org.apache.paimon.predicate.PredicateBuilder.And             |
-| or           | org.apache.paimon.predicate.PredicateBuilder.Or              |
-| is null      | org.apache.paimon.predicate.PredicateBuilder.IsNull          |
-| is not null  | org.apache.paimon.predicate.PredicateBuilder.IsNotNull       |
-| in           | org.apache.paimon.predicate.PredicateBuilder.In              |
-| not in       | org.apache.paimon.predicate.PredicateBuilder.NotIn           |
-| =            | org.apache.paimon.predicate.PredicateBuilder.Equal           |
-| <>           | org.apache.paimon.predicate.PredicateBuilder.NotEqual        |
-| <            | org.apache.paimon.predicate.PredicateBuilder.LessThan        |
-| <=           | org.apache.paimon.predicate.PredicateBuilder.LessOrEqual     |
-| >            | org.apache.paimon.predicate.PredicateBuilder.GreaterThan     |
-| >=           | org.apache.paimon.predicate.PredicateBuilder.GreaterOrEqual  |
+| SQL Predicate | Paimon Predicate                                            | 
+|:--------------|:------------------------------------------------------------|
+| and           | org.apache.paimon.predicate.PredicateBuilder.and            |
+| or            | org.apache.paimon.predicate.PredicateBuilder.or             |
+| is null       | org.apache.paimon.predicate.PredicateBuilder.isNull         |
+| is not null   | org.apache.paimon.predicate.PredicateBuilder.isNotNull      |
+| in            | org.apache.paimon.predicate.PredicateBuilder.in             |
+| not in        | org.apache.paimon.predicate.PredicateBuilder.notIn          |
+| =             | org.apache.paimon.predicate.PredicateBuilder.equal          |
+| <>            | org.apache.paimon.predicate.PredicateBuilder.notEqual       |
+| <             | org.apache.paimon.predicate.PredicateBuilder.lessThan       |
+| <=            | org.apache.paimon.predicate.PredicateBuilder.lessOrEqual    |
+| >             | org.apache.paimon.predicate.PredicateBuilder.greaterThan    |
+| >=            | org.apache.paimon.predicate.PredicateBuilder.greaterOrEqual |
+| between       | org.apache.paimon.predicate.PredicateBuilder.between        |
+| like          | org.apache.paimon.predicate.PredicateBuilder.like           |

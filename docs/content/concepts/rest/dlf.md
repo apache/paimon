@@ -3,8 +3,9 @@ title: "DLF Token"
 weight: 3
 type: docs
 aliases:
-- /concepts/rest/dlf.html
+  - /concepts/rest/dlf.html
 ---
+
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
 or more contributor license agreements.  See the NOTICE file
@@ -50,6 +51,13 @@ WITH (
     'dlf.access-key-secret'='<access-key-secret>',
 );
 ```
+
+- `uri`: Access the URI of the DLF Rest Catalog Server.
+- `warehouse`: DLF Catalog name
+- `token.provider`: token provider
+- `dlf.access-key-id`: The Access Key ID required to access the DLF service, usually referring to the AccessKey of your
+  RAM user
+- `dlf.access-key-secret`:The Access Key Secret required to access the DLF service
 
 You can grant specific permissions to a RAM user and use the RAM user's access key for long-term access to your DLF
 resources. Compared to using the Alibaba Cloud account access key, accessing DLF resources with a RAM user access key
@@ -105,5 +113,28 @@ WITH (
     'dlf.token-loader' = 'ecs'
     -- optional, loader can obtain it through ecs metadata service
     -- 'dlf.token-ecs-role-name' = 'my_ecs_role_name'
+);
+```
+
+## DLF Endpoint Configuration
+
+Paimon supports two types of DLF endpoints and automatically selects the appropriate signing algorithm:
+
+- **DLF VPC endpoints** (e.g., `cn-hangzhou-vpc.dlf.aliyuncs.com`): Recommended for VPC environments with better performance and lower latency.
+- **DLF OpenAPI endpoints** (e.g., `dlfnext.cn-hangzhou.aliyuncs.com`): Supports public network access through Alibaba Cloud API infrastructure. 
+  **Note:** Currently OpenAPI Endpoints only supports database and table names with alphanumeric characters (A-Z, a-z, 0-9) and specific symbols.
+
+Simply configure the endpoint URI, and Paimon will automatically handle the authentication:
+
+```sql
+CREATE CATALOG `paimon-rest-catalog`
+WITH (
+    'type' = 'paimon',
+    'uri' = 'https://${region}-vpc.dlf.aliyuncs.com',  -- or OpenAPI endpoint: https://dlfnext.cn-hangzhou.aliyuncs.com
+    'metastore' = 'rest',
+    'warehouse' = 'my_instance_name',
+    'token.provider' = 'dlf',
+    'dlf.access-key-id'='<access-key-id>',
+    'dlf.access-key-secret'='<access-key-secret>'
 );
 ```

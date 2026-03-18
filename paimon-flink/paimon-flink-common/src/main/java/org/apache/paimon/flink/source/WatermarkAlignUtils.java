@@ -25,7 +25,7 @@ import java.time.Duration;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Since Flink 1.15, watermark alignment is supported. */
+/** Utils for Watermark Alignment. */
 public class WatermarkAlignUtils {
 
     public static WatermarkStrategy<RowData> withWatermarkAlignment(

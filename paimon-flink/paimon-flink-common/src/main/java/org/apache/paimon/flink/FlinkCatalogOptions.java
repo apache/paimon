@@ -18,12 +18,9 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
-
-import java.time.Duration;
 
 /** Options for flink catalog. */
 public class FlinkCatalogOptions {
@@ -32,24 +29,6 @@ public class FlinkCatalogOptions {
             ConfigOptions.key("default-database")
                     .stringType()
                     .defaultValue(Catalog.DEFAULT_DATABASE);
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<Boolean> LOG_SYSTEM_AUTO_REGISTER =
-            ConfigOptions.key("log.system.auto-register")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "If true, the register will automatically create and delete a topic in log system for Paimon table. Default kafka log store register "
-                                    + "is supported, users can implement customized register for log system, for example, create a new class which extends "
-                                    + "KafkaLogStoreFactory and return a customized LogStoreRegister for their kafka cluster to create/delete topics.");
-
-    @ExcludeFromDocumentation("Confused without log system")
-    public static final ConfigOption<Duration> REGISTER_TIMEOUT =
-            ConfigOptions.key("log.system.auto-register-timeout")
-                    .durationType()
-                    .defaultValue(Duration.ofMinutes(1))
-                    .withDescription(
-                            "The timeout for register to create or delete topic in log system.");
 
     public static final ConfigOption<Boolean> DISABLE_CREATE_TABLE_IN_DEFAULT_DB =
             ConfigOptions.key("disable-create-table-in-default-db")

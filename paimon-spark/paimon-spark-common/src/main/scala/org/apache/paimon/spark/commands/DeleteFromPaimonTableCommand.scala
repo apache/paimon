@@ -24,17 +24,13 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.PrimaryKeyTableUtils.validatePKUpsertDeletable
 import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
-import org.apache.paimon.utils.InternalRowPartitionComputer
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
-import org.apache.spark.sql.catalyst.expressions.{And, Expression, Not}
-import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
+import org.apache.spark.sql.catalyst.expressions.{Expression, Not}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
-
-import scala.collection.JavaConverters._
 
 case class DeleteFromPaimonTableCommand(
     relation: DataSourceV2Relation,
@@ -45,61 +41,12 @@ case class DeleteFromPaimonTableCommand(
   with SupportsSubquery {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-
-    val commit = table.newBatchWriteBuilder().newCommit()
-    if (condition == null || condition == TrueLiteral) {
-      commit.truncateTable()
+    val commitMessages = if (usePKUpsertDelete()) {
+      performPrimaryKeyDelete(sparkSession)
     } else {
-      val (partitionCondition, otherCondition) = splitPruePartitionAndOtherPredicates(
-        condition,
-        table.partitionKeys().asScala.toSeq,
-        sparkSession.sessionState.conf.resolver)
-
-      val partitionPredicate = if (partitionCondition.isEmpty) {
-        None
-      } else {
-        try {
-          convertConditionToPaimonPredicate(
-            partitionCondition.reduce(And),
-            relation.output,
-            table.schema.logicalPartitionType())
-        } catch {
-          case _: Throwable =>
-            None
-        }
-      }
-
-      if (
-        otherCondition.isEmpty && partitionPredicate.nonEmpty && !table
-          .coreOptions()
-          .deleteForceProduceChangelog()
-      ) {
-        val matchedPartitions =
-          table.newSnapshotReader().withPartitionFilter(partitionPredicate.get).partitions().asScala
-        val rowDataPartitionComputer = new InternalRowPartitionComputer(
-          table.coreOptions().partitionDefaultName(),
-          table.schema().logicalPartitionType(),
-          table.partitionKeys.asScala.toArray,
-          table.coreOptions().legacyPartitionName()
-        )
-        val dropPartitions = matchedPartitions.map {
-          partition => rowDataPartitionComputer.generatePartValues(partition).asScala.asJava
-        }
-        if (dropPartitions.nonEmpty) {
-          commit.truncatePartitions(dropPartitions.asJava)
-        } else {
-          writer.commit(Seq.empty)
-        }
-      } else {
-        val commitMessages = if (usePKUpsertDelete()) {
-          performPrimaryKeyDelete(sparkSession)
-        } else {
-          performNonPrimaryKeyDelete(sparkSession)
-        }
-        writer.commit(commitMessages)
-      }
+      performNonPrimaryKeyDelete(sparkSession)
     }
-
+    writer.commit(commitMessages)
     Seq.empty[Row]
   }
 

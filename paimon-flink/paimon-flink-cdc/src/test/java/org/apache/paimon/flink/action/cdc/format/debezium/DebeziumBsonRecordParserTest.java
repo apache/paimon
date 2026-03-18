@@ -34,7 +34,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.TextNode;
 
-import org.apache.flink.streaming.connectors.kafka.KafkaDeserializationSchema;
+import org.apache.flink.api.common.functions.util.ListCollector;
+import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
@@ -63,7 +64,8 @@ public class DebeziumBsonRecordParserTest {
 
     private static final Map<String, String> keyEvent = new HashMap<>();
 
-    private static KafkaDeserializationSchema<CdcSourceRecord> kafkaDeserializationSchema = null;
+    private static KafkaRecordDeserializationSchema<CdcSourceRecord> kafkaDeserializationSchema =
+            null;
 
     private static final Map<String, String> beforeEvent = new HashMap<>();
 
@@ -259,7 +261,10 @@ public class DebeziumBsonRecordParserTest {
 
     private static CdcSourceRecord deserializeKafkaSchema(String key, String value)
             throws Exception {
-        return kafkaDeserializationSchema.deserialize(
-                new ConsumerRecord<>("topic", 0, 0, key.getBytes(), value.getBytes()));
+        List<CdcSourceRecord> results = new ArrayList<>();
+        kafkaDeserializationSchema.deserialize(
+                new ConsumerRecord<>("topic", 0, 0, key.getBytes(), value.getBytes()),
+                new ListCollector<>(results));
+        return results.isEmpty() ? null : results.get(0);
     }
 }

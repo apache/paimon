@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.tag.TagTimeExpire;
@@ -32,6 +33,7 @@ import org.apache.flink.types.Row;
 import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.TimeZone;
 
@@ -52,6 +54,10 @@ public class ExpireTagsProcedure extends ProcedureBase {
             ProcedureContext procedureContext, String tableId, @Nullable String olderThanStr)
             throws Catalog.TableNotExistException {
         FileStoreTable fileStoreTable = (FileStoreTable) table(tableId);
+        fileStoreTable =
+                fileStoreTable.copy(
+                        Collections.singletonMap(
+                                CoreOptions.TAG_TIME_EXPIRE_ENABLED.key(), "true"));
         TagTimeExpire tagTimeExpire =
                 fileStoreTable.store().newTagAutoManager(fileStoreTable).getTagTimeExpire();
         if (olderThanStr != null) {

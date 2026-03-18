@@ -8,7 +8,7 @@ This PyPi package contains the Python APIs for using Paimon.
 
 # Version
 
-Pypaimon requires Python 3.10+ version.
+Pypaimon requires Python 3.6+.
 
 # Dependencies
 

@@ -29,6 +29,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
@@ -47,10 +48,13 @@ public class ExpireTagsActionTest extends ActionITCaseBase {
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     public void testExpireTags(boolean startFlinkJob) throws Exception {
+        boolean tagTimeExpireEnabled = ThreadLocalRandom.current().nextBoolean();
         bEnv.executeSql(
                 "CREATE TABLE T (id STRING, name STRING,"
                         + " PRIMARY KEY (id) NOT ENFORCED)"
-                        + " WITH ('bucket'='1', 'write-only'='true')");
+                        + " WITH ('bucket'='1', 'write-only'='true', 'tag.time-expire-enabled' = '"
+                        + tagTimeExpireEnabled
+                        + "')");
 
         expireTags(startFlinkJob);
     }

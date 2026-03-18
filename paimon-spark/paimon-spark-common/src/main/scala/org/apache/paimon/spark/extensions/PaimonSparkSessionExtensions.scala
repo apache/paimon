@@ -18,8 +18,8 @@
 
 package org.apache.paimon.spark.extensions
 
-import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonFunctionResolver, PaimonIncompatiblePHRRules, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver, ReplacePaimonFunctions, RewriteUpsertTable}
-import org.apache.paimon.spark.catalyst.optimizer.{EvalSubqueriesForDeleteTable, MergePaimonScalarSubqueries}
+import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonFunctionResolver, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable, PaimonViewResolver, ReplacePaimonFunctions, RewriteUpsertTable}
+import org.apache.paimon.spark.catalyst.optimizer.{MergePaimonScalarSubqueries, OptimizeMetadataOnlyDeleteFromPaimonTable}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.commands.BucketExpression
 import org.apache.paimon.spark.execution.{OldCompatibleStrategy, PaimonStrategy}
@@ -46,7 +46,6 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     extensions.injectPostHocResolutionRule(spark => ReplacePaimonFunctions(spark))
     extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))
-    extensions.injectPostHocResolutionRule(spark => PaimonIncompatiblePHRRules(spark))
 
     extensions.injectPostHocResolutionRule(_ => PaimonUpdateTable)
     extensions.injectPostHocResolutionRule(_ => PaimonDeleteTable)
@@ -65,7 +64,7 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     }
 
     // optimization rules
-    extensions.injectOptimizerRule(_ => EvalSubqueriesForDeleteTable)
+    extensions.injectOptimizerRule(_ => OptimizeMetadataOnlyDeleteFromPaimonTable)
     extensions.injectOptimizerRule(_ => MergePaimonScalarSubqueries)
 
     // planner extensions

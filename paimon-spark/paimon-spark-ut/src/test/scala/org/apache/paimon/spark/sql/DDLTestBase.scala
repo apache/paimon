@@ -24,7 +24,8 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.types.DataTypes
 
 import org.apache.spark.SparkException
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{AnalysisException, Row}
+import org.apache.spark.sql.catalyst.analysis.NoSuchPartitionsException
 import org.junit.jupiter.api.Assertions
 
 import java.sql.{Date, Timestamp}
@@ -398,8 +399,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
   test("Paimon DDL: select table with timestamp and timestamp_ntz with filter") {
     Seq(true, false).foreach {
       datetimeJava8APIEnabled =>
-        withSparkSQLConf(
-          "spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
+        withSparkSQLConf("spark.sql.datetime.java8API.enabled" -> datetimeJava8APIEnabled.toString) {
           withTable("paimon_tbl") {
             // Spark support create table with timestamp_ntz since 3.4
             if (gteqSpark3_4) {
@@ -558,5 +558,41 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     assert(intercept[Exception] {
       sql("CREATE TABLE t (id INT) USING paimon1")
     }.getMessage.contains("Provider is not supported: paimon1"))
+  }
+
+  test("Paimon DDL: Drop Partition by partial spec") {
+    withTable("tbl") {
+      spark.sql(
+        s"CREATE TABLE tbl (id int, data string) USING paimon " +
+          s"PARTITIONED BY (dt string, hour string, event string) ")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-01', '00', 'event1')")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-02', '00', 'event1')")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-02', '00', 'event2')")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-02', '00', 'event3')")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-02', '02', 'event1')")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-02', '02', 'event2')")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-02', '03', 'event1')")
+      spark.sql(s"INSERT INTO tbl VALUES (1, 'a', '2023-01-03', '00', 'event1')")
+      val query = () => spark.sql("SELECT * FROM tbl")
+      assert(query().count() == 8)
+      // drop full parts level
+      spark.sql("ALTER TABLE tbl DROP PARTITION (dt='2023-01-01', hour='00', event='event1')")
+      assert(query().count() == 7)
+      // drop first + second level
+      spark.sql("ALTER TABLE tbl DROP PARTITION (dt='2023-01-02', hour='00')")
+      assert(query().count() == 4)
+      // drop first level
+      spark.sql("ALTER TABLE tbl DROP PARTITION (dt='2023-01-02')")
+      assert(query().count() == 1)
+      // no effected drop
+      spark.sql("ALTER TABLE tbl DROP PARTITION (dt='2023-01-01')")
+      assert(query().count() == 1)
+      assertThrows[AnalysisException] {
+        spark.sql("ALTER TABLE tbl DROP PARTITION (hour='00', event='event1')")
+      }
+      assertThrows[NoSuchPartitionsException] {
+        spark.sql("ALTER TABLE tbl DROP PARTITION (dt='2023-01-01', hour='00', event='event1')")
+      }
+    }
   }
 }

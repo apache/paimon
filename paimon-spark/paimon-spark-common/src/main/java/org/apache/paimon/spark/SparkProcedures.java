@@ -21,15 +21,19 @@ package org.apache.paimon.spark;
 import org.apache.paimon.spark.procedure.AlterFunctionProcedure;
 import org.apache.paimon.spark.procedure.AlterViewDialectProcedure;
 import org.apache.paimon.spark.procedure.ClearConsumersProcedure;
+import org.apache.paimon.spark.procedure.CompactDatabaseProcedure;
 import org.apache.paimon.spark.procedure.CompactManifestProcedure;
 import org.apache.paimon.spark.procedure.CompactProcedure;
+import org.apache.paimon.spark.procedure.CopyFilesProcedure;
 import org.apache.paimon.spark.procedure.CreateBranchProcedure;
 import org.apache.paimon.spark.procedure.CreateFunctionProcedure;
+import org.apache.paimon.spark.procedure.CreateGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.CreateTagFromTimestampProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteBranchProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.DropFunctionProcedure;
+import org.apache.paimon.spark.procedure.DropGlobalIndexProcedure;
 import org.apache.paimon.spark.procedure.ExpirePartitionsProcedure;
 import org.apache.paimon.spark.procedure.ExpireSnapshotsProcedure;
 import org.apache.paimon.spark.procedure.ExpireTagsProcedure;
@@ -45,7 +49,9 @@ import org.apache.paimon.spark.procedure.RemoveUnexistingFilesProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
+import org.apache.paimon.spark.procedure.RescaleProcedure;
 import org.apache.paimon.spark.procedure.ResetConsumerProcedure;
+import org.apache.paimon.spark.procedure.RewriteFileIndexProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 import org.apache.paimon.spark.procedure.RollbackToTimestampProcedure;
 import org.apache.paimon.spark.procedure.RollbackToWatermarkProcedure;
@@ -89,8 +95,12 @@ public class SparkProcedures {
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         procedureBuilders.put("expire_tags", ExpireTagsProcedure::builder);
         procedureBuilders.put("create_branch", CreateBranchProcedure::builder);
+        procedureBuilders.put("create_global_index", CreateGlobalIndexProcedure::builder);
+        procedureBuilders.put("drop_global_index", DropGlobalIndexProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
+        procedureBuilders.put("compact_database", CompactDatabaseProcedure::builder);
+        procedureBuilders.put("rescale", RescaleProcedure::builder);
         procedureBuilders.put("migrate_database", MigrateDatabaseProcedure::builder);
         procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
         procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
@@ -109,6 +119,8 @@ public class SparkProcedures {
         procedureBuilders.put("drop_function", DropFunctionProcedure::builder);
         procedureBuilders.put(
                 "trigger_tag_automatic_creation", TriggerTagAutomaticCreationProcedure::builder);
+        procedureBuilders.put("rewrite_file_index", RewriteFileIndexProcedure::builder);
+        procedureBuilders.put("copy", CopyFilesProcedure::builder);
         return procedureBuilders.build();
     }
 }

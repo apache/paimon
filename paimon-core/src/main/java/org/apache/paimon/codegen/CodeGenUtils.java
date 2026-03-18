@@ -80,6 +80,7 @@ public class CodeGenUtils {
                 RecordComparator.class,
                 inputTypes,
                 sortFields,
+                isAscendingOrder,
                 () ->
                         getCodeGenerator()
                                 .generateRecordComparator(
@@ -103,7 +104,16 @@ public class CodeGenUtils {
             List<DataType> fields,
             int[] fieldsIndex,
             Supplier<GeneratedClass<T>> supplier) {
-        ClassKey classKey = new ClassKey(classType, fields, fieldsIndex);
+        return generate(classType, fields, fieldsIndex, null, supplier);
+    }
+
+    private static <T> T generate(
+            Class<?> classType,
+            List<DataType> fields,
+            int[] fieldsIndex,
+            Object extraKey,
+            Supplier<GeneratedClass<T>> supplier) {
+        ClassKey classKey = new ClassKey(classType, fields, fieldsIndex, extraKey);
 
         try {
             Pair<Class<?>, Object[]> result =
@@ -153,10 +163,14 @@ public class CodeGenUtils {
 
         private final int[] fieldsIndex;
 
-        public ClassKey(Class<?> classType, List<DataType> fields, int[] fieldsIndex) {
+        private final Object extraKey;
+
+        public ClassKey(
+                Class<?> classType, List<DataType> fields, int[] fieldsIndex, Object extraKey) {
             this.classType = classType;
             this.fields = fields;
             this.fieldsIndex = fieldsIndex;
+            this.extraKey = extraKey;
         }
 
         @Override
@@ -170,12 +184,13 @@ public class CodeGenUtils {
             ClassKey classKey = (ClassKey) o;
             return Objects.equals(classType, classKey.classType)
                     && Objects.equals(fields, classKey.fields)
-                    && Arrays.equals(fieldsIndex, classKey.fieldsIndex);
+                    && Arrays.equals(fieldsIndex, classKey.fieldsIndex)
+                    && Objects.equals(extraKey, classKey.extraKey);
         }
 
         @Override
         public int hashCode() {
-            int result = Objects.hash(classType, fields);
+            int result = Objects.hash(classType, fields, extraKey);
             result = 31 * result + Arrays.hashCode(fieldsIndex);
             return result;
         }

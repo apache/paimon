@@ -45,6 +45,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.fileindex.FileIndexResult.REMAIN;
@@ -116,20 +117,20 @@ public class FileIndexPredicate implements Closeable {
     private Set<String> getRequiredNames(Predicate filePredicate) {
         return filePredicate.visit(
                 new PredicateVisitor<Set<String>>() {
-                    final Set<String> names = new HashSet<>();
 
                     @Override
                     public Set<String> visit(LeafPredicate predicate) {
-                        names.add(predicate.fieldName());
-                        return names;
+                        return new HashSet<>(predicate.fieldNames());
                     }
 
                     @Override
                     public Set<String> visit(CompoundPredicate predicate) {
+                        Set<String> result = new HashSet<>();
                         for (Predicate child : predicate.children()) {
                             child.visit(this);
+                            result.addAll(child.visit(this));
                         }
-                        return names;
+                        return result;
                     }
                 });
     }
@@ -154,10 +155,14 @@ public class FileIndexPredicate implements Closeable {
 
         @Override
         public FileIndexResult visit(LeafPredicate predicate) {
+            Optional<FieldRef> fieldRefOptional = predicate.fieldRefOptional();
+            if (!fieldRefOptional.isPresent()) {
+                return REMAIN;
+            }
+
             FileIndexResult compoundResult = REMAIN;
-            FieldRef fieldRef =
-                    new FieldRef(predicate.index(), predicate.fieldName(), predicate.type());
-            for (FileIndexReader fileIndexReader : columnIndexReaders.get(predicate.fieldName())) {
+            FieldRef fieldRef = fieldRefOptional.get();
+            for (FileIndexReader fileIndexReader : columnIndexReaders.get(fieldRef.name())) {
                 compoundResult =
                         compoundResult.and(
                                 predicate

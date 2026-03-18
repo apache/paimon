@@ -166,7 +166,7 @@ public class RangeBitmapIndexBenchmark {
         Random random = new Random();
 
         FileIndexWriter bsiWriter =
-                new BitSliceIndexBitmapFileIndex(DataTypes.INT(), new Options()).createWriter();
+                new BitSliceIndexBitmapFileIndex(DataTypes.INT()).createWriter();
 
         Options bitmapOptions = new Options();
         bitmapOptions.setInteger(BitmapFileIndex.VERSION, BitmapFileIndex.VERSION_2);
@@ -219,7 +219,7 @@ public class RangeBitmapIndexBenchmark {
             LocalFileIO.LocalSeekableInputStream localSeekableInputStream =
                     new LocalFileIO.LocalSeekableInputStream(file);
             FileIndexReader reader =
-                    new BitSliceIndexBitmapFileIndex(DataTypes.INT(), options)
+                    new BitSliceIndexBitmapFileIndex(DataTypes.INT())
                             .createReader(localSeekableInputStream, 0, 0);
             FileIndexResult result = function.apply(reader, fieldRef);
             ((BitmapIndexResult) result).get();

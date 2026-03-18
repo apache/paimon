@@ -42,6 +42,8 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -54,6 +56,7 @@ import static java.util.Collections.singletonList;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** ITCase for batch file store. */
 public class BatchFileStoreITCase extends CatalogITCaseBase {
@@ -61,6 +64,12 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return singletonList("CREATE TABLE IF NOT EXISTS T (a INT, b INT, c INT)");
+    }
+
+    @Nullable
+    @Override
+    protected Boolean sqlSyncMode() {
+        return true;
     }
 
     @Test
@@ -456,9 +465,11 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         Map<String, String> expireOptions = new HashMap<>();
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
-        FileStoreTable table = (FileStoreTable) paimonTable(tableName);
+        FileStoreTable table = paimonTable(tableName);
         table.copy(expireOptions).newCommit("").expireSnapshots();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        sql("ALTER TABLE T SET('deletion-vectors.modifiable' = 'true')");
 
         assertThat(
                         batchSql(
@@ -603,16 +614,23 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreDelete() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
-
-        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+                        + "WITH ('merge-engine' = 'deduplicate', 'bucket' = '1')");
+        sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
+        sql("DELETE FROM ignore_delete WHERE pk = 2");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
+        // compact to merge the -D record
+        sql("CALL sys.compact(`table` => 'default.ignore_delete')");
+        sql("ALTER TABLE ignore_delete SET ('ignore-delete' = 'true')");
 
         sql("DELETE FROM ignore_delete WHERE pk = 1");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
 
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+
+        assertThatThrownBy(() -> sql("ALTER TABLE ignore_delete SET ('ignore-delete' = 'false')"))
+                .hasRootCauseMessage("Cannot change ignore-delete from true to false.");
     }
 
     @Test
@@ -635,16 +653,27 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreUpdateBeforeWithRowKindField() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING, kind STRING) "
-                        + "WITH ('ignore-update-before' = 'true', 'bucket' = '1', 'rowkind.field' = 'kind')");
+                        + "WITH ('bucket' = '1', 'rowkind.field' = 'kind')");
 
-        sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I')");
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', '+I'), (2, 'B', '+I')");
+        sql("INSERT INTO ignore_delete VALUES (2, 'B', '-U')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
+
+        // compact to merge the -U record
+        sql("CALL sys.compact(`table` => 'default.ignore_delete')");
+        sql("ALTER TABLE ignore_delete SET ('ignore-update-before' = 'true')");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A', '-U')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A", "+I"));
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A', '-D')");
         assertThat(sql("SELECT * FROM ignore_delete")).isEmpty();
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "ALTER TABLE ignore_delete SET ('ignore-update-before' = 'false')"))
+                .hasRootCauseMessage("Cannot change ignore-update-before from true to false.");
     }
 
     @Test
@@ -901,6 +930,52 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testScanWithSpecifiedPartitionsWithMaxPt() {
+        sql("CREATE TABLE P (id INT, v INT, pt STRING) PARTITIONED BY (pt)");
+        sql("CREATE TABLE Q (id INT, `proctime` AS PROCTIME())");
+        sql(
+                "INSERT INTO P VALUES (1, 10, 'a'), (2, 20, 'a'), (1, 11, 'b'), (3, 31, 'b'), (1, 12, 'c'), (2, 22, 'c'), (3, 32, 'c')");
+        sql("INSERT INTO Q VALUES (1), (2), (3)");
+        String query =
+                ThreadLocalRandom.current().nextBoolean()
+                        ? "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'max_pt()') */ FOR SYSTEM_TIME AS OF Q.proctime ON Q.id = P.id"
+                        : "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'max_pt()') */ ON Q.id = P.id";
+        assertThat(sql(query)).containsExactly(Row.of(1, 12), Row.of(2, 22), Row.of(3, 32));
+    }
+
+    @Test
+    public void testScanWithSpecifiedPartitionsWithMaxTwoPt() {
+        sql("CREATE TABLE P (id INT, v INT, pt STRING) PARTITIONED BY (pt)");
+        sql("CREATE TABLE Q (id INT, `proctime` AS PROCTIME())");
+        sql(
+                "INSERT INTO P VALUES (1, 10, 'a'), (2, 20, 'a'), (1, 11, 'b'), (3, 31, 'b'), (1, 12, 'c'), (2, 22, 'c'), (3, 32, 'c')");
+        sql("INSERT INTO Q VALUES (1), (2), (3)");
+        String query =
+                ThreadLocalRandom.current().nextBoolean()
+                        ? "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'max_two_pt()') */ FOR SYSTEM_TIME AS OF Q.proctime ON Q.id = P.id"
+                        : "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'max_two_pt()') */ ON Q.id = P.id";
+        assertThat(sql(query))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11), Row.of(1, 12), Row.of(2, 22), Row.of(3, 31), Row.of(3, 32));
+    }
+
+    @Test
+    public void testScanWithSpecifiedPartitionsWithLevelMaxPt() throws Exception {
+        sql(
+                "CREATE TABLE P (id INT, v INT, pt1 STRING, pt2 STRING, pt3 STRING) PARTITIONED BY (pt1, pt2, pt3)");
+        sql("CREATE TABLE Q (id INT, `proctime` AS PROCTIME())");
+        sql(
+                "INSERT INTO P VALUES (1, 10, 'a', '2025-10-01', '1'), (2, 20, 'a', '2025-10-01', '2'), (3, 30, 'a', '2025-10-02', '1'), (4, 40, 'a', '2025-10-02', '2'), "
+                        + "(1, 11, 'b', '2025-10-01', '1'), (2, 21, 'b', '2025-10-01', '2'), (3, 31, 'b', '2025-10-02', '1'), (4, 41, 'b', '2025-10-02', '2')");
+        sql("INSERT INTO Q VALUES (1), (2), (3), (4)");
+        String query =
+                ThreadLocalRandom.current().nextBoolean()
+                        ? "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'pt1=max_pt(),pt2=max_pt()') */ FOR SYSTEM_TIME AS OF Q.proctime ON Q.id = P.id"
+                        : "SELECT Q.id, P.v FROM Q INNER JOIN P /*+ OPTIONS('scan.partitions' = 'pt1=max_pt(),pt2=max_pt()') */ ON Q.id = P.id";
+        assertThat(sql(query)).containsExactly(Row.of(3, 31), Row.of(4, 41));
+    }
+
+    @Test
     public void testEmptyTableIncrementalBetweenTimestamp() {
         assertThat(sql("SELECT * FROM T /*+ OPTIONS('incremental-between-timestamp'='0,1') */"))
                 .isEmpty();
@@ -980,6 +1055,127 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAuditLogTableWithSequenceNumberEnabled() {
+        // Creating an append-only table (no primary key) with
+        // table-read.sequence-number.enabled option should throw an exception
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        sql(
+                                "CREATE TABLE test_table_err (a int, b int, c AS a + b) "
+                                        + "WITH ('table-read.sequence-number.enabled'='true')"));
+
+        // Selecting an auditlog table with
+        // table-read.sequence-number.enabled option should throw an exception
+        sql("CREATE TABLE test_table_err2 (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b);");
+        assertThrows(
+                RuntimeException.class,
+                () ->
+                        sql(
+                                "SELECT * FROM `test_table_err2$audit_log`"
+                                        + " /*+ OPTIONS('table-read.sequence-number.enabled' = 'true') */"));
+
+        // Create primary key table with table-read.sequence-number.enabled option
+        sql(
+                "CREATE TABLE test_table_seq (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b) "
+                        + "WITH ('table-read.sequence-number.enabled'='true');");
+        sql("INSERT INTO test_table_seq VALUES (1, 2)");
+        sql("INSERT INTO test_table_seq VALUES (3, 4)");
+
+        // Test SELECT * from original table
+        assertThat(sql("SELECT * FROM `test_table_seq`"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 3), Row.of(3, 4, 7));
+
+        // Test SELECT * includes _SEQUENCE_NUMBER
+        assertThat(sql("SELECT * FROM `test_table_seq$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of("+I", 0L, 1, 2, 3), Row.of("+I", 1L, 3, 4, 7));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, c, _SEQUENCE_NUMBER FROM `test_table_seq$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(2, 3, 0L), Row.of(4, 7, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER, rowkind
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_seq$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
+    public void testAuditLogTableWithSequenceNumberAlterTable() {
+        // Create primary key table without sequence-number option
+        sql("CREATE TABLE test_table_dyn (a int PRIMARY KEY NOT ENFORCED, b int, c AS a + b);");
+        sql("INSERT INTO test_table_dyn VALUES (1, 2)");
+        sql("INSERT INTO test_table_dyn VALUES (3, 4)");
+
+        // Add table-read.sequence-number.enabled option via ALTER TABLE
+        sql("ALTER TABLE test_table_dyn SET ('table-read.sequence-number.enabled'='true')");
+
+        // Test SELECT * includes _SEQUENCE_NUMBER (same as
+        // testAuditLogTableWithSequenceNumberEnabled)
+        assertThat(sql("SELECT * FROM `test_table_dyn$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of("+I", 0L, 1, 2, 3), Row.of("+I", 1L, 3, 4, 7));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, c, _SEQUENCE_NUMBER FROM `test_table_dyn$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(2, 3, 0L), Row.of(4, 7, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER, rowkind
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_dyn$audit_log`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
+    public void testBinlogTableWithSequenceNumberEnabled() {
+        // Create primary key table with table-read.sequence-number.enabled option
+        sql(
+                "CREATE TABLE test_table_seq (a int PRIMARY KEY NOT ENFORCED, b int) "
+                        + "WITH ('table-read.sequence-number.enabled'='true');");
+        sql("INSERT INTO test_table_seq VALUES (1, 2)");
+        sql("INSERT INTO test_table_seq VALUES (3, 4)");
+
+        // Test SELECT * includes _SEQUENCE_NUMBER
+        assertThat(sql("SELECT * FROM `test_table_seq$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of("+I", 0L, new Integer[] {1}, new Integer[] {2}),
+                        Row.of("+I", 1L, new Integer[] {3}, new Integer[] {4}));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, _SEQUENCE_NUMBER FROM `test_table_seq$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of(new Integer[] {2}, 0L), Row.of(new Integer[] {4}, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_seq$binlog`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
+    public void testBinlogTableWithSequenceNumberAlterTable() {
+        // Create primary key table without sequence-number option
+        sql("CREATE TABLE test_table_dyn (a int PRIMARY KEY NOT ENFORCED, b int);");
+        sql("INSERT INTO test_table_dyn VALUES (1, 2)");
+        sql("INSERT INTO test_table_dyn VALUES (3, 4)");
+
+        // Add table-read.sequence-number.enabled option via ALTER TABLE
+        sql("ALTER TABLE test_table_dyn SET ('table-read.sequence-number.enabled'='true')");
+
+        // Test SELECT * includes _SEQUENCE_NUMBER (same as
+        // testBinlogTableWithSequenceNumberEnabled)
+        assertThat(sql("SELECT * FROM `test_table_dyn$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of("+I", 0L, new Integer[] {1}, new Integer[] {2}),
+                        Row.of("+I", 1L, new Integer[] {3}, new Integer[] {4}));
+
+        // Test out-of-order select with _SEQUENCE_NUMBER
+        assertThat(sql("SELECT b, _SEQUENCE_NUMBER FROM `test_table_dyn$binlog`"))
+                .containsExactlyInAnyOrder(
+                        Row.of(new Integer[] {2}, 0L), Row.of(new Integer[] {4}, 1L));
+
+        // Test selecting only _SEQUENCE_NUMBER
+        assertThat(sql("SELECT _SEQUENCE_NUMBER, rowkind FROM `test_table_dyn$binlog`"))
+                .containsExactlyInAnyOrder(Row.of(0L, "+I"), Row.of(1L, "+I"));
+    }
+
+    @Test
     public void testBatchReadSourceWithSnapshot() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222), (3, 33, 333), (4, 44, 444)");
         assertThat(
@@ -1024,5 +1220,90 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         + "WITH ('deletion-vectors.enabled' = 'true', 'write-only' = 'true');");
         sql("INSERT INTO test_table VALUES (1, 'A')");
         assertThat(sql("SELECT * FROM `test_table$files`")).isNotEmpty();
+    }
+
+    @Test
+    public void testLevel0FileCanBeReadForPartitionsTable() {
+        sql(
+                "CREATE TABLE test_table (a int PRIMARY KEY NOT ENFORCED, b string, dt string) "
+                        + "PARTITIONED BY (dt)"
+                        + "WITH ('deletion-vectors.enabled' = 'true', 'write-only' = 'true');");
+        sql("INSERT INTO test_table VALUES (1, 'A', '2024-12-01')");
+        assertThat(sql("SELECT * FROM `test_table$partitions`")).isNotEmpty();
+    }
+
+    @Test
+    public void testOverwriteUpgradeForOrdinaryPk() {
+        boolean dynamicBucket = ThreadLocalRandom.current().nextBoolean();
+        sql(
+                "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
+                        + "WITH ('bucket' = '%s', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')",
+                dynamicBucket ? "-1" : "4");
+        sql(
+                "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql("INSERT OVERWRITE test_table VALUES (3, 'C', '2025-12-01')");
+        // didn't write pt 2025-12-02
+        assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(3, "C", "2025-12-01"));
+
+        sql("ALTER TABLE test_table SET ('overwrite-upgrade' = 'false')");
+        sql("INSERT OVERWRITE test_table VALUES (4, 'D', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+    }
+
+    @Test
+    public void testOverwriteUpgradeForPostpone() {
+        sql(
+                "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) PARTITIONED BY (pt)"
+                        + "WITH ('bucket' = '-2', 'deletion-vectors.enabled' = 'true', 'write-only' = 'true')");
+
+        sql(
+                "INSERT INTO test_table VALUES (1, 'A', '2025-12-01'), (2, 'B', '2025-12-01'), (1, 'A', '2025-12-02')");
+        // the data is batch writing to fixed bucket but skipped because of dv
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql(
+                "INSERT OVERWRITE test_table /*+ OPTIONS('postpone.batch-write-fixed-bucket' = 'false') */ VALUES (3, 'C', '2025-12-01')");
+        // doesn't concern data in bucket -2
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql("INSERT OVERWRITE test_table VALUES (4, 'D', '2025-12-01')");
+        // didn't write pt 2025-12-02
+        assertThat(sql("SELECT * FROM test_table")).containsExactly(Row.of(4, "D", "2025-12-01"));
+
+        sql("ALTER TABLE test_table SET ('overwrite-upgrade' = 'false')");
+        sql("INSERT OVERWRITE test_table VALUES (5, 'E', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql("ALTER TABLE test_table SET ('write-buffer-spillable' = 'false')");
+        sql("INSERT OVERWRITE test_table VALUES (6, 'F', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+    }
+
+    @Test
+    public void testNoOverwriteUpgradeWhenFilesOverlapped() {
+        sql(
+                "CREATE TABLE test_table (a INT, b STRING, pt STRING, PRIMARY KEY (a, pt) NOT ENFORCED) "
+                        + "PARTITIONED BY (pt) WITH ('bucket' = '4', 'deletion-vectors.enabled' = 'true', "
+                        + "'write-only' = 'true', 'write-buffer-spillable' = 'false', 'page-size' = '64 b', "
+                        + "'write-buffer-size' = '1 kb')");
+        sql("INSERT INTO test_table VALUES (1, 'A', '2025-12-01')");
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql(
+                "CREATE TEMPORARY TABLE gen (a INT, b STRING) "
+                        + "WITH ('connector' = 'datagen', 'fields.a.kind' = 'sequence', 'fields.a.start' = '1', "
+                        + "'fields.a.end' = '500', 'number-of-rows' = '500')");
+
+        sql("INSERT OVERWRITE test_table SELECT a, b, '2025-12-01' FROM gen");
+
+        assertThat(sql("SELECT * FROM test_table")).isEmpty();
+
+        sql(
+                "ALTER TABLE test_table RESET ('write-buffer-spillable', 'page-size', 'write-buffer-size')");
+        sql("CALL sys.compact(`table` => 'default.test_table')");
+
+        assertThat(sql("SELECT SUM(a) FROM test_table")).containsExactly(Row.of(125250));
     }
 }

@@ -170,7 +170,7 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
 
       spark.sql(
         s"""CALL sys.migrate_table(source_type => 'hive', table => '$hiveDbName.hive_tbl$random',
-           |options => 'file.format=parquet,partition.default-name=__HIVE_DEFAULT_PARTITION__')
+           |options => 'file.format=orc')
            |""".stripMargin)
 
       checkAnswer(

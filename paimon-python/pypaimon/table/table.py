@@ -19,7 +19,8 @@
 from abc import ABC, abstractmethod
 
 from pypaimon.read.read_builder import ReadBuilder
-from pypaimon.write.batch_write_builder import BatchWriteBuilder
+from pypaimon.read.stream_read_builder import StreamReadBuilder
+from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
 class Table(ABC):
@@ -30,5 +31,13 @@ class Table(ABC):
         """Return a builder for building table scan and table read."""
 
     @abstractmethod
+    def new_stream_read_builder(self) -> StreamReadBuilder:
+        """Return a builder for building streaming table scan and read."""
+
+    @abstractmethod
     def new_batch_write_builder(self) -> BatchWriteBuilder:
         """Returns a builder for building batch table write and table commit."""
+
+    @abstractmethod
+    def new_stream_write_builder(self) -> StreamWriteBuilder:
+        """Returns a builder for building stream table write and table commit."""

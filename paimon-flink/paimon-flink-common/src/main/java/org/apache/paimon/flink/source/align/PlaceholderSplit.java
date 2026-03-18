@@ -44,7 +44,6 @@ public class PlaceholderSplit extends DataSplit {
         dataSplit =
                 DataSplit.builder()
                         .withSnapshot(snapshotId)
-                        .withBeforeFiles(Collections.emptyList())
                         .withBucket(0)
                         .withDataFiles(Collections.emptyList())
                         .withPartition(BinaryRow.EMPTY_ROW)
@@ -71,11 +70,6 @@ public class PlaceholderSplit extends DataSplit {
     @Override
     public int bucket() {
         return dataSplit.bucket();
-    }
-
-    @Override
-    public List<DataFileMeta> beforeFiles() {
-        return dataSplit.beforeFiles();
     }
 
     @Override

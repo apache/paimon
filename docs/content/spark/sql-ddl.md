@@ -219,7 +219,7 @@ CREATE TABLE my_table (
 ```
 
 Furthermore, if there is already data stored in the specified location, you can create the table without explicitly specifying the fields, partitions and props or other information. 
-In this case, the new table will inherit them all from the existing table’s metadata. 
+In this case, the new table will inherit them all from the existing table's metadata.
 
 However, if you manually specify them, you need to ensure that they are consistent with those of the existing table (props can be a subset). Therefore, it is strongly recommended not to specify them.
 
@@ -295,11 +295,11 @@ And in this case, views are supported when the `metastore` type is `hive` or `re
 CREATE VIEW constructs a virtual table that has no physical data.
 
 ```sql
--- create a view.
-CREATE [TEMPORARY] VIEW v1 AS SELECT * FROM t1;
+-- create a view or a temporary view. (temporary view should not specify database name)
+CREATE [TEMPORARY] VIEW <mydb>.v1 AS SELECT * FROM t1;
 
--- create a view, if a view of same name already exists, it will be replaced.
-CREATE OR REPLACE [TEMPORARY] VIEW v1 AS SELECT * FROM t1;
+-- create a view or a temporary view, if a view of same name already exists, it will be replaced. (temporary view should not specify database name)
+CREATE OR REPLACE [TEMPORARY] VIEW <mydb>.v1 AS SELECT * FROM t1;
 ```
 
 ### Drop View
@@ -307,8 +307,8 @@ CREATE OR REPLACE [TEMPORARY] VIEW v1 AS SELECT * FROM t1;
 DROP VIEW removes the metadata associated with a specified view from the catalog.
 
 ```sql
--- drop a view
-DROP VIEW v1;
+-- drop a view or a temporary view.
+DROP VIEW <mydb>.v1;
 ```
 
 ## Tag

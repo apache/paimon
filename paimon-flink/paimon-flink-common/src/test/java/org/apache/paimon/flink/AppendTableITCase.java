@@ -565,22 +565,6 @@ public class AppendTableITCase extends CatalogITCaseBase {
         partitionEntriesLess.forEach(x -> assertThat(x.fileCount()).isEqualTo(fileCountLess));
     }
 
-    @Test
-    public void testFlinkMemoryPool() throws Exception {
-        batchSql("ALTER TABLE append_table SET ('sink.use-managed-memory-allocator' = 'true')");
-        sEnv.executeSql(
-                "CREATE TEMPORARY TABLE Orders_in (\n"
-                        + "    f0        INT,\n"
-                        + "    f1        STRING\n"
-                        + ") WITH (\n"
-                        + "    'connector' = 'datagen',\n"
-                        + "    'number-of-rows' = '10'\n"
-                        + ")");
-
-        sEnv.executeSql("INSERT INTO append_table SELECT * FROM Orders_in").await();
-        assertThat(batchSql("SELECT * FROM append_table").size()).isEqualTo(10);
-    }
-
     private static class TestStatelessWriterSource extends AbstractNonCoordinatedSource<Integer> {
 
         private final FileStoreTable table;
@@ -735,6 +719,87 @@ public class AppendTableITCase extends CatalogITCaseBase {
                         "Time up for streaming execute, don't get expected result.");
             }
             Thread.sleep(1000);
+        }
+    }
+
+    @Test
+    public void testLimitPushdownPerformanceOptimization() {
+        // Create a table with many files to test that limit optimization is applied
+        for (int i = 0; i < 50; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // Without limit, should read all data
+        List<Row> allRows = batchSql("SELECT * FROM append_table");
+        assertThat(allRows.size()).isEqualTo(50);
+
+        // With limit, optimization should be applied
+        List<Row> limitedRows = batchSql("SELECT * FROM append_table LIMIT 10");
+        assertThat(limitedRows.size()).isEqualTo(10);
+
+        // Test with limit 1
+        List<Row> limitedRows1 = batchSql("SELECT * FROM append_table LIMIT 1");
+        assertThat(limitedRows1.size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testLimitPushdownWithFilter() {
+        // Create a table with many files to test that limit optimization is applied
+        // when filter is present
+        for (int i = 0; i < 50; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // Without filter and without limit, should read all data
+        List<Row> allRows = batchSql("SELECT * FROM append_table");
+        assertThat(allRows.size()).isEqualTo(50);
+
+        // With filter (WHERE id > 20) and limit (10), optimization should be applied
+        // The early stop in LimitAwareManifestEntryIterator will now consider the filter's effect
+        // on row counts to ensure correctness.
+        List<Row> filteredAndLimitedRows =
+                batchSql("SELECT * FROM append_table WHERE id > 20 LIMIT 10");
+        assertThat(filteredAndLimitedRows.size()).isEqualTo(10);
+        // Verify all returned rows satisfy the filter
+        for (Row row : filteredAndLimitedRows) {
+            assertThat((Integer) row.getField(0)).isGreaterThan(20);
+        }
+
+        // Test with different filter
+        List<Row> filteredAndLimitedRows2 =
+                batchSql("SELECT * FROM append_table WHERE id < 30 LIMIT 5");
+        assertThat(filteredAndLimitedRows2.size()).isEqualTo(5);
+        // Verify all returned rows satisfy the filter
+        for (Row row : filteredAndLimitedRows2) {
+            assertThat((Integer) row.getField(0)).isLessThan(30);
+        }
+    }
+
+    @Test
+    public void testLimitPushdownWhenDataLessThanLimit() {
+        // Create a table with only 3 rows
+        for (int i = 0; i < 3; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // With limit 10, should return all 3 rows (less than limit)
+        List<Row> rows = batchSql("SELECT * FROM append_table LIMIT 10");
+        assertThat(rows.size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testLimitPushdownWithFilterWhenDataLessThanLimit() {
+        // Create a table with 10 rows, rows 0-4 have id < 5, rows 5-9 have id >= 5
+        for (int i = 0; i < 10; i++) {
+            batchSql(String.format("INSERT INTO append_table VALUES (%d, 'data_%d')", i, i));
+        }
+
+        // With filter (id >= 5) and limit (10), should return all 5 matching rows
+        List<Row> rows = batchSql("SELECT * FROM append_table WHERE id >= 5 LIMIT 10");
+        assertThat(rows.size()).isEqualTo(5);
+        // Verify all returned rows satisfy the filter
+        for (Row row : rows) {
+            assertThat((Integer) row.getField(0)).isGreaterThanOrEqualTo(5);
         }
     }
 }

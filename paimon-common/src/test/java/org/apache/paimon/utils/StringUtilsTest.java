@@ -412,6 +412,101 @@ class StringUtilsTest {
     }
 
     @Nested
+    class TruncatedStringTests {
+
+        @Test
+        void testTruncatedStringWithinMaxFields() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 5);
+            assertThat(result).isEqualTo("[a, b, c]");
+        }
+
+        @Test
+        void testTruncatedStringExactlyMaxFields() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[a, b, c]");
+        }
+
+        @Test
+        void testTruncatedStringExceedsMaxFields() {
+            List<String> items = Arrays.asList("a", "b", "c", "d", "e");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[a, b, ... 3 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringExceedsMaxFieldsWithSeparator() {
+            List<Integer> items = Arrays.asList(1, 2, 3, 4, 5, 6);
+            String result = StringUtils.truncatedString(items, "(", "-", ")", 4);
+            assertThat(result).isEqualTo("(1-2-3-... 3 more fields)");
+        }
+
+        @Test
+        void testTruncatedStringEmptyCollection() {
+            List<String> items = Arrays.asList();
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[]");
+        }
+
+        @Test
+        void testTruncatedStringSingleElement() {
+            List<String> items = Arrays.asList("only");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 5);
+            assertThat(result).isEqualTo("[only]");
+        }
+
+        @Test
+        void testTruncatedStringMaxFieldsZero() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 0);
+            assertThat(result).isEqualTo("[, ... 3 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringMaxFieldsOne() {
+            List<String> items = Arrays.asList("a", "b", "c", "d");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 1);
+            assertThat(result).isEqualTo("[, ... 4 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringLargeCollection() {
+            List<Integer> items = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+            String result = StringUtils.truncatedString(items, "{", ", ", "}", 5);
+            assertThat(result).isEqualTo("{1, 2, 3, 4, ... 6 more fields}");
+        }
+
+        @Test
+        void testTruncatedStringWithEmptyStrings() {
+            List<String> items = Arrays.asList("", "a", "", "b", "");
+            String result = StringUtils.truncatedString(items, "[", "|", "]", 3);
+            assertThat(result).isEqualTo("[|a|... 3 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringWithNullElements() {
+            List<String> items = Arrays.asList("a", null, "b", "c");
+            String result = StringUtils.truncatedString(items, "[", ", ", "]", 3);
+            assertThat(result).isEqualTo("[a, null, ... 2 more fields]");
+        }
+
+        @Test
+        void testTruncatedStringWithCustomDelimiters() {
+            List<String> items = Arrays.asList("apple", "banana", "cherry", "date");
+            String result = StringUtils.truncatedString(items, "<", " | ", ">", 3);
+            assertThat(result).isEqualTo("<apple | banana | ... 2 more fields>");
+        }
+
+        @Test
+        void testTruncatedStringWithEmptyDelimiters() {
+            List<String> items = Arrays.asList("a", "b", "c");
+            String result = StringUtils.truncatedString(items, "", "", "", 5);
+            assertThat(result).isEqualTo("abc");
+        }
+    }
+
+    @Nested
     class EdgeCaseTests {
 
         @Test

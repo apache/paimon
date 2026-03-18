@@ -42,6 +42,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ChangelogManager;
+import org.apache.paimon.utils.DVMetaCache;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SimpleFileReader;
 import org.apache.paimon.utils.SnapshotManager;
@@ -155,6 +156,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void setDVMetaCache(DVMetaCache cache) {
+        wrapped.setDVMetaCache(cache);
+    }
+
+    @Override
     public TableSchema schema() {
         return wrapped.schema();
     }
@@ -257,6 +263,16 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     @Override
     public void createBranch(String branchName, String tagName) {
         wrapped.createBranch(branchName, tagName);
+    }
+
+    @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        wrapped.createBranch(branchName, ignoreIfExists);
+    }
+
+    @Override
+    public void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        wrapped.createBranch(branchName, tagName, ignoreIfExists);
     }
 
     @Override

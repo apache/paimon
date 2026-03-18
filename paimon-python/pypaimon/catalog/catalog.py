@@ -17,10 +17,11 @@
 #################################################################################
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.schema import Schema
+from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 
@@ -39,12 +40,51 @@ class Catalog(ABC):
     OWNER_PROP = "owner"
 
     @abstractmethod
+    def list_databases(self) -> List[str]:
+        """List all database names in the catalog."""
+
+    @abstractmethod
     def get_database(self, name: str) -> 'Database':
         """Get paimon database identified by the given name."""
 
     @abstractmethod
     def create_database(self, name: str, ignore_if_exists: bool, properties: Optional[dict] = None):
         """Create a database with properties."""
+
+    @abstractmethod
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        """Drop a database.
+
+        Args:
+            name: Name of the database to drop.
+            ignore_if_not_exists: If True, do not raise error if database does not exist.
+            cascade: If True, drop all tables in the database before dropping it.
+        """
+
+    @abstractmethod
+    def list_tables(self, database_name: str) -> List[str]:
+        """List all table names in the given database.
+
+        Args:
+            database_name: Name of the database.
+
+        Returns:
+            List of table names.
+        """
+
+    def alter_database(self, name: str, changes: list):
+        """Alter database properties.
+
+        Args:
+            name: Name of the database.
+            changes: List of PropertyChange objects.
+
+        Raises:
+            NotImplementedError: If the catalog does not support alter database.
+        """
+        raise NotImplementedError(
+            "alter_database is not supported by this catalog."
+        )
 
     @abstractmethod
     def get_table(self, identifier: Union[str, Identifier]) -> 'Table':
@@ -54,6 +94,41 @@ class Catalog(ABC):
     def create_table(self, identifier: Union[str, Identifier], schema: Schema, ignore_if_exists: bool):
         """Create table with schema."""
 
+    @abstractmethod
+    def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
+        """Drop a table from the catalog.
+
+        Args:
+            identifier: Table identifier (string or Identifier instance)
+            ignore_if_not_exists: If True, do not raise error if table does not exist
+
+        Raises:
+            TableNotExistException: If table does not exist and ignore_if_not_exists is False
+        """
+
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        """Rename a table.
+
+        Args:
+            source_identifier: Current table identifier.
+            target_identifier: New table identifier.
+
+        Raises:
+            NotImplementedError: If the catalog does not support rename table.
+        """
+        raise NotImplementedError(
+            "rename_table is not supported by this catalog."
+        )
+
+    @abstractmethod
+    def alter_table(
+        self,
+        identifier: Union[str, Identifier],
+        changes: List[SchemaChange],
+        ignore_if_not_exists: bool = False
+    ):
+        """Alter table with schema changes."""
+
     def supports_version_management(self) -> bool:
         """
         Whether this catalog supports version management for tables.
@@ -62,6 +137,21 @@ class Catalog(ABC):
             True if the catalog supports version management, False otherwise
         """
         return False
+
+    @abstractmethod
+    def load_snapshot(self, identifier: Identifier):
+        """Load the snapshot of table identified by the given Identifier.
+
+        Args:
+            identifier: Path of the table
+
+        Returns:
+            TableSnapshot instance
+
+        Raises:
+            NotImplementedError: If the catalog does not support version management
+            TableNotExistException: If the table does not exist
+        """
 
     @abstractmethod
     def commit_snapshot(
@@ -84,3 +174,122 @@ class Catalog(ABC):
             True if commit was successful, False otherwise
 
         """
+
+    def rollback_to(self, identifier, instant, from_snapshot=None):
+        """Rollback table by the given identifier and instant.
+
+        Args:
+            identifier: Path of the table (Identifier instance).
+            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
+            from_snapshot: Optional snapshot ID. Success only occurs when the
+                latest snapshot is this snapshot.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            UnsupportedOperationError: If the catalog does not support version management.
+        """
+        raise NotImplementedError(
+            "rollback_to is not supported by this catalog."
+        )
+
+    def drop_partitions(
+            self,
+            identifier: Union[str, Identifier],
+            partitions: List[Dict[str, str]],
+    ) -> None:
+        raise NotImplementedError(
+            "drop_partitions is not supported by this catalog. Use REST catalog for partition drop."
+        )
+
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        """List partitions of a table with pagination.
+
+        Args:
+            identifier: Path of the table.
+            max_results: Maximum number of results to return per page.
+            page_token: Token for pagination.
+            partition_name_pattern: Optional pattern to filter partition names.
+
+        Returns:
+            PagedList of Partition objects.
+
+        Raises:
+            NotImplementedError: If the catalog does not support listing partitions.
+        """
+        raise NotImplementedError(
+            "list_partitions_paged is not supported by this catalog."
+        )
+
+    def create_branch(
+            self,
+            identifier: Identifier,
+            branch_name: str,
+            tag_name: Optional[str] = None
+    ) -> None:
+        """
+        Create a branch for the table.
+
+        Args:
+            identifier: Table identifier
+            branch_name: Name of the branch to create
+            tag_name: Optional tag name to create branch from, None for current state
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "create_branch is not supported by this catalog."
+        )
+
+    def drop_branch(self, identifier: Identifier, branch_name: str) -> None:
+        """
+        Drop a branch for the table.
+
+        Args:
+            identifier: Table identifier
+            branch_name: Name of the branch to drop
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "drop_branch is not supported by this catalog."
+        )
+
+    def fast_forward(self, identifier: Identifier, branch_name: str) -> None:
+        """
+        Fast forward the current branch to the specified branch.
+
+        Args:
+            identifier: Table identifier
+            branch_name: The branch to fast forward to
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "fast_forward is not supported by this catalog."
+        )
+
+    def list_branches(self, identifier: Identifier) -> List[str]:
+        """
+        List all branches for the table.
+
+        Args:
+            identifier: Table identifier
+
+        Returns:
+            List of branch names
+
+        Raises:
+            NotImplementedError: If the catalog does not support branch management
+        """
+        raise NotImplementedError(
+            "list_branches is not supported by this catalog."
+        )

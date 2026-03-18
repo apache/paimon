@@ -17,30 +17,31 @@
 ################################################################################
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
-from pypaimon.common.json_util import json_field
+from pypaimon.common.json_util import json_field, optional_json_field
+
+BATCH_COMMIT_IDENTIFIER = 0x7fffffffffffffff
 
 
 @dataclass
 class Snapshot:
     # Required fields
+    version: int = json_field("version")
     id: int = json_field("id")
     schema_id: int = json_field("schemaId")
     base_manifest_list: str = json_field("baseManifestList")
     delta_manifest_list: str = json_field("deltaManifestList")
+    total_record_count: int = json_field("totalRecordCount")
+    delta_record_count: int = json_field("deltaRecordCount")
     commit_user: str = json_field("commitUser")
     commit_identifier: int = json_field("commitIdentifier")
     commit_kind: str = json_field("commitKind")
     time_millis: int = json_field("timeMillis")
     # Optional fields with defaults
-    version: Optional[int] = json_field("version", default=None)
-    log_offsets: Optional[Dict[int, int]] = json_field("logOffsets", default_factory=dict)
-    changelog_manifest_list: Optional[str] = json_field("changelogManifestList", default=None)
-    index_manifest: Optional[str] = json_field("indexManifest", default=None)
-    total_record_count: Optional[int] = json_field("totalRecordCount", default=None)
-    delta_record_count: Optional[int] = json_field("deltaRecordCount", default=None)
-    changelog_record_count: Optional[int] = json_field("changelogRecordCount", default=None)
-    watermark: Optional[int] = json_field("watermark", default=None)
-    statistics: Optional[str] = json_field("statistics", default=None)
-    next_row_id: Optional[int] = json_field("nextRowId", default=None)
+    changelog_manifest_list: Optional[str] = optional_json_field("changelogManifestList", "non_null")
+    index_manifest: Optional[str] = optional_json_field("indexManifest", "non_null")
+    changelog_record_count: Optional[int] = optional_json_field("changelogRecordCount", "non_null")
+    watermark: Optional[int] = optional_json_field("watermark", "non_null")
+    statistics: Optional[str] = optional_json_field("statistics", "non_null")
+    next_row_id: Optional[int] = optional_json_field("nextRowId", "non_null")

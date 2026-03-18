@@ -31,7 +31,7 @@ class ScanPlanHelperTest extends PaimonSparkTestBase with ScanPlanHelper {
       sql("CREATE TABLE t (id INT, data STRING) TBLPROPERTIES ('row-tracking.enabled' = 'true')")
       sql("INSERT INTO t VALUES (11, 'a'), (22, 'b')")
 
-      val splits = getPaimonScan("SELECT * FROM t").getOriginSplits.map(_.asInstanceOf[DataSplit])
+      val splits = getPaimonScan("SELECT * FROM t").inputSplits.map(_.asInstanceOf[DataSplit])
       val newScanPlan = createNewScanPlan(splits, createRelationV2("t"))
       val newDf = createDataset(spark, newScanPlan)
 

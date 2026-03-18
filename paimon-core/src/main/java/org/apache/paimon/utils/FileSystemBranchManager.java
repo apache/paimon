@@ -73,6 +73,14 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName) {
+        createBranch(branchName, false);
+    }
+
+    @Override
+    public void createBranch(String branchName, boolean ignoreIfExists) {
+        if (ignoreIfExists && branchExists(branchName)) {
+            return;
+        }
         validateBranch(branchName);
         try {
             TableSchema latestSchema = schemaManager.latest().get();
@@ -88,6 +96,14 @@ public class FileSystemBranchManager implements BranchManager {
 
     @Override
     public void createBranch(String branchName, String tagName) {
+        createBranch(branchName, tagName, false);
+    }
+
+    @Override
+    public void createBranch(String branchName, String tagName, boolean ignoreIfExists) {
+        if (ignoreIfExists && branchExists(branchName)) {
+            return;
+        }
         validateBranch(branchName);
         Snapshot snapshot = tagManager.getOrThrow(tagName).trimToSnapshot();
 

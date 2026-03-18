@@ -27,6 +27,8 @@ public interface WritableTimestampVector extends WritableColumnVector, Timestamp
     /** Set {@link Timestamp} at rowId with the provided value. */
     void setTimestamp(int rowId, Timestamp timestamp);
 
+    void appendTimestamp(Timestamp timestamp);
+
     /** Fill the column vector with the provided value. */
     void fill(Timestamp value);
 }

@@ -54,6 +54,8 @@ public class LocalFileIO implements FileIO {
 
     private static final Logger LOG = LoggerFactory.getLogger(LocalFileIO.class);
 
+    public static final LocalFileIO INSTANCE = new LocalFileIO();
+
     private static final long serialVersionUID = 1L;
 
     // the lock to ensure atomic renaming

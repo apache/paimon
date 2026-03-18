@@ -57,6 +57,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.PARTITION_DEFAULT_NAME;
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 import static org.apache.paimon.hive.clone.HiveCloneUtils.HIDDEN_PATH_FILTER;
 import static org.apache.paimon.hive.clone.HiveCloneUtils.parseFormat;
@@ -147,11 +148,15 @@ public class HiveMigrator implements Migrator {
         try {
             hiveCatalog.getTable(identifier);
         } catch (Catalog.TableNotExistException e) {
+            String defaultPartitionName =
+                    client.getConfigValue(
+                            "hive.exec.default.partition.name", "__HIVE_DEFAULT_PARTITION__");
             Schema schema =
                     from(
                             client.getSchema(sourceDatabase, sourceTable),
                             sourceHiveTable.getPartitionKeys(),
-                            properties);
+                            properties,
+                            defaultPartitionName);
             hiveCatalog.createTable(identifier, schema, false);
             deleteIfFail = true;
         }
@@ -254,7 +259,8 @@ public class HiveMigrator implements Migrator {
     public Schema from(
             List<FieldSchema> fields,
             List<FieldSchema> partitionFields,
-            Map<String, String> hiveTableOptions) {
+            Map<String, String> hiveTableOptions,
+            String defaultPartitionName) {
         checkArgument(
                 coreOptions.bucket() == -1,
                 "Hive migrator only support unaware-bucket target table, bucket should be -1");
@@ -262,6 +268,9 @@ public class HiveMigrator implements Migrator {
         // for compatible with hive comment system
         if (hiveTableOptions.get("comment") != null) {
             paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
+        }
+        if (!partitionFields.isEmpty()) {
+            paimonOptions.put(PARTITION_DEFAULT_NAME.key(), defaultPartitionName);
         }
 
         Schema.Builder schemaBuilder =

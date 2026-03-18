@@ -73,16 +73,7 @@ public class LookupFileStoreTable extends DelegatedFileStoreTable {
 
     @Override
     public StreamDataTableScan newStreamScan() {
-        return new LookupDataTableScan(
-                wrapped.schema(),
-                wrapped.coreOptions(),
-                wrapped.newSnapshotReader(),
-                wrapped.snapshotManager(),
-                wrapped.changelogManager(),
-                wrapped.supportStreamingReadOverwrite(),
-                lookupScanMode,
-                wrapped.catalogEnvironment().tableQueryAuth(wrapped.coreOptions()),
-                !wrapped.schema().primaryKeys().isEmpty());
+        return new LookupDataTableScan(wrapped, wrapped.newSnapshotReader(), lookupScanMode);
     }
 
     @Override

@@ -108,7 +108,7 @@ public class AppendOnlySingleTableCompactionWorkerOperatorTest extends TableTest
         committables.forEach(
                 a ->
                         assertThat(
-                                        ((CommitMessageImpl) a.wrappedCommittable())
+                                        ((CommitMessageImpl) a.commitMessage())
                                                         .compactIncrement()
                                                         .compactAfter()
                                                         .size()

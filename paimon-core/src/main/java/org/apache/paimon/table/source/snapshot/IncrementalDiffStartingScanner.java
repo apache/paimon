@@ -20,6 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.tag.Tag;
 import org.apache.paimon.tag.TagPeriodHandler;
@@ -65,6 +66,12 @@ public class IncrementalDiffStartingScanner extends AbstractStartingScanner {
     @Override
     public Result scan(SnapshotReader reader) {
         return StartingScanner.fromPlan(reader.withSnapshot(end).readIncrementalDiff(start));
+    }
+
+    @Override
+    public List<PartitionEntry> scanPartitions(SnapshotReader reader) {
+        // ignore start, just use end to read partition entries
+        return reader.withSnapshot(end).partitionEntries();
     }
 
     public static StartingScanner betweenTags(

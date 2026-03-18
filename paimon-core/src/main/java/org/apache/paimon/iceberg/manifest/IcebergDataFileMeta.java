@@ -87,9 +87,6 @@ public class IcebergDataFileMeta {
     private final Long contentOffset;
     private final Long contentSizeInBytes;
 
-    // only used for iceberg migrate
-    private long schemaId = 0;
-
     IcebergDataFileMeta(
             Content content,
             String filePath,
@@ -277,15 +274,6 @@ public class IcebergDataFileMeta {
 
     public Long contentSizeInBytes() {
         return contentSizeInBytes;
-    }
-
-    public long schemaId() {
-        return schemaId;
-    }
-
-    public IcebergDataFileMeta withSchemaId(long schemaId) {
-        this.schemaId = schemaId;
-        return this;
     }
 
     public static RowType schema(RowType partitionType) {

@@ -23,6 +23,7 @@ import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
@@ -45,6 +46,7 @@ import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.InternalRowPartitionComputer;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -90,6 +92,11 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public RowType partitionType() {
         return wrapped.partitionType();
+    }
+
+    @Override
+    public InternalRowPartitionComputer partitionComputer() {
+        return wrapped.partitionComputer();
     }
 
     @Override
@@ -231,5 +238,10 @@ public class PrivilegedFileStore<T> implements FileStore<T> {
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         wrapped.setSnapshotCache(cache);
+    }
+
+    @Override
+    public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
+        return wrapped.newGlobalIndexScanBuilder();
     }
 }

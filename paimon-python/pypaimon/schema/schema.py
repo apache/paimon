@@ -20,7 +20,7 @@ from typing import Dict, List, Optional
 
 import pyarrow as pa
 
-from pypaimon.common.core_options import CoreOptions
+from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.json_util import json_field
 from pypaimon.schema.data_types import DataField, PyarrowFieldParser
 
@@ -55,6 +55,13 @@ class Schema:
         # Convert PyArrow schema to Paimon fields
         fields = PyarrowFieldParser.to_paimon_schema(pa_schema)
 
+        # Primary key fields must be NOT NULL
+        pk_set = set(primary_keys) if primary_keys else set()
+        if pk_set:
+            for field in fields:
+                if field.name in pk_set:
+                    field.type.nullable = False
+
         # Check if Blob type exists in the schema
         has_blob_type = any(
             'blob' in str(field.type).lower()
@@ -67,8 +74,8 @@ class Schema:
                 options = {}
 
             required_options = {
-                CoreOptions.ROW_TRACKING_ENABLED: 'true',
-                CoreOptions.DATA_EVOLUTION_ENABLED: 'true'
+                CoreOptions.ROW_TRACKING_ENABLED.key(): 'true',
+                CoreOptions.DATA_EVOLUTION_ENABLED.key(): 'true'
             }
 
             missing_options = []

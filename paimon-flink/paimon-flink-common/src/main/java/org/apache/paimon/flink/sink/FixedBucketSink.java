@@ -35,14 +35,8 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
-    @Nullable private final LogSinkFunction logSinkFunction;
-
-    public FixedBucketSink(
-            FileStoreTable table,
-            @Nullable Map<String, String> overwritePartition,
-            @Nullable LogSinkFunction logSinkFunction) {
+    public FixedBucketSink(FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
         super(table, overwritePartition);
-        this.logSinkFunction = logSinkFunction;
     }
 
     @Override
@@ -51,9 +45,7 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
         Options options = table.coreOptions().toConfiguration();
         boolean coordinatorEnabled = options.get(SINK_WRITER_COORDINATOR_ENABLED);
         return coordinatorEnabled
-                ? new RowDataStoreWriteOperator.CoordinatedFactory(
-                        table, logSinkFunction, writeProvider, commitUser)
-                : new RowDataStoreWriteOperator.Factory(
-                        table, logSinkFunction, writeProvider, commitUser);
+                ? new RowDataStoreWriteOperator.CoordinatedFactory(table, writeProvider, commitUser)
+                : new RowDataStoreWriteOperator.Factory(table, writeProvider, commitUser);
     }
 }

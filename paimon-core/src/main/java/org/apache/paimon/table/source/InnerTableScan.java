@@ -23,8 +23,11 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -35,6 +38,10 @@ import java.util.Map;
 public interface InnerTableScan extends TableScan {
 
     InnerTableScan withFilter(Predicate predicate);
+
+    default InnerTableScan withVectorSearch(VectorSearch vectorSearch) {
+        return this;
+    }
 
     default InnerTableScan withReadType(@Nullable RowType readType) {
         return this;
@@ -57,6 +64,18 @@ public interface InnerTableScan extends TableScan {
     }
 
     default InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
+        return this;
+    }
+
+    default InnerTableScan withPartitionFilter(Predicate predicate) {
+        return this;
+    }
+
+    default InnerTableScan withRowRanges(List<Range> rowRanges) {
+        return this;
+    }
+
+    default InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
         return this;
     }
 

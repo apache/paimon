@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.data.variant.VariantMetadataUtils;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.partition.PartitionUtils;
@@ -336,6 +337,9 @@ public class FormatReaderMapping {
             switch (readType.getTypeRoot()) {
                 case ROW:
                     RowType r = (RowType) readType;
+                    if (VariantMetadataUtils.isVariantRowType(r)) {
+                        return readType;
+                    }
                     RowType d = (RowType) dataType;
                     ArrayList<DataField> newFields = new ArrayList<>();
                     for (DataField rf : r.getFields()) {

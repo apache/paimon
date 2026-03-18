@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.IndexFilePathFactories;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
@@ -109,6 +110,19 @@ public class IndexFileHandler {
         return result;
     }
 
+    public List<IndexManifestEntry> scan(
+            Snapshot snapshot, Filter<IndexManifestEntry> readTFilter) {
+        if (snapshot == null) {
+            return Collections.emptyList();
+        }
+        String indexManifest = snapshot.indexManifest();
+        if (indexManifest == null) {
+            return Collections.emptyList();
+        }
+
+        return indexManifestFile.read(indexManifest, null, Filter.alwaysTrue(), readTFilter);
+    }
+
     public List<IndexFileMeta> scan(
             Snapshot snapshot, String indexType, BinaryRow partition, int bucket) {
         List<IndexFileMeta> result = new ArrayList<>();
@@ -168,6 +182,10 @@ public class IndexFileHandler {
             }
         }
         return result;
+    }
+
+    public Path indexManifestFilePath(String indexManifest) {
+        return indexManifestFile.indexManifestFilePath(indexManifest);
     }
 
     public Path filePath(IndexManifestEntry entry) {

@@ -52,6 +52,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.rest.responses.AuditRESTResponse.FIELD_CREATED_AT;
@@ -200,6 +201,11 @@ public class AllTablesTable implements ReadonlyTable {
         public int hashCode() {
             return Objects.hash(rows);
         }
+
+        @Override
+        public OptionalLong mergedRowCount() {
+            return OptionalLong.empty();
+        }
     }
 
     private static class AllTablesRead implements InnerTableRead {
@@ -233,10 +239,7 @@ public class AllTablesTable implements ReadonlyTable {
                 iterator =
                         Iterators.transform(
                                 iterator,
-                                row ->
-                                        ProjectedRow.from(
-                                                        readType, AggregationFieldsTable.TABLE_TYPE)
-                                                .replaceRow(row));
+                                row -> ProjectedRow.from(readType, TABLE_TYPE).replaceRow(row));
             }
             //noinspection ReassignedVariable,unchecked
             return new IteratorRecordReader<>((Iterator<InternalRow>) iterator);

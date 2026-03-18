@@ -19,8 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.paimon.shade.org.apache.commons.lang3.StringUtils;
@@ -31,6 +29,7 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.types.variant.Variant;
 import org.apache.flink.types.variant.VariantBuilder;
 import org.junit.jupiter.api.Test;
@@ -40,16 +39,19 @@ import org.junit.jupiter.api.condition.EnabledIf;
 import javax.annotation.Nonnull;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.flink.types.RowUtils.createRowWithNamedPositions;
 import static org.apache.paimon.catalog.Catalog.LAST_UPDATE_TIME_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_FILES_PROP;
 import static org.apache.paimon.catalog.Catalog.NUM_ROWS_PROP;
 import static org.apache.paimon.catalog.Catalog.TOTAL_SIZE_PROP;
+import static org.apache.paimon.table.system.SystemTableLoader.GLOBAL_SYSTEM_TABLES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -71,7 +73,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testSnapshotsTable() throws Exception {
-        sql("CREATE TABLE T (a INT, b INT)");
+        sql(
+                "CREATE TABLE T (a INT, b INT) WITH ('row-tracking.enabled' = 'true', 'data-evolution.enabled' = 'true')");
         sql("INSERT INTO T VALUES (1, 2)");
         sql("INSERT INTO T VALUES (3, 4)");
         sql("INSERT INTO T VALUES (5, 6)");
@@ -134,6 +137,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         Row.of(1L, 0L, "APPEND"),
                         Row.of(2L, 0L, "APPEND"),
                         Row.of(3L, 0L, "APPEND"));
+
+        result = sql("SELECT next_row_id FROM T$snapshots");
+
+        assertThat(result).contains(Row.of(1L), Row.of(2L), Row.of(3L));
     }
 
     @Test
@@ -146,7 +153,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 sql(
                         "SELECT snapshot_id, total_record_count, delta_record_count, changelog_record_count FROM T$snapshots");
         assertThat(result)
-                .containsExactlyInAnyOrder(Row.of(1L, 1L, 1L, 0L), Row.of(2L, 2L, 1L, 0L));
+                .containsExactlyInAnyOrder(Row.of(1L, 1L, 1L, null), Row.of(2L, 2L, 1L, null));
     }
 
     @Test
@@ -204,9 +211,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testSystemDatabase() {
         sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
         assertThat(sql("SHOW TABLES"))
-                .containsExactlyInAnyOrder(
-                        Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS),
-                        Row.of(CatalogOptionsTable.CATALOG_OPTIONS));
+                .containsAll(
+                        GLOBAL_SYSTEM_TABLES.stream().map(Row::of).collect(Collectors.toList()));
     }
 
     @Test
@@ -244,6 +250,17 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         List<Row> result = sql("SELECT num_added_files, num_deleted_files FROM T$manifests");
         assertThat(result).containsExactlyInAnyOrder(Row.of(1L, 0L), Row.of(1L, 0L));
+    }
+
+    @Test
+    public void testManifestsTableWihRowId() {
+        sql(
+                "CREATE TABLE T (a INT, b INT) WITH ('data-evolution.enabled'='true', 'row-tracking.enabled'='true')");
+        sql("INSERT INTO T VALUES (1, 2), (3, 4)");
+        sql("INSERT INTO T VALUES (5, 6), (7, 8)");
+
+        List<Row> result = sql("SELECT min_row_id, max_row_id FROM T$manifests");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(0L, 1L), Row.of(2L, 3L));
     }
 
     @Test
@@ -610,6 +627,35 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         Row.of("dt=2020-01-02/hh=11"), Row.of("dt=2020-01-03/hh=11"));
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
+        assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
+
+        sql(
+                "CREATE TABLE PartitionTableWithDVEnabled (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh) WITH ('deletion-vectors.enabled'='true', 'write-only'='true')");
+        sql("INSERT INTO PartitionTableWithDVEnabled select 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO PartitionTableWithDVEnabled select 2,2,'b','2020-01-02','11'");
+        sql("INSERT INTO PartitionTableWithDVEnabled select 3,3,'c','2020-01-03','11'");
+        result = sql("SHOW PARTITIONS PartitionTableWithDVEnabled");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-01/hh=10"),
+                        Row.of("dt=2020-01-02/hh=11"),
+                        Row.of("dt=2020-01-03/hh=11"));
+
+        result = sql("SHOW PARTITIONS PartitionTableWithDVEnabled partition (hh='11')");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of("dt=2020-01-02/hh=11"), Row.of("dt=2020-01-03/hh=11"));
+
+        result =
+                sql(
+                        "SHOW PARTITIONS PartitionTableWithDVEnabled partition (dt='2020-01-02', hh='11')");
         assertThat(result).containsExactlyInAnyOrder(Row.of("dt=2020-01-02/hh=11"));
     }
 
@@ -1020,7 +1066,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", table);
         List<Row> result =
                 sql("SELECT `partition`, record_count, file_count FROM %s$partitions", table);
-        assertThat(result).containsExactlyInAnyOrder(Row.of("{1}", 2L, 2L), Row.of("{2}", 3L, 2L));
+        assertThat(result).containsExactlyInAnyOrder(Row.of("p=1", 2L, 2L), Row.of("p=2", 3L, 2L));
 
         // assert new files in partition
         sql("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", table);
@@ -1032,10 +1078,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 table));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("{1}", 3L, 3L),
-                        Row.of("{2}", 4L, 3L),
-                        Row.of("{3}", 1L, 1L),
-                        Row.of("{4}", 1L, 1L));
+                        Row.of("p=1", 3L, 3L),
+                        Row.of("p=2", 4L, 3L),
+                        Row.of("p=3", 1L, 1L),
+                        Row.of("p=4", 1L, 1L));
 
         // assert delete partitions
         sql("ALTER TABLE %s DROP PARTITION (p = 2)", table);
@@ -1046,7 +1092,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 table));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("{1}", 3L, 3L), Row.of("{3}", 1L, 1L), Row.of("{4}", 1L, 1L));
+                        Row.of("p=1", 3L, 3L), Row.of("p=3", 1L, 1L), Row.of("p=4", 1L, 1L));
 
         // add new file to p 2
         sql("INSERT INTO %s VALUES (1, 2, 2, 'S1')", table);
@@ -1057,10 +1103,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 table));
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        Row.of("{1}", 3L, 3L),
-                        Row.of("{2}", 1L, 1L),
-                        Row.of("{3}", 1L, 1L),
-                        Row.of("{4}", 1L, 1L));
+                        Row.of("p=1", 3L, 3L),
+                        Row.of("p=2", 1L, 1L),
+                        Row.of("p=3", 1L, 1L),
+                        Row.of("p=4", 1L, 1L));
     }
 
     @Test
@@ -1258,6 +1304,41 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         Row.of(builder.object().add("a", builder.of((byte) 1)).build()),
                         Row.of(builder.object().add("a", builder.of((byte) 2)).build()),
                         Row.of(builder.of("hello")));
+    }
+
+    @Test
+    @EnabledIf("isFlink2_1OrAbove")
+    void testReadWriteShreddingVariant() {
+        sql(
+                "CREATE TABLE t (v VARIANT) WITH ("
+                        + "'parquet.variant.shreddingSchema' =\n"
+                        + "'{\"type\":\"ROW\",\"fields\":["
+                        + "   {\"name\":\"v\",\"type\":"
+                        + "       {\"type\":\"ROW\",\"fields\":["
+                        + "           {\"name\":\"age\",\"type\":\"INT\"},"
+                        + "           {\"name\":\"city\",\"type\":\"STRING\"}]"
+                        + "       }"
+                        + "   }]"
+                        + "}'"
+                        + ")");
+
+        sql(
+                "INSERT INTO t SELECT PARSE_JSON(s) FROM (VALUES ('{\"age\":27,\"city\":\"Beijing\"}')) AS T(s)");
+
+        List<Row> rows = sql("SELECT * FROM t");
+
+        VariantBuilder builder = Variant.newBuilder();
+        Variant expectedVariant =
+                builder.object()
+                        .add("age", builder.of((byte) 27))
+                        .add("city", builder.of("Beijing"))
+                        .build();
+        LinkedHashMap<String, Integer> positionByNames = new LinkedHashMap<>();
+        positionByNames.put("v", 0);
+        Row expectedRow =
+                createRowWithNamedPositions(
+                        RowKind.INSERT, new Object[] {expectedVariant}, positionByNames);
+        assertThat(rows).containsExactlyInAnyOrder(expectedRow);
     }
 
     private void innerTestReadOptimizedTableAndCheckData(String insertTableName) {

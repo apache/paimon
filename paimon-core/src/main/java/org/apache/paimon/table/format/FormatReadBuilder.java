@@ -30,6 +30,8 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
+import org.apache.paimon.predicate.VectorSearch;
+import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -37,8 +39,11 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
@@ -47,13 +52,14 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.partition.PartitionPredicate.createPartitionPredicate;
 import static org.apache.paimon.partition.PartitionPredicate.fromPredicate;
+import static org.apache.paimon.partition.PartitionPredicate.splitPartitionPredicatesAndDataPredicates;
 import static org.apache.paimon.predicate.PredicateBuilder.excludePredicateWithFields;
-import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAndByPartition;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link ReadBuilder} for {@link FormatTable}. */
 public class FormatReadBuilder implements ReadBuilder {
@@ -137,13 +143,12 @@ public class FormatReadBuilder implements ReadBuilder {
     public TableScan newScan() {
         PartitionPredicate partitionFilter = this.partitionFilter;
         if (partitionFilter == null && this.filter != null && !table.partitionKeys().isEmpty()) {
-            int[] partitionIdx = fieldIdxToPartitionIdx(table.rowType(), table.partitionKeys());
-            List<Predicate> partitionFilters = splitAndByPartition(filter, partitionIdx).getLeft();
-            if (!partitionFilters.isEmpty()) {
-                RowType partitionType = table.rowType().project(table.partitionKeys());
-                partitionFilter =
-                        PartitionPredicate.fromPredicate(
-                                partitionType, PredicateBuilder.and(partitionFilters));
+            Optional<PartitionPredicate> partitionPredicateOpt =
+                    splitPartitionPredicatesAndDataPredicates(
+                                    filter, table.rowType(), table.partitionKeys())
+                            .getLeft();
+            if (partitionPredicateOpt.isPresent()) {
+                partitionFilter = partitionPredicateOpt.get();
             }
         }
         return new FormatTableScan(table, partitionFilter, limit);
@@ -157,7 +162,7 @@ public class FormatReadBuilder implements ReadBuilder {
     protected RecordReader<InternalRow> createReader(FormatDataSplit dataSplit) throws IOException {
         Path filePath = dataSplit.dataPath();
         FormatReaderContext formatReaderContext =
-                new FormatReaderContext(table.fileIO(), filePath, dataSplit.length(), null);
+                new FormatReaderContext(table.fileIO(), filePath, dataSplit.fileSize(), null);
         // Skip pushing down partition filters to reader.
         List<Predicate> readFilters =
                 excludePredicateWithFields(
@@ -172,18 +177,34 @@ public class FormatReadBuilder implements ReadBuilder {
         Pair<int[], RowType> partitionMapping =
                 PartitionUtils.getPartitionMapping(
                         table.partitionKeys(), readType().getFields(), table.partitionType());
-
-        return new DataFileRecordReader(
-                readType(),
-                readerFactory,
-                formatReaderContext,
-                null,
-                null,
-                PartitionUtils.create(partitionMapping, dataSplit.partition()),
-                false,
-                null,
-                0,
-                Collections.emptyMap());
+        try {
+            FileRecordReader<InternalRow> reader;
+            Long length = dataSplit.length();
+            if (length != null) {
+                reader =
+                        readerFactory.createReader(formatReaderContext, dataSplit.offset(), length);
+            } else {
+                checkArgument(dataSplit.offset() == 0, "Offset must be 0.");
+                reader = readerFactory.createReader(formatReaderContext);
+            }
+            return new DataFileRecordReader(
+                    readType(),
+                    reader,
+                    options.scanIgnoreCorruptFile(),
+                    options.scanIgnoreLostFile(),
+                    null,
+                    null,
+                    PartitionUtils.create(partitionMapping, dataSplit.partition()),
+                    false,
+                    null,
+                    0,
+                    Collections.emptyMap(),
+                    null,
+                    formatReaderContext.filePath());
+        } catch (Exception e) {
+            FileUtils.checkExists(formatReaderContext.fileIO(), formatReaderContext.filePath());
+            throw e;
+        }
     }
 
     private static RowType getRowTypeWithoutPartition(RowType rowType, List<String> partitionKeys) {
@@ -218,6 +239,21 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withShard(int indexOfThisSubtask, int numberOfParallelSubtasks) {
         throw new UnsupportedOperationException("Format Table does not support withShard.");
+    }
+
+    @Override
+    public ReadBuilder withRowRanges(List<Range> rowRanges) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
+    }
+
+    @Override
+    public ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRangeIndex.");
+    }
+
+    @Override
+    public ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
+        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
     }
 
     @Override

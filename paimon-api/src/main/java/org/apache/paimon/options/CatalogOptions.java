@@ -136,6 +136,13 @@ public class CatalogOptions {
                     .withDescription(
                             "Controls the max number for snapshots per table in the catalog are cached.");
 
+    public static final ConfigOption<Integer> CACHE_DV_MAX_NUM =
+            key("cache.deletion-vectors.max-num")
+                    .intType()
+                    .defaultValue(100_000)
+                    .withDescription(
+                            "Controls the maximum number of deletion vector meta that can be cached.");
+
     public static final ConfigOption<Boolean> CASE_SENSITIVE =
             ConfigOptions.key("case-sensitive")
                     .booleanType()
@@ -146,10 +153,11 @@ public class CatalogOptions {
     public static final ConfigOption<Boolean> SYNC_ALL_PROPERTIES =
             ConfigOptions.key("sync-all-properties")
                     .booleanType()
-                    // We should set default value to true in case of hive metastore losing table
+                    // We should set default value to true in case of metastore losing table
                     // properties.
                     .defaultValue(true)
-                    .withDescription("Sync all table properties to hive metastore");
+                    .withDescription(
+                            "Sync all table properties to the catalog metastore (e.g. Hive metastore, JDBC catalog store)");
 
     public static final ConfigOption<Boolean> FORMAT_TABLE_ENABLED =
             ConfigOptions.key("format-table.enabled")

@@ -21,9 +21,11 @@ package org.apache.paimon.arrow.writer;
 import org.apache.paimon.arrow.ArrowUtils;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataGetters;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.ArrayColumnVector;
 import org.apache.paimon.data.columnar.BooleanColumnVector;
@@ -39,8 +41,16 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.data.columnar.VecColumnVector;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
+import org.apache.paimon.data.variant.GenericVariant;
+import org.apache.paimon.data.variant.PaimonShreddingUtils;
+import org.apache.paimon.data.variant.Variant;
+import org.apache.paimon.data.variant.VariantSchema;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IntArrayList;
 
 import org.apache.arrow.vector.BigIntVector;
@@ -57,6 +67,7 @@ import org.apache.arrow.vector.TimeStampVector;
 import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.complex.FixedSizeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
@@ -65,9 +76,17 @@ import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
 import java.time.ZoneId;
+import java.util.Arrays;
+import java.util.List;
 
 /** Registry of {@link ArrowFieldWriter}s. */
 public class ArrowFieldWriters {
+
+    private static final RowType DEFAULT_VARIANT_ROW_TYPE =
+            new RowType(
+                    Arrays.asList(
+                            new DataField(0, Variant.VALUE, DataTypes.BYTES().notNull()),
+                            new DataField(1, Variant.METADATA, DataTypes.BYTES().notNull())));
 
     /** Writer for CHAR & VARCHAR. */
     public static class StringWriter extends ArrowFieldWriter {
@@ -511,6 +530,107 @@ public class ArrowFieldWriters {
         }
     }
 
+    /** Writer for VARIANT. */
+    public static class VariantWriter extends ArrowFieldWriter {
+
+        @Nullable private final VariantSchema variantSchema;
+        @Nullable private final GenericRow reusableRow;
+        private final ArrowFieldWriter[] fieldWriters;
+        private final StructVector structVector;
+        private final int fieldCount;
+
+        public VariantWriter(
+                FieldVector fieldVector, boolean isNullable, @Nullable RowType shreddingSchema) {
+            super(fieldVector, isNullable);
+            this.structVector = (StructVector) fieldVector;
+
+            RowType outputRowType;
+            if (shreddingSchema != null) {
+                this.variantSchema = PaimonShreddingUtils.buildVariantSchema(shreddingSchema);
+                this.reusableRow = null;
+                outputRowType = shreddingSchema;
+            } else {
+                this.variantSchema = null;
+                this.reusableRow = new GenericRow(DEFAULT_VARIANT_ROW_TYPE.getFieldCount());
+                outputRowType = DEFAULT_VARIANT_ROW_TYPE;
+            }
+
+            this.fieldCount = outputRowType.getFieldCount();
+            this.fieldWriters = new ArrowFieldWriter[fieldCount];
+            List<FieldVector> children = structVector.getChildrenFromFields();
+            for (int i = 0; i < fieldCount; i++) {
+                fieldWriters[i] =
+                        outputRowType
+                                .getTypeAt(i)
+                                .accept(ArrowFieldWriterFactoryVisitor.INSTANCE)
+                                .create(children.get(i), outputRowType.getTypeAt(i).isNullable());
+            }
+        }
+
+        @Override
+        public void reset() {
+            super.reset();
+            for (ArrowFieldWriter fieldWriter : fieldWriters) {
+                fieldWriter.reset();
+            }
+        }
+
+        @Override
+        protected void doWrite(
+                ColumnVector columnVector,
+                @Nullable int[] pickedInColumn,
+                int startIndex,
+                int batchRows) {
+            RowColumnVector rowColumnVector = (RowColumnVector) columnVector;
+            for (int i = 0; i < batchRows; i++) {
+                int row = getRowNumber(startIndex, i, pickedInColumn);
+                if (columnVector.isNullAt(row)) {
+                    structVector.setNull(i);
+                    continue;
+                }
+
+                InternalRow rowData = rowColumnVector.getRow(row);
+                if (variantSchema != null && rowData.getFieldCount() != fieldCount) {
+                    GenericVariant variant =
+                            new GenericVariant(rowData.getBinary(0), rowData.getBinary(1));
+                    InternalRow shreddedRow =
+                            PaimonShreddingUtils.castShredded(variant, variantSchema);
+                    writeRow(i, shreddedRow);
+                } else {
+                    writeRow(i, rowData);
+                }
+            }
+        }
+
+        @Override
+        protected void doWrite(int rowIndex, DataGetters getters, int pos) {
+            Variant variant = getters.getVariant(pos);
+            if (variantSchema != null) {
+                GenericVariant genericVariant =
+                        variant instanceof GenericVariant
+                                ? (GenericVariant) variant
+                                : new GenericVariant(variant.value(), variant.metadata());
+                InternalRow shreddedRow =
+                        PaimonShreddingUtils.castShredded(genericVariant, variantSchema);
+                writeRow(rowIndex, shreddedRow);
+            } else {
+                if (reusableRow == null) {
+                    throw new IllegalStateException("Reusable row is not initialized.");
+                }
+                reusableRow.setField(0, variant.value());
+                reusableRow.setField(1, variant.metadata());
+                writeRow(rowIndex, reusableRow);
+            }
+        }
+
+        private void writeRow(int rowIndex, InternalRow rowData) {
+            for (int i = 0; i < fieldCount; i++) {
+                fieldWriters[i].write(rowIndex, rowData, i);
+            }
+            structVector.setIndexDefined(rowIndex);
+        }
+    }
+
     /** Writer for ARRAY. */
     public static class ArrayWriter extends ArrowFieldWriter {
 
@@ -526,7 +646,8 @@ public class ArrowFieldWriters {
 
         @Override
         public void reset() {
-            fieldVector.reset();
+            super.reset();
+            elementWriter.reset();
             offset = 0;
         }
 
@@ -593,6 +714,93 @@ public class ArrowFieldWriters {
         }
     }
 
+    /** Writer for VECTOR. */
+    public static class VectorWriter extends ArrowFieldWriter {
+
+        private final ArrowFieldWriter elementWriter;
+
+        private final int length;
+
+        public VectorWriter(
+                FieldVector fieldVector,
+                int length,
+                ArrowFieldWriter elementWriter,
+                boolean isNullable) {
+            super(fieldVector, isNullable);
+            this.length = length;
+            this.elementWriter = elementWriter;
+        }
+
+        @Override
+        public void reset() {
+            super.reset();
+            elementWriter.reset();
+        }
+
+        @Override
+        protected void doWrite(
+                ColumnVector columnVector,
+                @Nullable int[] pickedInColumn,
+                int startIndex,
+                int batchRows) {
+            VecColumnVector vecColumnVector = (VecColumnVector) columnVector;
+
+            if (pickedInColumn == null) {
+                elementWriter.write(
+                        vecColumnVector.getColumnVector(),
+                        null,
+                        startIndex * length,
+                        batchRows * length);
+            } else {
+                int[] childPickedInColumn = new int[batchRows * length];
+                for (int i = 0; i < batchRows; ++i) {
+                    int pickedIndexInChild = pickedInColumn[startIndex + i] * length;
+                    for (int j = 0; j < length; ++j) {
+                        childPickedInColumn[i * length + j] = pickedIndexInChild + j;
+                    }
+                }
+                elementWriter.write(
+                        vecColumnVector.getColumnVector(),
+                        childPickedInColumn,
+                        0,
+                        batchRows * length);
+            }
+
+            // set FixedSizeListVector
+            FixedSizeListVector listVector = (FixedSizeListVector) fieldVector;
+            for (int i = 0; i < batchRows; i++) {
+                int row = getRowNumber(startIndex, i, pickedInColumn);
+                if (vecColumnVector.isNullAt(row)) {
+                    listVector.setNull(i);
+                } else {
+                    listVector.startNewValue(i);
+                }
+            }
+        }
+
+        @Override
+        protected void doWrite(int rowIndex, DataGetters getters, int pos) {
+            InternalVector vector = getters.getVector(pos);
+            if (vector.size() != length) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "The size of vector %s is not equal to the length %s",
+                                vector.size(), length));
+            }
+            FixedSizeListVector listVector = (FixedSizeListVector) fieldVector;
+            listVector.setNotNull(rowIndex);
+            final int rowBase = rowIndex * length;
+            for (int vectorIndex = 0; vectorIndex < length; ++vectorIndex) {
+                elementWriter.write(rowBase + vectorIndex, vector, vectorIndex);
+            }
+            // Ensure child value count is large enough.
+            listVector
+                    .getDataVector()
+                    .setValueCount(
+                            Math.max(listVector.getDataVector().getValueCount(), rowBase + length));
+        }
+    }
+
     /** Writer for MAP. */
     public static class MapWriter extends ArrowFieldWriter {
 
@@ -613,7 +821,9 @@ public class ArrowFieldWriters {
 
         @Override
         public void reset() {
-            fieldVector.reset();
+            super.reset();
+            keyWriter.reset();
+            valueWriter.reset();
             offset = 0;
         }
 
@@ -767,6 +977,14 @@ public class ArrowFieldWriters {
                 FieldVector fieldVector, ArrowFieldWriter[] fieldWriters, boolean isNullable) {
             super(fieldVector, isNullable);
             this.fieldWriters = fieldWriters;
+        }
+
+        @Override
+        public void reset() {
+            super.reset();
+            for (ArrowFieldWriter fieldWriter : fieldWriters) {
+                fieldWriter.reset();
+            }
         }
 
         @Override

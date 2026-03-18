@@ -112,7 +112,10 @@ public class TestChangelogDataReadWrite {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         null,
                         null,
-                        false);
+                        CoreOptions.ExternalPathStrategy.NONE,
+                        null,
+                        false,
+                        null);
         this.snapshotManager = newSnapshotManager(LocalFileIO.create(), new Path(root));
         this.commitUser = UUID.randomUUID().toString();
     }
@@ -139,6 +142,7 @@ public class TestChangelogDataReadWrite {
                                 pathFactory,
                                 EXTRACTOR,
                                 options));
+
         RawFileSplitRead rawFileRead =
                 new RawFileSplitRead(
                         LocalFileIO.create(),
@@ -147,15 +151,14 @@ public class TestChangelogDataReadWrite {
                         VALUE_TYPE,
                         FileFormatDiscover.of(options),
                         pathFactory,
-                        options.fileIndexReadEnabled(),
-                        false);
+                        options);
         return new KeyValueTableRead(() -> read, () -> rawFileRead, null);
     }
 
-    public List<DataFileMeta> writeFiles(
-            BinaryRow partition, int bucket, List<Tuple2<Long, Long>> kvs) throws Exception {
+    public <T> List<DataFileMeta> writeFiles(
+            BinaryRow partition, int bucket, List<Tuple2<Long, T>> kvs) throws Exception {
         RecordWriter<KeyValue> writer = createMergeTreeWriter(partition, bucket);
-        for (Tuple2<Long, Long> tuple2 : kvs) {
+        for (Tuple2<Long, T> tuple2 : kvs) {
             writer.write(
                     new KeyValue()
                             .replace(

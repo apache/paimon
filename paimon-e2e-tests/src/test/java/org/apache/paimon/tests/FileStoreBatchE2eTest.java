@@ -79,9 +79,7 @@ public class FileStoreBatchE2eTest extends E2eTestBase {
 
         String useCatalogCmd = "USE CATALOG ts_catalog;";
 
-        String flinkVersion = System.getProperty("test.flink.main.version");
-        boolean useCoordinator =
-                flinkVersion.compareTo("1.15") > 0 && ThreadLocalRandom.current().nextBoolean();
+        boolean useCoordinator = ThreadLocalRandom.current().nextBoolean();
         // no infer parallelism, e2e will fail due to less resources
         String paimonDdl =
                 String.format(

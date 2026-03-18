@@ -480,6 +480,18 @@ public class SparkWriteITCase {
     }
 
     @Test
+    public void testTruncatePartitionValueNull() {
+        spark.sql("CREATE TABLE TRUNC_T (pt STRING, data STRING) PARTITIONED BY (pt) ");
+
+        spark.sql("INSERT INTO TRUNC_T VALUES('1', 'a'), (null, 'b')");
+
+        spark.sql("TRUNCATE TABLE TRUNC_T PARTITION (pt = null)");
+
+        List<Row> rows = spark.sql("SELECT * FROM TRUNC_T ORDER BY pt").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,a]]");
+    }
+
+    @Test
     public void testWriteDynamicBucketPartitionedTable() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"

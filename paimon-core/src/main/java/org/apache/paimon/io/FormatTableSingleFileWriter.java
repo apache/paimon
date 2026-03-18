@@ -114,7 +114,7 @@ public class FormatTableSingleFileWriter {
         }
         if (committer != null) {
             try {
-                committer.discard();
+                committer.discard(this.fileIO);
             } catch (Throwable e) {
                 LOG.warn("Exception occurs when close out {}", committer, e);
             }

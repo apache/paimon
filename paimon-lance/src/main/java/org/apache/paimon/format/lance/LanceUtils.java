@@ -22,9 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.fs.hadoop.HadoopFileIO;
-import org.apache.paimon.jindo.JindoFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.oss.OSSFileIO;
 import org.apache.paimon.rest.RESTTokenFileIO;
 import org.apache.paimon.utils.Pair;
 
@@ -40,6 +38,24 @@ public class LanceUtils {
     private static final Class<?> pluginFileIOKlass;
     private static final Class<?> jindoFileIOKlass;
     private static final Class<?> hadoopFileIOKlass;
+
+    // OSS configuration keys
+    public static final String FS_OSS_ENDPOINT = "fs.oss.endpoint";
+    public static final String FS_OSS_ACCESS_KEY_ID = "fs.oss.accessKeyId";
+    public static final String FS_OSS_ACCESS_KEY_SECRET = "fs.oss.accessKeySecret";
+    public static final String FS_OSS_SECURITY_TOKEN = "fs.oss.securityToken";
+    private static final String FS_PREFIX = "fs.";
+
+    // Storage options keys for Lance
+    public static final String STORAGE_OPTION_ENDPOINT = "endpoint";
+    public static final String STORAGE_OPTION_ACCESS_KEY_ID = "access_key_id";
+    public static final String STORAGE_OPTION_SECRET_ACCESS_KEY = "secret_access_key";
+    public static final String STORAGE_OPTION_SESSION_TOKEN = "session_token";
+    public static final String STORAGE_OPTION_VIRTUAL_HOSTED_STYLE = "virtual_hosted_style_request";
+    public static final String STORAGE_OPTION_OSS_ACCESS_KEY_ID = "oss_access_key_id";
+    public static final String STORAGE_OPTION_OSS_SECRET_ACCESS_KEY = "oss_secret_access_key";
+    public static final String STORAGE_OPTION_OSS_SESSION_TOKEN = "oss_session_token";
+    public static final String STORAGE_OPTION_OSS_ENDPOINT = "oss_endpoint";
 
     static {
         Class<?> klass;
@@ -72,7 +88,18 @@ public class LanceUtils {
         hadoopFileIOKlass = klass;
     }
 
-    public static Pair<Path, Map<String, String>> toLanceSpecified(FileIO fileIO, Path path) {
+    public static Pair<Path, Map<String, String>> toLanceSpecifiedForReader(
+            FileIO fileIO, Path path) {
+        return toLanceSpecified(fileIO, path, true);
+    }
+
+    public static Pair<Path, Map<String, String>> toLanceSpecifiedForWriter(
+            FileIO fileIO, Path path) {
+        return toLanceSpecified(fileIO, path, false);
+    }
+
+    private static Pair<Path, Map<String, String>> toLanceSpecified(
+            FileIO fileIO, Path path, boolean isRead) {
 
         URI uri = path.toUri();
         String schema = uri.getScheme();
@@ -87,33 +114,70 @@ public class LanceUtils {
 
         Options originOptions;
         if (ossFileIOKlass != null && ossFileIOKlass.isInstance(fileIO)) {
-            originOptions = ((OSSFileIO) fileIO).hadoopOptions();
+            try {
+                originOptions = (Options) ossFileIOKlass.getMethod("hadoopOptions").invoke(fileIO);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to invoke hadoopOptions on OSSFileIO", e);
+            }
         } else if (jindoFileIOKlass != null && jindoFileIOKlass.isInstance(fileIO)) {
-            originOptions = ((JindoFileIO) fileIO).hadoopOptions();
+            try {
+                originOptions =
+                        (Options)
+                                jindoFileIOKlass
+                                        .getMethod("hadoopOptions", Path.class, String.class)
+                                        .invoke(fileIO, path, isRead ? "read" : "write");
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to invoke hadoopOptions on JindoFileIO", e);
+            }
         } else if (pluginFileIOKlass != null && pluginFileIOKlass.isInstance(fileIO)) {
             originOptions = ((PluginFileIO) fileIO).options();
         } else if (hadoopFileIOKlass != null && hadoopFileIOKlass.isInstance(fileIO)) {
-            originOptions = new Options(((HadoopFileIO) fileIO).hadoopConf());
+            originOptions = ((HadoopFileIO) fileIO).hadoopOptions();
         } else {
             originOptions = new Options();
         }
 
         Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
-        if ("oss".equals(schema)) {
-            assert originOptions.containsKey("fs.oss.endpoint");
-            assert originOptions.containsKey("fs.oss.accessKeyId");
-            assert originOptions.containsKey("fs.oss.accessKeySecret");
-            storageOptions.put(
-                    "endpoint",
-                    "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));
-            storageOptions.put("access_key_id", originOptions.get("fs.oss.accessKeyId"));
-            storageOptions.put("secret_access_key", originOptions.get("fs.oss.accessKeySecret"));
-            storageOptions.put("virtual_hosted_style_request", "true");
-            if (originOptions.containsKey("fs.oss.securityToken")) {
-                storageOptions.put("session_token", originOptions.get("fs.oss.securityToken"));
+
+        if ("traceable".equals(schema)) {
+            String uriString = uri.toString();
+            if (uriString.startsWith("traceable:/")) {
+                converted = new Path(uriString.replace("traceable:/", "file:/"));
             }
-            converted = new Path(uri.toString().replace("oss://", "s3://"));
+        } else if ("oss".equals(schema)) {
+            assert originOptions.containsKey(FS_OSS_ENDPOINT);
+            assert originOptions.containsKey(FS_OSS_ACCESS_KEY_ID);
+            assert originOptions.containsKey(FS_OSS_ACCESS_KEY_SECRET);
+
+            for (String key : originOptions.keySet()) {
+                if (key.startsWith(FS_PREFIX)) {
+                    storageOptions.put(key, originOptions.get(key));
+                }
+            }
+
+            storageOptions.put(
+                    STORAGE_OPTION_ENDPOINT,
+                    "https://" + uri.getHost() + "." + originOptions.get(FS_OSS_ENDPOINT));
+            storageOptions.put(
+                    STORAGE_OPTION_ACCESS_KEY_ID, originOptions.get(FS_OSS_ACCESS_KEY_ID));
+            storageOptions.put(
+                    STORAGE_OPTION_OSS_ACCESS_KEY_ID, originOptions.get(FS_OSS_ACCESS_KEY_ID));
+            storageOptions.put(
+                    STORAGE_OPTION_SECRET_ACCESS_KEY, originOptions.get(FS_OSS_ACCESS_KEY_SECRET));
+            storageOptions.put(
+                    STORAGE_OPTION_OSS_SECRET_ACCESS_KEY,
+                    originOptions.get(FS_OSS_ACCESS_KEY_SECRET));
+            storageOptions.put(STORAGE_OPTION_VIRTUAL_HOSTED_STYLE, "true");
+            if (originOptions.containsKey(FS_OSS_SECURITY_TOKEN)) {
+                storageOptions.put(
+                        STORAGE_OPTION_SESSION_TOKEN, originOptions.get(FS_OSS_SECURITY_TOKEN));
+                storageOptions.put(
+                        STORAGE_OPTION_OSS_SESSION_TOKEN, originOptions.get(FS_OSS_SECURITY_TOKEN));
+            }
+            if (originOptions.containsKey(FS_OSS_ENDPOINT)) {
+                storageOptions.put(STORAGE_OPTION_OSS_ENDPOINT, originOptions.get(FS_OSS_ENDPOINT));
+            }
         }
 
         return Pair.of(converted, storageOptions);

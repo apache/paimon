@@ -19,6 +19,7 @@
 package org.apache.paimon.data.columnar.heap;
 
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 
 import java.util.Arrays;
 
@@ -61,6 +62,21 @@ public class AbstractArrayBasedVector extends AbstractStructVector {
             offsets = Arrays.copyOf(offsets, newCapacity);
             lengths = Arrays.copyOf(lengths, newCapacity);
         }
+    }
+
+    public void appendArray(int length) {
+        reserve(elementsAppended + 1);
+        for (ColumnVector child : children) {
+            if (child instanceof WritableColumnVector) {
+                WritableColumnVector writableColumnVector = (WritableColumnVector) child;
+                writableColumnVector.reserve(writableColumnVector.getElementsAppended() + length);
+            }
+        }
+        if (children[0] instanceof WritableColumnVector) {
+            WritableColumnVector arrayData = (WritableColumnVector) children[0];
+            putOffsetLength(elementsAppended, arrayData.getElementsAppended(), length);
+        }
+        elementsAppended++;
     }
 
     @Override

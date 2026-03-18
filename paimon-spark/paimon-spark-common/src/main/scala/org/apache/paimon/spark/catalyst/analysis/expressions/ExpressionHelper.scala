@@ -26,7 +26,6 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.{Column, SparkSession}
 import org.apache.spark.sql.PaimonUtils.{normalizeExprs, translateFilterV2}
-import org.apache.spark.sql.catalyst.QueryPlanningTracker
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.optimizer.ConstantFolding
@@ -208,17 +207,6 @@ trait ExpressionHelperBase extends PredicateHelper {
         throw new RuntimeException(
           s"Could not resolve expression $conditionSql in relation: $relation")
     }
-  }
-
-  def splitPruePartitionAndOtherPredicates(
-      condition: Expression,
-      partitionColumns: Seq[String],
-      resolver: Resolver): (Seq[Expression], Seq[Expression]) = {
-    splitConjunctivePredicates(condition)
-      .partition {
-        isPredicatePartitionColumnsOnly(_, partitionColumns, resolver) && !SubqueryExpression
-          .hasSubquery(condition)
-      }
   }
 
   def isPredicatePartitionColumnsOnly(

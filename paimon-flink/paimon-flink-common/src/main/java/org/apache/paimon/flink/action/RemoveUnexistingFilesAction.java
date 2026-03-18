@@ -31,7 +31,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
@@ -180,9 +179,7 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
                                         new ArrayList<>(entry.getValue().values()),
                                         Collections.emptyList()),
                                 CompactIncrement.emptyIncrement());
-                output.collect(
-                        new StreamRecord<>(
-                                new Committable(Long.MAX_VALUE, Committable.Kind.FILE, message)));
+                output.collect(new StreamRecord<>(new Committable(Long.MAX_VALUE, message)));
                 for (String path : entry.getValue().keySet()) {
                     output.collect(RESULT_SIDE_OUTPUT, new StreamRecord<>(path));
                 }
@@ -213,16 +210,13 @@ public class RemoveUnexistingFilesAction extends TableActionBase {
         }
 
         @Override
-        public void processElement(StreamRecord<Committable> record) throws Exception {
+        public void processElement(StreamRecord<Committable> record) {
             Committable committable = record.getValue();
-            Preconditions.checkArgument(
-                    committable.kind() == Committable.Kind.FILE,
-                    "Committable has kind " + committable.kind() + ". This is unexpected!");
-            commitMessages.add((CommitMessage) committable.wrappedCommittable());
+            commitMessages.add(committable.commitMessage());
         }
 
         @Override
-        public void endInput() throws Exception {
+        public void endInput() {
             try {
                 commit.commit(Long.MAX_VALUE, commitMessages);
             } catch (Exception e) {

@@ -23,11 +23,13 @@ import org.apache.paimon.spark.{PaimonAppendTable, PaimonPrimaryKeyTable, Paimon
 
 import org.apache.spark.sql.Row
 
+import java.util.UUID
 import java.util.concurrent.Executors
 
 import scala.concurrent.{Await, Future}
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.DurationInt
+import scala.util.Random
 
 abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTableTest {
 
@@ -528,7 +530,7 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
       createTable("target", "a INT, b INT, c STRING", Seq("a"))
       spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2')")
 
-      val error = intercept[RuntimeException] {
+      val error = intercept[Exception] {
         spark.sql(s"""
                      |MERGE INTO target
                      |USING source
@@ -539,7 +541,11 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
                      |THEN INSERT (a, b, c) values (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error.contains("match more than one source rows"))
+      // V1 path: "match more than one source rows"
+      // V2 path: "MERGE_CARDINALITY_VIOLATION"
+      assert(
+        error.contains("match more than one source rows") ||
+          error.contains("MERGE_CARDINALITY_VIOLATION"))
     }
   }
 
@@ -661,6 +667,29 @@ abstract class MergeIntoTableTestBase extends PaimonSparkTestBase with PaimonTab
     }
   }
 
+  test(s"Paimon MergeInto: on clause has filter expression") {
+    withTable("source", "target") {
+      createTable("target", "a INT, b INT, c STRING", Seq("a"))
+      createTable("source", "a INT, b INT, c STRING", Seq("a"))
+
+      sql("INSERT INTO source VALUES (1, 100, 'c11'), (3, 300, 'c11'), (5, 500, 'c55')")
+      sql("INSERT INTO target VALUES (1, 100, 'cc'), (2, 20, 'cc')")
+
+      sql("""
+            |MERGE INTO target tgt
+            |USING (
+            |  SELECT a, b
+            |  FROM source
+            |  WHERE c = 'c11'
+            |) AS src
+            |ON tgt.a = src.a AND tgt.b = src.b AND tgt.c = 'cc'
+            |WHEN MATCHED THEN DELETE
+            |""".stripMargin)
+
+      checkAnswer(sql("SELECT * FROM target ORDER BY a, b"), Row(2, 20, "cc") :: Nil)
+    }
+  }
+
   test(s"Paimon MergeInto: merge into with varchar") {
     withTable("source", "target") {
       createTable("source", "a INT, b VARCHAR(32)", Seq("a"))
@@ -763,42 +792,47 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
 
   test("Paimon MergeInto: concurrent merge and compact") {
     for (dvEnabled <- Seq("true", "false")) {
-      withTable("s", "t") {
-        sql("CREATE TABLE s (id INT, b INT, c INT)")
-        sql("INSERT INTO s VALUES (1, 1, 1)")
+      val className = getClass.getSimpleName
+      val source = s"mc_s_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      val target = s"mc_t_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      withTable(source, target) {
+        sql(s"CREATE TABLE $source (id INT, b INT, c INT)")
+        sql(s"INSERT INTO $source VALUES (1, 1, 1)")
 
         sql(
-          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
-        sql("INSERT INTO t VALUES (1, 1, 1)")
+          s"CREATE TABLE $target (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql(s"INSERT INTO $target VALUES (1, 1, 1)")
 
         val mergeInto = Future {
           for (_ <- 1 to 10) {
             try {
-              sql("""
-                    |MERGE INTO t
-                    |USING s
-                    |ON t.id = s.id
-                    |WHEN MATCHED THEN
-                    |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                    |""".stripMargin)
+              sql(
+                s"""
+                   |MERGE INTO $target
+                   |USING $source
+                   |ON $target.id = $source.id
+                   |WHEN MATCHED THEN
+                   |UPDATE SET $target.id = $source.id, $target.b = $source.b + $target.b, $target.c = $source.c + $target.c
+                   |""".stripMargin)
             } catch {
               case a: Throwable =>
                 assert(
                   a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
                     "Missing file"))
             }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
+            checkAnswer(sql(s"SELECT count(*) FROM $target"), Seq(Row(1)))
           }
         }
 
         val compact = Future {
           for (_ <- 1 to 10) {
             try {
-              sql("CALL sys.compact(table => 't', order_strategy => 'order', order_by => 'id')")
+              sql(
+                s"CALL sys.compact(table => '$target', order_strategy => 'order', order_by => 'id')")
             } catch {
               case a: Throwable => assert(a.getMessage.contains("Conflicts during commits"))
             }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(1)))
+            checkAnswer(sql(s"SELECT count(*) FROM $target"), Seq(Row(1)))
           }
         }
 
@@ -810,33 +844,37 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
 
   test("Paimon MergeInto: concurrent two merge") {
     for (dvEnabled <- Seq("true", "false")) {
-      withTable("s", "t") {
-        sql("CREATE TABLE s (id INT, b INT, c INT)")
+      val className = getClass.getSimpleName
+      val source = s"tm_s_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      val target = s"tm_t_$dvEnabled" + "_" + createPositiveRandomInt() + "_" + className
+      withTable(source, target) {
+        sql(s"CREATE TABLE $source (id INT, b INT, c INT)")
         sql(
-          "INSERT INTO s VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
+          s"INSERT INTO $source VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
 
         sql(
-          s"CREATE TABLE t (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+          s"CREATE TABLE $target (id INT, b INT, c INT) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
         sql(
-          "INSERT INTO t VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
+          s"INSERT INTO $target VALUES (1, 1, 1), (2, 2, 2), (3, 3, 3), (4, 4, 4), (5, 5, 5), (6, 6, 6), (7, 7, 7), (8, 8, 8), (9, 9, 9)")
 
         def doMergeInto(): Unit = {
           for (i <- 1 to 9) {
             try {
-              sql(s"""
-                     |MERGE INTO t
-                     |USING (SELECT * FROM s WHERE id = $i)
-                     |ON t.id = s.id
-                     |WHEN MATCHED THEN
-                     |UPDATE SET t.id = s.id, t.b = s.b + t.b, t.c = s.c + t.c
-                     |""".stripMargin)
+              sql(
+                s"""
+                   |MERGE INTO $target
+                   |USING (SELECT * FROM $source WHERE id = $i)
+                   |ON $target.id = $source.id
+                   |WHEN MATCHED THEN
+                   |UPDATE SET $target.id = $source.id, $target.b = $source.b + $target.b, $target.c = $source.c + $target.c
+                   |""".stripMargin)
             } catch {
               case a: Throwable =>
                 assert(
                   a.getMessage.contains("Conflicts during commits") || a.getMessage.contains(
                     "Missing file"))
             }
-            checkAnswer(sql("SELECT count(*) FROM t"), Seq(Row(9)))
+            checkAnswer(sql(s"SELECT count(*) FROM $target"), Seq(Row(9)))
           }
         }
 
@@ -854,5 +892,11 @@ trait MergeIntoAppendTableTest extends PaimonSparkTestBase with PaimonAppendTabl
         executor.shutdown()
       }
     }
+  }
+
+  def createPositiveRandomInt(): Int = {
+    val random = new Random()
+    val positiveInt = random.nextInt()
+    if (positiveInt > 0) positiveInt else -positiveInt
   }
 }

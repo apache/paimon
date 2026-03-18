@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Optional;
 
 /** A {@link PredicateVisitor} to replace {@link Predicate}. */
+@FunctionalInterface
 public interface PredicateReplaceVisitor extends PredicateVisitor<Optional<Predicate>> {
 
     @Override

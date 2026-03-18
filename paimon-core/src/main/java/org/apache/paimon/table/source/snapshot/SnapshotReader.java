@@ -34,9 +34,13 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BiFilter;
 import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -87,6 +91,8 @@ public interface SnapshotReader {
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
+    SnapshotReader withLevelMinMaxFilter(BiFilter<Integer, Integer> minMaxFilter);
+
     SnapshotReader enableValueFilter();
 
     SnapshotReader withManifestEntryFilter(Filter<ManifestEntry> filter);
@@ -106,6 +112,14 @@ public interface SnapshotReader {
     SnapshotReader withShard(int indexOfThisSubtask, int numberOfParallelSubtasks);
 
     SnapshotReader withMetricRegistry(MetricRegistry registry);
+
+    SnapshotReader withRowRanges(List<Range> rowRanges);
+
+    SnapshotReader withRowRangeIndex(RowRangeIndex rowRangeIndex);
+
+    SnapshotReader withReadType(RowType readType);
+
+    SnapshotReader withLimit(int limit);
 
     /** Get splits plan from snapshot. */
     Plan read();

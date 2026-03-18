@@ -37,7 +37,7 @@ case class WriteIntoPaimonTable(
     saveMode: SaveMode,
     _data: DataFrame,
     options: Options,
-    batchId: Long = -1)
+    batchId: Option[Long] = None)
   extends RunnableCommand
   with ExpressionHelper
   with SchemaHelper

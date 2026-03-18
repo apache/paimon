@@ -23,6 +23,7 @@ import org.apache.paimon.annotation.Public;
 import java.io.Serializable;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /**
  * An input split for reading.
@@ -32,7 +33,19 @@ import java.util.Optional;
 @Public
 public interface Split extends Serializable {
 
+    /**
+     * The row count in files, may be duplicated, such as in the primary key table and the
+     * Data-Evolution Append table.
+     */
     long rowCount();
+
+    /**
+     * Return the merged row count of data files. For example, when the delete vector is enabled in
+     * the primary key table, the number of rows that have been deleted will be subtracted from the
+     * returned result. In the Data Evolution mode of the Append table, the actual number of rows
+     * will be returned.
+     */
+    OptionalLong mergedRowCount();
 
     /**
      * If all files in this split can be read without merging, returns an {@link Optional} wrapping

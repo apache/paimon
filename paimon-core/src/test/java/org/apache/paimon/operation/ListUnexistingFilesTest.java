@@ -38,7 +38,8 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,23 +51,30 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 /** Tests for {@link ListUnexistingFiles}. */
 public class ListUnexistingFilesTest {
 
     @TempDir java.nio.file.Path tempDir;
 
+    private static Stream<Arguments> params() {
+        return Stream.of(
+                arguments(-1, false), arguments(3, false), arguments(-1, true), arguments(3, true));
+    }
+
     @ParameterizedTest
-    @ValueSource(ints = {-1, 3})
-    public void testListFiles(int bucket) throws Exception {
+    @MethodSource("params")
+    public void testListFiles(int bucket, boolean dvEnabled) throws Exception {
         int numPartitions = 2;
         int numFiles = 10;
         int[] numDeletes = new int[numPartitions];
         FileStoreTable table =
                 prepareRandomlyDeletedTable(
-                        tempDir.toString(), "mydb", "t", bucket, numFiles, numDeletes);
+                        tempDir.toString(), "mydb", "t", bucket, numFiles, numDeletes, dvEnabled);
 
         Function<Integer, BinaryRow> binaryRow =
                 i -> {
@@ -90,7 +98,8 @@ public class ListUnexistingFilesTest {
             String tableName,
             int bucket,
             int numFiles,
-            int[] numDeletes)
+            int[] numDeletes,
+            boolean dvEnabled)
             throws Exception {
         RowType rowType =
                 RowType.of(
@@ -102,12 +111,16 @@ public class ListUnexistingFilesTest {
         if (bucket > 0) {
             options.put(CoreOptions.BUCKET_KEY.key(), "id");
         }
+        if (dvEnabled) {
+            options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        }
         FileStoreTable table =
                 createPaimonTable(
                         warehouse,
                         databaseName,
                         tableName,
                         rowType,
+                        dvEnabled ? Arrays.asList("pt", "id") : Collections.emptyList(),
                         Collections.singletonList("pt"),
                         options);
 
@@ -124,7 +137,11 @@ public class ListUnexistingFilesTest {
         int identifier = 0;
         for (int i = 0; i < numPartitions; i++) {
             for (int j = 0; j < numFiles; j++) {
-                write.write(GenericRow.of(i, random.nextInt(), random.nextLong()));
+                if (dvEnabled && bucket == -1) {
+                    write.write(GenericRow.of(i, random.nextInt(), random.nextLong()), 0);
+                } else {
+                    write.write(GenericRow.of(i, random.nextInt(), random.nextLong()));
+                }
                 identifier++;
                 commit.commit(identifier, write.prepareCommit(false, identifier));
             }
@@ -157,6 +174,7 @@ public class ListUnexistingFilesTest {
             String databaseName,
             String tableName,
             RowType rowType,
+            List<String> primaryKeys,
             List<String> partitionKeys,
             Map<String, String> customOptions)
             throws Exception {
@@ -164,12 +182,7 @@ public class ListUnexistingFilesTest {
         Path path = new Path(warehouse);
 
         Schema schema =
-                new Schema(
-                        rowType.getFields(),
-                        partitionKeys,
-                        Collections.emptyList(),
-                        customOptions,
-                        "");
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, customOptions, "");
 
         try (FileSystemCatalog paimonCatalog = new FileSystemCatalog(fileIO, path)) {
             paimonCatalog.createDatabase(databaseName, true);

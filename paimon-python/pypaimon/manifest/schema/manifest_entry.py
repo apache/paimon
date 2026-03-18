@@ -20,16 +20,27 @@ from dataclasses import dataclass
 
 from pypaimon.manifest.schema.data_file_meta import (DATA_FILE_META_SCHEMA,
                                                      DataFileMeta)
+from pypaimon.manifest.schema.file_entry import FileEntry
 from pypaimon.table.row.generic_row import GenericRow
 
 
 @dataclass
-class ManifestEntry:
+class ManifestEntry(FileEntry):
     kind: int
     partition: GenericRow
     bucket: int
     total_buckets: int
     file: DataFileMeta
+
+    def copy_without_stats(self) -> 'ManifestEntry':
+        """Create a new ManifestEntry without value statistics."""
+        return ManifestEntry(
+            kind=self.kind,
+            partition=self.partition,
+            bucket=self.bucket,
+            total_buckets=self.total_buckets,
+            file=self.file.copy_without_stats()
+        )
 
     def assign_first_row_id(self, first_row_id: int) -> 'ManifestEntry':
         """Create a new ManifestEntry with the assigned first_row_id."""

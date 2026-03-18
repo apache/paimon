@@ -18,13 +18,15 @@
 import logging
 import unittest
 import uuid
+from unittest.mock import Mock
 
 from pypaimon.api.api_response import ConfigResponse
 from pypaimon.api.auth import BearTokenAuthProvider
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.token_loader import DLFToken, DLFTokenLoaderFactory
 from pypaimon.catalog.rest.table_metadata import TableMetadata
-from pypaimon.common.config import CatalogOptions
+from pypaimon.common.options import Options
+from pypaimon.common.options.config import CatalogOptions
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import JSON
 from pypaimon.schema.data_types import (ArrayType, AtomicInteger, AtomicType,
@@ -203,21 +205,21 @@ class ApiTest(unittest.TestCase):
             server.start()
             ecs_metadata_url = f"http://localhost:{server.port}/ram/security-credential/"
             options = {
-                CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url
+                CatalogOptions.DLF_TOKEN_LOADER.key(): 'ecs',
+                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL.key(): ecs_metadata_url
             }
-            loader = DLFTokenLoaderFactory.create_token_loader(options)
+            loader = DLFTokenLoaderFactory.create_token_loader(Options(options))
             load_token = loader.load_token()
             self.assertEqual(load_token.access_key_id, token.access_key_id)
             self.assertEqual(load_token.access_key_secret, token.access_key_secret)
             self.assertEqual(load_token.security_token, token.security_token)
             self.assertEqual(load_token.expiration, token.expiration)
             options_with_role = {
-                CatalogOptions.DLF_TOKEN_LOADER: 'ecs',
-                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL: ecs_metadata_url,
-                CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME: role_name,
+                CatalogOptions.DLF_TOKEN_LOADER.key(): 'ecs',
+                CatalogOptions.DLF_TOKEN_ECS_METADATA_URL.key(): ecs_metadata_url,
+                CatalogOptions.DLF_TOKEN_ECS_ROLE_NAME.key(): role_name,
             }
-            loader = DLFTokenLoaderFactory.create_token_loader(options_with_role)
+            loader = DLFTokenLoaderFactory.create_token_loader(Options(options_with_role))
             token = loader.load_token()
             self.assertEqual(load_token.access_key_id, token.access_key_id)
             self.assertEqual(load_token.access_key_secret, token.access_key_secret)
@@ -227,3 +229,235 @@ class ApiTest(unittest.TestCase):
             # Shutdown server
             server.shutdown()
             print("Server stopped")
+
+    def test_rest_api_parameter_validation(self):
+        rest_api = RESTApi.__new__(RESTApi)
+        # Test __init__ with missing URI
+        with self.assertRaises(ValueError) as context:
+            RESTApi({"warehouse": "test"}, config_required=False)
+        self.assertIn("URI cannot be empty", str(context.exception))
+
+        # Test __init__ with empty URI
+        with self.assertRaises(ValueError) as context:
+            RESTApi({CatalogOptions.URI.key(): "   "}, config_required=False)
+        self.assertIn("URI cannot be empty", str(context.exception))
+
+        # Test create_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_database("", {})
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test create_database with whitespace name
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_database("   ", {})
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test get_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.get_database("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test get_database with whitespace name
+        with self.assertRaises(ValueError) as context:
+            rest_api.get_database("   ")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test drop_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.drop_database("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test alter_database with empty name
+        with self.assertRaises(ValueError) as context:
+            rest_api.alter_database("", [], {})
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test list_tables with empty database_name
+        with self.assertRaises(ValueError) as context:
+            rest_api.list_tables("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test list_tables_paged with empty database_name
+        with self.assertRaises(ValueError) as context:
+            rest_api.list_tables_paged("")
+        self.assertIn("Database name cannot be empty", str(context.exception))
+
+        # Test create_table with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_table(None, Mock())
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test create_table with None schema
+        with self.assertRaises(ValueError) as context:
+            rest_api.create_table(Mock(), None)
+        self.assertIn("Schema cannot be None", str(context.exception))
+
+        # Test get_table with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.get_table(None)
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test drop_table with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.drop_table(None)
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test rename_table with None source_identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.rename_table(None, Mock())
+        self.assertIn("Source identifier cannot be None", str(context.exception))
+
+        # Test rename_table with None target_identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.rename_table(Mock(), None)
+        self.assertIn("Target identifier cannot be None", str(context.exception))
+
+        # Test load_table_token with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.load_table_token(None)
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test commit_snapshot with None identifier
+        with self.assertRaises(ValueError) as context:
+            rest_api.commit_snapshot(None, "uuid", Mock(), [])
+        self.assertIn("Identifier cannot be None", str(context.exception))
+
+        # Test commit_snapshot with None snapshot
+        with self.assertRaises(ValueError) as context:
+            rest_api.commit_snapshot(Mock(), "uuid", None, [])
+        self.assertIn("Snapshot cannot be None", str(context.exception))
+
+        # Test commit_snapshot with None statistics
+        with self.assertRaises(ValueError) as context:
+            rest_api.commit_snapshot(Mock(), "uuid", Mock(), None)
+        self.assertIn("Statistics cannot be None", str(context.exception))
+
+    def test_list_tables_paged_with_table_type_param(self):
+        config = ConfigResponse(defaults={"prefix": "mock-test"})
+        token = str(uuid.uuid4())
+        server = RESTCatalogServer(
+            data_path="/tmp/test_warehouse",
+            auth_provider=BearTokenAuthProvider(token),
+            config=config,
+            warehouse="test_warehouse"
+        )
+        try:
+            server.start()
+
+            server.database_store.update({
+                "default": server.mock_database("default", {"env": "test"})
+            })
+
+            data_fields = [
+                DataField(0, "id", AtomicType("INT"), "id"),
+            ]
+            table_schema = TableSchema(
+                TableSchema.CURRENT_VERSION,
+                len(data_fields),
+                data_fields,
+                len(data_fields),
+                [],
+                [],
+                {"type": "table"},
+                "",
+            )
+            format_table_schema = TableSchema(
+                TableSchema.CURRENT_VERSION,
+                len(data_fields),
+                data_fields,
+                len(data_fields),
+                [],
+                [],
+                {"type": "format-table"},
+                "",
+            )
+            iceberg_table_schema = TableSchema(
+                TableSchema.CURRENT_VERSION,
+                len(data_fields),
+                data_fields,
+                len(data_fields),
+                [],
+                [],
+                {"type": "iceberg-table"},
+                "",
+            )
+            server.table_metadata_store.update({
+                "default.normal_table_1": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=table_schema
+                ),
+                "default.format_table_1": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=format_table_schema
+                ),
+                "default.iceberg_table_1": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=iceberg_table_schema
+                ),
+                "default.normal_table_2": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=table_schema
+                ),
+                "default.format_table_2": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=format_table_schema
+                ),
+                "default.iceberg_table_2": TableMetadata(
+                    uuid=str(uuid.uuid4()),
+                    is_external=True,
+                    schema=iceberg_table_schema
+                ),
+            })
+
+            options = {
+                'uri': f"http://localhost:{server.port}",
+                'warehouse': 'test_warehouse',
+                'dlf.region': 'cn-hangzhou',
+                "token.provider": "bear",
+                'token': token
+            }
+            rest_api = RESTApi(options)
+
+            all_result = rest_api.list_tables_paged("default")
+            table_result = rest_api.list_tables_paged("default", table_type="table")
+            format_table_result = rest_api.list_tables_paged("default", table_type="format-table")
+            iceberg_table_result = rest_api.list_tables_paged("default", table_type="iceberg-table")
+
+            self.assertEqual(
+                [
+                    "format_table_1",
+                    "format_table_2",
+                    "iceberg_table_1",
+                    "iceberg_table_2",
+                    "normal_table_1",
+                    "normal_table_2",
+                ],
+                all_result.elements,
+            )
+            self.assertEqual(["normal_table_1", "normal_table_2"], table_result.elements)
+            self.assertEqual(["format_table_1", "format_table_2"], format_table_result.elements)
+            self.assertEqual(["iceberg_table_1", "iceberg_table_2"], iceberg_table_result.elements)
+
+            filtered_with_pattern = rest_api.list_tables_paged(
+                "default", table_type="table", table_name_pattern="%_2"
+            )
+            self.assertEqual(["normal_table_2"], filtered_with_pattern.elements)
+
+            first_page = rest_api.list_tables_paged(
+                "default", max_results=1, table_type="table"
+            )
+            self.assertEqual(["normal_table_1"], first_page.elements)
+            self.assertIsNotNone(first_page.next_page_token)
+
+            second_page = rest_api.list_tables_paged(
+                "default", max_results=1, page_token=first_page.next_page_token, table_type="table"
+            )
+            self.assertEqual(["normal_table_2"], second_page.elements)
+            self.assertEqual("normal_table_2", second_page.next_page_token)
+        finally:
+            server.shutdown()

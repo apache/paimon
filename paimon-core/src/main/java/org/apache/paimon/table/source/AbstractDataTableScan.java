@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.TableQueryAuthResult;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
@@ -55,6 +56,8 @@ import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -69,8 +72,6 @@ import java.util.Optional;
 import java.util.TimeZone;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
-import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.CHANGELOG;
-import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DELTA;
 import static org.apache.paimon.CoreOptions.IncrementalBetweenScanMode.DIFF;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -99,6 +100,18 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
+    public final TableScan.Plan plan() {
+        TableQueryAuthResult queryAuthResult = authQuery();
+        Plan plan = planWithoutAuth();
+        if (queryAuthResult != null) {
+            plan = queryAuthResult.convertPlan(plan);
+        }
+        return plan;
+    }
+
+    protected abstract TableScan.Plan planWithoutAuth();
+
+    @Override
     public InnerTableScan withFilter(Predicate predicate) {
         snapshotReader.withFilter(predicate);
         return this;
@@ -119,6 +132,7 @@ abstract class AbstractDataTableScan implements DataTableScan {
     @Override
     public InnerTableScan withReadType(@Nullable RowType readType) {
         this.readType = readType;
+        snapshotReader.withReadType(readType);
         return this;
     }
 
@@ -147,6 +161,12 @@ abstract class AbstractDataTableScan implements DataTableScan {
     }
 
     @Override
+    public InnerTableScan withPartitionFilter(Predicate predicate) {
+        snapshotReader.withPartitionFilter(predicate);
+        return this;
+    }
+
+    @Override
     public AbstractDataTableScan withLevelFilter(Filter<Integer> levelFilter) {
         snapshotReader.withLevelFilter(levelFilter);
         return this;
@@ -157,18 +177,34 @@ abstract class AbstractDataTableScan implements DataTableScan {
         return this;
     }
 
-    protected void authQuery() {
+    @Nullable
+    protected TableQueryAuthResult authQuery() {
         if (!options.queryAuthEnabled()) {
-            return;
+            return null;
         }
-        queryAuth.auth(readType == null ? null : readType.getFieldNames());
-        // TODO add support for row level access control
+        return queryAuth.auth(readType == null ? null : readType.getFieldNames());
     }
 
     @Override
     public AbstractDataTableScan dropStats() {
         snapshotReader.dropStats();
         return this;
+    }
+
+    @Override
+    public InnerTableScan withRowRanges(List<Range> sortedPushdownRowRanges) {
+        snapshotReader.withRowRanges(sortedPushdownRowRanges);
+        return this;
+    }
+
+    @Override
+    public InnerTableScan withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        snapshotReader.withRowRangeIndex(rowRangeIndex);
+        return this;
+    }
+
+    public SnapshotReader snapshotReader() {
+        return snapshotReader;
     }
 
     public CoreOptions options() {

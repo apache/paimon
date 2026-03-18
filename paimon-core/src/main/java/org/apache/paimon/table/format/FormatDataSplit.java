@@ -25,22 +25,35 @@ import org.apache.paimon.table.source.Split;
 import javax.annotation.Nullable;
 
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /** {@link FormatDataSplit} for format table. */
 public class FormatDataSplit implements Split {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     private final Path filePath;
+    private final long fileSize;
     private final long offset;
-    private final long length;
+    // If null, means reading the whole file.
+    @Nullable private final Long length;
     @Nullable private final BinaryRow partition;
 
-    public FormatDataSplit(Path filePath, long offset, long length, @Nullable BinaryRow partition) {
+    public FormatDataSplit(
+            Path filePath,
+            long fileSize,
+            long offset,
+            @Nullable Long length,
+            @Nullable BinaryRow partition) {
         this.filePath = filePath;
+        this.fileSize = fileSize;
         this.offset = offset;
         this.length = length;
         this.partition = partition;
+    }
+
+    public FormatDataSplit(Path filePath, long fileSize, @Nullable BinaryRow partition) {
+        this(filePath, fileSize, 0L, null, partition);
     }
 
     public Path filePath() {
@@ -48,14 +61,19 @@ public class FormatDataSplit implements Split {
     }
 
     public Path dataPath() {
-        return filePath;
+        return this.filePath;
+    }
+
+    public long fileSize() {
+        return this.fileSize;
     }
 
     public long offset() {
         return offset;
     }
 
-    public long length() {
+    @Nullable
+    public Long length() {
         return length;
     }
 
@@ -69,6 +87,11 @@ public class FormatDataSplit implements Split {
     }
 
     @Override
+    public OptionalLong mergedRowCount() {
+        return OptionalLong.empty();
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -78,13 +101,14 @@ public class FormatDataSplit implements Split {
         }
         FormatDataSplit that = (FormatDataSplit) o;
         return offset == that.offset
-                && length == that.length
+                && fileSize == that.fileSize
+                && Objects.equals(length, that.length)
                 && Objects.equals(filePath, that.filePath)
                 && Objects.equals(partition, that.partition);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(filePath, offset, length, partition);
+        return Objects.hash(filePath, fileSize, offset, length, partition);
     }
 }

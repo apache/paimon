@@ -281,7 +281,7 @@ public class TableSchema implements Serializable {
     }
 
     public TableSchema project(@Nullable List<String> writeCols) {
-        if (writeCols == null || writeCols.isEmpty()) {
+        if (writeCols == null) {
             return this;
         }
 

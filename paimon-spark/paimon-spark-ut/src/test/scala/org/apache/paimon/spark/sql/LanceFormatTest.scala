@@ -34,6 +34,12 @@ class LanceFormatTest extends PaimonSparkTestBase {
       checkAnswer(
         sql("SELECT * FROM t LIMIT 10"),
         Seq(Row(1, "a", Array(90.5, 88.0)), Row(2, "b", Array(90.6, 88.1))))
+
+      assert(
+        sql("SELECT file_size_in_bytes FROM `t$files`")
+          .collect()
+          .map(s => s.get(0).asInstanceOf[Long])
+          .apply(0) > 0L)
     }
   }
 }

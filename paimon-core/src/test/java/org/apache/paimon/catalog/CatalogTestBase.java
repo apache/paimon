@@ -41,15 +41,12 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FormatTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.format.FormatTableWrite;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -80,12 +77,14 @@ import java.util.Map;
 import java.util.Random;
 import java.util.stream.Collectors;
 
+import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
+import static org.apache.paimon.table.system.SystemTableLoader.GLOBAL_SYSTEM_TABLES;
 import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -576,6 +575,56 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testFormatTableFileCompression() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "test_format_table_file_compression";
+        catalog.createDatabase(dbName, true);
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f1", DataTypes.INT());
+        schemaBuilder.option("type", "format-table");
+        Pair[] format2ExpectDefaultFileCompression = {
+            Pair.of("csv", "none"),
+            Pair.of("parquet", "snappy"),
+            Pair.of("json", "none"),
+            Pair.of("orc", "zstd")
+        };
+        for (Pair<String, String> format2Compression : format2ExpectDefaultFileCompression) {
+            Identifier identifier =
+                    Identifier.create(
+                            dbName,
+                            "partition_table_file_compression_" + format2Compression.getKey());
+            schemaBuilder.option("file.format", format2Compression.getKey());
+            catalog.createTable(identifier, schemaBuilder.build(), true);
+            String fileCompression =
+                    new CoreOptions(catalog.getTable(identifier).options())
+                            .formatTableFileCompression();
+
+            assertEquals(fileCompression, format2Compression.getValue());
+        }
+        // table has option file.compression
+        String expectFileCompression = "gzip";
+        schemaBuilder.option("file.format", "csv");
+        schemaBuilder.option("file.compression", expectFileCompression);
+        Identifier identifier = Identifier.create(dbName, "partition_table_file_compression_a");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        String fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+
+        // table has option format-table.file.compression
+        schemaBuilder.option("format-table.file.compression", expectFileCompression);
+        identifier = Identifier.create(dbName, "partition_table_file_compression_b");
+        catalog.createTable(identifier, schemaBuilder.build(), true);
+        fileCompression =
+                new CoreOptions(catalog.getTable(identifier).options())
+                        .formatTableFileCompression();
+        assertEquals(fileCompression, expectFileCompression);
+    }
+
+    @Test
     public void testFormatTableOnlyPartitionValueRead() throws Exception {
         if (!supportsFormatTable()) {
             return;
@@ -710,9 +759,168 @@ public abstract class CatalogTestBase {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testFormatTableOverwrite(boolean partitionPathOnlyValue) throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        String dbName = "format_overwrite_db";
+        catalog.createDatabase(dbName, true);
+
+        Identifier id = Identifier.create(dbName, "format_overwrite_table");
+        Schema nonPartitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(id, nonPartitionedSchema, true);
+        FormatTable nonPartitionedTable = (FormatTable) catalog.getTable(id);
+        BatchWriteBuilder nonPartitionedTableWriteBuilder =
+                nonPartitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = nonPartitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 10));
+            write.write(GenericRow.of(2, 20));
+            commit.commit(write.prepareCommit());
+        }
+
+        try (BatchTableWrite write = nonPartitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        nonPartitionedTableWriteBuilder.withOverwrite().newCommit()) {
+            write.write(GenericRow.of(3, 30));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> fullOverwriteRows = read(nonPartitionedTable, null, null, null, null);
+        assertThat(fullOverwriteRows).containsExactlyInAnyOrder(GenericRow.of(3, 30));
+        catalog.dropTable(id, true);
+
+        Identifier pid = Identifier.create(dbName, "format_overwrite_partitioned");
+        Schema partitionedSchema =
+                Schema.newBuilder()
+                        .column("a", DataTypes.INT())
+                        .column("b", DataTypes.INT())
+                        .column("year", DataTypes.INT())
+                        .column("month", DataTypes.INT())
+                        .partitionKeys("year", "month")
+                        .options(getFormatTableOptions())
+                        .option("file.format", "csv")
+                        .option("file.compression", HadoopCompressionType.GZIP.value())
+                        .option(
+                                "format-table.partition-path-only-value",
+                                "" + partitionPathOnlyValue)
+                        .build();
+        catalog.createTable(pid, partitionedSchema, true);
+        FormatTable partitionedTable = (FormatTable) catalog.getTable(pid);
+        BatchWriteBuilder partitionedTableWriteBuilder = partitionedTable.newBatchWriteBuilder();
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit = partitionedTableWriteBuilder.newCommit()) {
+            write.write(GenericRow.of(1, 100, 2024, 10));
+            write.write(GenericRow.of(2, 200, 2025, 10));
+            write.write(GenericRow.of(3, 300, 2025, 11));
+            commit.commit(write.prepareCommit());
+        }
+
+        Map<String, String> staticPartition = new HashMap<>();
+        staticPartition.put("year", "2024");
+        staticPartition.put("month", "10");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2024, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        List<InternalRow> partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10),
+                        GenericRow.of(2, 200, 2025, 10),
+                        GenericRow.of(3, 300, 2025, 11));
+
+        staticPartition = new HashMap<>();
+        staticPartition.put("year", "2025");
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite();
+                BatchTableCommit commit =
+                        partitionedTableWriteBuilder.withOverwrite(staticPartition).newCommit()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            commit.commit(write.prepareCommit());
+        }
+
+        partitionOverwriteRows = read(partitionedTable, null, null, null, null);
+        assertThat(partitionOverwriteRows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(10, 1000, 2024, 10), GenericRow.of(10, 1000, 2025, 10));
+
+        try (BatchTableWrite write = partitionedTableWriteBuilder.newWrite()) {
+            write.write(GenericRow.of(10, 1000, 2025, 10));
+            assertThrows(
+                    RuntimeException.class,
+                    () -> {
+                        Map<String, String> staticOverwritePartition = new HashMap<>();
+                        staticOverwritePartition.put("month", "10");
+                        partitionedTableWriteBuilder
+                                .withOverwrite(staticOverwritePartition)
+                                .newCommit();
+                    });
+        }
+        catalog.dropTable(pid, true);
+    }
+
+    @Test
+    public void testFormatTableSplitRead() throws Exception {
+        if (!supportsFormatTable()) {
+            return;
+        }
+        Pair[] format2Compressions = {
+            Pair.of("csv", HadoopCompressionType.NONE),
+            Pair.of("json", HadoopCompressionType.NONE),
+            Pair.of("csv", HadoopCompressionType.GZIP),
+            Pair.of("json", HadoopCompressionType.GZIP),
+            Pair.of("parquet", HadoopCompressionType.ZSTD)
+        };
+        for (Pair<String, HadoopCompressionType> format2Compression : format2Compressions) {
+            String format = format2Compression.getKey();
+            String compression = format2Compression.getValue().value();
+            String dbName = format + "_split_db_" + compression;
+            catalog.createDatabase(dbName, true);
+
+            Identifier id = Identifier.create(dbName, format + "_split_table_" + compression);
+            Schema schema =
+                    Schema.newBuilder()
+                            .column("id", DataTypes.INT())
+                            .column("name", DataTypes.STRING())
+                            .column("score", DataTypes.DOUBLE())
+                            .options(getFormatTableOptions())
+                            .option("file.format", format)
+                            .option("source.split.target-size", "54 B")
+                            .option("file.compression", compression.toString())
+                            .build();
+            catalog.createTable(id, schema, true);
+            FormatTable table = (FormatTable) catalog.getTable(id);
+            int size = 50;
+            InternalRow[] datas = new InternalRow[size];
+            for (int i = 0; i < size; i++) {
+                datas[i] = GenericRow.of(i, BinaryString.fromString("User" + i), 85.5 + (i % 15));
+            }
+            writeAndCheckCommitFormatTable(table, datas, null);
+            List<InternalRow> allRows = read(table, null, null, null, null);
+            assertThat(allRows).containsExactlyInAnyOrder(datas);
+        }
+    }
+
     private void writeAndCheckCommitFormatTable(
-            Table table, InternalRow[] datas, InternalRow dataWithDiffPartition) throws Exception {
-        try (FormatTableWrite write = (FormatTableWrite) table.newBatchWriteBuilder().newWrite()) {
+            FormatTable table, InternalRow[] datas, InternalRow dataWithDiffPartition)
+            throws Exception {
+        try (BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             for (InternalRow row : datas) {
                 write.write(row);
             }
@@ -722,7 +930,7 @@ public abstract class CatalogTestBase {
             List<CommitMessage> committers = write.prepareCommit();
             List<InternalRow> readData = read(table, null, null, null, null);
             assertThat(readData).isEmpty();
-            write.commit(committers);
+            commit.commit(committers);
         }
     }
 
@@ -836,10 +1044,7 @@ public abstract class CatalogTestBase {
                         () -> catalog.getTable(Identifier.create(SYSTEM_DATABASE_NAME, "1111")));
 
         List<String> sysTables = catalog.listTables(SYSTEM_DATABASE_NAME);
-        assertThat(sysTables)
-                .containsExactlyInAnyOrder(
-                        AllTableOptionsTable.ALL_TABLE_OPTIONS,
-                        CatalogOptionsTable.CATALOG_OPTIONS);
+        assertThat(sysTables).containsAll(GLOBAL_SYSTEM_TABLES);
 
         assertThat(catalog.listViews(SYSTEM_DATABASE_NAME)).isEmpty();
     }
@@ -1339,6 +1544,65 @@ public abstract class CatalogTestBase {
         assertThrows(
                 UnsupportedOperationException.class,
                 () -> catalog.listPartitionsPaged(identifier, null, null, "dt=0101"));
+    }
+
+    @Test
+    public void testListPartitionsByNames() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_by_names_db";
+        List<Map<String, String>> partitionSpecs =
+                Arrays.asList(
+                        singletonMap("dt", "20250101"),
+                        singletonMap("dt", "20250102"),
+                        singletonMap("dt", "20240102"),
+                        singletonMap("dt", "20260101"));
+
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        BatchWriteBuilder writeBuilder = catalog.getTable(identifier).newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Map<String, String> partitionSpec : partitionSpecs) {
+                write.write(GenericRow.of(0, BinaryString.fromString(partitionSpec.get("dt"))));
+            }
+            commit.commit(write.prepareCommit());
+        }
+
+        // Test listing partitions by names
+        List<Map<String, String>> specsToQuery =
+                Arrays.asList(singletonMap("dt", "20250101"), singletonMap("dt", "20250102"));
+        List<Partition> partitions = catalog.listPartitionsByNames(identifier, specsToQuery);
+
+        assertThat(partitions.stream().map(Partition::spec).collect(Collectors.toList()))
+                .containsExactlyInAnyOrderElementsOf(specsToQuery);
+
+        // Test with non-existent partition spec
+        List<Map<String, String>> nonExistentSpecs =
+                Arrays.asList(singletonMap("dt", "20990101"), singletonMap("dt", "20990102"));
+        List<Partition> emptyPartitions =
+                catalog.listPartitionsByNames(identifier, nonExistentSpecs);
+        assertEquals(0, emptyPartitions.size());
+
+        // Test with empty partition specs
+        List<Partition> emptyResult =
+                catalog.listPartitionsByNames(identifier, Collections.emptyList());
+        assertEquals(0, emptyResult.size());
     }
 
     protected boolean supportsAlterDatabase() {

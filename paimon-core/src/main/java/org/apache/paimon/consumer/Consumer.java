@@ -26,7 +26,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.exc.MismatchedInputException;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -60,23 +59,32 @@ public class Consumer {
 
     public static Optional<Consumer> fromPath(FileIO fileIO, Path path) {
         int retryNumber = 0;
-        MismatchedInputException exception = null;
+        Exception exception = null;
         while (retryNumber++ < 10) {
+            Optional<String> content;
             try {
-                return fileIO.readOverwrittenFileUtf8(path).map(Consumer::fromJson);
-            } catch (MismatchedInputException e) {
+                content = fileIO.readOverwrittenFileUtf8(path);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
+            if (!content.isPresent()) {
+                return Optional.empty();
+            }
+
+            try {
+                return content.map(Consumer::fromJson);
+            } catch (Exception e) {
                 // retry
                 exception = e;
                 try {
-                    Thread.sleep(1_000);
+                    Thread.sleep(200);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(ie);
                 }
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
             }
         }
-        throw new UncheckedIOException(exception);
+        throw new RuntimeException("Retry fail after 10 times", exception);
     }
 }

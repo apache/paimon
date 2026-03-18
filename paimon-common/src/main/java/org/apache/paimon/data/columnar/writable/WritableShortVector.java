@@ -26,6 +26,8 @@ public interface WritableShortVector extends WritableColumnVector, ShortColumnVe
     /** Set short at rowId with the provided value. */
     void setShort(int rowId, short value);
 
+    void appendShort(short v);
+
     /** Fill the column vector with the provided value. */
     void fill(short value);
 }

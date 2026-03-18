@@ -36,24 +36,6 @@ import java.util.Objects;
 /**
  * This file is the entrance to all data committed at some specific time point.
  *
- * <p>Versioned change list:
- *
- * <ul>
- *   <li>Version 1: Initial version for paimon <= 0.2. There is no "version" field in json file.
- *   <li>Version 2: Introduced in paimon 0.3. Add "version" field and "changelogManifestList" field.
- *   <li>Version 3: Introduced in paimon 0.4. Add "baseRecordCount" field, "deltaRecordCount" field
- *       and "changelogRecordCount" field.
- * </ul>
- *
- * <p>Unversioned change list:
- *
- * <ul>
- *   <li>Since paimon 0.2 and paimon 0.3, commitIdentifier is changed from a String to a long value.
- *       For paimon < 0.2, only Flink connectors have paimon sink and they use checkpointId as
- *       commitIdentifier (which is a long value). Json can automatically perform type conversion so
- *       there is no compatibility issue.
- * </ul>
- *
  * @since 0.9.0
  */
 @Public
@@ -64,7 +46,6 @@ public class Snapshot implements Serializable {
 
     public static final long FIRST_SNAPSHOT_ID = 1;
 
-    public static final int TABLE_STORE_02_VERSION = 1;
     protected static final int CURRENT_VERSION = 3;
 
     protected static final String FIELD_VERSION = "version";
@@ -81,7 +62,6 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     protected static final String FIELD_COMMIT_KIND = "commitKind";
     protected static final String FIELD_TIME_MILLIS = "timeMillis";
-    protected static final String FIELD_LOG_OFFSETS = "logOffsets";
     protected static final String FIELD_TOTAL_RECORD_COUNT = "totalRecordCount";
     protected static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
     protected static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
@@ -91,10 +71,8 @@ public class Snapshot implements Serializable {
     protected static final String FIELD_NEXT_ROW_ID = "nextRowId";
 
     // version of snapshot
-    // null for paimon <= 0.2
     @JsonProperty(FIELD_VERSION)
-    @Nullable
-    protected final Integer version;
+    protected final int version;
 
     @JsonProperty(FIELD_ID)
     protected final long id;
@@ -106,6 +84,7 @@ public class Snapshot implements Serializable {
     @JsonProperty(FIELD_BASE_MANIFEST_LIST)
     protected final String baseManifestList;
 
+    // null for paimon <= 1.0
     @JsonProperty(FIELD_BASE_MANIFEST_LIST_SIZE)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
@@ -116,17 +95,20 @@ public class Snapshot implements Serializable {
     @JsonProperty(FIELD_DELTA_MANIFEST_LIST)
     protected final String deltaManifestList;
 
+    // null for paimon <= 1.0
     @JsonProperty(FIELD_DELTA_MANIFEST_LIST_SIZE)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
     protected final Long deltaManifestListSize;
 
     // a manifest list recording all changelog produced in this snapshot
-    // null if no changelog is produced, or for paimon <= 0.2
+    // null if no changelog is produced
     @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
     protected final String changelogManifestList;
 
+    // null for paimon <= 1.0 or no changelog
     @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST_SIZE)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
@@ -157,32 +139,22 @@ public class Snapshot implements Serializable {
     @JsonProperty(FIELD_TIME_MILLIS)
     protected final long timeMillis;
 
-    @JsonProperty(FIELD_LOG_OFFSETS)
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @Nullable
-    protected final Map<Integer, Long> logOffsets;
-
     // record count of all changes occurred in this snapshot
-    // null for paimon <= 0.3
     @JsonProperty(FIELD_TOTAL_RECORD_COUNT)
-    @Nullable
-    protected final Long totalRecordCount;
+    protected final long totalRecordCount;
 
     // record count of all new changes occurred in this snapshot
-    // null for paimon <= 0.3
     @JsonProperty(FIELD_DELTA_RECORD_COUNT)
-    @Nullable
-    protected final Long deltaRecordCount;
+    protected final long deltaRecordCount;
 
     // record count of all changelog produced in this snapshot
-    // null for paimon <= 0.3
+    // null if no changelog
     @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT)
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
     protected final Long changelogRecordCount;
 
     // watermark for input records
-    // null for paimon <= 0.3
     // null if there is no watermark in new committing, and the previous snapshot does not have a
     // watermark
     @JsonProperty(FIELD_WATERMARK)
@@ -198,15 +170,15 @@ public class Snapshot implements Serializable {
     protected final String statistics;
 
     // properties
-    // null for paimon <= 1.1 or empty properties
+    // null for empty properties
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_PROPERTIES)
     @Nullable
     protected final Map<String, String> properties;
 
-    @Nullable
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_NEXT_ROW_ID)
+    @Nullable
     protected final Long nextRowId;
 
     public Snapshot(
@@ -223,9 +195,8 @@ public class Snapshot implements Serializable {
             long commitIdentifier,
             CommitKind commitKind,
             long timeMillis,
-            Map<Integer, Long> logOffsets,
-            @Nullable Long totalRecordCount,
-            @Nullable Long deltaRecordCount,
+            long totalRecordCount,
+            long deltaRecordCount,
             @Nullable Long changelogRecordCount,
             @Nullable Long watermark,
             @Nullable String statistics,
@@ -246,7 +217,6 @@ public class Snapshot implements Serializable {
                 commitIdentifier,
                 commitKind,
                 timeMillis,
-                logOffsets,
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
@@ -258,7 +228,7 @@ public class Snapshot implements Serializable {
 
     @JsonCreator
     public Snapshot(
-            @JsonProperty(FIELD_VERSION) @Nullable Integer version,
+            @JsonProperty(FIELD_VERSION) int version,
             @JsonProperty(FIELD_ID) long id,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
@@ -273,9 +243,8 @@ public class Snapshot implements Serializable {
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
-            @JsonProperty(FIELD_LOG_OFFSETS) @Nullable Map<Integer, Long> logOffsets,
-            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) @Nullable Long totalRecordCount,
-            @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
+            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) long totalRecordCount,
+            @JsonProperty(FIELD_DELTA_RECORD_COUNT) long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
             @JsonProperty(FIELD_STATISTICS) @Nullable String statistics,
@@ -295,7 +264,6 @@ public class Snapshot implements Serializable {
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
         this.timeMillis = timeMillis;
-        this.logOffsets = logOffsets;
         this.totalRecordCount = totalRecordCount;
         this.deltaRecordCount = deltaRecordCount;
         this.changelogRecordCount = changelogRecordCount;
@@ -307,8 +275,7 @@ public class Snapshot implements Serializable {
 
     @JsonGetter(FIELD_VERSION)
     public int version() {
-        // there is no version field for paimon <= 0.2
-        return version == null ? TABLE_STORE_02_VERSION : version;
+        return version;
     }
 
     @JsonGetter(FIELD_ID)
@@ -381,21 +348,13 @@ public class Snapshot implements Serializable {
         return timeMillis;
     }
 
-    @JsonGetter(FIELD_LOG_OFFSETS)
-    @Nullable
-    public Map<Integer, Long> logOffsets() {
-        return logOffsets;
-    }
-
     @JsonGetter(FIELD_TOTAL_RECORD_COUNT)
-    @Nullable
-    public Long totalRecordCount() {
+    public long totalRecordCount() {
         return totalRecordCount;
     }
 
     @JsonGetter(FIELD_DELTA_RECORD_COUNT)
-    @Nullable
-    public Long deltaRecordCount() {
+    public long deltaRecordCount() {
         return deltaRecordCount;
     }
 
@@ -450,7 +409,6 @@ public class Snapshot implements Serializable {
                 commitIdentifier,
                 commitKind,
                 timeMillis,
-                logOffsets,
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
@@ -483,7 +441,6 @@ public class Snapshot implements Serializable {
                 && commitIdentifier == that.commitIdentifier
                 && commitKind == that.commitKind
                 && timeMillis == that.timeMillis
-                && Objects.equals(logOffsets, that.logOffsets)
                 && Objects.equals(totalRecordCount, that.totalRecordCount)
                 && Objects.equals(deltaRecordCount, that.deltaRecordCount)
                 && Objects.equals(changelogRecordCount, that.changelogRecordCount)

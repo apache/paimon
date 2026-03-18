@@ -18,160 +18,75 @@
 
 package org.apache.paimon.spark
 
-import org.apache.paimon.{stats, CoreOptions}
-import org.apache.paimon.annotation.VisibleForTesting
-import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.spark.metric.SparkMetricRegistry
+import org.apache.paimon.spark.read.{BaseScan, PaimonSupportsRuntimeFiltering}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
-import org.apache.paimon.spark.statistics.StatisticsHelper
-import org.apache.paimon.table.{DataTable, InnerTable}
+import org.apache.paimon.spark.util.OptionUtils
+import org.apache.paimon.table.{DataTable, FileStoreTable, InnerTable}
 import org.apache.paimon.table.source.{InnerTableScan, Split}
-import org.apache.paimon.table.source.snapshot.TimeTravelUtil
-import org.apache.paimon.table.system.FilesTable
-import org.apache.paimon.utils.{SnapshotManager, TagManager}
 
+import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
+import org.apache.spark.sql.connector.read.Batch
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
-import org.apache.spark.sql.sources.Filter
-import org.apache.spark.sql.types.StructType
-
-import java.util.Optional
 
 import scala.collection.JavaConverters._
 
-abstract class PaimonBaseScan(
-    table: InnerTable,
-    requiredSchema: StructType,
-    filters: Seq[Predicate],
-    reservedFilters: Seq[Filter],
-    pushDownLimit: Option[Int])
-  extends Scan
-  with SupportsReportStatistics
-  with ScanHelper
-  with ColumnPruningAndPushDown
-  with StatisticsHelper {
-
-  protected var inputPartitions: Seq[PaimonInputPartition] = _
-
-  protected var inputSplits: Array[Split] = _
-
-  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
-
-  lazy val statistics: Optional[stats.Statistics] = table.statistics()
+abstract class PaimonBaseScan(table: InnerTable)
+  extends BaseScan
+  with PaimonSupportsRuntimeFiltering
+  with SQLConfHelper {
 
   private lazy val paimonMetricsRegistry: SparkMetricRegistry = SparkMetricRegistry()
 
-  lazy val requiredStatsSchema: StructType = {
-    val fieldNames =
-      readTableRowType.getFields.asScala.map(_.name) ++ reservedFilters.flatMap(_.references)
-    StructType(tableSchema.filter(field => fieldNames.contains(field.name)))
-  }
-
-  @VisibleForTesting
-  def getOriginSplits: Array[Split] = {
-    if (inputSplits == null) {
-      inputSplits = readBuilder
-        .newScan()
-        .asInstanceOf[InnerTableScan]
-        .withMetricRegistry(paimonMetricsRegistry)
-        .plan()
-        .splits()
-        .asScala
-        .toArray
-    }
-    inputSplits
-  }
-
-  final def lazyInputPartitions: Seq[PaimonInputPartition] = {
-    if (inputPartitions == null) {
-      inputPartitions = getInputPartitions(getOriginSplits)
-    }
-    inputPartitions
+  protected def getInputSplits: Array[Split] = {
+    readBuilder
+      .newScan()
+      .asInstanceOf[InnerTableScan]
+      .withMetricRegistry(paimonMetricsRegistry)
+      .plan()
+      .splits()
+      .asScala
+      .toArray
   }
 
   override def toBatch: Batch = {
-    PaimonBatch(lazyInputPartitions, readBuilder, coreOptions.blobAsDescriptor(), metadataColumns)
+    ensureNoFullScan()
+    super.toBatch
   }
 
   override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
     new PaimonMicroBatchStream(table.asInstanceOf[DataTable], readBuilder, checkpointLocation)
   }
 
-  override def estimateStatistics(): Statistics = {
-    val stats = PaimonStatistics(this)
-    // When using paimon stats, we need to perform additional FilterEstimation with reservedFilters on stats.
-    if (stats.paimonStatsEnabled && reservedFilters.nonEmpty) {
-      filterStatistics(stats, reservedFilters)
-    } else {
-      stats
-    }
-  }
-
   override def supportedCustomMetrics: Array[CustomMetric] = {
-    Array(
-      PaimonNumSplitMetric(),
-      PaimonSplitSizeMetric(),
-      PaimonAvgSplitSizeMetric(),
-      PaimonPlanningDurationMetric(),
-      PaimonScannedManifestsMetric(),
-      PaimonSkippedTableFilesMetric(),
-      PaimonResultedTableFilesMetric()
-    )
+    super.supportedCustomMetrics ++
+      Array(
+        PaimonPlanningDurationMetric(),
+        PaimonScannedSnapshotIdMetric(),
+        PaimonScannedManifestsMetric(),
+        PaimonSkippedTableFilesMetric()
+      )
   }
 
   override def reportDriverMetrics(): Array[CustomTaskMetric] = {
     paimonMetricsRegistry.buildSparkScanMetrics()
   }
 
-  override def description(): String = {
-    val pushedFiltersStr = if (filters.nonEmpty) {
-      ", PushedFilters: [" + filters.mkString(",") + "]"
-    } else {
-      ""
-    }
-    val pushedTopNFilterStr = if (pushDownTopN.nonEmpty) {
-      s", PushedTopNFilter: [${pushDownTopN.get.toString}]"
-    } else {
-      ""
+  private def ensureNoFullScan(): Unit = {
+    if (OptionUtils.readAllowFullScan()) {
+      return
     }
 
-    val latestSnapshotId = if (table.latestSnapshot().isPresent) {
-      Some(table.latestSnapshot().get.id)
-    } else {
-      None
-    }
-
-    val latestSnapshotIdStr = if (latestSnapshotId.isDefined) {
-      s", LatestSnapshotId: [${latestSnapshotId.get}]"
-    } else {
-      ""
-    }
-
-    val currentSnapshot =
-      try {
-        table match {
-          case dataTable: DataTable =>
-            TimeTravelUtil.tryTravelToSnapshot(
-              coreOptions.toConfiguration,
-              dataTable.snapshotManager(),
-              dataTable.tagManager())
-          case _ =>
-            Optional.empty()
+    table match {
+      case t: FileStoreTable if !t.partitionKeys().isEmpty =>
+        val skippedFiles = paimonMetricsRegistry.buildSparkScanMetrics().collectFirst {
+          case m: PaimonSkippedTableFilesTaskMetric => m.value
         }
-      } catch {
-        case _: Exception => Optional.empty()
-      }
-
-    val currentSnapshotIdStr = if (currentSnapshot.isPresent) {
-      s", currentSnapshotId: [${currentSnapshot.get().id}]"
-    } else if (latestSnapshotId.isDefined) {
-      s", currentSnapshotId: [${latestSnapshotId.get}]"
-    } else {
-      ""
+        if (skippedFiles.contains(0)) {
+          throw new RuntimeException("Full scan is not supported.")
+        }
+      case _ =>
     }
-
-    s"PaimonScan: [${table.name}]" + latestSnapshotIdStr + currentSnapshotIdStr + pushedFiltersStr + pushedTopNFilterStr +
-      pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

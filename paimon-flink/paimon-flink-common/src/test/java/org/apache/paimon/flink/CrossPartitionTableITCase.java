@@ -198,7 +198,7 @@ public class CrossPartitionTableITCase extends CatalogITCaseBase {
             throws ExecutionException, InterruptedException {
         sql(
                 "create table cross_postpone (pt int, k int, v int, primary key (k) not enforced) "
-                        + "partitioned by (pt) with ('bucket' = '-2')");
+                        + "partitioned by (pt) with ('bucket' = '-2', 'postpone.batch-write-fixed-bucket' = 'false')");
         sql("insert into cross_postpone values (1, 1, 1)");
         sql("insert into cross_postpone values (2, 2, 2)");
         tEnv.executeSql("CALL sys.compact(`table` => 'default.cross_postpone')").await();

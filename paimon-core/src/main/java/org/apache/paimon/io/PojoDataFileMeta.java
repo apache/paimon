@@ -23,10 +23,13 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.SimpleStats;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import javax.annotation.Nullable;
 
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -226,9 +229,7 @@ public class PojoDataFileMeta implements DataFileMeta {
 
     @Override
     public Optional<String> externalPathDir() {
-        return Optional.ofNullable(externalPath)
-                .map(Path::new)
-                .map(p -> p.getParent().toUri().toString());
+        return Optional.ofNullable(externalPath).map(Path::new).map(p -> p.getParent().toString());
     }
 
     @Override
@@ -451,6 +452,37 @@ public class PojoDataFileMeta implements DataFileMeta {
                 externalPath,
                 firstRowId,
                 writeCols);
+    }
+
+    @Override
+    public RoaringBitmap32 toFileSelection(List<Range> rowRanges) {
+        RoaringBitmap32 selection = null;
+        if (rowRanges != null) {
+            if (firstRowId() == null) {
+                throw new IllegalStateException(
+                        "firstRowId is null, can't convert to file selection");
+            }
+            selection = new RoaringBitmap32();
+            Range fileRange = nonNullRowIdRange();
+            List<Range> result = new ArrayList<>();
+            for (Range expected : rowRanges) {
+                Range intersection = Range.intersection(fileRange, expected);
+                if (intersection != null) {
+                    result.add(intersection);
+                }
+            }
+
+            if (result.size() == 1 && result.get(0).equals(fileRange)) {
+                return null;
+            }
+
+            for (Range range : result) {
+                for (long rowId = range.from; rowId <= range.to; rowId++) {
+                    selection.add((int) (rowId - fileRange.from));
+                }
+            }
+        }
+        return selection;
     }
 
     @Override

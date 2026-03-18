@@ -29,7 +29,6 @@ import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtensio
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,10 +37,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.LOOKUP_LOCAL_FILE_TYPE;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Benchmark for measuring the throughput of writing for lookup. */
@@ -87,43 +85,26 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
                         .setNumWarmupIters(1)
                         .setOutputPerIteration(true);
         for (int valueLength : VALUE_LENGTHS) {
-            for (CoreOptions.LookupLocalFileType fileType :
-                    CoreOptions.LookupLocalFileType.values()) {
-                CoreOptions options =
-                        CoreOptions.fromMap(
-                                Collections.singletonMap(
-                                        LOOKUP_LOCAL_FILE_TYPE.key(), fileType.name()));
-                Pair<String, LookupStoreFactory.Context> pair =
-                        writeData(tempDir, options, inputs, valueLength, false, bloomFilterEnabled);
-                benchmark.addCase(
-                        String.format(
-                                "%s-read-%dB-value-%d-num",
-                                fileType.name(), valueLength, randomInputs.length),
-                        5,
-                        () -> {
-                            try {
-                                readData(
-                                        options,
-                                        randomInputs,
-                                        pair.getLeft(),
-                                        pair.getRight(),
-                                        nullResult);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
-            }
+            CoreOptions options = new CoreOptions(new HashMap<>());
+            String path =
+                    writeData(tempDir, options, inputs, valueLength, false, bloomFilterEnabled);
+            benchmark.addCase(
+                    String.format("read-%dB-value-%d-num", valueLength, randomInputs.length),
+                    5,
+                    () -> {
+                        try {
+                            readData(options, randomInputs, path, nullResult);
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
         }
 
         benchmark.run();
     }
 
     private void readData(
-            CoreOptions options,
-            byte[][] randomInputs,
-            String filePath,
-            LookupStoreFactory.Context context,
-            boolean nullResult)
+            CoreOptions options, byte[][] randomInputs, String filePath, boolean nullResult)
             throws IOException {
         LookupStoreFactory factory =
                 LookupStoreFactory.create(
@@ -133,7 +114,7 @@ public class LookupReaderBenchmark extends AbstractLookupBenchmark {
                                 .createSliceComparator());
 
         File file = new File(filePath);
-        LookupStoreReader reader = factory.createReader(file, context);
+        LookupStoreReader reader = factory.createReader(file);
         for (byte[] input : randomInputs) {
             if (nullResult) {
                 assertThat(reader.lookup(input)).isNull();

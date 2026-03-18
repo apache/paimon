@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.util
 
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.schema.PaimonMetadataColumn.{DV_META_COLUMNS, ROW_TRACKING_META_COLUMNS}
+import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PATH_AND_INDEX_META_COLUMNS, ROW_TRACKING_META_COLUMNS}
 import org.apache.paimon.table.{InnerTable, KnownSplitsTable}
 import org.apache.paimon.table.source.DataSplit
 
@@ -57,7 +57,7 @@ trait ScanPlanHelper extends SQLConfHelper {
   }
 
   def selectWithDvMeta(data: DataFrame): DataFrame = {
-    selectWithAdditionalCols(data, DV_META_COLUMNS)
+    selectWithAdditionalCols(data, PATH_AND_INDEX_META_COLUMNS)
   }
 
   def selectWithRowTracking(data: DataFrame): DataFrame = {

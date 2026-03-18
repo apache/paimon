@@ -22,7 +22,7 @@ import org.apache.paimon.spark.commands.UpdatePaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UpdateTable}
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, LogicalPlan, UpdateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 
 import scala.collection.JavaConverters._
@@ -41,21 +41,36 @@ object PaimonUpdateTable
 
         table.getTable match {
           case paimonTable: FileStoreTable =>
+            val relation = PaimonRelation.getPaimonRelation(u.table)
+
             val primaryKeys = paimonTable.primaryKeys().asScala.toSeq
             if (!validUpdateAssignment(u.table.outputSet, primaryKeys, assignments)) {
               throw new RuntimeException("Can't update the primary key column.")
             }
 
-            val relation = PaimonRelation.getPaimonRelation(u.table)
             if (paimonTable.coreOptions().dataEvolutionEnabled()) {
               throw new RuntimeException(
                 "Update operation is not supported when data evolution is enabled yet.")
             }
-            UpdatePaimonTableCommand(
-              relation,
-              paimonTable,
-              condition.getOrElse(TrueLiteral),
-              assignments)
+
+            val alignedExpressions =
+              generateAlignedExpressions(relation.output, assignments).zip(relation.output)
+
+            val alignedAssignments = alignedExpressions.map {
+              case (expression, field) => Assignment(field, expression)
+            }
+
+            val alignedUpdateTable = u.copy(assignments = alignedAssignments)
+
+            if (!shouldFallbackToV1Update(table, alignedUpdateTable)) {
+              alignedUpdateTable
+            } else {
+              UpdatePaimonTableCommand(
+                relation,
+                paimonTable,
+                condition.getOrElse(TrueLiteral),
+                alignedExpressions)
+            }
 
           case _ =>
             throw new RuntimeException("Update Operation is only supported for FileStoreTable.")
