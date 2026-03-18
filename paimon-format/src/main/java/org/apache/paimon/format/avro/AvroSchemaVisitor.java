@@ -24,6 +24,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
@@ -53,6 +54,8 @@ public interface AvroSchemaVisitor<T> {
                 if (type instanceof MapType) {
                     MapType mapType = (MapType) type;
                     return visitArrayMap(schema, mapType.getKeyType(), mapType.getValueType());
+                } else if (type instanceof VectorType) {
+                    return visitArrayVector(schema, ((VectorType) type).getElementType());
                 } else {
                     return visitArray(
                             schema, type == null ? null : ((ArrayType) type).getElementType());
@@ -154,6 +157,8 @@ public interface AvroSchemaVisitor<T> {
     T visitDecimal(Integer precision, Integer scale);
 
     T visitArray(Schema schema, DataType elementType);
+
+    T visitArrayVector(Schema schema, DataType elementType);
 
     T visitArrayMap(Schema schema, DataType keyType, DataType valueType);
 
