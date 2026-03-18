@@ -22,6 +22,7 @@ from pypaimon.common.json_util import json_field
 
 SYSTEM_TABLE_SPLITTER = '$'
 SYSTEM_BRANCH_PREFIX = 'branch-'
+DEFAULT_MAIN_BRANCH = 'main'
 
 
 @dataclass
