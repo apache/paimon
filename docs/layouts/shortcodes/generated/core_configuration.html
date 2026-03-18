@@ -219,6 +219,12 @@ under the License.
             <td>Whether enable incremental clustering.</td>
         </tr>
         <tr>
+            <td><h5>clustering.incremental.mode</h5></td>
+            <td style="word-wrap: break-word;">global-sort</td>
+            <td><p>Enum</p></td>
+            <td>The sort mode for incremental clustering compaction. 'global-sort' (default) performs a global range shuffle so output files are globally ordered. 'local-sort' skips the global shuffle and only sorts rows within each compaction task, producing files that are internally ordered. 'local-sort' is cheaper and sufficient for Parquet lookup optimizations.<br /><br />Possible values:<ul><li>"global-sort": Perform global range shuffle and then local sort. Output files are globally ordered but require network shuffling.</li><li>"local-sort": Sort rows only within each compaction task without global shuffle. Every output file is internally ordered.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>clustering.incremental.optimize-write</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
