@@ -673,16 +673,9 @@ public class JdbcCatalogTest extends CatalogTestBase {
         Schema schema = schemaWithCustomPath(customDir);
         Identifier identifier = Identifier.create("test_db", "nosync_table");
 
-        jdbcCatalog.createTable(identifier, schema, false);
-
-        // Path should still be stored even when sync is disabled
-        Map<String, String> storedProps =
-                fetchTableProperties(jdbcCatalog, "test_db", "nosync_table");
-        assertThat(storedProps)
-                .containsEntry(CoreOptions.PATH.key(), new Path(customDir).toString());
-
-        // Other properties should NOT be stored (sync disabled)
-        assertThat(storedProps).hasSize(1);
+        // Custom path requires syncTableProperties=true
+        assertThatThrownBy(() -> jdbcCatalog.createTable(identifier, schema, false))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @Test
@@ -804,7 +797,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
 
     @Test
     public void testLoadTableSchemaWithCustomPath() throws Exception {
-        JdbcCatalog jdbcCatalog = initCatalogWithSync(false);
+        JdbcCatalog jdbcCatalog = initCatalogWithSync(true);
         jdbcCatalog.createDatabase("test_db", false);
 
         String customDir = warehouse + "/custom_load/my_table";
