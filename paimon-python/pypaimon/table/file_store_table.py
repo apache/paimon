@@ -61,7 +61,8 @@ class FileStoreTable(Table):
         self.is_primary_key_table = bool(self.primary_keys)
         self.total_buckets = self.options.bucket()
 
-        self.schema_manager = SchemaManager(file_io, table_path)
+        current_branch = self.options.branch()
+        self.schema_manager = SchemaManager(file_io, table_path, branch=current_branch)
 
     @classmethod
     def from_path(cls, table_path: str) -> 'FileStoreTable':
