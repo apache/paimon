@@ -36,7 +36,8 @@ class OSSFileIOTest(unittest.TestCase):
         access_key_id = os.environ.get("OSS_ACCESS_KEY_ID")
         access_key_secret = os.environ.get("OSS_ACCESS_KEY_SECRET")
         endpoint = os.environ.get("OSS_ENDPOINT")
-        
+        oss_impl = os.environ.get("OSS_IMPL", "default")
+
         if not self.bucket:
             self.skipTest("test bucket is not configured")
             return
@@ -56,6 +57,7 @@ class OSSFileIOTest(unittest.TestCase):
             OssOptions.OSS_ACCESS_KEY_ID.key(): access_key_id,
             OssOptions.OSS_ACCESS_KEY_SECRET.key(): access_key_secret,
             OssOptions.OSS_ENDPOINT.key(): endpoint,
+            OssOptions.OSS_IMPL.key(): oss_impl,
         })
         
         # Create PyArrowFileIO instance
