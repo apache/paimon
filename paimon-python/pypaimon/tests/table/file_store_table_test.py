@@ -143,7 +143,7 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertIsInstance(branch_manager, FileSystemBranchManager)
 
         # Verify branch_manager has correct current branch
-        from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
+        from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
         self.assertEqual(branch_manager.current_branch, DEFAULT_MAIN_BRANCH)
 
         # Test basic branch operations
@@ -238,3 +238,44 @@ class FileStoreTableTest(unittest.TestCase):
         finally:
             # Restore original catalog environment
             self.table.catalog_environment = original_env
+
+    def test_current_branch(self):
+        """Test that current_branch returns the branch from options."""
+        from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
+
+        # Default table should have main branch
+        self.assertEqual(self.table.current_branch(), DEFAULT_MAIN_BRANCH)
+
+        # Table with branch option should return that branch
+        branch_name = "feature_branch"
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={
+                CoreOptions.BUCKET.key(): "2",
+                "branch": branch_name
+            }
+        )
+        self.catalog.create_table('default.test_current_branch', schema, False)
+        branch_table = self.catalog.get_table('default.test_current_branch')
+        self.assertEqual(branch_table.current_branch(), branch_name)
+
+    def test_copy_with_branch(self):
+        """Test copy method with branch option."""
+        branch_name = "test_branch"
+
+        # Copy table with branch option
+        new_options = {"branch": branch_name}
+        copied_table = self.table.copy(new_options)
+
+        # Verify branch is set correctly
+        self.assertEqual(copied_table.current_branch(), branch_name)
+
+        # Verify schema_manager has the correct branch
+        from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
+        self.assertEqual(self.table.schema_manager.branch, DEFAULT_MAIN_BRANCH)
+        self.assertEqual(copied_table.schema_manager.branch, branch_name)
+
+        # Verify other properties are preserved
+        self.assertEqual(copied_table.identifier, self.table.identifier)
+        self.assertEqual(copied_table.table_path, self.table.table_path)

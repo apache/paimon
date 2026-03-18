@@ -22,8 +22,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from pypaimon.consumer.consumer import Consumer
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 
-DEFAULT_MAIN_BRANCH = "main"
 BRANCH_PREFIX = "branch-"
 
 

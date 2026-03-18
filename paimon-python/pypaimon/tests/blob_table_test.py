@@ -1138,6 +1138,69 @@ class DataBlobWriterTest(unittest.TestCase):
         self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
         self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
 
+    def test_to_arrow_batch_reader(self):
+        import random
+        from pypaimon import Schema
+        from pypaimon.table.row.blob import BlobDescriptor
+
+        pa_schema = pa.schema([
+            ('id', pa.int32()),
+            ('pic1', pa.large_binary()),
+            ('pic2', pa.large_binary()),
+        ])
+
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'blob-descriptor-field': 'pic2'
+            }
+        )
+        self.catalog.create_table('test_db.test_to_arrow_batch_reader', schema, False)
+        table = self.catalog.get_table('test_db.test_to_arrow_batch_reader')
+
+        random.seed(8)
+        pic1_data = bytes(bytearray([random.randint(0, 255) for _ in range(1024)]))
+
+        external_blob_path = os.path.join(self.temp_dir, 'mixed_external_blob_batch_reader')
+        pic2_data = b'pic2_batch_reader_payload'
+        with open(external_blob_path, 'wb') as f:
+            f.write(pic2_data)
+        descriptor = BlobDescriptor(external_blob_path, 0, len(pic2_data))
+
+        test_data = pa.Table.from_pydict({
+            'id': [1],
+            'pic1': [pic1_data],
+            'pic2': [descriptor.serialize()]
+        }, schema=pa_schema)
+
+        write_builder = table.new_batch_write_builder()
+        writer = write_builder.new_write()
+        writer.write_arrow(test_data)
+        commit_messages = writer.prepare_commit()
+        write_builder.new_commit().commit(commit_messages)
+        writer.close()
+
+        read_builder = table.new_read_builder()
+        splits = read_builder.new_scan().plan().splits()
+        batch_reader = read_builder.new_read().to_arrow_batch_reader(splits)
+
+        batches = []
+        while True:
+            try:
+                batch = batch_reader.read_next_batch()
+            except StopIteration:
+                break
+            if batch.num_rows > 0:
+                batches.append(batch)
+
+        self.assertGreater(len(batches), 0, "Should have at least one batch")
+        result = pa.Table.from_batches(batches)
+        self.assertEqual(result.num_rows, 1)
+        self.assertEqual(result.column('pic1').to_pylist()[0], pic1_data)
+        self.assertEqual(result.column('pic2').to_pylist()[0], pic2_data)
+
     def test_blob_descriptor_fields_rejects_non_descriptor_input(self):
         from pypaimon import Schema
 
