@@ -137,8 +137,9 @@ class DataFileMeta:
         s = str(value)
         return len(s) == 0 or s.isspace()
 
-    def set_file_path(self, table_path: str, partition: GenericRow, bucket: int,
-                     default_part_value: str = "__DEFAULT_PARTITION__"):
+    def set_file_path(
+            self, table_path: str, partition: GenericRow, bucket: int,
+            default_part_value: str = "__DEFAULT_PARTITION__"):
         path_builder = table_path.rstrip('/')
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
