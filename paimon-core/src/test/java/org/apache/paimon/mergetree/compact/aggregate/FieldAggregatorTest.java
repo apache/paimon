@@ -28,6 +28,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAggregatorFactory;
+import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAvgAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolAndAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldBoolOrAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldCollectAggFactory;
@@ -40,7 +41,6 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFact
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
-import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAvgAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldProductAggFactory;
