@@ -78,6 +78,8 @@ public class ChangelogDeletion extends FileDeletionBase<Changelog> {
             if (manifestList.exists(changelog.deltaManifestList())) {
                 cleanUnusedManifestList(changelog.deltaManifestList(), skippingSet);
             }
+            // See FileDeletionBase#cleanUnusedManifests
+            // about why we need to clean base manifest
             if (manifestList.exists(changelog.baseManifestList())) {
                 cleanUnusedManifestList(changelog.baseManifestList(), skippingSet);
             }
