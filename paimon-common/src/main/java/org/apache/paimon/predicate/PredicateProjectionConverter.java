@@ -25,19 +25,62 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * A {@link PredicateVisitor} which converts {@link Predicate} with projection.
+ * An inclusive {@link PredicateVisitor} that projects predicates for a table's data rows into
+ * predicates on a projected schema (e.g. partition values).
  *
- * <p>TODO: merge PredicateBuilder.transformFieldMapping.
+ * <p>The visitor is inclusive: if the original predicate matches a row, then the projected
+ * predicate will match that row's projected values. In other words, the projected predicate is a
+ * necessary condition (superset) of the original — it may have false positives but never false
+ * negatives.
+ *
+ * <p>Projection semantics by node type:
+ *
+ * <ul>
+ *   <li><b>Leaf:</b> projectable iff all referenced fields exist in the projection. Returns the
+ *       predicate with remapped field indices, or empty if any field is outside the projection.
+ *   <li><b>AND:</b> projects each child independently; keeps only projectable children and drops
+ *       the rest. This is safe because if {@code AND(A,B)} is true then A is true, so A's
+ *       projection is true. Returns empty if no children are projectable.
+ *   <li><b>OR:</b> all children must be projectable. If any child cannot be projected, we cannot
+ *       guarantee inclusiveness (that child might match a row whose projected values don't satisfy
+ *       any projected branch). Returns empty if any child fails.
+ * </ul>
  */
 public class PredicateProjectionConverter implements PredicateVisitor<Optional<Predicate>> {
 
     private final Map<Integer, Integer> reversed;
 
-    public PredicateProjectionConverter(int[] projection) {
-        this.reversed = new HashMap<>();
+    private PredicateProjectionConverter(Map<Integer, Integer> reversed) {
+        this.reversed = reversed;
+    }
+
+    /**
+     * Creates a converter from a projection array.
+     *
+     * @param projection array where {@code projection[projectedIndex] = originalIndex}
+     */
+    public static PredicateProjectionConverter fromProjection(int[] projection) {
+        Map<Integer, Integer> mapping = new HashMap<>();
         for (int i = 0; i < projection.length; i++) {
-            reversed.put(projection[i], i);
+            mapping.put(projection[i], i);
         }
+        return new PredicateProjectionConverter(mapping);
+    }
+
+    /**
+     * Creates a converter from a direct field index mapping.
+     *
+     * @param fieldIdxMapping array where {@code fieldIdxMapping[originalIndex] = projectedIndex},
+     *     or a negative value if the field is not in the projection
+     */
+    public static PredicateProjectionConverter fromMapping(int[] fieldIdxMapping) {
+        Map<Integer, Integer> mapping = new HashMap<>();
+        for (int i = 0; i < fieldIdxMapping.length; i++) {
+            if (fieldIdxMapping[i] >= 0) {
+                mapping.put(i, fieldIdxMapping[i]);
+            }
+        }
+        return new PredicateProjectionConverter(mapping);
     }
 
     @Override
@@ -70,9 +113,17 @@ public class PredicateProjectionConverter implements PredicateVisitor<Optional<P
                 converted.add(optional.get());
             } else {
                 if (!isAnd) {
+                    // OR: all children must be projectable
                     return Optional.empty();
                 }
+                // AND: skip non-projectable children (inclusive)
             }
+        }
+        if (converted.isEmpty()) {
+            return Optional.empty();
+        }
+        if (converted.size() == 1) {
+            return Optional.of(converted.get(0));
         }
         return Optional.of(new CompoundPredicate(predicate.function(), converted));
     }

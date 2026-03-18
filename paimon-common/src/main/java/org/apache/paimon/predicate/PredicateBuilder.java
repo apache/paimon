@@ -479,40 +479,7 @@ public class PredicateBuilder {
 
     public static Optional<Predicate> transformFieldMapping(
             Predicate predicate, int[] fieldIdxMapping) {
-        // TODO: merge PredicateProjectionConverter
-        if (predicate instanceof CompoundPredicate) {
-            CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
-            List<Predicate> children = new ArrayList<>();
-            for (Predicate child : compoundPredicate.children()) {
-                Optional<Predicate> mapped = transformFieldMapping(child, fieldIdxMapping);
-                if (mapped.isPresent()) {
-                    children.add(mapped.get());
-                } else {
-                    return Optional.empty();
-                }
-            }
-            return Optional.of(new CompoundPredicate(compoundPredicate.function(), children));
-        } else if (predicate instanceof LeafPredicate) {
-            LeafPredicate leafPredicate = (LeafPredicate) predicate;
-            List<Object> inputs = leafPredicate.transform().inputs();
-            List<Object> newInputs = new ArrayList<>(inputs.size());
-            for (Object input : inputs) {
-                if (input instanceof FieldRef) {
-                    FieldRef fieldRef = (FieldRef) input;
-                    int mappedIndex = fieldIdxMapping[fieldRef.index()];
-                    if (mappedIndex >= 0) {
-                        newInputs.add(new FieldRef(mappedIndex, fieldRef.name(), fieldRef.type()));
-                    } else {
-                        return Optional.empty();
-                    }
-                } else {
-                    newInputs.add(input);
-                }
-            }
-            return Optional.of(leafPredicate.copyWithNewInputs(newInputs));
-        } else {
-            return Optional.empty();
-        }
+        return predicate.visit(PredicateProjectionConverter.fromMapping(fieldIdxMapping));
     }
 
     public static boolean containsFields(Predicate predicate, Set<String> fields) {
