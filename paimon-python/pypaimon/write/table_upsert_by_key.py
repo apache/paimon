@@ -284,23 +284,15 @@ class TableUpsertByKey:
             input_key_set:   Set of composite key tuples from the input data.
         """
         read_builder = self.table.new_read_builder()
-        predicate_builder = read_builder.new_predicate_builder()
 
-        # Scan predicates: partition equality + per-column is_in for file pruning
-        predicates = []
         if partition_spec:
-            predicates.extend([
+            predicate_builder = read_builder.new_predicate_builder()
+            sub_predicates = [
                 predicate_builder.equal(k, v)
                 for k, v in partition_spec.items()
-            ])
-        for idx, key in enumerate(match_keys):
-            distinct_values = list({kt[idx] for kt in input_key_set})
-            predicates.append(predicate_builder.is_in(key, distinct_values))
-
-        if predicates:
-            read_builder = read_builder.with_filter(
-                predicate_builder.and_predicates(predicates)
-            )
+            ]
+            partition_predicate = predicate_builder.and_predicates(sub_predicates)
+            read_builder = read_builder.with_filter(partition_predicate)
 
         scan = read_builder.new_scan()
         splits = scan.plan().splits()
