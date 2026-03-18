@@ -46,7 +46,7 @@ class BTreeFileFooter:
     allowing efficient navigation of the B-tree index file.
     """
     
-    MAGIC_NUMBER = 198732882
+    MAGIC_NUMBER = 0x50425449
     CURRENT_VERSION = 1
     ENCODED_LENGTH = 52
 

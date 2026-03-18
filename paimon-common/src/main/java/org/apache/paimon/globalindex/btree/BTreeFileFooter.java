@@ -31,7 +31,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** The Footer for BTree file. */
 public class BTreeFileFooter {
 
-    public static final int MAGIC_NUMBER = 198732882;
+    public static final int MAGIC_NUMBER = 0x50425449;
     public static final int CURRENT_VERSION = 1;
     public static final int ENCODED_LENGTH = 52;
 
