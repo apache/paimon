@@ -232,14 +232,8 @@ public class JdbcCatalog extends AbstractCatalog {
         execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
         // Delete properties from paimon_database_properties
         execute(connections, JdbcUtils.DELETE_ALL_DATABASE_PROPERTIES_SQL, catalogKey, name);
-        // Delete table properties from paimon_table_properties
-        if (syncTableProperties()) {
-            execute(
-                    connections,
-                    JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_FOR_DB_SQL,
-                    catalogKey,
-                    name);
-        }
+        // Always delete table properties (needed for custom path entries)
+        execute(connections, JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_FOR_DB_SQL, catalogKey, name);
     }
 
     @Override
@@ -293,6 +287,10 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
+            // Retrieve table location and custom-path flag BEFORE deleting JDBC metadata
+            Path path = getTableLocation(identifier);
+            boolean customPath = isCustomTablePath(identifier);
+
             int deletedRecords =
                     execute(
                             connections,
@@ -305,15 +303,20 @@ public class JdbcCatalog extends AbstractCatalog {
                 LOG.info("Skipping drop, table does not exist: {}", identifier);
                 return;
             }
-            if (syncTableProperties()) {
-                execute(
-                        connections,
-                        JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
-                        catalogKey,
-                        identifier.getDatabaseName(),
-                        identifier.getTableName());
+
+            // Always delete table properties (needed for custom path entries)
+            execute(
+                    connections,
+                    JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName());
+
+            // If custom path: skip filesystem deletion (external table keeps its data)
+            if (customPath) {
+                return;
             }
-            Path path = getTableLocation(identifier);
+
             try {
                 if (fileIO.exists(path)) {
                     fileIO.deleteDirectoryQuietly(path);
@@ -334,12 +337,16 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
         try {
-            // create table file
-            SchemaManager schemaManager = getSchemaManager(identifier);
+            // Determine table location before table exists in JDBC
+            Path tableLocation = initialTableLocation(schema.options(), identifier);
+            boolean externalTable = schema.options().containsKey(CoreOptions.PATH.key());
+
+            // create table file using the determined location
+            SchemaManager schemaManager = new SchemaManager(fileIO, tableLocation);
             TableSchema tableSchema =
-                    runWithLock(identifier, () -> schemaManager.createTable(schema));
-            // Update schema metadata
-            Path path = getTableLocation(identifier);
+                    runWithLock(identifier, () -> schemaManager.createTable(schema, externalTable));
+
+            // Insert table record into paimon_tables
             if (JdbcUtils.insertTable(
                     connections,
                     catalogKey,
@@ -348,22 +355,40 @@ public class JdbcCatalog extends AbstractCatalog {
                 LOG.debug("Successfully committed to new table: {}", identifier);
             } else {
                 try {
-                    fileIO.deleteDirectoryQuietly(path);
+                    if (!externalTable) {
+                        fileIO.deleteDirectoryQuietly(tableLocation);
+                    }
                 } catch (Exception ee) {
-                    LOG.error("Delete directory[{}] fail for table {}", path, identifier, ee);
+                    LOG.error(
+                            "Delete directory[{}] fail for table {}",
+                            tableLocation,
+                            identifier,
+                            ee);
                 }
                 throw new RuntimeException(
                         String.format(
                                 "Failed to create table %s in catalog %s",
                                 identifier.getFullName(), catalogKey));
             }
+
+            // Always store path property for custom-path tables
+            Map<String, String> propsToStore = new HashMap<>();
+            if (externalTable) {
+                propsToStore.put(CoreOptions.PATH.key(), tableLocation.toString());
+            }
             if (syncTableProperties()) {
+                Map<String, String> tableProps = collectTableProperties(tableSchema);
+                // Avoid duplicate path entry
+                tableProps.remove(CoreOptions.PATH.key());
+                propsToStore.putAll(tableProps);
+            }
+            if (!propsToStore.isEmpty()) {
                 JdbcUtils.insertTableProperties(
                         connections,
                         catalogKey,
                         identifier.getDatabaseName(),
                         identifier.getTableName(),
-                        collectTableProperties(tableSchema));
+                        propsToStore);
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
@@ -373,24 +398,32 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
         try {
+            // Check custom path BEFORE renaming metadata
+            boolean customPath = isCustomTablePath(fromTable);
+            Path fromPath = getTableLocation(fromTable);
+
             // update table metadata info
             updateTable(connections, catalogKey, fromTable, toTable);
-            if (syncTableProperties()) {
-                execute(
-                        connections,
-                        JdbcUtils.RENAME_TABLE_PROPERTIES_SQL,
-                        toTable.getDatabaseName(),
-                        toTable.getObjectName(),
-                        catalogKey,
-                        fromTable.getDatabaseName(),
-                        fromTable.getObjectName());
+
+            // Always update table properties (needed for custom path entries)
+            execute(
+                    connections,
+                    JdbcUtils.RENAME_TABLE_PROPERTIES_SQL,
+                    toTable.getDatabaseName(),
+                    toTable.getObjectName(),
+                    catalogKey,
+                    fromTable.getDatabaseName(),
+                    fromTable.getObjectName());
+
+            // If custom path: skip filesystem rename (data stays at same location)
+            if (customPath) {
+                return;
             }
 
-            Path fromPath = getTableLocation(fromTable);
             if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
                 // the file system and tables in the Hive Metastore.
-                Path toPath = getTableLocation(toTable);
+                Path toPath = super.getTableLocation(toTable);
                 try {
                     fileIO.rename(fromPath, toPath);
                 } catch (IOException e) {
@@ -414,6 +447,15 @@ public class JdbcCatalog extends AbstractCatalog {
         try {
             runWithLock(identifier, () -> schemaManager.commitChanges(changes));
             if (syncTableProperties()) {
+                // Save custom path before DELETE_ALL so we can re-insert it
+                Optional<String> customPath =
+                        JdbcUtils.getTableProperty(
+                                connections,
+                                catalogKey,
+                                identifier.getDatabaseName(),
+                                identifier.getTableName(),
+                                CoreOptions.PATH.key());
+
                 TableSchema updatedSchema = schemaManager.latest().get();
                 execute(
                         connections,
@@ -421,12 +463,18 @@ public class JdbcCatalog extends AbstractCatalog {
                         catalogKey,
                         identifier.getDatabaseName(),
                         identifier.getTableName());
-                JdbcUtils.insertTableProperties(
-                        connections,
-                        catalogKey,
-                        identifier.getDatabaseName(),
-                        identifier.getTableName(),
-                        collectTableProperties(updatedSchema));
+
+                Map<String, String> propsToStore = collectTableProperties(updatedSchema);
+                // Re-insert custom path if it was stored
+                customPath.ifPresent(p -> propsToStore.put(CoreOptions.PATH.key(), p));
+                if (!propsToStore.isEmpty()) {
+                    JdbcUtils.insertTableProperties(
+                            connections,
+                            catalogKey,
+                            identifier.getDatabaseName(),
+                            identifier.getTableName(),
+                            propsToStore);
+                }
             }
         } catch (TableNotExistException
                 | ColumnAlreadyExistException
@@ -449,6 +497,23 @@ public class JdbcCatalog extends AbstractCatalog {
         return tableSchemaInFileSystem(tableLocation, identifier.getBranchNameOrDefault())
                 .orElseThrow(
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
+    }
+
+    @Override
+    protected boolean allowCustomTablePath() {
+        return true;
+    }
+
+    @Override
+    public Path getTableLocation(Identifier identifier) {
+        Optional<String> storedPath =
+                JdbcUtils.getTableProperty(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        CoreOptions.PATH.key());
+        return storedPath.map(Path::new).orElse(super.getTableLocation(identifier));
     }
 
     @Override
@@ -550,20 +615,33 @@ public class JdbcCatalog extends AbstractCatalog {
                 LOG.error("Failed to repair table: {}", identifier);
             }
         }
+
+        // Always clean and re-insert table properties during repair
+        execute(
+                connections,
+                JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
+                catalogKey,
+                identifier.getDatabaseName(),
+                identifier.getTableName());
+
+        Map<String, String> propsToStore = new HashMap<>();
+        // Check if the table has a custom path (path from schema != default location)
+        Path defaultLocation = super.getTableLocation(identifier);
+        if (!tableLocation.equals(defaultLocation)) {
+            propsToStore.put(CoreOptions.PATH.key(), tableLocation.toString());
+        }
         if (syncTableProperties()) {
-            // Delete existing properties and reinsert from filesystem schema
-            execute(
-                    connections,
-                    JdbcUtils.DELETE_ALL_TABLE_PROPERTIES_SQL,
-                    catalogKey,
-                    identifier.getDatabaseName(),
-                    identifier.getTableName());
+            Map<String, String> tableProps = collectTableProperties(tableSchema);
+            tableProps.remove(CoreOptions.PATH.key());
+            propsToStore.putAll(tableProps);
+        }
+        if (!propsToStore.isEmpty()) {
             JdbcUtils.insertTableProperties(
                     connections,
                     catalogKey,
                     identifier.getDatabaseName(),
                     identifier.getTableName(),
-                    collectTableProperties(tableSchema));
+                    propsToStore);
         }
     }
 
@@ -597,6 +675,23 @@ public class JdbcCatalog extends AbstractCatalog {
         Map<String, String> properties = new HashMap<>(tableSchema.options());
         properties.putAll(convertToPropertiesTableKey(tableSchema));
         return properties;
+    }
+
+    private Path initialTableLocation(Map<String, String> tableOptions, Identifier identifier) {
+        if (tableOptions.containsKey(CoreOptions.PATH.key())) {
+            return new Path(tableOptions.get(CoreOptions.PATH.key()));
+        }
+        return super.getTableLocation(identifier);
+    }
+
+    private boolean isCustomTablePath(Identifier identifier) {
+        return JdbcUtils.getTableProperty(
+                        connections,
+                        catalogKey,
+                        identifier.getDatabaseName(),
+                        identifier.getTableName(),
+                        CoreOptions.PATH.key())
+                .isPresent();
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
