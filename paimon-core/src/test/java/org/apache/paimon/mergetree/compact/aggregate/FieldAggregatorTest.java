@@ -40,7 +40,6 @@ import org.apache.paimon.mergetree.compact.aggregate.factory.FieldListaggAggFact
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMaxAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMergeMapAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldMinAggFactory;
-import org.apache.paimon.mergetree.compact.aggregate.FieldAvgAgg;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldAvgAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedPartialUpdateAggFactory;
 import org.apache.paimon.mergetree.compact.aggregate.factory.FieldNestedUpdateAggFactory;
