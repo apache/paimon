@@ -580,7 +580,30 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testVectorStoreSameFormatUsesRowDataWriter() throws Exception {
+    public void testVectorUsesRowDataWriterWithNoVectorFormat() throws Exception {
+        RowType vectorStoreSchema =
+                RowType.builder()
+                        .fields(
+                                new DataType[] {
+                                    new IntType(),
+                                    new VarCharType(),
+                                    DataTypes.VECTOR(3, DataTypes.FLOAT())
+                                },
+                                new String[] {"id", "name", "embed"})
+                        .build();
+        FileFormat format = null;
+        AppendOnlyWriter writer = createVectorStoreWriter(1024 * 1024L, format, vectorStoreSchema);
+        writer.write(rowWithVectors(1, "AAA", new float[] {1.0f, 2.0f, 3.0f}));
+        CommitIncrement increment = writer.prepareCommit(true);
+        writer.close();
+
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
+        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
+        assertThat(meta.fileName()).doesNotContain(".vector");
+    }
+
+    @Test
+    public void testVectorUsesNewWriterWithSameVectorFormat() throws Exception {
         RowType vectorStoreSchema =
                 RowType.builder()
                         .fields(
@@ -597,9 +620,18 @@ public class AppendOnlyWriterTest {
         CommitIncrement increment = writer.prepareCommit(true);
         writer.close();
 
-        assertThat(increment.newFilesIncrement().newFiles()).hasSize(1);
-        DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
-        assertThat(meta.fileName()).doesNotContain(".vector");
+        assertThat(increment.newFilesIncrement().newFiles()).hasSize(2);
+        List<DataFileMeta> metaFiles = increment.newFilesIncrement().newFiles();
+        int countWithVector = 0, countWithoutVector = 0;
+        for (DataFileMeta meta : metaFiles) {
+            if (meta.fileName().contains(".vector")) {
+                ++countWithVector;
+            } else {
+                ++countWithoutVector;
+            }
+        }
+        assertThat(countWithVector).isEqualTo(1);
+        assertThat(countWithoutVector).isEqualTo(1);
     }
 
     private SimpleColStats initStats(Integer min, Integer max, long nullCount) {
