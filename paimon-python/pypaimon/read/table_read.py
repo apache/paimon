@@ -159,6 +159,20 @@ class TableRead:
             )
         return result
 
+    def _convert_descriptor_stored_fields_for_read_batch(
+        self, batch: pyarrow.RecordBatch
+    ) -> pyarrow.RecordBatch:
+        if CoreOptions.blob_as_descriptor(self.table.options):
+            return batch
+
+        descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
+        if not descriptor_fields:
+            return batch
+
+        table = pyarrow.Table.from_batches([batch])
+        table = self._convert_descriptor_stored_fields_for_read(table)
+        return table.to_batches()[0]
+
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema) -> Iterator[pyarrow.RecordBatch]:
         chunk_size = 65536
 
@@ -169,9 +183,11 @@ class TableRead:
                     # Add row kind column if requested (default to +I for RecordBatchReader)
                     if self.include_row_kind:
                         for batch in iter(reader.read_arrow_batch, None):
-                            yield self._add_row_kind_column_to_batch(batch, "+I")
+                            yield self._convert_descriptor_stored_fields_for_read_batch(
+                                self._add_row_kind_column_to_batch(batch, "+I"))
                     else:
-                        yield from iter(reader.read_arrow_batch, None)
+                        for batch in iter(reader.read_arrow_batch, None):
+                            yield self._convert_descriptor_stored_fields_for_read_batch(batch)
                 else:
                     row_tuple_chunk = []
                     row_kind_chunk = []
@@ -187,7 +203,7 @@ class TableRead:
                                 batch = self._convert_rows_to_arrow_batch_with_row_kind(
                                     row_tuple_chunk, row_kind_chunk, schema
                                 )
-                                yield batch
+                                yield self._convert_descriptor_stored_fields_for_read_batch(batch)
                                 row_tuple_chunk = []
                                 row_kind_chunk = []
 
@@ -195,7 +211,7 @@ class TableRead:
                         batch = self._convert_rows_to_arrow_batch_with_row_kind(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
-                        yield batch
+                        yield self._convert_descriptor_stored_fields_for_read_batch(batch)
             finally:
                 reader.close()
 
