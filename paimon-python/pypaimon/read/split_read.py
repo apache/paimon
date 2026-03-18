@@ -40,6 +40,7 @@ from pypaimon.read.reader.empty_record_reader import EmptyFileRecordReader
 from pypaimon.read.reader.field_bunch import BlobBunch, DataBunch, FieldBunch
 from pypaimon.read.reader.filter_record_reader import FilterRecordReader
 from pypaimon.read.reader.format_avro_reader import FormatAvroReader
+from pypaimon.read.reader.blob_descriptor_convert_reader import BlobDescriptorConvertReader
 from pypaimon.read.reader.filter_record_batch_reader import FilterRecordBatchReader
 from pypaimon.read.reader.row_range_filter_record_reader import RowIdFilterRecordBatchReader
 from pypaimon.read.reader.format_blob_reader import FormatBlobReader
@@ -511,13 +512,20 @@ class DataEvolutionSplitRead(SplitRead):
 
         merge_reader = ConcatBatchReader(suppliers)
         if self.predicate_for_reader is not None:
-            return FilterRecordBatchReader(
+            reader = FilterRecordBatchReader(
                 merge_reader,
                 self.predicate_for_reader,
                 field_names=[f.name for f in self.read_fields],
                 schema_fields=self.read_fields,
             )
-        return merge_reader
+        else:
+            reader = merge_reader
+
+        if (not CoreOptions.blob_as_descriptor(self.table.options)
+                and CoreOptions.blob_descriptor_fields(self.table.options)):
+            reader = BlobDescriptorConvertReader(reader, self.table)
+
+        return reader
 
     def _split_by_row_id(self, files: List[DataFileMeta]) -> List[List[DataFileMeta]]:
         """Split files by firstRowId for data evolution."""

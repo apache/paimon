@@ -20,7 +20,6 @@ from typing import Any, Dict, Iterator, List, Optional
 import pandas
 import pyarrow
 
-from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
 from pypaimon.read.split import Split
@@ -108,70 +107,7 @@ class TableRead:
         if not table_list:
             return pyarrow.Table.from_arrays([pyarrow.array([], type=field.type) for field in schema], schema=schema)
         else:
-            table = pyarrow.Table.from_batches(table_list)
-            return self._convert_descriptor_stored_fields_for_read(table)
-
-    def _convert_descriptor_stored_fields_for_read(self, table: pyarrow.Table) -> pyarrow.Table:
-        if CoreOptions.blob_as_descriptor(self.table.options):
-            return table
-
-        descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
-        if not descriptor_fields:
-            return table
-
-        from pypaimon.table.row.blob import Blob, BlobDescriptor
-
-        result = table
-        for field_name in descriptor_fields:
-            if field_name not in result.column_names:
-                continue
-            values = result.column(field_name).to_pylist()
-            converted_values = []
-            for value in values:
-                if value is None:
-                    converted_values.append(None)
-                    continue
-                if hasattr(value, 'as_py'):
-                    value = value.as_py()
-                if isinstance(value, str):
-                    value = value.encode('utf-8')
-                if isinstance(value, bytearray):
-                    value = bytes(value)
-                if not isinstance(value, bytes):
-                    converted_values.append(value)
-                    continue
-
-                try:
-                    descriptor = BlobDescriptor.deserialize(value)
-                    if descriptor.serialize() != value:
-                        converted_values.append(value)
-                        continue
-                    uri_reader = self.table.file_io.uri_reader_factory.create(descriptor.uri)
-                    converted_values.append(Blob.from_descriptor(uri_reader, descriptor).to_data())
-                except Exception:
-                    converted_values.append(value)
-
-            column_idx = result.column_names.index(field_name)
-            result = result.set_column(
-                column_idx,
-                pyarrow.field(field_name, pyarrow.large_binary(), nullable=True),
-                pyarrow.array(converted_values, type=pyarrow.large_binary()),
-            )
-        return result
-
-    def _convert_descriptor_stored_fields_for_read_batch(
-        self, batch: pyarrow.RecordBatch
-    ) -> pyarrow.RecordBatch:
-        if CoreOptions.blob_as_descriptor(self.table.options):
-            return batch
-
-        descriptor_fields = CoreOptions.blob_descriptor_fields(self.table.options)
-        if not descriptor_fields:
-            return batch
-
-        table = pyarrow.Table.from_batches([batch])
-        table = self._convert_descriptor_stored_fields_for_read(table)
-        return table.to_batches()[0]
+            return pyarrow.Table.from_batches(table_list)
 
     def _arrow_batch_generator(self, splits: List[Split], schema: pyarrow.Schema) -> Iterator[pyarrow.RecordBatch]:
         chunk_size = 65536
@@ -183,11 +119,9 @@ class TableRead:
                     # Add row kind column if requested (default to +I for RecordBatchReader)
                     if self.include_row_kind:
                         for batch in iter(reader.read_arrow_batch, None):
-                            yield self._convert_descriptor_stored_fields_for_read_batch(
-                                self._add_row_kind_column_to_batch(batch, "+I"))
+                            yield self._add_row_kind_column_to_batch(batch, "+I")
                     else:
-                        for batch in iter(reader.read_arrow_batch, None):
-                            yield self._convert_descriptor_stored_fields_for_read_batch(batch)
+                        yield from iter(reader.read_arrow_batch, None)
                 else:
                     row_tuple_chunk = []
                     row_kind_chunk = []
@@ -203,7 +137,7 @@ class TableRead:
                                 batch = self._convert_rows_to_arrow_batch_with_row_kind(
                                     row_tuple_chunk, row_kind_chunk, schema
                                 )
-                                yield self._convert_descriptor_stored_fields_for_read_batch(batch)
+                                yield batch
                                 row_tuple_chunk = []
                                 row_kind_chunk = []
 
@@ -211,7 +145,7 @@ class TableRead:
                         batch = self._convert_rows_to_arrow_batch_with_row_kind(
                             row_tuple_chunk, row_kind_chunk, schema
                         )
-                        yield self._convert_descriptor_stored_fields_for_read_batch(batch)
+                        yield batch
             finally:
                 reader.close()
 
