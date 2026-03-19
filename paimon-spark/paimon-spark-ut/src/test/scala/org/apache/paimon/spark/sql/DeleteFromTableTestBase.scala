@@ -531,4 +531,44 @@ abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
       )
     }
   }
+
+  test("Paimon Delete: delete should not remove rows with NULL in condition column") {
+    // Verifies that DELETE WHERE col = value does not incorrectly remove rows
+    // where col IS NULL. This tests the fix for the NULL handling bug where
+    // Not(condition) was used instead of Not(EqualNullSafe(condition, true)).
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(
+          s"CREATE TABLE t (id INT, name STRING) TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')")
+        sql("INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, NULL), (4, 'a'), (5, NULL), (6, 'c')")
+
+        sql("DELETE FROM t WHERE name = 'a'")
+
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(2, "b"), Row(3, null), Row(5, null), Row(6, "c"))
+        )
+      }
+    }
+  }
+
+  test("Paimon Delete: delete with NULL in condition column for partitioned table") {
+    for (dvEnabled <- Seq(true, false)) {
+      withTable("t") {
+        sql(s"""CREATE TABLE t (id INT, name STRING, pt STRING)
+               |PARTITIONED BY (pt)
+               |TBLPROPERTIES ('deletion-vectors.enabled' = '$dvEnabled')
+               |""".stripMargin)
+        sql(
+          "INSERT INTO t VALUES (1, 'a', 'p1'), (2, NULL, 'p1'), (3, 'b', 'p1'), (4, NULL, 'p2'), (5, 'a', 'p2')")
+
+        sql("DELETE FROM t WHERE name = 'a'")
+
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(2, null, "p1"), Row(3, "b", "p1"), Row(4, null, "p2"))
+        )
+      }
+    }
+  }
 }
