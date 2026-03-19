@@ -29,6 +29,8 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.Collector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -37,6 +39,8 @@ import java.util.List;
  * out.
  */
 public class FirstRowIdAssigner extends RichFlatMapFunction<RowData, Tuple2<Long, RowData>> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FirstRowIdAssigner.class);
 
     private final FirstRowIdLookup firstRowIdLookup;
     private final long maxRowId;
@@ -55,6 +59,8 @@ public class FirstRowIdAssigner extends RichFlatMapFunction<RowData, Tuple2<Long
         long rowId = value.getLong(rowIdFieldIndex);
         if (rowId >= 0 && rowId <= maxRowId) {
             out.collect(new Tuple2<>(firstRowIdLookup.lookup(rowId), value));
+        } else {
+            LOG.warn("Invalid Row id {} is out of range [0, {}].", rowId, maxRowId);
         }
     }
 
