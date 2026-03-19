@@ -120,6 +120,33 @@ public class KeyValueFileWriterFactory {
                 suggestedFileSize);
     }
 
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingClusteringFileWriter() {
+        WriteFormatKey key = new WriteFormatKey(1, false);
+        return new RollingFileWriterImpl<>(
+                () -> {
+                    DataFilePathFactory pathFactory = formatContext.pathFactory(key);
+                    return createKvSeparatedFileWriter(
+                            pathFactory.newPath(), key, pathFactory.isExternalPath());
+                },
+                suggestedFileSize);
+    }
+
+    private KeyValueClusteringFileWriter createKvSeparatedFileWriter(
+            Path path, WriteFormatKey key, boolean isExternalPath) {
+        return new KeyValueClusteringFileWriter(
+                fileIO,
+                formatContext.fileWriterContext(key),
+                path,
+                keyType,
+                valueType,
+                schemaId,
+                key.level,
+                formatContext.thinModeEnabled,
+                options,
+                fileIndexOptions,
+                isExternalPath);
+    }
+
     private KeyValueDataFileWriter createDataFileWriter(
             Path path, WriteFormatKey key, FileSource fileSource, boolean isExternalPath) {
         return formatContext.thinModeEnabled

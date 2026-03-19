@@ -1111,6 +1111,7 @@ public class FileStoreCommitTest {
                                 store.bucketMode(),
                                 store.options().deletionVectorsEnabled(),
                                 store.options().dataEvolutionEnabled(),
+                                store.options().pkClusteringOverride(),
                                 store.newIndexFileHandler(),
                                 store.snapshotManager(),
                                 scanner),

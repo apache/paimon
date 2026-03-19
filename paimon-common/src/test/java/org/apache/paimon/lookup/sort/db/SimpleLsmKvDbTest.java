@@ -48,7 +48,6 @@ public class SimpleLsmKvDbTest {
         return SimpleLsmKvDb.builder(dataDirectory)
                 .memTableFlushThreshold(1024)
                 .blockSize(256)
-                .cacheSize(4 * 1024 * 1024)
                 .level0FileNumCompactTrigger(4)
                 .compressOptions(new CompressOptions("none", 1))
                 .build();
@@ -197,7 +196,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(dataDirectory)
                         .memTableFlushThreshold(256)
                         .blockSize(128)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -320,7 +318,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(dbDir)
                         .memTableFlushThreshold(1024 * 1024) // large threshold, won't auto-flush
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(10)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -349,7 +346,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "compressed-db"))
                         .memTableFlushThreshold(512)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(CompressOptions.defaultOptions())
                         .build();
@@ -397,7 +393,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-trigger-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -434,7 +429,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-overlap-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -470,7 +464,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-reduce-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -513,7 +506,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-multi-db"))
                         .memTableFlushThreshold(512)
                         .blockSize(128)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(50)
                         .compressOptions(new CompressOptions("none", 1))
@@ -545,7 +537,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-tombstone-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -593,7 +584,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "universal-update-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -638,7 +628,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "large-scale-db"))
                         .memTableFlushThreshold(256)
                         .blockSize(64)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(20)
                         .compressOptions(new CompressOptions("none", 1))
@@ -792,7 +781,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "stats-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(10)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -827,7 +815,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "reverse-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .keyComparator(reverseComparator)
@@ -869,7 +856,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "reverse-compact-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .keyComparator(reverseComparator)
@@ -915,7 +901,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "reverse-delete-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(new CompressOptions("none", 1))
                         .keyComparator(reverseComparator)
@@ -955,7 +940,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "non-overlap-skip-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -985,7 +969,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "overlap-group-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1019,7 +1002,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "mixed-group-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(4)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1068,7 +1050,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "tombstone-no-skip-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1099,7 +1080,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "multi-round-group-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();
@@ -1143,7 +1123,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "l0-clear-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(1)
                         .compressOptions(new CompressOptions("none", 1))
@@ -1197,7 +1176,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "many-l0-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(1)
                         .compressOptions(new CompressOptions("none", 1))
@@ -1249,7 +1227,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "overlap-l0-l1-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .sizeRatio(1)
                         .compressOptions(new CompressOptions("none", 1))
@@ -1308,7 +1285,6 @@ public class SimpleLsmKvDbTest {
                 SimpleLsmKvDb.builder(new File(tempDir.toFile(), "group-delete-db"))
                         .memTableFlushThreshold(1024 * 1024)
                         .blockSize(256)
-                        .cacheSize(4 * 1024 * 1024)
                         .level0FileNumCompactTrigger(3)
                         .compressOptions(new CompressOptions("none", 1))
                         .build();

@@ -474,9 +474,9 @@ public class SimpleLsmKvDb implements Closeable {
         private long memTableFlushThreshold = 64 * 1024 * 1024; // 64 MB
         private long maxSstFileSize = 8 * 1024 * 1024; // 8 MB
         private int blockSize = 32 * 1024; // 32 KB
-        private long cacheSize = 128 * 1024 * 1024; // 128 MB
         private int level0FileNumCompactTrigger = 4;
         private int sizeRatio = 10;
+        private CacheManager cacheManager;
         private CompressOptions compressOptions = CompressOptions.defaultOptions();
         private Comparator<MemorySlice> keyComparator = MemorySlice::compareTo;
 
@@ -502,9 +502,9 @@ public class SimpleLsmKvDb implements Closeable {
             return this;
         }
 
-        /** Set the block cache size in bytes. Default is 128 MB. */
-        public Builder cacheSize(long cacheSize) {
-            this.cacheSize = cacheSize;
+        /** Set the cache manager. */
+        public Builder cacheManager(CacheManager cacheManager) {
+            this.cacheManager = cacheManager;
             return this;
         }
 
@@ -551,7 +551,9 @@ public class SimpleLsmKvDb implements Closeable {
                 }
             }
 
-            CacheManager cacheManager = new CacheManager(MemorySize.ofBytes(cacheSize));
+            if (cacheManager == null) {
+                cacheManager = new CacheManager(MemorySize.ofMebiBytes(8));
+            }
             SortLookupStoreFactory factory =
                     new SortLookupStoreFactory(
                             keyComparator, cacheManager, blockSize, compressOptions);
