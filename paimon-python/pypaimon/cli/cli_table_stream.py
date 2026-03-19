@@ -23,52 +23,38 @@ Continuously polls a table for new snapshots and prints rows as they arrive.
 
 import json
 import sys
-from datetime import datetime, timezone, timedelta
 from typing import Union
 
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 
 
-# Timestamp format strings tried in order during parse_from_position.
-_TIMESTAMP_FORMATS = [
-    "%Y-%m-%dT%H:%M:%S%z",  # ISO 8601 with offset (e.g. +05:30 or Z via strptime %z)
-    "%Y-%m-%dT%H:%M:%S",    # ISO 8601 naive
-    "%Y-%m-%d %H:%M:%S",    # space-separated naive
-    "%Y-%m-%d",             # date only
-]
-
-
 def _parse_timestamp(value: str) -> int:
     """Parse a human-readable datetime string to epoch milliseconds.
 
+    Accepts ISO 8601, space-separated datetimes, date-only strings, and named
+    timezones (e.g. "2025-01-15T10:30:00 EST", "2025-01-15T10:30:00 Europe/London").
     Naive datetimes (no timezone) are treated as local machine time.
     Returns epoch ms as an integer.
     Raises ValueError on unrecognised format.
     """
-    # Handle the 'Z' suffix — Python <3.11 strptime doesn't recognise 'Z' as UTC
-    normalised = value
-    if normalised.endswith("Z"):
-        normalised = normalised[:-1] + "+00:00"
+    from dateutil import parser as dateutil_parser
+    from dateutil.parser import ParserError
 
-    for fmt in _TIMESTAMP_FORMATS:
-        try:
-            dt = datetime.strptime(normalised, fmt)
-            break
-        except ValueError:
-            continue
-    else:
+    try:
+        dt = dateutil_parser.parse(value)
+    except (ParserError, OverflowError):
         raise ValueError(
             f"Unrecognised timestamp format: '{value}'. "
             "Expected formats: YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, "
-            "YYYY-MM-DDTHH:MM:SS, YYYY-MM-DDTHH:MM:SSZ, or YYYY-MM-DDTHH:MM:SS+HH:MM"
+            "YYYY-MM-DDTHH:MM:SS, YYYY-MM-DDTHH:MM:SSZ, YYYY-MM-DDTHH:MM:SS+HH:MM, "
+            "or a datetime with a named timezone (e.g. '2025-01-15T10:30:00 EST')"
         )
 
     if dt.tzinfo is None:
         # Treat naive datetime as local time
         dt = dt.astimezone()
 
-    epoch_ms = int(dt.timestamp() * 1000)
-    return epoch_ms
+    return int(dt.timestamp() * 1000)
 
 
 def parse_from_position(value: str, snapshot_manager: SnapshotManager) -> Union[str, int]:
