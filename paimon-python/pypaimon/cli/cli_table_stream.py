@@ -88,8 +88,8 @@ def parse_from_position(value: str, snapshot_manager: SnapshotManager) -> Union[
         return value
 
     # Pure integer → snapshot ID
-    if value.isdigit():
-        return int(value)
+    if value.strip().isdigit():
+        return int(value.strip())
 
     # Anything containing '-', 'T', ':', or '/' is treated as a timestamp
     if any(c in value for c in ("-", "T", ":", "/")):
@@ -165,7 +165,7 @@ def cmd_table_stream(args):
 
     # --- Resolve --from position ---
     from_position = args.from_position
-    if from_position not in ("latest", "earliest") and not from_position.isdigit():
+    if from_position not in ("latest", "earliest") and not from_position.strip().isdigit():
         # Likely a timestamp — need snapshot_manager to resolve it
         if not isinstance(table, FileStoreTable):
             print(
@@ -179,8 +179,8 @@ def cmd_table_stream(args):
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
-    elif from_position.isdigit():
-        from_position = int(from_position)
+    elif from_position.strip().isdigit():
+        from_position = int(from_position.strip())
 
     # --- Build StreamReadBuilder ---
     builder = table.new_stream_read_builder()
@@ -189,7 +189,7 @@ def cmd_table_stream(args):
         builder = builder.with_projection(user_columns)
     if predicate:
         builder = builder.with_filter(predicate)
-    if args.poll_interval_ms:
+    if args.poll_interval_ms is not None:
         builder = builder.with_poll_interval_ms(args.poll_interval_ms)
     if args.include_row_kind:
         builder = builder.with_include_row_kind(True)
