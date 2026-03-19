@@ -294,8 +294,9 @@ public class JdbcCatalog extends AbstractCatalog {
     protected void dropTableImpl(Identifier identifier, List<Path> externalPaths) {
         try {
             // Retrieve table location and custom-path flag BEFORE deleting JDBC metadata
-            Path path = getTableLocation(identifier);
-            boolean customPath = syncTableProperties() && isCustomTablePath(identifier);
+            Optional<String> storedPath = fetchStoredPathIfSyncEnabled(identifier);
+            Path path = storedPath.map(Path::new).orElse(super.getTableLocation(identifier));
+            boolean customPath = storedPath.isPresent();
 
             int deletedRecords =
                     execute(
@@ -402,8 +403,9 @@ public class JdbcCatalog extends AbstractCatalog {
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
         try {
             // Check custom path BEFORE renaming metadata
-            boolean customPath = syncTableProperties() && isCustomTablePath(fromTable);
-            Path fromPath = getTableLocation(fromTable);
+            Optional<String> storedPath = fetchStoredPathIfSyncEnabled(fromTable);
+            boolean customPath = storedPath.isPresent();
+            Path fromPath = storedPath.map(Path::new).orElse(super.getTableLocation(fromTable));
 
             // update table metadata info
             updateTable(connections, catalogKey, fromTable, toTable);
@@ -425,7 +427,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
             if (!new SchemaManager(fileIO, fromPath).listAllIds().isEmpty()) {
                 // Rename the file system's table directory. Maintain consistency between tables in
-                // the file system and tables in the Hive Metastore.
+                // the file system and tables in the JDBC catalog.
                 Path toPath = super.getTableLocation(toTable);
                 try {
                     fileIO.rename(fromPath, toPath);
@@ -595,6 +597,15 @@ public class JdbcCatalog extends AbstractCatalog {
         }
     }
 
+    /**
+     * Repair a table by re-syncing JDBC metadata from the filesystem schema.
+     *
+     * <p>Note: Tables created with a custom path ({@code CoreOptions.PATH}) cannot be fully
+     * repaired if both the {@code paimon_tables} row and the {@code paimon_table_properties} rows
+     * are lost. In that case, {@code getTableLocation} falls back to the default warehouse path
+     * where no schema exists, and repair will throw {@link TableNotExistException}. To recover,
+     * re-create the table pointing to the original custom path.
+     */
     @Override
     public void repairTable(Identifier identifier) throws TableNotExistException {
         checkNotBranch(identifier, "repairTable");
@@ -689,14 +700,16 @@ public class JdbcCatalog extends AbstractCatalog {
         return super.getTableLocation(identifier);
     }
 
-    private boolean isCustomTablePath(Identifier identifier) {
-        return JdbcUtils.getTableProperty(
-                        connections,
-                        catalogKey,
-                        identifier.getDatabaseName(),
-                        identifier.getTableName(),
-                        CoreOptions.PATH.key())
-                .isPresent();
+    private Optional<String> fetchStoredPathIfSyncEnabled(Identifier identifier) {
+        if (syncTableProperties()) {
+            return JdbcUtils.getTableProperty(
+                    connections,
+                    catalogKey,
+                    identifier.getDatabaseName(),
+                    identifier.getTableName(),
+                    CoreOptions.PATH.key());
+        }
+        return Optional.empty();
     }
 
     private SchemaManager getSchemaManager(Identifier identifier) {
