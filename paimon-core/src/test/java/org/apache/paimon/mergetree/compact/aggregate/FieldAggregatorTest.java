@@ -83,6 +83,7 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.ThetaSketch.sketchOf;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -158,7 +159,10 @@ public class FieldAggregatorTest {
     public void testFieldListAggWithDefaultDelimiter() {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
-                        .create(new VarCharType(), new CoreOptions(new HashMap<>()), "fieldName");
+                        .create(
+                                new VarCharType(VarCharType.MAX_LENGTH),
+                                new CoreOptions(new HashMap<>()),
+                                "fieldName");
         BinaryString accumulator = BinaryString.fromString("user1");
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
@@ -170,7 +174,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -194,7 +198,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.distinct",
@@ -218,7 +222,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -241,7 +245,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -264,7 +268,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.distinct",
@@ -291,7 +295,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.distinct",
@@ -318,7 +322,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of("fields.fieldName.distinct", "true")),
                                 "fieldName");
@@ -341,7 +345,7 @@ public class FieldAggregatorTest {
         FieldListaggAgg fieldListaggAgg =
                 new FieldListaggAggFactory()
                         .create(
-                                new VarCharType(),
+                                new VarCharType(VarCharType.MAX_LENGTH),
                                 CoreOptions.fromMap(
                                         ImmutableMap.of(
                                                 "fields.fieldName.list-agg-delimiter", "-")),
@@ -350,6 +354,21 @@ public class FieldAggregatorTest {
         BinaryString inputField = BinaryString.fromString("user2");
         assertThat(fieldListaggAgg.agg(accumulator, inputField).toString())
                 .isEqualTo("user1-user2");
+    }
+
+    @Test
+    public void testFieldListAggWithBoundedVarcharShouldFail() {
+        FieldListaggAggFactory factory = new FieldListaggAggFactory();
+        // Should throw IllegalArgumentException when using VARCHAR(n) with length limit
+        assertThatThrownBy(
+                        () ->
+                                factory.create(
+                                        new VarCharType(100),
+                                        CoreOptions.fromMap(new HashMap<>()),
+                                        "fieldName"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(
+                        "Data type for list agg column must be STRING (unbounded VARCHAR), but was VARCHAR(100)");
     }
 
     @Test
