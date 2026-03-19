@@ -50,7 +50,6 @@ public class FieldListaggAgg extends FieldAggregator {
         }
         // ordered by type root definition
 
-        // TODO: ensure not VARCHAR(n)
         BinaryString mergeFieldSD = (BinaryString) accumulator;
         BinaryString inFieldSD = (BinaryString) inputField;
 
