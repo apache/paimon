@@ -31,24 +31,24 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.filter2.compat.FilterCompat;
-import org.apache.parquet.schema.MessageType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.lang.reflect.Field;
-import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for the instance-level schema cache in {@link ParquetReaderFactory}.
+ * Tests for the schema cache in {@link ParquetReaderFactory}.
  *
- * <p>The cache stores the computed {@code requestedSchema} and {@code fields} list on the first
- * file read and reuses them for all subsequent reads on the same factory instance. This avoids
- * re-running {@code clipParquetSchema} and {@code buildFieldsList} for every file.
+ * <p>The cache stores the computed {@code requestedSchema} and {@code fields} list keyed by the
+ * actual {@code fileSchema} read from the Parquet footer. This avoids re-running {@code
+ * clipParquetSchema} and {@code buildFieldsList} for every file that shares the same on-disk schema
+ * within one factory instance.
  */
 public class ParquetSchemaCacheTest {
 
@@ -58,16 +58,15 @@ public class ParquetSchemaCacheTest {
     @TempDir public File folder;
 
     // -------------------------------------------------------------------------
-    // Cache population: verify fields are null before first read, non-null after
+    // Cache population: empty before first read, one entry after
     // -------------------------------------------------------------------------
 
     @Test
-    void testCacheIsNullBeforeFirstRead() throws Exception {
+    void testCacheIsEmptyBeforeFirstRead() throws Exception {
         ParquetReaderFactory factory =
                 new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
 
-        assertThat(getCachedRequestedSchema(factory)).isNull();
-        assertThat(getCachedFields(factory)).isNull();
+        assertThat(getSchemaCacheSize(factory)).isEqualTo(0);
     }
 
     @Test
@@ -79,16 +78,15 @@ public class ParquetSchemaCacheTest {
 
         readAll(factory, path);
 
-        assertThat(getCachedRequestedSchema(factory)).isNotNull();
-        assertThat(getCachedFields(factory)).isNotNull();
+        assertThat(getSchemaCacheSize(factory)).isEqualTo(1);
     }
 
     // -------------------------------------------------------------------------
-    // Cache reuse: same instance object is returned on subsequent reads
+    // Cache reuse: same fileSchema produces only one cache entry
     // -------------------------------------------------------------------------
 
     @Test
-    void testCachedSchemaIsReusedAcrossMultipleFiles() throws Exception {
+    void testSameFileSchemaCausesOnlyOneCacheEntry() throws Exception {
         Path path1 = writeSingleFile();
         Path path2 = writeSingleFile();
         Path path3 = writeSingleFile();
@@ -97,19 +95,15 @@ public class ParquetSchemaCacheTest {
                 new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
 
         readAll(factory, path1);
-        MessageType schemaAfterFirst = getCachedRequestedSchema(factory);
-        List<?> fieldsAfterFirst = getCachedFields(factory);
-
         readAll(factory, path2);
         readAll(factory, path3);
 
-        // The exact same object instances must be reused (reference equality)
-        assertThat(getCachedRequestedSchema(factory)).isSameAs(schemaAfterFirst);
-        assertThat(getCachedFields(factory)).isSameAs(fieldsAfterFirst);
+        // All files have the same on-disk schema → only one cache entry
+        assertThat(getSchemaCacheSize(factory)).isEqualTo(1);
     }
 
     // -------------------------------------------------------------------------
-    // Correctness: data is read correctly both with and without cache
+    // Correctness: data is read correctly both on cold and warm cache
     // -------------------------------------------------------------------------
 
     @Test
@@ -119,7 +113,6 @@ public class ParquetSchemaCacheTest {
         ParquetReaderFactory factory =
                 new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
 
-        // First read - cache is cold
         assertThat(countRows(factory, path)).isEqualTo(3);
     }
 
@@ -130,9 +123,7 @@ public class ParquetSchemaCacheTest {
         ParquetReaderFactory factory =
                 new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
 
-        // First read populates cache
         assertThat(countRows(factory, path)).isEqualTo(3);
-        // Second and third reads use cache
         assertThat(countRows(factory, path)).isEqualTo(3);
         assertThat(countRows(factory, path)).isEqualTo(3);
     }
@@ -162,12 +153,10 @@ public class ParquetSchemaCacheTest {
         ParquetReaderFactory factory2 =
                 new ParquetReaderFactory(new Options(), ROW_TYPE, 500, FilterCompat.NOOP);
 
-        // Read only via factory1
         readAll(factory1, path);
 
-        assertThat(getCachedRequestedSchema(factory1)).isNotNull();
-        // factory2 cache must remain untouched
-        assertThat(getCachedRequestedSchema(factory2)).isNull();
+        assertThat(getSchemaCacheSize(factory1)).isEqualTo(1);
+        assertThat(getSchemaCacheSize(factory2)).isEqualTo(0);
     }
 
     // -------------------------------------------------------------------------
@@ -209,16 +198,10 @@ public class ParquetSchemaCacheTest {
         return cnt.get();
     }
 
-    private MessageType getCachedRequestedSchema(ParquetReaderFactory factory) throws Exception {
-        Field field = ParquetReaderFactory.class.getDeclaredField("cachedRequestedSchema");
+    private int getSchemaCacheSize(ParquetReaderFactory factory) throws Exception {
+        Field field = ParquetReaderFactory.class.getDeclaredField("schemaCache");
         field.setAccessible(true);
-        return (MessageType) field.get(factory);
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<?> getCachedFields(ParquetReaderFactory factory) throws Exception {
-        Field field = ParquetReaderFactory.class.getDeclaredField("cachedFields");
-        field.setAccessible(true);
-        return (List<?>) field.get(factory);
+        Map<?, ?> cache = (Map<?, ?>) field.get(factory);
+        return cache.size();
     }
 }
