@@ -94,12 +94,15 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
         indexType = indexType.toLowerCase().trim();
         try {
             if ("btree".equals(indexType)) {
-                BTreeIndexTopoBuilder.buildIndex(
+                BTreeIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
                         indexColumn,
                         partitionPredicate,
                         userOptions);
+                return new String[] {
+                    "BTree global index created successfully for table: " + table.name()
+                };
             } else {
                 GenericIndexTopoBuilder.buildIndex(
                         procedureContext.getExecutionEnvironment(),

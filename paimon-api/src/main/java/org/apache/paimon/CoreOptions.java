@@ -86,6 +86,8 @@ public class CoreOptions implements Serializable {
 
     public static final String LIST_AGG_DELIMITER = "list-agg-delimiter";
 
+    public static final String MERGE_MAP_TS_FIELD = "ts-field";
+
     public static final String FILE_INDEX = "file-index";
 
     public static final String COLUMNS = "columns";
@@ -4378,6 +4380,13 @@ public class CoreOptions implements Serializable {
         public InlineElement getDescription() {
             return text(description);
         }
+    }
+
+    public String fieldMergeMapTsField(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + MERGE_MAP_TS_FIELD)
+                        .stringType()
+                        .noDefaultValue());
     }
 
     /**

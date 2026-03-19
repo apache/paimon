@@ -235,6 +235,22 @@ public class JavaPyE2ETest {
                         createRow7Cols(
                                 6, "Beef", "Meat", 8.0, 1000005L, 2000005L, 6000, "store3", 1006L,
                                 "London", "UK"));
+                // Row with null partition value -> __DEFAULT_PARTITION__
+                write.write(
+                        GenericRow.of(
+                                7,
+                                BinaryString.fromString("Tofu"),
+                                null,
+                                3.0,
+                                org.apache.paimon.data.Timestamp.fromEpochMillis(1000006L),
+                                org.apache.paimon.data.Timestamp.fromEpochMillis(2000006L),
+                                7000,
+                                GenericRow.of(
+                                        BinaryString.fromString("store4"),
+                                        1007L,
+                                        GenericRow.of(
+                                                BinaryString.fromString("Paris"),
+                                                BinaryString.fromString("France")))));
 
                 commit.commit(0, write.prepareCommit(true, 0));
             }
@@ -251,7 +267,8 @@ public class JavaPyE2ETest {
                             "+I[3, Carrot, Vegetable, 0.6, 1970-01-01T00:16:40.002, 1970-01-01T00:33:20.002, 3000, (store2, 1003, (Tokyo, Japan))]",
                             "+I[4, Broccoli, Vegetable, 1.2, 1970-01-01T00:16:40.003, 1970-01-01T00:33:20.003, 4000, (store2, 1004, (Seoul, Korea))]",
                             "+I[5, Chicken, Meat, 5.0, 1970-01-01T00:16:40.004, 1970-01-01T00:33:20.004, 5000, (store3, 1005, (NewYork, USA))]",
-                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, (store3, 1006, (London, UK))]");
+                            "+I[6, Beef, Meat, 8.0, 1970-01-01T00:16:40.005, 1970-01-01T00:33:20.005, 6000, (store3, 1006, (London, UK))]",
+                            "+I[7, Tofu, NULL, 3.0, 1970-01-01T00:16:40.006, 1970-01-01T00:33:20.006, 7000, (store4, 1007, (Paris, France))]");
         }
     }
 

@@ -17,6 +17,7 @@
 ################################################################################
 from typing import Optional, List
 
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.catalog.catalog_exception import ColumnAlreadyExistException, ColumnNotExistException
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
@@ -216,12 +217,24 @@ def _handle_add_column(
 
 class SchemaManager:
 
-    def __init__(self, file_io: FileIO, table_path: str):
+    def __init__(self, file_io: FileIO, table_path: str, branch: str = DEFAULT_MAIN_BRANCH):
+        from pypaimon.branch.branch_manager import BranchManager
         self.schema_prefix = "schema-"
         self.file_io = file_io
         self.table_path = table_path
-        self.schema_path = f"{table_path.rstrip('/')}/schema"
+        self.branch = BranchManager.normalize_branch(branch)
+        self.schema_path = f"{self.branch_path}/schema"
         self.schema_cache = {}
+
+    @property
+    def branch_path(self) -> str:
+        """Get the branch path for this schema manager."""
+        from pypaimon.branch.branch_manager import BranchManager
+        return BranchManager.branch_path(self.table_path, self.branch)
+
+    def copy_with_branch(self, branch_name: str) -> 'SchemaManager':
+        """Create a copy of SchemaManager for a different branch."""
+        return SchemaManager(self.file_io, self.table_path, branch_name)
 
     def latest(self) -> Optional['TableSchema']:
         try:
