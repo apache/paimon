@@ -18,49 +18,23 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.btree.BTreeIndexTopoBuilder;
-import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
-import org.apache.paimon.globalindex.ResultEntry;
-import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.ParameterUtils;
-import org.apache.paimon.utils.Range;
 
 import org.apache.flink.table.annotation.ArgumentHint;
 import org.apache.flink.table.annotation.DataTypeHint;
 import org.apache.flink.table.annotation.ProcedureHint;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.io.Closeable;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.createIndexWriter;
-import static org.apache.paimon.globalindex.GlobalIndexBuilderUtils.toIndexFileMetas;
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.groupSplitsByRange;
-import static org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder.splitByContiguousRowRange;
-import static org.apache.paimon.io.CompactIncrement.emptyIncrement;
-import static org.apache.paimon.io.DataIncrement.indexIncrement;
 import static org.apache.paimon.utils.ParameterUtils.getPartitions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -118,212 +92,36 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
 
         // Build global index based on index type
         indexType = indexType.toLowerCase().trim();
-        if ("btree".equals(indexType)) {
-            BTreeIndexTopoBuilder.buildIndexAndExecute(
-                    procedureContext.getExecutionEnvironment(),
-                    table,
-                    indexColumn,
-                    partitionPredicate,
-                    userOptions);
-            return new String[] {
-                "BTree global index created successfully for table: " + table.name()
-            };
-        } else {
-            buildGenericIndex(table, indexColumn, indexType, partitionPredicate, userOptions);
-            return new String[] {
-                indexType + " global index created successfully for table: " + table.name()
-            };
-        }
-    }
-
-    /**
-     * Builds a global index using the generic SPI-based GlobalIndexer mechanism. This supports any
-     * index type registered via {@link org.apache.paimon.globalindex.GlobalIndexerFactory} (e.g.
-     * lumina-vector-ann, bitmap).
-     */
-    private void buildGenericIndex(
-            FileStoreTable table,
-            String indexColumn,
-            String indexType,
-            PartitionPredicate partitionPredicate,
-            Options userOptions)
-            throws Exception {
-        RowType rowType = table.rowType();
-        DataField indexField = rowType.getField(indexColumn);
-        RowType projectedRowType = rowType.project(Collections.singletonList(indexColumn));
-
-        // Merge table options with user options (user options take precedence)
-        Options mergedOptions = new Options(table.options(), userOptions.toMap());
-
-        long rowsPerShard =
-                mergedOptions
-                        .getOptional(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD)
-                        .orElse(CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD.defaultValue());
-
-        // Use snapshot reader to get proper DataSplits (preserves bucket paths)
-        SnapshotReader snapshotReader = table.newSnapshotReader();
-        if (partitionPredicate != null) {
-            snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
-        }
-        List<DataSplit> splits = splitByContiguousRowRange(snapshotReader.read().dataSplits());
-        if (splits.isEmpty()) {
-            return;
-        }
-
-        // Group splits by partition and contiguous row range
-        Map<BinaryRow, Map<Range, List<DataSplit>>> partitionRangeSplits =
-                groupSplitsByRange(splits);
-
-        ReadBuilder readBuilder = table.newReadBuilder().withReadType(projectedRowType);
-        InternalRow.FieldGetter getter =
-                InternalRow.createFieldGetter(
-                        indexField.type(), projectedRowType.getFieldIndex(indexField.name()));
-
-        List<CommitMessage> allCommitMessages = new ArrayList<>();
-
-        for (Map.Entry<BinaryRow, Map<Range, List<DataSplit>>> partEntry :
-                partitionRangeSplits.entrySet()) {
-            BinaryRow partition = partEntry.getKey();
-            for (Map.Entry<Range, List<DataSplit>> rangeEntry : partEntry.getValue().entrySet()) {
-                Range rowRange = rangeEntry.getKey();
-                List<DataSplit> rangeSplits = rangeEntry.getValue();
-
-                buildForRange(
-                        table,
-                        partition,
-                        rowRange,
-                        rangeSplits,
-                        readBuilder,
-                        getter,
-                        indexField,
-                        indexType,
-                        mergedOptions,
-                        rowsPerShard,
-                        allCommitMessages);
-            }
-        }
-
-        // Commit all index files
-        if (!allCommitMessages.isEmpty()) {
-            try (TableCommitImpl commit =
-                    table.newCommit("global-index-create-" + UUID.randomUUID())) {
-                commit.commit(allCommitMessages);
-            }
-        }
-    }
-
-    /**
-     * Builds index files for a single partition + contiguous row range, sharding into multiple
-     * index files when the row count exceeds {@code rowsPerShard}. Each shard receives its own
-     * sub-range so the reader creates one reader per shard file and merges results via {@link
-     * org.apache.paimon.globalindex.UnionGlobalIndexReader}.
-     */
-    private void buildForRange(
-            FileStoreTable table,
-            BinaryRow partition,
-            Range rowRange,
-            List<DataSplit> rangeSplits,
-            ReadBuilder readBuilder,
-            InternalRow.FieldGetter getter,
-            DataField indexField,
-            String indexType,
-            Options mergedOptions,
-            long rowsPerShard,
-            List<CommitMessage> allCommitMessages)
-            throws Exception {
-        long totalWritten = 0;
-        long shardCount = 0;
-        GlobalIndexSingletonWriter currentWriter = null;
-
         try {
-            for (DataSplit split : rangeSplits) {
-                try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split);
-                        CloseableIterator<InternalRow> iter = reader.toCloseableIterator()) {
-                    while (iter.hasNext()) {
-                        InternalRow row = iter.next();
-
-                        // Shard: flush current writer when threshold reached
-                        if (currentWriter != null && shardCount >= rowsPerShard) {
-                            Range shardRange =
-                                    new Range(
-                                            rowRange.from + totalWritten - shardCount,
-                                            rowRange.from + totalWritten - 1);
-                            allCommitMessages.add(
-                                    flushIndex(
-                                            table,
-                                            partition,
-                                            shardRange,
-                                            indexField,
-                                            indexType,
-                                            currentWriter.finish()));
-                            currentWriter = null;
-                            shardCount = 0;
-                        }
-
-                        if (currentWriter == null) {
-                            currentWriter =
-                                    (GlobalIndexSingletonWriter)
-                                            createIndexWriter(
-                                                    table, indexType, indexField, mergedOptions);
-                        }
-
-                        currentWriter.write(getter.getFieldOrNull(row));
-                        shardCount++;
-                        totalWritten++;
-                    }
-                }
-            }
-
-            // Flush remaining data
-            if (currentWriter != null && shardCount > 0) {
-                Range shardRange =
-                        new Range(
-                                rowRange.from + totalWritten - shardCount,
-                                rowRange.from + totalWritten - 1);
-                allCommitMessages.add(
-                        flushIndex(
-                                table,
-                                partition,
-                                shardRange,
-                                indexField,
-                                indexType,
-                                currentWriter.finish()));
-                currentWriter = null;
-            }
-        } finally {
-            // Clean up writer on exception to prevent resource leaks
-            closeWriterQuietly(currentWriter);
-        }
-    }
-
-    private CommitMessage flushIndex(
-            FileStoreTable table,
-            BinaryRow partition,
-            Range rowRange,
-            DataField indexField,
-            String indexType,
-            List<ResultEntry> resultEntries)
-            throws IOException {
-        List<IndexFileMeta> indexFileMetas =
-                toIndexFileMetas(
-                        table.fileIO(),
-                        table.store().pathFactory().globalIndexFileFactory(),
-                        table.coreOptions(),
-                        rowRange,
-                        indexField.id(),
+            if ("btree".equals(indexType)) {
+                BTreeIndexTopoBuilder.buildIndexAndExecute(
+                        procedureContext.getExecutionEnvironment(),
+                        table,
+                        indexColumn,
+                        partitionPredicate,
+                        userOptions);
+                return new String[] {
+                    "BTree global index created successfully for table: " + table.name()
+                };
+            } else {
+                GenericIndexTopoBuilder.buildIndexAndExecute(
+                        procedureContext.getExecutionEnvironment(),
+                        table,
+                        indexColumn,
                         indexType,
-                        resultEntries);
-        return new CommitMessageImpl(
-                partition, 0, null, indexIncrement(indexFileMetas), emptyIncrement());
-    }
-
-    private static void closeWriterQuietly(GlobalIndexSingletonWriter writer) {
-        if (writer instanceof Closeable) {
-            try {
-                ((Closeable) writer).close();
-            } catch (IOException ignored) {
+                        partitionPredicate,
+                        userOptions);
             }
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to create %s index for column '%s' on table '%s'.",
+                            indexType, indexColumn, table.name()),
+                    e);
         }
+        return new String[] {
+            indexType + " global index created successfully for table: " + table.name()
+        };
     }
 
     private PartitionPredicate parsePartitionPredicate(FileStoreTable table, String partitions) {

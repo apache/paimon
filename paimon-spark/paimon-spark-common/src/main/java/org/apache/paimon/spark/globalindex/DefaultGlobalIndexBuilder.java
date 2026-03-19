@@ -103,15 +103,28 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                 (GlobalIndexSingletonWriter)
                         createIndexWriter(table, indexType, indexField, options);
 
-        InternalRow.FieldGetter getter =
-                InternalRow.createFieldGetter(
-                        indexField.type(), readType.getFieldIndex(indexField.name()));
-        rows.forEachRemaining(
-                row -> {
-                    Object indexO = getter.getFieldOrNull(row);
-                    indexWriter.write(indexO);
-                    rowCounter.add(1);
-                });
-        return indexWriter.finish();
+        try {
+            InternalRow.FieldGetter getter =
+                    InternalRow.createFieldGetter(
+                            indexField.type(), readType.getFieldIndex(indexField.name()));
+            rows.forEachRemaining(
+                    row -> {
+                        Object indexO = getter.getFieldOrNull(row);
+                        indexWriter.write(indexO);
+                        rowCounter.add(1);
+                    });
+            return indexWriter.finish();
+        } finally {
+            closeWriterQuietly(indexWriter);
+        }
+    }
+
+    private static void closeWriterQuietly(GlobalIndexSingletonWriter writer) {
+        if (writer instanceof java.io.Closeable) {
+            try {
+                ((java.io.Closeable) writer).close();
+            } catch (IOException ignored) {
+            }
+        }
     }
 }

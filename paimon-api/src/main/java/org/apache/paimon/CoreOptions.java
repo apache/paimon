@@ -2281,6 +2281,24 @@ public class CoreOptions implements Serializable {
                     .defaultValue(100000L)
                     .withDescription("Row count per shard for global index.");
 
+    public static final ConfigOption<Integer> GLOBAL_INDEX_BUILD_MAX_SHARD =
+            key("global-index.build.max-shard")
+                    .intType()
+                    .defaultValue(32)
+                    .withDescription(
+                            "The max number of shards for building global index. "
+                                    + "If the number of shards calculated by 'global-index.row-count-per-shard' "
+                                    + "exceeds this value, 'global-index.row-count-per-shard' will be "
+                                    + "recalculated as ceil(total-row-count / max-shard) to guarantee "
+                                    + "the shard count does not exceed max-shard.");
+
+    public static final ConfigOption<Integer> GLOBAL_INDEX_BUILD_MAX_PARALLELISM =
+            key("global-index.build.max-parallelism")
+                    .intType()
+                    .defaultValue(4096)
+                    .withDescription(
+                            "The max parallelism of Flink/Spark for building global index.");
+
     public static final ConfigOption<Boolean> GLOBAL_INDEX_ENABLED =
             key("global-index.enabled")
                     .booleanType()

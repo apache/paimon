@@ -19,10 +19,15 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.globalindex.GenericGlobalIndexBuilder;
+import org.apache.paimon.flink.globalindex.GenericIndexTopoBuilder;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -357,6 +362,141 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
                     .isGreaterThanOrEqualTo(meta.globalIndexMeta().rowRangeStart());
             assertThat(meta.fileSize()).isGreaterThan(0);
         }
+    }
+
+    @Test
+    public void testCustomBuilderSupplier() throws Exception {
+        sql(
+                "CREATE TABLE T_CUSTOM (id INT, v ARRAY<FLOAT>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'lumina.index.dimension' = '3', "
+                        + "'lumina.distance.metric' = 'l2'"
+                        + ")");
+
+        // Two separate inserts create two data files with different firstRowId ranges
+        sql("INSERT INTO T_CUSTOM VALUES " + vectorValues(0, 50, 3));
+        sql("INSERT INTO T_CUSTOM VALUES " + vectorValues(50, 50, 3));
+
+        FileStoreTable table = paimonTable("T_CUSTOM");
+        Options mergedOptions = new Options(table.options());
+
+        // Use a custom builder that only indexes the first batch (firstRowId < 50)
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        boolean hasIndex =
+                GenericIndexTopoBuilder.buildIndex(
+                        env,
+                        () ->
+                                new GenericGlobalIndexBuilder(table) {
+                                    @Override
+                                    public List<ManifestEntry> scan() {
+                                        return super.scan().stream()
+                                                .filter(
+                                                        e ->
+                                                                e.file().firstRowId() != null
+                                                                        && e.file().firstRowId()
+                                                                                < 50)
+                                                .collect(Collectors.toList());
+                                    }
+                                },
+                        table,
+                        "v",
+                        INDEX_TYPE,
+                        null,
+                        mergedOptions);
+        assertThat(hasIndex).isTrue();
+        env.execute("test-partial-index");
+
+        List<IndexFileMeta> vectorEntries = getVectorIndexFiles(table);
+        assertThat(vectorEntries).isNotEmpty();
+        // Only the first batch (50 rows) should be indexed
+        long totalRowCount = vectorEntries.stream().mapToLong(IndexFileMeta::rowCount).sum();
+        assertThat(totalRowCount).isEqualTo(50L);
+    }
+
+    @Test
+    public void testDeletedIndexEntriesDefault() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_DEL_DEFAULT (id INT, v ARRAY<FLOAT>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'lumina.index.dimension' = '3', "
+                        + "'lumina.distance.metric' = 'l2'"
+                        + ")");
+
+        FileStoreTable table = paimonTable("T_DEL_DEFAULT");
+        GenericGlobalIndexBuilder builder = new GenericGlobalIndexBuilder(table);
+        assertThat(builder.deletedIndexEntries()).isEmpty();
+    }
+
+    @Test
+    public void testDeletedIndexEntriesAtomicCommit() throws Exception {
+        sql(
+                "CREATE TABLE T_DEL_ATOMIC (id INT, v ARRAY<FLOAT>) WITH ("
+                        + "'bucket' = '-1', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true', "
+                        + "'lumina.index.dimension' = '3', "
+                        + "'lumina.distance.metric' = 'l2'"
+                        + ")");
+
+        sql("INSERT INTO T_DEL_ATOMIC VALUES " + vectorValues(0, 100, 3));
+
+        // First build: create initial index
+        sql(
+                "CALL sys.create_global_index("
+                        + "`table` => 'default.T_DEL_ATOMIC', "
+                        + "index_column => 'v', "
+                        + "index_type => '"
+                        + INDEX_TYPE
+                        + "')");
+
+        FileStoreTable table = paimonTable("T_DEL_ATOMIC");
+        List<IndexManifestEntry> oldEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> INDEX_TYPE.equals(e.indexFile().indexType()))
+                        .collect(Collectors.toList());
+        assertThat(oldEntries).isNotEmpty();
+
+        List<String> oldFileNames =
+                oldEntries.stream().map(e -> e.indexFile().fileName()).collect(Collectors.toList());
+
+        // Second build: use a custom builder that reports old entries as deletedIndexEntries
+        StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
+        boolean hasIndex =
+                GenericIndexTopoBuilder.buildIndex(
+                        env,
+                        () ->
+                                new GenericGlobalIndexBuilder(table) {
+                                    @Override
+                                    public List<IndexManifestEntry> deletedIndexEntries() {
+                                        return oldEntries;
+                                    }
+                                },
+                        table,
+                        "v",
+                        INDEX_TYPE,
+                        null,
+                        new Options(table.options()));
+        assertThat(hasIndex).isTrue();
+        env.execute("test-rebuild-index");
+
+        // After the atomic commit, old index files should be deleted and new ones created
+        List<IndexManifestEntry> newEntries =
+                table.store().newIndexFileHandler().scanEntries().stream()
+                        .filter(e -> INDEX_TYPE.equals(e.indexFile().indexType()))
+                        .collect(Collectors.toList());
+
+        assertThat(newEntries).isNotEmpty();
+        long totalRowCount = newEntries.stream().mapToLong(e -> e.indexFile().rowCount()).sum();
+        assertThat(totalRowCount).isEqualTo(100L);
+
+        // New files should be different from old files (old ones were deleted)
+        List<String> newFileNames =
+                newEntries.stream().map(e -> e.indexFile().fileName()).collect(Collectors.toList());
+        assertThat(newFileNames).doesNotContainAnyElementsOf(oldFileNames);
     }
 
     // -- Helpers --

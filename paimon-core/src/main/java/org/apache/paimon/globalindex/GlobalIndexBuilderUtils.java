@@ -71,6 +71,23 @@ public class GlobalIndexBuilderUtils {
         return results;
     }
 
+    /**
+     * Adjust rowsPerShard if the estimated shard count exceeds maxShard. Returns the adjusted
+     * rowsPerShard value.
+     */
+    public static long adjustRowsPerShard(long rowsPerShard, long totalRowCount, int maxShard) {
+        long estimatedShards = ceilDivision(totalRowCount, rowsPerShard);
+        if (estimatedShards > maxShard) {
+            return ceilDivision(totalRowCount, maxShard);
+        }
+        return rowsPerShard;
+    }
+
+    /** Integer ceiling division: returns ceil(a / b) for positive a and b. */
+    private static long ceilDivision(long a, long b) {
+        return (a + b - 1) / b;
+    }
+
     public static GlobalIndexWriter createIndexWriter(
             FileStoreTable table, String indexType, DataField indexField, Options options)
             throws IOException {
