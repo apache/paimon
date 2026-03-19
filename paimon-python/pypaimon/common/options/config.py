@@ -83,3 +83,28 @@ class CatalogOptions:
     HTTP_USER_AGENT_HEADER = ConfigOptions.key(
         "header.HTTP_USER_AGENT").string_type().no_default_value().with_description("HTTP User Agent header")
     BLOB_FILE_IO_DEFAULT_CACHE_SIZE = 2 ** 31 - 1
+
+
+class FuseOptions:
+    """FUSE local path configuration options."""
+
+    FUSE_LOCAL_PATH_ENABLED = (
+        ConfigOptions.key("fuse.local-path.enabled")
+        .boolean_type()
+        .default_value(False)
+        .with_description("Whether to enable FUSE local path mapping")
+    )
+
+    FUSE_LOCAL_PATH_ROOT = (
+        ConfigOptions.key("fuse.local-path.root")
+        .string_type()
+        .no_default_value()
+        .with_description("FUSE mounted local root path, e.g., /mnt/fuse/warehouse")
+    )
+
+    FUSE_LOCAL_PATH_VALIDATION_MODE = (
+        ConfigOptions.key("fuse.local-path.validation-mode")
+        .string_type()
+        .default_value("strict")
+        .with_description("Validation mode: strict, warn, or none")
+    )
