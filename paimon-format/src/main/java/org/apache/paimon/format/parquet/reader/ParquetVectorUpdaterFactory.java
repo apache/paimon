@@ -498,7 +498,7 @@ public class ParquetVectorUpdaterFactory {
 
         @Override
         public void skipValues(int total, VectorizedValuesReader valuesReader) {
-            valuesReader.skipBytes(12);
+            valuesReader.skipFixedLenByteArray(total, 12);
         }
 
         @Override
