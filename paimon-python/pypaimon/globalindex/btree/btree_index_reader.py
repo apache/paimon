@@ -61,7 +61,7 @@ class BTreeIndexReader(GlobalIndexReader):
     supporting various predicate operations like equality, range, and null checks.
     """
 
-    FOOTER_ENCODED_LENGTH = 48
+    FOOTER_ENCODED_LENGTH = 52
 
     def __init__(
         self,
