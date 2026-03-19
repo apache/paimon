@@ -79,6 +79,19 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final int batchSize;
     @Nullable private final FilterCompat.Filter filter;
 
+    /**
+     * Cached requestedSchema derived from the read type. Since this factory instance is bound to a
+     * fixed read type (set at construction time) and the underlying file schema for a given schema
+     * version is immutable, the clipped schema only needs to be computed once per instance.
+     */
+    @Nullable private volatile MessageType cachedRequestedSchema;
+
+    /**
+     * Cached ParquetField list corresponding to {@link #cachedRequestedSchema}. Computed together
+     * with the schema on first read and reused for all subsequent files.
+     */
+    @Nullable private volatile List<ParquetField> cachedFields;
+
     public ParquetReaderFactory(
             Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
         this.conf = conf;
@@ -102,7 +115,20 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
-        MessageType requestedSchema = clipParquetSchema(fileSchema);
+
+        // Compute requestedSchema and fields once per factory instance and cache them.
+        // This factory is bound to a fixed readType and is reused across multiple files that share
+        // the same schema version (via KeyValueFileReaderFactory.formatReaderMappings), so the
+        // clipped schema and field list only need to be computed on the first file read.
+        MessageType requestedSchema = cachedRequestedSchema;
+        List<ParquetField> fields = cachedFields;
+        if (requestedSchema == null) {
+            requestedSchema = clipParquetSchema(fileSchema);
+            MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
+            fields = buildFieldsList(readFields, columnIO, requestedSchema);
+            cachedRequestedSchema = requestedSchema;
+            cachedFields = fields;
+        }
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -114,9 +140,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         reader.setRequestedSchema(requestedSchema);
         WritableColumnVector[] writableVectors = createWritableVectors();
-
-        MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields = buildFieldsList(readFields, columnIO, requestedSchema);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(),
