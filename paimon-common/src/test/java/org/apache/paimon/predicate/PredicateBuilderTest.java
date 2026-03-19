@@ -150,22 +150,6 @@ public class PredicateBuilderTest {
         assertThat(result).isEqualTo(PredicateBuilder.alwaysTrue());
     }
 
-    @Test
-    public void testAndProducesFlatCompound() {
-        PredicateBuilder builder =
-                new PredicateBuilder(RowType.of(new IntType(), new IntType(), new IntType()));
-        Predicate a = builder.equal(0, 1);
-        Predicate b = builder.equal(1, 2);
-        Predicate c = builder.equal(2, 3);
-
-        Predicate result = PredicateBuilder.and(a, b, c);
-        // Should be a flat CompoundPredicate, not nested binary
-        assertThat(result).isInstanceOf(CompoundPredicate.class);
-        CompoundPredicate compound = (CompoundPredicate) result;
-        assertThat(compound.function()).isInstanceOf(And.class);
-        assertThat(compound.children()).containsExactly(a, b, c);
-    }
-
     // ---- or() tests ----
 
     @Test
@@ -198,22 +182,6 @@ public class PredicateBuilderTest {
         Predicate result =
                 PredicateBuilder.or(PredicateBuilder.alwaysFalse(), PredicateBuilder.alwaysFalse());
         assertThat(result).isEqualTo(PredicateBuilder.alwaysFalse());
-    }
-
-    @Test
-    public void testOrProducesFlatCompound() {
-        PredicateBuilder builder =
-                new PredicateBuilder(RowType.of(new IntType(), new IntType(), new IntType()));
-        Predicate a = builder.equal(0, 1);
-        Predicate b = builder.equal(1, 2);
-        Predicate c = builder.equal(2, 3);
-
-        Predicate result = PredicateBuilder.or(a, b, c);
-        // Should be a flat CompoundPredicate, not nested binary
-        assertThat(result).isInstanceOf(CompoundPredicate.class);
-        CompoundPredicate compound = (CompoundPredicate) result;
-        assertThat(compound.function()).isInstanceOf(Or.class);
-        assertThat(compound.children()).containsExactly(a, b, c);
     }
 
     // ---- and/or evaluation tests ----

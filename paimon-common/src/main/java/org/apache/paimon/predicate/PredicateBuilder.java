@@ -296,7 +296,9 @@ public class PredicateBuilder {
             return optimized.get(0);
         }
 
-        return new CompoundPredicate(And.INSTANCE, optimized);
+        return optimized.stream()
+                .reduce((a, b) -> new CompoundPredicate(And.INSTANCE, Arrays.asList(a, b)))
+                .get();
     }
 
     @Nullable
@@ -349,7 +351,9 @@ public class PredicateBuilder {
             return noFalsePredicates.get(0);
         }
 
-        return new CompoundPredicate(Or.INSTANCE, noFalsePredicates);
+        return noFalsePredicates.stream()
+                .reduce((a, b) -> new CompoundPredicate(Or.INSTANCE, Arrays.asList(a, b)))
+                .get();
     }
 
     private static boolean isAlwaysFalse(Predicate predicate) {
