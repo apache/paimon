@@ -125,6 +125,10 @@ public class PredicateProjectionConverter implements PredicateVisitor<Optional<P
         if (converted.size() == 1) {
             return Optional.of(converted.get(0));
         }
-        return Optional.of(new CompoundPredicate(predicate.function(), converted));
+        if (isAnd) {
+            return Optional.of(PredicateBuilder.and(converted));
+        } else {
+            return Optional.of(PredicateBuilder.or(converted));
+        }
     }
 }
