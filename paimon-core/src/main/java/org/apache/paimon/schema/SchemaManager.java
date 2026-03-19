@@ -78,6 +78,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
@@ -87,6 +88,7 @@ import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
 import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.CoreOptions.LIST_AGG_DELIMITER;
 import static org.apache.paimon.CoreOptions.NESTED_KEY;
+import static org.apache.paimon.CoreOptions.PK_CLUSTERING_OVERRIDE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
@@ -1165,6 +1167,15 @@ public class SchemaManager implements Serializable {
                         String.format(
                                 "Cannot change %s from true to false.",
                                 IGNORE_UPDATE_BEFORE.key()));
+            }
+        }
+
+        if (CLUSTERING_COLUMNS.key().equals(key)) {
+            if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change %s when %s enabled.",
+                                CLUSTERING_COLUMNS.key(), PK_CLUSTERING_OVERRIDE.key()));
             }
         }
     }

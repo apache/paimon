@@ -2351,6 +2351,7 @@ public class CoreOptions implements Serializable {
                                                     + " Default is 10 * TARGET_FILE_SIZE.")
                                     .build());
 
+    @Immutable
     public static final ConfigOption<Boolean> PK_CLUSTERING_OVERRIDE =
             key("pk-clustering-override")
                     .booleanType()
