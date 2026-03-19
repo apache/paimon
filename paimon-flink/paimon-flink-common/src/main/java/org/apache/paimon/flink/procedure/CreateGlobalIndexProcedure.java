@@ -104,7 +104,7 @@ public class CreateGlobalIndexProcedure extends ProcedureBase {
                     "BTree global index created successfully for table: " + table.name()
                 };
             } else {
-                GenericIndexTopoBuilder.buildIndex(
+                GenericIndexTopoBuilder.buildIndexAndExecute(
                         procedureContext.getExecutionEnvironment(),
                         table,
                         indexColumn,

@@ -89,7 +89,7 @@ public class GenericIndexTopoBuilder {
 
     private static final Logger LOG = LoggerFactory.getLogger(GenericIndexTopoBuilder.class);
 
-    public static void buildIndex(
+    public static void buildIndexAndExecute(
             StreamExecutionEnvironment env,
             FileStoreTable table,
             String indexColumn,
@@ -97,28 +97,29 @@ public class GenericIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
-        buildIndex(
-                env,
-                () -> new GenericGlobalIndexBuilder(table),
-                table,
-                indexColumn,
-                indexType,
-                partitionPredicate,
-                userOptions);
+        boolean hasIndexToBuild =
+                buildIndex(
+                        env,
+                        () -> new GenericGlobalIndexBuilder(table),
+                        table,
+                        indexColumn,
+                        indexType,
+                        partitionPredicate,
+                        userOptions);
+        if (hasIndexToBuild) {
+            env.execute("Create " + indexType + " global index for table: " + table.name());
+        } else {
+            LOG.info("No index to build, nothing to do.");
+        }
     }
 
     /**
-     * Builds a generic global index using a {@link GenericGlobalIndexBuilder} supplier.
+     * Builds a generic global index topology using a {@link GenericGlobalIndexBuilder} supplier.
      *
-     * @param env Flink execution environment
-     * @param indexBuilderSupplier supplier for the index builder (encapsulates scan strategy)
-     * @param table the target table
-     * @param indexColumn the column to build index on
-     * @param indexType the index type identifier (e.g. "lumina-vector-ann")
-     * @param partitionPredicate optional partition filter
-     * @param userOptions user-provided options (merged with table options)
+     * @return {@code true} if a Flink topology was built and is ready to execute, {@code false} if
+     *     there was nothing to index
      */
-    public static void buildIndex(
+    public static boolean buildIndex(
             StreamExecutionEnvironment env,
             Supplier<GenericGlobalIndexBuilder> indexBuilderSupplier,
             FileStoreTable table,
@@ -168,7 +169,7 @@ public class GenericIndexTopoBuilder {
         List<ShardTask> shardTasks = computeShardTasks(table, entries, rowsPerShard);
         if (shardTasks.isEmpty()) {
             LOG.info("No shard tasks generated, nothing to index.");
-            return;
+            return false;
         }
         LOG.info("Generated {} shard tasks with rowsPerShard={}.", shardTasks.size(), rowsPerShard);
 
@@ -216,8 +217,7 @@ public class GenericIndexTopoBuilder {
         }
 
         commit(table, indexType, built);
-
-        env.execute("Create " + indexType + " global index for table: " + table.name());
+        return true;
     }
 
     /**

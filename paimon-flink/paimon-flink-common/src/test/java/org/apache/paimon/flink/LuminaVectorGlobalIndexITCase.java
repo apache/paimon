@@ -384,25 +384,29 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
 
         // Use a custom builder that only indexes the first batch (firstRowId < 50)
         StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
-        GenericIndexTopoBuilder.buildIndex(
-                env,
-                () ->
-                        new GenericGlobalIndexBuilder(table) {
-                            @Override
-                            public List<ManifestEntry> scan() {
-                                return super.scan().stream()
-                                        .filter(
-                                                e ->
-                                                        e.file().firstRowId() != null
-                                                                && e.file().firstRowId() < 50)
-                                        .collect(Collectors.toList());
-                            }
-                        },
-                table,
-                "v",
-                INDEX_TYPE,
-                null,
-                mergedOptions);
+        boolean hasIndex =
+                GenericIndexTopoBuilder.buildIndex(
+                        env,
+                        () ->
+                                new GenericGlobalIndexBuilder(table) {
+                                    @Override
+                                    public List<ManifestEntry> scan() {
+                                        return super.scan().stream()
+                                                .filter(
+                                                        e ->
+                                                                e.file().firstRowId() != null
+                                                                        && e.file().firstRowId()
+                                                                                < 50)
+                                                .collect(Collectors.toList());
+                                    }
+                                },
+                        table,
+                        "v",
+                        INDEX_TYPE,
+                        null,
+                        mergedOptions);
+        assertThat(hasIndex).isTrue();
+        env.execute("test-partial-index");
 
         List<IndexFileMeta> vectorEntries = getVectorIndexFiles(table);
         assertThat(vectorEntries).isNotEmpty();
@@ -461,20 +465,23 @@ public class LuminaVectorGlobalIndexITCase extends CatalogITCaseBase {
 
         // Second build: use a custom builder that reports old entries as deletedIndexEntries
         StreamExecutionEnvironment env = streamExecutionEnvironmentBuilder().batchMode().build();
-        GenericIndexTopoBuilder.buildIndex(
-                env,
-                () ->
-                        new GenericGlobalIndexBuilder(table) {
-                            @Override
-                            public List<IndexManifestEntry> deletedIndexEntries() {
-                                return oldEntries;
-                            }
-                        },
-                table,
-                "v",
-                INDEX_TYPE,
-                null,
-                new Options(table.options()));
+        boolean hasIndex =
+                GenericIndexTopoBuilder.buildIndex(
+                        env,
+                        () ->
+                                new GenericGlobalIndexBuilder(table) {
+                                    @Override
+                                    public List<IndexManifestEntry> deletedIndexEntries() {
+                                        return oldEntries;
+                                    }
+                                },
+                        table,
+                        "v",
+                        INDEX_TYPE,
+                        null,
+                        new Options(table.options()));
+        assertThat(hasIndex).isTrue();
+        env.execute("test-rebuild-index");
 
         // After the atomic commit, old index files should be deleted and new ones created
         List<IndexManifestEntry> newEntries =
