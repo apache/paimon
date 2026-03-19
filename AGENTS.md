@@ -1,6 +1,6 @@
 # Apache Paimon
 
-This file provides context and guidelines for AI coding assistants working with the Apache Paimon codebase.
+Guidelines for AI coding assistants working with the Apache Paimon codebase.
 
 ## Syntax Requirements
 
@@ -8,11 +8,9 @@ This file provides context and guidelines for AI coding assistants working with 
 
 ## Build and Test
 
-Prefer the smallest possible build/test scope and use the local iteration speedup techniques below to keep feedback loops fast.
+Prefer the smallest possible build/test scope and use the speedup techniques below to keep feedback loops fast.
 
 ### Build
-
-Prefer using Maven module selection to minimize the build scope.
 
 - Compile a single module: `mvn -pl <module> -DskipTests compile`
 - Compile multiple modules: `mvn -pl <module1>,<module2> -DskipTests compile`
@@ -21,32 +19,31 @@ Prefer using Maven module selection to minimize the build scope.
 
 Prefer running the narrowest tests.
 
-- Run test for a single method: `mvn -pl <module> -Dtest=TestClassName#methodName test`
-- Run test for a single class: `mvn -pl <module> -Dtest=TestClassName test`
+#### Java Tests (surefire)
+
+- Single method: `mvn -pl <module> -Dtest=TestClassName#methodName test`
+- Single class: `mvn -pl <module> -Dtest=TestClassName test`
+
+#### Scala Tests (scalatest)
+
+Scala tests use `scalatest-maven-plugin`, not surefire. Use `-DwildcardSuites` and `-Dtest=none`:
+
+```shell
+mvn -pl paimon-spark/paimon-spark-ut -am -Pfast-build -DfailIfNoTests=false \
+  -DwildcardSuites=org.apache.paimon.spark.sql.WriteMergeSchemaTest \
+  -Dtest=none test
+```
 
 ### Local Iteration Speedup
 
-#### Use Maven Skip Options
-
-Prefer these skip options for faster local iteration, but don't rely on them for final verification.
+Use `-Pfast-build` to skip checkstyle, spotless, enforcer, and rat checks (not for final verification):
 
 ```shell
--Dcheckstyle.skip -Dspotless.check.skip -Denforcer.skip
+mvn -pl <module> -Pfast-build -Dtest=TestClassName#methodName test
 ```
 
-For example:
+Use `-am` if your target module depends on locally changed modules. Add `-DfailIfNoTests=false` to avoid failures for modules without tests:
 
 ```shell
-mvn -pl <module> -Dcheckstyle.skip -Dspotless.check.skip -Denforcer.skip -Dtest=TestClassName#methodName test
-```
-
-#### Use -am (also-make)
-
-If your target module depends on other modules you've changed locally, prefer `-am` to rebuild them together in the same reactor.
-Also add `-DfailIfNoTests=false` to avoid failures for modules without tests.
-
-For example:
-
-```shell
-mvn -pl <module> -am -DfailIfNoTests=false -Dtest=TestClassName#methodName test
+mvn -pl <module> -am -Pfast-build -DfailIfNoTests=false -Dtest=TestClassName#methodName test
 ```

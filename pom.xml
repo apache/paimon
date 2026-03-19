@@ -511,6 +511,17 @@ under the License.
                 <jdk>11</jdk>
             </activation>
         </profile>
+
+        <profile>
+            <id>fast-build</id>
+            <properties>
+                <checkstyle.skip>true</checkstyle.skip>
+                <spotless.check.skip>true</spotless.check.skip>
+                <scalastyle.skip>true</scalastyle.skip>
+                <enforcer.skip>true</enforcer.skip>
+                <rat.skip>true</rat.skip>
+            </properties>
+        </profile>
     </profiles>
 
     <build>

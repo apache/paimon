@@ -3,7 +3,6 @@
 ### Purpose
 
 <!-- Linking this pull request to the issue -->
-Linked issue: close #xxx
 
 <!-- What is the purpose of the change -->
 
