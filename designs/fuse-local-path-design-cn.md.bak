@@ -16,39 +16,39 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-# FUSE Local Path Configuration for RESTCatalog
+# RESTCatalog FUSE 本地路径配置设计
 
-## Background
+## 背景
 
-When using Paimon RESTCatalog with remote object storage (e.g., OSS, S3, HDFS), data access typically goes through remote storage SDKs. However, in scenarios where remote storage paths are mounted locally via FUSE (Filesystem in Userspace), users can access data through local file system paths directly, achieving better performance.
+在使用 Paimon RESTCatalog 访问远端对象存储（如 OSS、S3、HDFS）时，数据访问通常通过远端存储 SDK 进行。然而，在远端存储路径通过 FUSE（用户空间文件系统）挂载到本地的场景下，用户可以直接通过本地文件系统路径访问数据，获得更好的性能。
 
-This design introduces configuration parameters to support FUSE-mounted remote storage paths, allowing users to specify local path mappings at catalog, database, and table levels.
+本设计引入配置参数以支持 FUSE 挂载的远端存储路径，允许用户在 Catalog、Database 和 Table 三个层级指定本地路径映射。
 
-## Goals
+## 目标
 
-1. Enable local file system access for FUSE-mounted remote storage paths
-2. Support hierarchical path mapping: catalog root > database > table
-3. Use local FileIO for data read/write when FUSE local path is applicable
-4. Maintain backward compatibility with existing RESTCatalog behavior
+1. 支持通过本地文件系统访问 FUSE 挂载的远端存储路径
+2. 支持分层路径映射：Catalog 根路径 > Database > Table
+3. 当 FUSE 本地路径适用时，使用本地 FileIO 进行数据读写
+4. 保持与现有 RESTCatalog 行为的向后兼容性
 
-## Configuration Parameters
+## 配置参数
 
-All parameters are defined in `RESTCatalogOptions.java`:
+所有参数定义在 `RESTCatalogOptions.java` 中：
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `fuse.local-path.enabled` | Boolean | `false` | Whether to enable FUSE local path mapping for remote storage paths |
-| `fuse.local-path.root` | String | (none) | The root local path for FUSE-mounted storage, e.g., `/mnt/fuse` |
-| `fuse.local-path.database` | Map<String, String> | `{}` | Database-level local path mapping. Format: `db1:/local/path1,db2:/local/path2` |
-| `fuse.local-path.table` | Map<String, String> | `{}` | Table-level local path mapping. Format: `db1.table1:/local/path1,db2.table2:/local/path2` |
-| `fuse.local-path.validation-mode` | String | `strict` | Validation mode: `strict`, `warn`, or `none` |
-| `fuse.local-path.retry.max-attempts` | Integer | `3` | Maximum retry attempts for FUSE-specific errors (e.g., stale file handle) |
-| `fuse.local-path.retry.initial-delay-ms` | Integer | `100` | Initial retry delay in milliseconds |
-| `fuse.local-path.retry.max-delay-ms` | Integer | `5000` | Maximum retry delay in milliseconds |
+| 参数 | 类型 | 默认值 | 描述 |
+|-----|------|--------|------|
+| `fuse.local-path.enabled` | Boolean | `false` | 是否启用 FUSE 本地路径映射 |
+| `fuse.local-path.root` | String | (无) | FUSE 挂载的本地根路径，如 `/mnt/fuse` |
+| `fuse.local-path.database` | Map<String, String> | `{}` | Database 级别的本地路径映射。格式：`db1:/local/path1,db2:/local/path2` |
+| `fuse.local-path.table` | Map<String, String> | `{}` | Table 级别的本地路径映射。格式：`db1.table1:/local/path1,db2.table2:/local/path2` |
+| `fuse.local-path.validation-mode` | String | `strict` | 校验模式：`strict`、`warn` 或 `none` |
+| `fuse.local-path.retry.max-attempts` | Integer | `3` | FUSE 特有错误的最大重试次数（如 stale file handle） |
+| `fuse.local-path.retry.initial-delay-ms` | Integer | `100` | 初始重试延迟（毫秒） |
+| `fuse.local-path.retry.max-delay-ms` | Integer | `5000` | 最大重试延迟（毫秒） |
 
-## Usage Example
+## 使用示例
 
-### SQL Configuration (Flink/Spark)
+### SQL 配置（Flink/Spark）
 
 ```sql
 CREATE CATALOG paimon_rest_catalog WITH (
@@ -57,7 +57,7 @@ CREATE CATALOG paimon_rest_catalog WITH (
     'uri' = 'http://rest-server:8080',
     'token' = 'xxx',
 
-    -- FUSE local path configuration
+    -- FUSE 本地路径配置
     'fuse.local-path.enabled' = 'true',
     'fuse.local-path.root' = '/mnt/fuse/warehouse',
     'fuse.local-path.database' = 'db1:/mnt/custom/db1,db2:/mnt/custom/db2',
@@ -65,50 +65,50 @@ CREATE CATALOG paimon_rest_catalog WITH (
 );
 ```
 
-### Path Resolution Priority
+### 路径解析优先级
 
-When resolving a path, the system checks in the following order (higher priority wins):
+解析路径时，系统按以下顺序检查（优先级从高到低）：
 
-1. **Table-level mapping** (`fuse.local-path.table`)
-2. **Database-level mapping** (`fuse.local-path.database`)
-3. **Root mapping** (`fuse.local-path.root`)
+1. **Table 级别映射**（`fuse.local-path.table`）
+2. **Database 级别映射**（`fuse.local-path.database`）
+3. **根路径映射**（`fuse.local-path.root`）
 
-Example: For table `db1.table1`:
-- If `fuse.local-path.table` contains `db1.table1:/mnt/special/t1`, use `/mnt/special/t1`
-- Else if `fuse.local-path.database` contains `db1:/mnt/custom/db1`, use `/mnt/custom/db1`
-- Else use `fuse.local-path.root` (e.g., `/mnt/fuse/warehouse`)
+示例：对于表 `db1.table1`：
+- 如果 `fuse.local-path.table` 包含 `db1.table1:/mnt/special/t1`，使用 `/mnt/special/t1`
+- 否则，如果 `fuse.local-path.database` 包含 `db1:/mnt/custom/db1`，使用 `/mnt/custom/db1`
+- 否则，使用 `fuse.local-path.root`（如 `/mnt/fuse/warehouse`）
 
-## Implementation
+## 实现方案
 
-### RESTCatalog Modification
+### RESTCatalog 修改
 
-The `fileIOForData` method in `RESTCatalog.java` will be modified:
+修改 `RESTCatalog.java` 中的 `fileIOForData` 方法：
 
 ```java
 private FileIO fileIOForData(Path path, Identifier identifier) {
-    // If FUSE local path is enabled and path matches, use local FileIO
+    // 如果 FUSE 本地路径启用且路径匹配，使用本地 FileIO
     if (fuseLocalPathEnabled) {
         Path localPath = resolveFUSELocalPath(path, identifier);
         if (localPath != null) {
-            // Use local file IO, no token needed
+            // 使用本地文件 IO，无需 token
             return FileIO.get(localPath, CatalogContext.create(new Options(), context.hadoopConf()));
         }
     }
     
-    // Original logic: data token or ResolvingFileIO
+    // 原有逻辑：data token 或 ResolvingFileIO
     return dataTokenEnabled
             ? new RESTTokenFileIO(context, api, identifier, path)
             : fileIOFromOptions(path);
 }
 
 /**
- * Resolve FUSE local path. Priority: table > database > root.
- * @return Local path, or null if not applicable
+ * 解析 FUSE 本地路径。优先级：table > database > root。
+ * @return 本地路径，如果不适用则返回 null
  */
 private Path resolveFUSELocalPath(Path originalPath, Identifier identifier) {
     String pathStr = originalPath.toString();
     
-    // 1. Check table-level mapping
+    // 1. 检查 Table 级别映射
     Map<String, String> tableMappings = context.options().get(FUSE_LOCAL_PATH_TABLE);
     String tableKey = identifier.getDatabaseName() + "." + identifier.getTableName();
     if (tableMappings.containsKey(tableKey)) {
@@ -116,14 +116,14 @@ private Path resolveFUSELocalPath(Path originalPath, Identifier identifier) {
         return convertToLocalPath(pathStr, localRoot);
     }
     
-    // 2. Check database-level mapping
+    // 2. 检查 Database 级别映射
     Map<String, String> dbMappings = context.options().get(FUSE_LOCAL_PATH_DATABASE);
     if (dbMappings.containsKey(identifier.getDatabaseName())) {
         String localRoot = dbMappings.get(identifier.getDatabaseName());
         return convertToLocalPath(pathStr, localRoot);
     }
     
-    // 3. Use root mapping
+    // 3. 使用根路径映射
     String fuseRoot = context.options().get(FUSE_LOCAL_PATH_ROOT);
     if (fuseRoot != null) {
         return convertToLocalPath(pathStr, fuseRoot);
@@ -133,58 +133,58 @@ private Path resolveFUSELocalPath(Path originalPath, Identifier identifier) {
 }
 
 private Path convertToLocalPath(String originalPath, String localRoot) {
-    // Convert remote storage path to local FUSE path
-    // Example: oss://bucket/warehouse/db1/table1 -> /mnt/fuse/warehouse/db1/table1
-    // Implementation depends on path structure
+    // 将远端存储路径转换为本地 FUSE 路径
+    // 示例：oss://bucket/warehouse/db1/table1 -> /mnt/fuse/warehouse/db1/table1
+    // 具体实现取决于路径结构
 }
 ```
 
-### Behavior Matrix
+### 行为矩阵
 
-| Configuration | Path Match | Behavior |
-|---------------|------------|----------|
-| `fuse.local-path.enabled=true` | Yes | Local FileIO for data read/write |
-| `fuse.local-path.enabled=true` | No | Fallback to original logic |
-| `fuse.local-path.enabled=false` | N/A | Original logic (data token or ResolvingFileIO) |
+| 配置 | 路径匹配 | 行为 |
+|-----|---------|------|
+| `fuse.local-path.enabled=true` | 是 | 本地 FileIO 进行数据读写 |
+| `fuse.local-path.enabled=true` | 否 | 回退到原有逻辑 |
+| `fuse.local-path.enabled=false` | 不适用 | 原有逻辑（data token 或 ResolvingFileIO） |
 
-## Benefits
+## 优势
 
-1. **Performance**: Local file system access is typically faster than network-based remote storage access
-2. **Flexibility**: Supports different local paths for different databases/tables
-3. **Backward Compatibility**: Disabled by default, existing behavior unchanged
+1. **性能提升**：本地文件系统访问通常比基于网络的远端存储访问更快
+2. **灵活性**：支持为不同的数据库/表配置不同的本地路径
+3. **向后兼容**：默认禁用，现有行为不变
 
-## Security Validation Mechanism
+## 安全校验机制
 
-### Problem Scenarios
+### 问题场景
 
-Incorrect FUSE local path configuration can lead to serious data consistency issues:
+错误的 FUSE 本地路径配置可能导致严重的数据一致性问题：
 
-| Scenario | Description | Consequence |
-|----------|-------------|-------------|
-| **Local path not mounted** | User's configured `/local/table` is not actually FUSE-mounted | Data is written only to local disk, not synced to remote storage, causing data loss |
-| **Remote path mismatch** | Local path points to a different table's remote storage path | Data is written to the wrong table, causing data pollution |
+| 场景 | 描述 | 后果 |
+|-----|------|------|
+| **本地路径未挂载** | 用户配置的 `/local/table` 实际没有 FUSE 挂载 | 数据仅写入本地磁盘，未同步到远端存储，导致数据丢失 |
+| **远端路径错误** | 本地路径指向了其他库表的远端存储路径 | 数据写入错误的表，导致数据污染 |
 
-### Validation Mode Configuration
+### 校验模式配置
 
-New configuration parameter to control validation behavior:
+新增配置参数控制校验行为：
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `fuse.local-path.validation-mode` | String | `strict` | Validation mode: `strict`, `warn`, or `none` |
+| 参数 | 类型 | 默认值 | 描述 |
+|-----|------|--------|------|
+| `fuse.local-path.validation-mode` | String | `strict` | 校验模式：`strict`（严格）、`warn`（警告）、`none`（不校验） |
 
-**Validation Mode Description**:
+**校验模式说明**：
 
-| Mode | Behavior |
-|------|----------|
-| `strict` | Enable validation, throw exception on failure, block the operation |
-| `warn` | Enable validation, log warning on failure, but allow operation to proceed |
-| `none` | No validation (not recommended, may cause data loss or pollution) |
+| 模式 | 行为 |
+|-----|------|
+| `strict` | 启用校验，失败时抛出异常，阻止操作 |
+| `warn` | 启用校验，失败时输出警告日志，但允许操作继续 |
+| `none` | 不进行校验（不推荐，可能导致数据丢失或污染） |
 
-### Validation Flow
+### 校验流程
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Access Table (getTable)                  │
+│                     访问表（getTable）                        │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -196,7 +196,7 @@ New configuration parameter to control validation behavior:
                     │                    │
                     ▼                    ▼
         ┌───────────────────┐    ┌───────────────────┐
-        │ Resolve local path│    │ Use original logic│
+        │ 解析本地路径       │    │ 使用原有逻辑       │
         │ resolveFUSELocalPath│   │ (RESTTokenFileIO) │
         └───────────────────┘    └───────────────────┘
                     │
@@ -209,152 +209,150 @@ New configuration parameter to control validation behavior:
                     │                    │
                     ▼                    ▼
         ┌───────────────────┐    ┌───────────────────┐
-        │ Validate local    │    │ Skip validation   │
-        │ path exists       │    │ Use local path    │
-        │ Compare with      │    │ directly          │
-        │ remote data       │    │                   │
+        │ 校验本地路径存在    │    │ 跳过校验           │
+        │ 与远端数据比对      │    │ 直接使用本地路径    │
         └───────────────────┘    └───────────────────┘
                     │
                     ▼
         ┌───────────────────────────────────────┐
-        │ Validation passed ?                    │
+        │ 校验通过 ?                             │
         └───────────────────────────────────────┘
            │                    │
           Yes                   No
            │                    │
            ▼                    ▼
     ┌─────────────┐    ┌─────────────────────┐
-    │ Use local   │    │ validation-mode:     │
-    │ path        │    │  - strict: throw     │
-    │ LocalFileIO │    │  - warn: warn+fallback│
-    └─────────────┘    └─────────────────────┘
+    │ 使用本地路径 │    │ validation-mode:     │
+    │ LocalFileIO │    │  - strict: 抛异常     │
+    └─────────────┘    │  - warn: 警告+回退    │
+                       └─────────────────────┘
 ```
 
-### .identifier File
+### .identifier 文件
 
-Each table directory contains a `.identifier` file for quick validation:
+每个表目录下都包含一个 `.identifier` 文件用于快速校验：
 
-**File Location**: `<table-path>/.identifier`
+**文件位置**：`<表路径>/.identifier`
 
-**File Format**:
+**文件格式**：
 ```json
 {"uuid":"xxx-xxx-xxx-xxx"}
 ```
 
-**Usage**:
-- Compare table UUID between local and remote paths
-- Quick validation before expensive data comparison
-- Automatically generated when table is created
-- Only UUID is needed (database/table names can change via rename)
+**用途**：
+- 比对本地和远端路径的表 UUID
+- 在昂贵的文件内容比对前进行快速校验
+- 创建表时自动生成
+- 仅需 UUID（database/table 名称可能因重命名而变化）
 
-### Security Validation Implementation
+### 安全校验实现
 
-Use remote data validation to verify FUSE path correctness: read remote storage files via existing FileIO and compare with local files.
+使用远端数据校验验证 FUSE 路径正确性：通过现有 FileIO 读取远端存储文件，与本地文件比对。
 
-**Complete Implementation**:
+**完整实现**：
 
 ```java
 /**
- * Complete implementation of fileIOForData in RESTCatalog
- * Combining FUSE local path validation with remote data validation
+ * RESTCatalog 中 fileIOForData 的完整实现
+ * 结合 FUSE 本地路径校验与远端数据校验
  */
 private FileIO fileIOForData(Path path, Identifier identifier) {
-    // If FUSE local path is enabled, try using local path
+    // 如果 FUSE 本地路径启用，尝试使用本地路径
     if (fuseLocalPathEnabled) {
         Path localPath = resolveFUSELocalPath(path, identifier);
         if (localPath != null) {
-            // Execute validation based on validation mode
+            // 根据校验模式执行校验
             ValidationMode mode = getValidationMode();
 
             if (mode != ValidationMode.NONE) {
                 ValidationResult result = validateFUSEPath(localPath, path, identifier);
                 if (!result.isValid()) {
                     handleValidationError(result, mode);
-                    // Validation failed, fallback to default logic
+                    // 校验失败，回退到原有逻辑
                     return createDefaultFileIO(path, identifier);
                 }
             }
 
-            // Validation passed or skipped, use local FileIO
+            // 校验通过或跳过校验，使用本地 FileIO
             return createLocalFileIO(localPath);
         }
     }
 
-    // Original logic: data token or ResolvingFileIO
+    // 原有逻辑：data token 或 ResolvingFileIO
     return createDefaultFileIO(path, identifier);
 }
 
 /**
- * Validate FUSE local path
+ * 校验 FUSE 本地路径
  */
 private ValidationResult validateFUSEPath(Path localPath, Path remotePath, Identifier identifier) {
-    // 1. Create LocalFileIO for local path
+    // 1. 创建 LocalFileIO 用于本地路径操作
     LocalFileIO localFileIO = LocalFileIO.create();
 
-    // 2. Check if local path exists
+    // 2. 检查本地路径是否存在
     if (!localFileIO.exists(localPath)) {
-        return ValidationResult.fail("Local path does not exist: " + localPath);
+        return ValidationResult.fail("本地路径不存在: " + localPath);
     }
 
-    // 3. First validation: Table identifier file
+    // 3. 第一次校验：表标识文件
     ValidationResult identifierResult = validateByIdentifierFile(localFileIO, localPath, remotePath, identifier);
     if (!identifierResult.isSuccess()) {
         return identifierResult;
     }
 
-    // 4. Second validation: Remote data validation
+    // 4. 第二次校验：远端数据校验
     return validateByRemoteData(localFileIO, localPath, remotePath, identifier);
 }
 
 /**
- * First validation: Check .identifier file
- * Compare table UUID between local and remote to ensure path correctness
+ * 第一次校验：检查 .identifier 文件
+ * 比对本地和远端的表 UUID 确保路径正确性
  */
 private ValidationResult validateByIdentifierFile(
         LocalFileIO localFileIO, Path localPath, Path remotePath, Identifier identifier) {
     try {
-        // 1. Get remote FileIO
+        // 1. 获取远端存储 FileIO
         FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
 
-        // 2. Read remote identifier file
+        // 2. 读取远端标识文件
         Path remoteIdentifierFile = new Path(remotePath, ".identifier");
         if (!remoteFileIO.exists(remoteIdentifierFile)) {
-            // No identifier file, skip this validation
-            LOG.debug("No .identifier file found for table: {}, skip identifier validation", identifier);
+            // 无标识文件，跳过此次校验
+            LOG.debug("未找到表 {} 的 .identifier 文件，跳过标识校验", identifier);
             return ValidationResult.success();
         }
 
         String remoteIdentifier = readIdentifierFile(remoteFileIO, remoteIdentifierFile);
 
-        // 3. Read local identifier file
+        // 3. 读取本地标识文件
         Path localIdentifierFile = new Path(localPath, ".identifier");
         if (!localFileIO.exists(localIdentifierFile)) {
             return ValidationResult.fail(
-                "Local .identifier file not found: " + localIdentifierFile +
-                ". The FUSE path may not be mounted correctly.");
+                "本地 .identifier 文件未找到: " + localIdentifierFile +
+                "。FUSE 路径可能未正确挂载。");
         }
 
         String localIdentifier = readIdentifierFile(localFileIO, localIdentifierFile);
 
-        // 4. Compare identifiers
+        // 4. 比对标识符
         if (!remoteIdentifier.equals(localIdentifier)) {
             return ValidationResult.fail(String.format(
-                "Table identifier mismatch! Local: %s, Remote: %s. " +
-                "The local path may point to a different table.",
+                "表标识不匹配！本地: %s，远端: %s。" +
+                "本地路径可能指向了其他表。",
                 localIdentifier, remoteIdentifier));
         }
 
         return ValidationResult.success();
 
     } catch (Exception e) {
-        LOG.warn("Failed to validate by identifier file for: {}", identifier, e);
-        return ValidationResult.fail("Identifier validation failed: " + e.getMessage());
+        LOG.warn("标识文件校验失败: {}", identifier, e);
+        return ValidationResult.fail("标识文件校验失败: " + e.getMessage());
     }
 }
 
 /**
- * Read .identifier file content
- * Format: {"uuid":"xxx-xxx-xxx-xxx"}
+ * 读取 .identifier 文件内容
+ * 格式：{"uuid":"xxx-xxx-xxx-xxx"}
  */
 private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOException {
     try (InputStream in = fileIO.newInputStream(identifierFile)) {
@@ -365,81 +363,81 @@ private String readIdentifierFile(FileIO fileIO, Path identifierFile) throws IOE
 }
 
 /**
- * Second validation: Validate FUSE path correctness by comparing remote and local file data
- * Uses existing FileIO (RESTTokenFileIO or ResolvingFileIO) to read remote files
+ * 第二次校验：通过比对远端存储和本地文件验证 FUSE 路径正确性
+ * 使用现有 FileIO（RESTTokenFileIO 或 ResolvingFileIO）读取远端存储文件
  */
 private ValidationResult validateByRemoteData(
         LocalFileIO localFileIO, Path localPath, Path remotePath, Identifier identifier) {
     try {
-        // 1. Get remote FileIO (using existing logic, can access remote storage)
+        // 1. 获取远端存储 FileIO（使用现有逻辑，可访问远端存储）
         FileIO remoteFileIO = createDefaultFileIO(remotePath, identifier);
 
-        // 2. Get latest snapshot via SnapshotManager
+        // 2. 使用 SnapshotManager 获取最新 snapshot
         SnapshotManager snapshotManager = new SnapshotManager(remoteFileIO, remotePath);
         Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
         Path checksumFile;
         if (latestSnapshot != null) {
-            // Has snapshot, use snapshot file for validation
+            // 有 snapshot，使用 snapshot 文件校验
             checksumFile = snapshotManager.snapshotPath(latestSnapshot.id());
         } else {
-            // No snapshot (new table), use schema file for validation
+            // 无 snapshot（新表），使用 schema 文件校验
             SchemaManager schemaManager = new SchemaManager(remoteFileIO, remotePath);
             Optional<TableSchema> latestSchema = schemaManager.latest();
             if (!latestSchema.isPresent()) {
-                // No schema (e.g., format table, object table), skip validation
-                LOG.info("No snapshot or schema found for table: {}, skip validation", identifier);
+                // 无 schema（如 format 表、object 表），跳过验证
+                LOG.info("未找到表 {} 的 snapshot 或 schema，跳过验证", identifier);
                 return ValidationResult.success();
             }
             checksumFile = schemaManager.toSchemaPath(latestSchema.get().id());
         }
 
-        // 3. Read remote file content and compute hash
+        // 3. 读取远端文件内容并计算 hash
         FileStatus remoteStatus = remoteFileIO.getFileStatus(checksumFile);
         String remoteHash = computeFileHash(remoteFileIO, checksumFile);
 
-        // 4. Build local file path and compute hash
+        // 4. 构建本地文件路径并计算 hash
         Path localChecksumFile = new Path(localPath, remotePath.toUri().getPath());
 
         if (!localFileIO.exists(localChecksumFile)) {
             return ValidationResult.fail(
-                "Local file not found: " + localChecksumFile +
-                ". The FUSE path may not be mounted correctly.");
+                "本地文件未找到: " + localChecksumFile +
+                "。FUSE 路径可能未正确挂载。");
         }
 
         long localSize = localFileIO.getFileSize(localChecksumFile);
         String localHash = computeFileHash(localFileIO, localChecksumFile);
 
-        // 5. Compare file features
+        // 5. 比对文件特征
         if (localSize != remoteStatus.getLen()) {
             return ValidationResult.fail(String.format(
-                "File size mismatch! Local: %d bytes, Remote: %d bytes.",
+                "文件大小不匹配！本地: %d 字节, 远端: %d 字节。",
                 localSize, remoteStatus.getLen()));
         }
 
         if (!localHash.equalsIgnoreCase(remoteHash)) {
             return ValidationResult.fail(String.format(
-                "File content hash mismatch! Local: %s, Remote: %s.",
+                "文件内容哈希不匹配！本地: %s, 远端: %s。",
                 localHash, remoteHash));
         }
 
         return ValidationResult.success();
 
     } catch (Exception e) {
-        LOG.warn("Failed to validate FUSE path by remote data for: {}", identifier, e);
-        return ValidationResult.fail("Remote data validation failed: " + e.getMessage());
+        LOG.warn("通过远端数据验证 FUSE 路径失败: {}", identifier, e);
+        return ValidationResult.fail("远端数据验证失败: " + e.getMessage());
     }
 }
 
 /**
- * Compute file content hash using FileIO
+ * 使用 FileIO 计算文件内容哈希
  */
 private String computeFileHash(FileIO fileIO, Path file) throws IOException {
     MessageDigest md;
     try {
         md = MessageDigest.getInstance("MD5");
     } catch (NoSuchAlgorithmException e) {
-        throw new IOException("MD5 algorithm not available", e);
+        throw new IOException("MD5 算法不可用", e);
     }
 
     try (InputStream is = fileIO.newInputStream(file)) {
@@ -453,7 +451,7 @@ private String computeFileHash(FileIO fileIO, Path file) throws IOException {
 }
 
 /**
- * Handle validation error
+ * 处理校验错误
  */
 private void handleValidationError(ValidationResult result, ValidationMode mode) {
     String errorMsg = "FUSE local path validation failed: " + result.getErrorMessage();
@@ -465,20 +463,20 @@ private void handleValidationError(ValidationResult result, ValidationMode mode)
             LOG.warn(errorMsg + ". Falling back to default FileIO.");
             break;
         case NONE:
-            // Won't reach here
+            // 不会执行到这里
             break;
     }
 }
 
 /**
- * Create local FileIO using existing context
+ * 使用现有 context 创建本地 FileIO
  */
 private FileIO createLocalFileIO(Path localPath) {
     return FileIO.get(localPath, context);
 }
 
 /**
- * Create default FileIO (original logic)
+ * 创建默认 FileIO（原有逻辑）
  */
 private FileIO createDefaultFileIO(Path path, Identifier identifier) {
     return dataTokenEnabled
@@ -486,12 +484,12 @@ private FileIO createDefaultFileIO(Path path, Identifier identifier) {
         : fileIOFromOptions(path);
 }
 
-// ========== Helper Classes ==========
+// ========== 辅助类 ==========
 
 enum ValidationMode {
-    STRICT,  // Strict mode: throw exception on validation failure
-    WARN,    // Warn mode: log warning on failure, fallback to default logic
-    NONE     // No validation
+    STRICT,  // 严格模式：校验失败抛异常
+    WARN,    // 警告模式：校验失败只警告，回退到默认逻辑
+    NONE     // 不校验
 }
 
 class ValidationResult {
@@ -516,140 +514,139 @@ class ValidationResult {
 }
 ```
 
-**Advantages**:
+**方案优势**：
 
-| Advantage | Description |
-|-----------|-------------|
-| **No API Extension Needed** | Uses existing FileIO and SnapshotManager/SchemaManager |
-| **Uses LATEST snapshot** | Gets via `SnapshotManager.latestSnapshot()`, no traversal needed |
-| **New Table Support** | Falls back to schema file validation when no snapshot |
-| **Most Accurate** | Directly validates data consistency, ensures path correctness |
-| **Graceful Degradation** | Validation failure falls back to default FileIO |
+| 优势 | 说明 |
+|------|------|
+| **无需扩展 API** | 使用现有 FileIO 和 SnapshotManager/SchemaManager |
+| **使用 LATEST snapshot** | 通过 `SnapshotManager.latestSnapshot()` 直接获取，无需遍历 |
+| **新表支持** | 无 snapshot 时自动回退到 schema 文件校验 |
+| **准确性最高** | 直接验证数据一致性，确保路径正确 |
+| **优雅降级** | 校验失败可回退到默认 FileIO |
 
-**Validation File Selection Logic**:
+**校验文件选择逻辑**：
 
-| Scenario | Validation File |
-|----------|-----------------|
-| Has snapshot | Latest snapshot file via `SnapshotManager.latestSnapshot()` |
-| No snapshot (new table) | Latest schema file via `SchemaManager.latest()` |
-| No schema (e.g., format table, object table) | Skip validation |
+| 场景 | 校验文件 |
+|------|----------|
+| 有 snapshot | 使用 `SnapshotManager.latestSnapshot()` 获取的最新 snapshot 文件 |
+| 无 snapshot（新表）| 使用 `SchemaManager.latest()` 获取的最新 schema 文件 |
+| 无 schema（如 format 表、object 表）| 跳过校验 |
 
-**Two-Step Validation**:
+**两步校验**：
 
-| Step | Validation | Description |
-|------|------------|-------------|
-| 1 | `.identifier` file | Compare table UUID between local and remote |
-| 2 | Remote data validation | Compare snapshot/schema file content |
+| 步骤 | 校验方式 | 描述 |
+|------|----------|------|
+| 1 | `.identifier` 文件 | 比对本地和远端的表 UUID |
+| 2 | 远端数据校验 | 比对 snapshot/schema 文件内容 |
 
-**Complete Validation Flow**:
+**完整校验流程**：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Validation Flow                          │
+│                       校验流程                               │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│         Step 1: .identifier Validation              │
+│           第一步：.identifier 校验                    │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ .identifier exists remotely ?  │
+        │ 远端存在 .identifier ?          │
         └───────────────────────────────────────┘
            │                    │
           Yes                   No
            │                    │
            ▼                    ▼
 ┌─────────────────────┐  ┌─────────────────────────────────────┐
-│ Compare UUID        │  │ Skip to Step 2 (remote data         │
-│ local vs remote     │  │ validation)                          │
+│ 比对 UUID           │  │ 跳过第一步，进入第二步               │
+│ 本地 vs 远端        │  │ （远端数据校验）                     │
 └─────────────────────┘  └─────────────────────────────────────┘
            │
            ▼
         ┌───────────────────────────────────────┐
-        │ UUID matches ?                        │
+        │ UUID 匹配 ?                            │
         └───────────────────────────────────────┘
            │                    │
-          Yes                   No → FAIL: Table identifier mismatch
+          Yes                   No → 失败：表标识不匹配
            │
            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│         Step 2: Remote Data Validation                      │
+│           第二步：远端数据校验                                │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│   1. Get remote FileIO (RESTTokenFileIO or ResolvingFileIO) │
+│  1. 获取远端存储 FileIO（RESTTokenFileIO 或 ResolvingFileIO）│
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     2. Get latest snapshot via SnapshotManager              │
+│     2. 通过 SnapshotManager 获取最新 snapshot               │
 │        snapshotManager.latestSnapshot()                     │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ Snapshot exists ?                     │
+        │ Snapshot 存在 ?                        │
         └───────────────────────────────────────┘
            │                    │
           Yes                   No
            │                    │
            ▼                    ▼
 ┌─────────────────────┐  ┌─────────────────────────────────────┐
-│ Use snapshot file   │  │ Get latest schema via SchemaManager │
-│ for validation      │  │ schemaManager.latest()              │
+│ 使用 snapshot 文件  │  │ 通过 SchemaManager 获取最新 schema   │
+│ 进行校验            │  │ schemaManager.latest()              │
 └─────────────────────┘  └─────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ Schema exists ?                       │
+        │ Schema 存在 ?                          │
         └───────────────────────────────────────┘
            │                    │
-          Yes                   No → Skip validation (format/object table)
+          Yes                   No → 跳过校验（format/object 表）
            │
            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     3. Get remote file metadata (size)                      │
-│        Compute remote file hash                             │
+│     3. 获取远端文件元数据（大小）                            │
+│        计算远端文件 hash                                    │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│     4. Read local corresponding file                        │
+│     4. 读取本地对应文件                                      │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ Local file exists ?                   │
+        │ 本地文件存在 ?                         │
         └───────────────────────────────────────┘
            │                    │
-          Yes                   No → Validation failed (wrong path or not mounted)
+          Yes                   No → 校验失败（路径错误或未挂载）
            │
            ▼
         ┌───────────────────────────────────────┐
-        │ File size matches ?                   │
+        │ 文件大小匹配 ?                         │
         └───────────────────────────────────────┘
            │                    │
-          Yes                   No → Validation failed
+          Yes                   No → 校验失败
            │
            ▼
         ┌───────────────────────────────────────┐
-        │ File content hash matches ?           │
+        │ 文件内容 hash 匹配 ?                   │
         └───────────────────────────────────────┘
            │                    │
-          Yes                   No → Validation failed (path points to wrong table)
+          Yes                   No → 校验失败（路径指向错误表）
            │
            ▼
     ┌─────────────┐
-    │ Validation  │
-    │ passed      │
-    │ Safe to use │
+    │ 校验通过     │
+    │ 可安全使用   │
     └─────────────┘
 ```
 
-### Usage Example (with Security Validation)
+### 使用示例（启用安全校验）
 
 ```sql
 CREATE CATALOG paimon_rest_catalog WITH (
@@ -658,50 +655,50 @@ CREATE CATALOG paimon_rest_catalog WITH (
     'uri' = 'http://rest-server:8080',
     'token' = 'xxx',
 
-    -- FUSE local path configuration
+    -- FUSE 本地路径配置
     'fuse.local-path.enabled' = 'true',
     'fuse.local-path.root' = '/mnt/fuse/warehouse',
 
-    -- Security validation configuration (optional, default: strict)
+    -- 安全校验配置（可选，默认 strict）
     'fuse.local-path.validation-mode' = 'strict'  -- strict/warn/none
 );
 ```
 
-## Limitations
+## 限制
 
-1. FUSE mount must be properly configured and accessible
-2. Local path must have the same directory structure as the remote storage path
-3. Write operations require proper permissions on the local FUSE mount
-4. Windows platform has limited FUSE support (requires third-party tools like WinFsp)
+1. FUSE 挂载必须正确配置且可访问
+2. 本地路径必须与远端存储路径具有相同的目录结构
+3. 写操作需要本地 FUSE 挂载点具有适当的权限
+4. Windows 平台 FUSE 支持有限（需第三方工具如 WinFsp）
 
-## FUSE Error Handling
+## FUSE 错误处理
 
-This section covers FUSE-specific errors only. Other errors (network, REST API, permission) are already handled by existing mechanisms in Paimon.
+本节仅涵盖 FUSE 特有的错误。其他错误（网络、REST API、权限）已由 Paimon 现有机制处理。
 
-### FUSE-Specific Errors
+### FUSE 特有错误
 
-| Error Type | Scenario | Cause | Handling Strategy |
-|------------|----------|-------|-------------------|
-| `Transport endpoint is not connected` | Local file read/write | FUSE mount disconnected or crashed | Fail immediately, log error with mount check suggestion |
-| `Stale file handle` | File operation | File deleted/modified by another process | Retry once (reopen file) |
-| `Device or resource busy` | Delete/rename operation | File still open by another process | Retry with backoff |
-| `Input/output error` | Any file operation | FUSE backend failure (remote storage issue) | Fail with clear error message |
-| `No such file or directory` (unexpected) | File operation | FUSE mount point not ready | Check mount status, fail |
+| 错误类型 | 场景 | 原因 | 处理策略 |
+|----------|------|------|----------|
+| `Transport endpoint is not connected` | 本地文件读写 | FUSE 挂载断开或崩溃 | 立即失败，记录错误并提示检查挂载状态 |
+| `Stale file handle` | 文件操作 | 文件被其他进程删除/修改 | 重试一次（重新打开文件） |
+| `Device or resource busy` | 删除/重命名操作 | 文件仍被其他进程占用 | 退避重试 |
+| `Input/output error` | 任意文件操作 | FUSE 后端故障（远端存储问题） | 失败并给出明确错误信息 |
+| `No such file or directory`（意外） | 文件操作 | FUSE 挂载点未就绪 | 检查挂载状态，失败 |
 
-### Error Handling Strategy
+### 错误处理策略
 
-#### FUSE Mount Disconnection (Most Critical)
+#### FUSE 挂载断开（最关键）
 
-The most critical FUSE-specific error is mount disconnection (`Transport endpoint is not connected`). This error indicates:
-- FUSE process crashed
-- Network issue caused FUSE to disconnect from remote storage
-- FUSE mount was manually unmounted
+最关键的 FUSE 特有错误是挂载断开（`Transport endpoint is not connected`）。该错误表示：
+- FUSE 进程崩溃
+- 网络问题导致 FUSE 与远端存储断开连接
+- FUSE 挂载被手动卸载
 
-**Handling**: Fail immediately with clear error message. Do NOT retry as the mount must be restored first.
+**处理方式**：立即失败并给出明确错误信息。不要重试，因为必须先恢复挂载。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│           FUSE Mount Disconnection Handling                 │
+│                FUSE 挂载断开处理                             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -714,27 +711,27 @@ The most critical FUSE-specific error is mount disconnection (`Transport endpoin
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ LOG.error("FUSE mount disconnected. Please check:          │
-│   1. FUSE process is running                               │
-│   2. Mount point exists: ls -la /mnt/fuse/...              │
-│   3. Remount if needed: fusermount -u /mnt/fuse && ...")   │
+│ LOG.error("FUSE 挂载断开，路径: {}。请检查:                  │
+│   1. FUSE 进程是否运行                                      │
+│   2. 挂载点是否存在: ls -la /mnt/fuse/...                   │
+│   3. 如需重新挂载: fusermount -u /mnt/fuse && ...")         │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ Throw IOException with clear message  │
+        │ 抛出 IOException 并附带明确信息        │
         └───────────────────────────────────────┘
 ```
 
-#### Stale File Handle
+#### Stale File Handle（过期文件句柄）
 
-This error occurs when a file is deleted or modified by another process while we have an open handle.
+当文件在我们持有打开句柄时被其他进程删除或修改，会触发此错误。
 
-**Handling**: Retry once by reopening the file.
+**处理方式**：重试一次，重新打开文件。
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              Stale File Handle Handling                     │
+│                Stale File Handle 处理                       │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -746,31 +743,29 @@ This error occurs when a file is deleted or modified by another process while we
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ LOG.warn("Stale file handle for {}, retrying...", path)    │
+│ LOG.warn("Stale file handle: {}, 重试中...", path)         │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
         ┌───────────────────────────────────────┐
-        │ Retry once: reopen file               │
+        │ 重试一次: 重新打开文件                 │
         └───────────────────────────────────────┘
                               │
                     ┌─────────┴─────────┐
-                   Success             Fail
+                   成功                失败
                     │                   │
                     ▼                   ▼
             ┌─────────────┐  ┌─────────────────────┐
-            │ Continue    │  │ Throw IOException    │
-            │ operation   │  │ with details         │
+            │ 继续操作     │  │ 抛出 IOException     │
+            │             │  │ 并附带详细信息        │
             └─────────────┘  └─────────────────────┘
 ```
 
-### Implementation Example
+### 实现示例
 
 ```java
-import org.apache.paimon.utils.RetryUtils;
-
 /**
- * FUSE error handler with configurable retry and exponential backoff.
+ * FUSE 错误处理器，支持可配置的重试和指数退避。
  */
 public class FuseErrorHandler {
     private final int maxAttempts;
@@ -784,7 +779,7 @@ public class FuseErrorHandler {
     }
 
     /**
-     * Check if error is FUSE mount disconnection
+     * 检查是否为 FUSE 挂载断开错误
      */
     public boolean isFuseMountDisconnected(IOException e) {
         String message = e.getMessage();
@@ -793,7 +788,7 @@ public class FuseErrorHandler {
     }
 
     /**
-     * Check if error is stale file handle
+     * 检查是否为 Stale file handle 错误
      */
     public boolean isStaleFileHandle(IOException e) {
         String message = e.getMessage();
@@ -802,7 +797,7 @@ public class FuseErrorHandler {
     }
 
     /**
-     * Check if error is device or resource busy
+     * 检查是否为 Device or resource busy 错误
      */
     public boolean isDeviceBusy(IOException e) {
         String message = e.getMessage();
@@ -811,8 +806,8 @@ public class FuseErrorHandler {
     }
 
     /**
-     * Calculate exponential backoff delay.
-     * Formula: min(initialDelay * 2^attempt, maxDelay)
+     * 计算指数退避延迟。
+     * 公式: min(initialDelay * 2^attempt, maxDelay)
      */
     private long calculateDelay(int attempt) {
         long delay = initialDelayMs * (1L << attempt);  // 2^attempt
@@ -820,8 +815,8 @@ public class FuseErrorHandler {
     }
 
     /**
-     * Execute file operation with FUSE-specific error handling.
-     * Uses exponential backoff for retryable errors.
+     * 执行文件操作，处理 FUSE 特有错误。
+     * 对可重试错误使用指数退避策略。
      */
     public <T> T executeWithFuseErrorHandling(
             SupplierWithIOException<T> operation,
@@ -836,37 +831,36 @@ public class FuseErrorHandler {
             } catch (IOException e) {
                 lastException = e;
 
-                // FUSE mount disconnected - fail immediately, no retry
+                // FUSE 挂载断开 - 立即失败，不重试
                 if (isFuseMountDisconnected(e)) {
-                    LOG.error("FUSE mount disconnected for path: {}. " +
-                        "Please check: 1) FUSE process is running, " +
-                        "2) Mount point exists, 3) Remount if needed.", path);
-                    throw new IOException("FUSE mount disconnected: " + path, e);
+                    LOG.error("FUSE 挂载断开，路径: {}。请检查: 1) FUSE 进程是否运行, " +
+                        "2) 挂载点是否存在, 3) 如需重新挂载", path);
+                    throw new IOException("FUSE 挂载断开: " + path, e);
                 }
 
-                // Retryable errors: stale file handle, device busy
+                // 可重试错误: stale file handle, device busy
                 if (isStaleFileHandle(e) || isDeviceBusy(e)) {
                     if (attempt < maxAttempts - 1) {
                         long delay = calculateDelay(attempt);
-                        LOG.warn("FUSE error ({}) for {}, retrying in {}ms (attempt {}/{})",
+                        LOG.warn("FUSE 错误 ({}) 路径: {}, {}ms 后重试 (第 {}/{} 次)",
                             e.getMessage(), path, delay, attempt + 1, maxAttempts);
                         try {
                             Thread.sleep(delay);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
-                            throw new IOException("Retry interrupted", ie);
+                            throw new IOException("重试被中断", ie);
                         }
                         continue;
                     }
                 }
 
-                // Non-retryable errors or max attempts reached
+                // 不可重试错误或达到最大重试次数
                 throw e;
             }
         }
 
-        // Should not reach here, but just in case
-        throw new IOException("FUSE operation failed after " + maxAttempts + " attempts: " + path,
+        // 不应到达这里，但以防万一
+        throw new IOException("FUSE 操作失败，已重试 " + maxAttempts + " 次: " + path,
             lastException);
     }
 
@@ -877,12 +871,12 @@ public class FuseErrorHandler {
 }
 ```
 
-### FuseAwareFileIO Wrapper
+### FuseAwareFileIO 包装器
 
 ```java
 /**
- * FileIO wrapper that handles FUSE-specific errors with configurable retry.
- * Delegates to LocalFileIO for actual file operations.
+ * FileIO 包装器，处理 FUSE 特有错误，支持可配置重试。
+ * 委托给 LocalFileIO 执行实际文件操作。
  */
 public class FuseAwareFileIO implements FileIO {
     private final FileIO delegate;
@@ -917,19 +911,19 @@ public class FuseAwareFileIO implements FileIO {
             () -> delegate.exists(path), path, "exists");
     }
 
-    // ... other methods similarly wrapped
+    // ... 其他方法类似包装
 }
 ```
 
-### RESTCatalog Integration
+### RESTCatalog 集成
 
 ```java
 private FileIO fileIOForData(Path path, Identifier identifier) {
-    // 1. Try to resolve FUSE local path
+    // 1. 尝试解析 FUSE 本地路径
     if (fuseLocalPathEnabled) {
         Path localPath = resolveFUSELocalPath(path, identifier);
         if (localPath != null) {
-            // 2. Validate if needed (see validation section)
+            // 2. 如果需要，执行校验（参见校验章节）
             if (validationMode != ValidationMode.NONE) {
                 ValidationResult result = validateFUSEPath(localPath, path, identifier);
                 if (!result.isValid()) {
@@ -938,39 +932,39 @@ private FileIO fileIOForData(Path path, Identifier identifier) {
                 }
             }
 
-            // 3. Return FuseAwareFileIO with error handling
+            // 3. 返回带错误处理的 FuseAwareFileIO
             return new FuseAwareFileIO(localPath, context);
         }
     }
 
-    // 4. Fallback to original logic
+    // 4. 回退到原有逻辑
     return dataTokenEnabled
             ? new RESTTokenFileIO(context, api, identifier, path)
             : fileIOFromOptions(path);
 }
 ```
 
-### Retry Behavior Examples
+### 重试行为示例
 
-| Error Type | Retry? | Delay Pattern (default settings) |
-|------------|--------|----------------------------------|
-| `Transport endpoint is not connected` | ❌ No | Fail immediately |
-| `Stale file handle` | ✅ Yes | 100ms → 200ms → 400ms → fail |
-| `Device or resource busy` | ✅ Yes | 100ms → 200ms → 400ms → fail |
-| Other IOException | ❌ No | Propagate immediately |
+| 错误类型 | 是否重试 | 延迟模式（默认设置） |
+|----------|----------|---------------------|
+| `Transport endpoint is not connected` | ❌ 否 | 立即失败 |
+| `Stale file handle` | ✅ 是 | 100ms → 200ms → 400ms → 失败 |
+| `Device or resource busy` | ✅ 是 | 100ms → 200ms → 400ms → 失败 |
+| 其他 IOException | ❌ 否 | 直接抛出 |
 
-### Logging Guidelines
+### 日志规范
 
-| Log Level | Scenario | Example |
-|-----------|----------|---------|
-| ERROR | FUSE mount disconnected | `FUSE mount disconnected for path: /mnt/fuse/db/table/snapshot-1` |
-| WARN | Stale file handle | `Stale file handle for /mnt/fuse/..., retrying once...` |
-| INFO | Normal FUSE operations | (Optional, for debugging) |
+| 日志级别 | 场景 | 示例 |
+|----------|------|------|
+| ERROR | FUSE 挂载断开 | `FUSE 挂载断开，路径: /mnt/fuse/db/table/snapshot-1` |
+| WARN | Stale file handle | `Stale file handle: /mnt/fuse/..., 重试一次...` |
+| INFO | 正常 FUSE 操作 | （可选，用于调试） |
 
-### Best Practices for FUSE Users
+### FUSE 用户最佳实践
 
-1. **Monitor FUSE process**: Use `ps aux | grep fusermount` or your FUSE tool's monitoring
-2. **Health check**: Periodically check mount point with `ls` or `stat`
-3. **Auto-restart**: Consider using systemd or supervisor to auto-restart FUSE on crash
-4. **Log FUSE errors**: Check `dmesg` or FUSE logs for root cause analysis
+1. **监控 FUSE 进程**：使用 `ps aux | grep fusermount` 或 FUSE 工具的监控功能
+2. **健康检查**：定期使用 `ls` 或 `stat` 检查挂载点
+3. **自动重启**：考虑使用 systemd 或 supervisor 在崩溃时自动重启 FUSE
+4. **日志分析**：查看 `dmesg` 或 FUSE 日志进行根因分析
 
