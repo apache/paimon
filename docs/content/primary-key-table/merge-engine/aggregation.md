@@ -66,6 +66,35 @@ Current supported aggregate functions and data types are:
   The sum function aggregates the values across multiple rows.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
+### avg
+
+The avg function calculates the average value across multiple rows.
+It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
+
+The avg aggregator maintains an internal `Accumulator` state containing `sum` and `count` fields.
+When aggregating, it updates both the sum and count. To compute the final average value,
+divide `sum` by `count`.
+
+**Example:**
+  ```sql
+  -- Create a table with avg aggregation
+  CREATE TABLE sales_summary (
+      product_id BIGINT PRIMARY KEY NOT ENFORCED,
+      price DOUBLE
+  ) WITH (
+      'merge-engine' = 'aggregation',
+      'fields.price.aggregate-function' = 'avg'
+  );
+
+  -- Insert multiple prices for the same product
+  INSERT INTO sales_summary VALUES (1, 10.0), (1, 20.0), (1, 30.0);
+
+  -- Query to get average price (you'll need to compute avg from sum/count)
+  SELECT product_id, price FROM sales_summary;
+  -- The stored result will be: Accumulator {sum=60.0, count=3}
+  -- To get the actual average: 60.0 / 3 = 20.0
+  ```
+
 ### product
   The product function can compute product values across multiple lines.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
