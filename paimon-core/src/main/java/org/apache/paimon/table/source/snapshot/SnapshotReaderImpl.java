@@ -241,6 +241,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         if (!pair.getRight().isEmpty()) {
             nonPartitionFilterConsumer.accept(scan, PredicateBuilder.and(pair.getRight()));
         }
+        scan.withCompleteFilter(predicate);
         return this;
     }
 

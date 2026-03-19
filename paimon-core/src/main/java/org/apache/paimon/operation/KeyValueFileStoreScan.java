@@ -116,6 +116,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withCompleteFilter(Predicate predicate) {
         this.bucketSelectConverter.convert(predicate).ifPresent(this::withTotalAwareBucketFilter);
         return this;
     }
