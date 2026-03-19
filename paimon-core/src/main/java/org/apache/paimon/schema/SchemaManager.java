@@ -320,7 +320,7 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RemoveOption) {
                 RemoveOption removeOption = (RemoveOption) change;
                 if (hasSnapshots.get()) {
-                    checkResetTableOption(removeOption.key());
+                    checkResetTableOption(oldOptions, removeOption.key());
                 }
                 newOptions.remove(removeOption.key());
             } else if (change instanceof UpdateComment) {
@@ -1180,7 +1180,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public static void checkResetTableOption(String key) {
+    public static void checkResetTableOption(Map<String, String> options, String key) {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
@@ -1188,6 +1188,13 @@ public class SchemaManager implements Serializable {
 
         if (CoreOptions.BUCKET.key().equals(key)) {
             throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
+        }
+
+        if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())
+                && CLUSTERING_COLUMNS.key().equals(key)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot reset %s when %s enabled.", key, PK_CLUSTERING_OVERRIDE.key()));
         }
     }
 
