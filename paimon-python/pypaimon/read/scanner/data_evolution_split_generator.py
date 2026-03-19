@@ -133,7 +133,8 @@ class DataEvolutionSplitGenerator(AbstractSplitGenerator):
                 data_file.set_file_path(
                     self.table.table_path,
                     file_entries[0].partition,
-                    file_entries[0].bucket
+                    file_entries[0].bucket,
+                    self.default_part_value
                 )
 
             if file_group:

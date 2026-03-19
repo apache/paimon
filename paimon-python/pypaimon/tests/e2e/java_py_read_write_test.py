@@ -235,7 +235,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print(f"Format: {file_format}, Result:\n{res}")
 
         # Verify data
-        self.assertEqual(len(res), 6)
+        self.assertEqual(len(res), 7)
         if file_format != "lance":
             self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
             self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
@@ -250,9 +250,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertIsInstance(metadata_fields[2].type, RowType)
         
         # Data order may vary due to partitioning/bucketing, so compare as sets
-        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef', 'Tofu'}
         actual_names = set(res['name'].tolist())
         self.assertEqual(actual_names, expected_names)
+
+        # Verify null partition value (default partition) is readable
+        tofu_row = res[res['name'] == 'Tofu']
+        self.assertEqual(len(tofu_row), 1)
+        self.assertTrue(pd.isna(tofu_row['category'].iloc[0]))
 
         # Verify metadata column can be read and contains nested structures
         if 'metadata' in res.columns:
