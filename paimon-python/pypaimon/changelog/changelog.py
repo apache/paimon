@@ -18,7 +18,6 @@
 ################################################################################
 
 import logging
-from typing import Optional
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON

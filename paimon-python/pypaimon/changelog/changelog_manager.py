@@ -20,7 +20,7 @@
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Dict, Iterator, List, Optional
+from typing import Iterator, List, Optional
 
 from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.changelog.changelog import Changelog
@@ -207,8 +207,10 @@ class ChangelogManager:
 
         # Read changelogs in parallel
         with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {executor.submit(read_changelog, i, path): (i, path)
-                      for i, path in enumerate(paths)}
+            futures = {
+                executor.submit(read_changelog, i, path): (i, path)
+                for i, path in enumerate(paths)
+            }
             for future in as_completed(futures):
                 future.result()
 
