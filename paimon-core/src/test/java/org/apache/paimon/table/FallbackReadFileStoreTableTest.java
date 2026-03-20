@@ -26,12 +26,15 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.DataTableScan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -137,6 +140,66 @@ public class FallbackReadFileStoreTableTest {
                 .map(e -> Pair.of(e.partition().getInt(0), e.recordCount()))
                 .containsExactlyInAnyOrder(
                         Pair.of(1, 2L), Pair.of(2, 1L), Pair.of(3, 1L), Pair.of(4, 1L));
+    }
+
+    /**
+     * Test that FallbackReadScan.plan() determines partition ownership based on partition
+     * predicates only, not mixed with data filters. If a partition exists in the main branch, it
+     * should never be read from fallback, regardless of the data filter.
+     *
+     * <p>Without the fix, the old code built completePartitions from mainScan.plan() results which
+     * already had data filters applied. When the data filter excluded all files of a main partition
+     * via filterByStats, that partition was incorrectly treated as "not in main" and read from
+     * fallback.
+     */
+    @Test
+    public void testPlanWithDataFilter() throws Exception {
+        String branchName = "bc";
+
+        FileStoreTable mainTable = createTable();
+
+        // Main branch: partition 1 (a=10), partition 2 (a=20)
+        writeDataIntoTable(mainTable, 0, rowData(1, 10), rowData(2, 20));
+
+        mainTable.createBranch(branchName);
+
+        FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
+
+        // Fallback branch: partition 1 already has a=10 (inherited), add a=100.
+        // Also add partition 3 (a=30) which is fallback-only.
+        writeDataIntoTable(branchTable, 1, rowData(1, 100), rowData(3, 30));
+
+        FallbackReadFileStoreTable fallbackTable =
+                new FallbackReadFileStoreTable(mainTable, branchTable);
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+
+        // Case 1: WHERE pt = 1 AND a = 100
+        // Partition 1 exists in main branch. Even though main has no a=100 data,
+        // we should never fall back for it. The result should contain no fallback splits.
+        DataTableScan scan1 = fallbackTable.newScan();
+        scan1.withFilter(PredicateBuilder.and(builder.equal(0, 1), builder.equal(1, 100)));
+        List<Split> splits1 = scan1.plan().splits();
+
+        for (Split split : splits1) {
+            FallbackReadFileStoreTable.FallbackSplit fs =
+                    (FallbackReadFileStoreTable.FallbackSplit) split;
+            assertThat(fs.isFallback())
+                    .as("Partition that exists in main branch should never be read from fallback")
+                    .isFalse();
+        }
+
+        // Case 2: WHERE pt = 3 AND a = 30
+        // Partition 3 only exists in fallback branch, so it should be read from fallback.
+        DataTableScan scan2 = fallbackTable.newScan();
+        scan2.withFilter(PredicateBuilder.and(builder.equal(0, 3), builder.equal(1, 30)));
+        List<Split> splits2 = scan2.plan().splits();
+
+        assertThat(splits2).hasSize(1);
+        FallbackReadFileStoreTable.FallbackSplit fs2 =
+                (FallbackReadFileStoreTable.FallbackSplit) splits2.get(0);
+        assertThat(fs2.isFallback())
+                .as("Partition that only exists in fallback branch should be read from fallback")
+                .isTrue();
     }
 
     private void writeDataIntoTable(
