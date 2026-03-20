@@ -945,6 +945,145 @@ Branch names have the following constraints:
 - Cannot be a pure numeric string
 - Valid examples: `feature`, `develop`, `feature-123`, `my-branch`
 
+## Changelog Management
+
+Changelog management allows you to track and manage table change history, including reading changelog files and managing changelog hints.
+
+### Get ChangelogManager
+
+You can obtain the ChangelogManager directly from a table:
+
+```python
+from pypaimon import CatalogFactory
+
+# Get table
+catalog = CatalogFactory.create({'warehouse': 'file:///path/to/warehouse'})
+table = catalog.get_table('database_name.table_name')
+
+# Get changelog manager (default main branch)
+changelog_manager = table.changelog_manager()
+
+# Get changelog manager for custom branch
+changelog_manager = table.changelog_manager('feature_branch')
+```
+
+### Get Changelog Information
+
+Retrieve changelog IDs and check existence:
+
+```python
+# Get the latest long-lived changelog ID
+latest_id = changelog_manager.latest_long_lived_changelog_id()
+if latest_id:
+    print(f"Latest changelog ID: {latest_id}")
+
+# Get the earliest long-lived changelog ID
+earliest_id = changelog_manager.earliest_long_lived_changelog_id()
+if earliest_id:
+    print(f"Earliest changelog ID: {earliest_id}")
+
+# Check if a specific changelog exists
+exists = changelog_manager.long_lived_changelog_exists(123)
+print(f"Changelog 123 exists: {exists}")
+```
+
+### Get Changelog Files
+
+Retrieve specific changelog files:
+
+```python
+# Get a specific changelog by snapshot ID
+changelog = changelog_manager.changelog(snapshot_id=123)
+
+# Get long-lived changelog
+long_lived = changelog_manager.long_lived_changelog(snapshot_id=123)
+
+# Try to get changelog (returns None if not found)
+changelog = changelog_manager.try_get_changelog(123)
+if changelog:
+    print(f"Changelog ID: {changelog.id}")
+```
+
+### List All Changelogs
+
+Iterate over all changelogs in sorted order:
+
+```python
+# Iterate over all changelogs
+for changelog in changelog_manager.changelogs():
+    print(f"Changelog {changelog.id}: {changelog.time_millis}")
+```
+
+### Safely Get All Changelogs
+
+Get all changelogs with error handling and parallel reading:
+
+```python
+# Safely get all changelogs in parallel
+# Handles cases where files might be missing or corrupted
+all_changelogs = changelog_manager.safely_get_all_changelogs()
+
+for changelog in all_changelogs:
+    print(f"Changelog {changelog.id}: {changelog.time_millis}")
+```
+
+### Changelog Paths
+
+Get paths for changelog files and directories:
+
+```python
+# Get changelog directory path
+changelog_dir = changelog_manager.changelog_directory()
+print(f"Changelog directory: {changelog_dir}")
+
+# Get path to a specific changelog file
+changelog_path = changelog_manager.long_lived_changelog_path(123)
+print(f"Changelog path: {changelog_path}")
+```
+
+### Commit Changelogs
+
+Commit changelog data and update hints:
+
+```python
+from pypaimon.changelog.changelog import Changelog
+
+# Commit a changelog
+changelog = Changelog(...)
+changelog_manager.commit_changelog(changelog, changelog_id=123)
+
+# Update latest hint
+changelog_manager.commit_long_lived_changelog_latest_hint(123)
+
+# Update earliest hint
+changelog_manager.commit_long_lived_changelog_earliest_hint(100)
+```
+
+### Delete Hints
+
+Delete hint files:
+
+```python
+# Delete latest hint
+changelog_manager.delete_latest_hint()
+
+# Delete earliest hint
+changelog_manager.delete_earliest_hint()
+```
+
+### Branch Support
+
+ChangelogManager supports multiple branches through the table:
+
+```python
+# Get changelog manager for custom branch
+branch_changelog_manager = table.changelog_manager('feature_branch')
+
+# Each branch maintains its own changelogs
+print(f"Changelog directory: {branch_changelog_manager.changelog_directory()}")
+# Output: /path/to/table/branch/branch-feature_branch/changelog
+```
+
 ## Supported Features
 
 The following shows the supported features of Python Paimon compared to Java Paimon:
