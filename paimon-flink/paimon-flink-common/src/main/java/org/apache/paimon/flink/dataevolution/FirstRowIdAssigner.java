@@ -24,30 +24,44 @@ import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.functions.Partitioner;
-import org.apache.flink.api.common.functions.RichMapFunction;
+import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.util.Collector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
-/** Assign first row id for each row through binary search. */
-public class FirstRowIdAssigner extends RichMapFunction<RowData, Tuple2<Long, RowData>> {
+/**
+ * Assign first row id for each row through binary search. Rows with invalid row ids are filtered
+ * out.
+ */
+public class FirstRowIdAssigner extends RichFlatMapFunction<RowData, Tuple2<Long, RowData>> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FirstRowIdAssigner.class);
 
     private final FirstRowIdLookup firstRowIdLookup;
+    private final long maxRowId;
 
     private final int rowIdFieldIndex;
 
-    public FirstRowIdAssigner(List<Long> firstRowIds, RowType rowType) {
+    public FirstRowIdAssigner(List<Long> firstRowIds, long maxRowId, RowType rowType) {
         this.firstRowIdLookup = new FirstRowIdLookup(firstRowIds);
+        this.maxRowId = maxRowId;
         this.rowIdFieldIndex = rowType.getFieldNames().indexOf(SpecialFields.ROW_ID.name());
         Preconditions.checkState(this.rowIdFieldIndex >= 0, "Do not found _ROW_ID column.");
     }
 
     @Override
-    public Tuple2<Long, RowData> map(RowData value) throws Exception {
+    public void flatMap(RowData value, Collector<Tuple2<Long, RowData>> out) throws Exception {
         long rowId = value.getLong(rowIdFieldIndex);
-        return new Tuple2<>(firstRowIdLookup.lookup(rowId), value);
+        if (rowId >= 0 && rowId <= maxRowId) {
+            out.collect(new Tuple2<>(firstRowIdLookup.lookup(rowId), value));
+        } else {
+            LOG.warn("Invalid Row id {} is out of range [0, {}].", rowId, maxRowId);
+        }
     }
 
     /** The Key Selector to get firstRowId from tuple2. */

@@ -19,15 +19,10 @@
 package org.apache.paimon.metastore;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.manifest.SimpleFileEntry;
-import org.apache.paimon.table.ChainGroupReadTable;
-import org.apache.paimon.table.FallbackReadFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitCallback;
@@ -64,27 +59,17 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
     }
 
     @Override
-    public void call(
-            List<SimpleFileEntry> baseFiles,
-            List<ManifestEntry> deltaFiles,
-            List<IndexManifestEntry> indexFiles,
-            Snapshot snapshot) {
+    public void call(Context context) {
 
         if (!ChainTableUtils.isScanFallbackDeltaBranch(coreOptions)) {
             return;
         }
 
-        if (snapshot.commitKind() != CommitKind.OVERWRITE) {
+        if (context.snapshot.commitKind() != CommitKind.OVERWRITE) {
             return;
         }
 
-        // Find the underlying table for writing snapshot branch.
-        FileStoreTable candidateTable = table;
-        if (table instanceof FallbackReadFileStoreTable) {
-            candidateTable =
-                    ((ChainGroupReadTable) ((FallbackReadFileStoreTable) table).fallback())
-                            .wrapped();
-        }
+        FileStoreTable candidateTable = ChainTableUtils.resolveChainPrimaryTable(table);
 
         FileStoreTable snapshotTable =
                 candidateTable.switchToBranch(coreOptions.scanFallbackSnapshotBranch());
@@ -97,7 +82,7 @@ public class ChainTableOverwriteCommitCallback implements CommitCallback {
                         coreOptions.legacyPartitionName());
 
         List<BinaryRow> overwritePartitions =
-                deltaFiles.stream()
+                context.deltaFiles.stream()
                         .map(ManifestEntry::partition)
                         .distinct()
                         .collect(Collectors.toList());

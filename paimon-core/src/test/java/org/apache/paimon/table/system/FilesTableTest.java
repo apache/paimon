@@ -30,6 +30,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -40,6 +42,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -132,6 +135,58 @@ public class FilesTableTest extends TableTestBase {
                                                 + "-"
                                                 + row.getInt(5)));
         return rows;
+    }
+
+    @Test
+    public void testReadWithPartitionRange() throws Exception {
+        compact(table, row(2, 20), 0);
+        write(table, GenericRow.of(3, 1, 10, 1));
+
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+
+        assertThat(readPartBucketLevel(builder.greaterThan(0, BinaryString.fromString("{1, 10}"))))
+                .containsExactlyInAnyOrder("{2, 20}-0-5");
+
+        assertThat(
+                        readPartBucketLevel(
+                                builder.greaterOrEqual(0, BinaryString.fromString("{2, 20}"))))
+                .containsExactlyInAnyOrder("{2, 20}-0-5");
+
+        assertThat(readPartBucketLevel(builder.lessThan(0, BinaryString.fromString("{2, 20}"))))
+                .containsExactlyInAnyOrder("{1, 10}-0-0", "{1, 10}-0-0", "{1, 10}-1-0");
+
+        assertThat(readPartBucketLevel(builder.lessOrEqual(0, BinaryString.fromString("{1, 10}"))))
+                .containsExactlyInAnyOrder("{1, 10}-0-0", "{1, 10}-0-0", "{1, 10}-1-0");
+    }
+
+    @Test
+    public void testReadWithPartitionIn() throws Exception {
+        compact(table, row(2, 20), 0);
+        write(table, GenericRow.of(3, 1, 10, 1));
+
+        assertThat(
+                        readPartBucketLevel(
+                                buildInPredicate(
+                                        BinaryString.fromString("{1, 10}"),
+                                        BinaryString.fromString("{2, 20}"))))
+                .containsExactlyInAnyOrder(
+                        "{1, 10}-0-0", "{1, 10}-0-0", "{1, 10}-1-0", "{2, 20}-0-5");
+
+        assertThat(readPartBucketLevel(buildInPredicate(BinaryString.fromString("{2, 20}"))))
+                .containsExactlyInAnyOrder("{2, 20}-0-5");
+
+        assertThat(readPartBucketLevel(buildInPredicate(BinaryString.fromString("{3, 30}"))))
+                .isEmpty();
+    }
+
+    private Predicate buildInPredicate(BinaryString... values) {
+        DataField partitionField = FilesTable.TABLE_TYPE.getFields().get(0);
+        return new LeafPredicate(
+                In.INSTANCE,
+                partitionField.type(),
+                0,
+                partitionField.name(),
+                Arrays.asList(values));
     }
 
     @Test

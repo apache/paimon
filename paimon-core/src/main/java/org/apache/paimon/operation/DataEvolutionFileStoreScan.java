@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.DataEvolutionArray;
 import org.apache.paimon.reader.DataEvolutionRow;
@@ -41,10 +42,14 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
@@ -52,6 +57,8 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
+import static org.apache.paimon.manifest.ManifestFileMeta.allContainsRowId;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** {@link FileStoreScan} for data-evolution enabled table. */
@@ -80,7 +87,8 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
                 manifestFileFactory,
                 scanManifestParallelism,
                 false,
-                deletionVectorsEnabled);
+                deletionVectorsEnabled,
+                true);
 
         this.fileFields = new ConcurrentHashMap<>();
     }
@@ -124,6 +132,47 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
     }
 
     @Override
+    public Iterator<ManifestEntry> readManifestEntries(
+            List<ManifestFileMeta> manifestFiles, boolean useSequential) {
+        if (inputFilter != null
+                || limit == null
+                || limit <= 0
+                || !allContainsRowId(manifestFiles)) {
+            return super.readManifestEntries(manifestFiles, useSequential);
+        }
+
+        List<ManifestEntry> filtered = new ArrayList<>();
+        RangeHelper<ManifestFileMeta> rangeHelper =
+                new RangeHelper<>(meta -> new Range(meta.minRowId(), meta.maxRowId()));
+        Queue<List<ManifestFileMeta>> queue =
+                new ArrayDeque<>(rangeHelper.mergeOverlappingRanges(manifestFiles));
+
+        long accumulatedRowCount = 0;
+        while (!queue.isEmpty()) {
+            List<ManifestFileMeta> groupMetas = queue.poll();
+            List<ManifestEntry> entries = new ArrayList<>();
+            super.readManifestEntries(groupMetas, useSequential).forEachRemaining(entries::add);
+            RangeHelper<ManifestEntry> rangeHelper2 =
+                    new RangeHelper<>(e -> e.file().nonNullRowIdRange());
+            List<List<ManifestEntry>> splitByRowId = rangeHelper2.mergeOverlappingRanges(entries);
+
+            for (List<ManifestEntry> group : splitByRowId) {
+                filtered.addAll(group);
+                long groupRowCount =
+                        group.stream()
+                                .mapToLong(e -> e.file().rowCount())
+                                .reduce(Long::max)
+                                .orElse(0L);
+                accumulatedRowCount += groupRowCount;
+                if (accumulatedRowCount >= limit) {
+                    return filtered.iterator();
+                }
+            }
+        }
+        return filtered.iterator();
+    }
+
+    @Override
     protected boolean postFilterManifestEntriesEnabled() {
         return inputFilter != null;
     }
@@ -134,9 +183,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
 
         // group by row id range
         RangeHelper<ManifestEntry> rangeHelper =
-                new RangeHelper<>(
-                        e -> e.file().nonNullFirstRowId(),
-                        e -> e.file().nonNullFirstRowId() + e.file().rowCount() - 1);
+                new RangeHelper<>(e -> e.file().nonNullRowIdRange());
         List<List<ManifestEntry>> splitByRowId = rangeHelper.mergeOverlappingRanges(entries);
 
         return splitByRowId.stream()
@@ -158,10 +205,11 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
             TableSchema schema,
             Function<Long, TableSchema> scanTableSchema,
             List<ManifestEntry> metas) {
-        // exclude blob files, useless for predicate eval
+        // exclude blob and vector-store files, useless for predicate eval
         metas =
                 metas.stream()
                         .filter(entry -> !isBlobFile(entry.file().fileName()))
+                        .filter(entry -> !isVectorStoreFile(entry.file().fileName()))
                         .collect(Collectors.toList());
 
         ToLongFunction<ManifestEntry> maxSeqFunc = e -> e.file().maxSequenceNumber();
@@ -269,7 +317,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         }
 
         // If rowRanges is null, all entries should be kept
-        if (this.rowRanges == null) {
+        if (this.rowRangeIndex == null) {
             return true;
         }
 
@@ -282,16 +330,7 @@ public class DataEvolutionFileStoreScan extends AppendOnlyFileStoreScan {
         // Check if any value in indices is in the range [firstRowId, firstRowId + rowCount - 1]
         long rowCount = file.rowCount();
         long endRowId = firstRowId + rowCount - 1;
-        Range fileRowRange = new Range(firstRowId, endRowId);
-
-        for (Range expected : rowRanges) {
-            if (Range.intersection(fileRowRange, expected) != null) {
-                return true;
-            }
-        }
-
-        // No matching indices found, skip this entry
-        return false;
+        return rowRangeIndex.intersects(firstRowId, endRowId);
     }
 
     /** Statistics for data evolution. */

@@ -211,6 +211,7 @@ public class SparkFileIndexITCase extends SparkWriteITCase {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
+                        null,
                         false,
                         null);
 

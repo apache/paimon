@@ -44,6 +44,12 @@ class TorchReadTest(unittest.TestCase):
             ('behavior', pa.string()),
             ('dt', pa.string())
         ])
+        cls.pk_pa_schema = pa.schema([
+            pa.field('user_id', pa.int32(), nullable=False),
+            ('item_id', pa.int64()),
+            pa.field('behavior', pa.string(), nullable=False),
+            ('dt', pa.string())
+        ])
         cls.expected = pa.Table.from_pydict({
             'user_id': [1, 2, 3, 4, 5, 6, 7, 8],
             'item_id': [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008],
@@ -99,6 +105,42 @@ class TorchReadTest(unittest.TestCase):
                          f"Behaviors mismatch. Expected {expected_behaviors}, got {sorted_behaviors}")
 
         print(f"✓ Test passed: Successfully read {len(all_user_ids)} rows with correct data")
+
+    def test_torch_streaming_prefetch_concurrency(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'])
+        self.catalog.create_table('default.test_torch_prefetch_concurrency', schema, False)
+        table = self.catalog.get_table('default.test_torch_prefetch_concurrency')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['user_id', 'behavior'])
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        self.assertGreater(len(splits), 0, "Need at least one split to test prefetch")
+
+        dataset = table_read.to_torch(splits, streaming=True, prefetch_concurrency=4)
+        dataloader = DataLoader(
+            dataset,
+            batch_size=2,
+            num_workers=0,
+            shuffle=False
+        )
+
+        all_user_ids = []
+        all_behaviors = []
+        for batch_data in dataloader:
+            all_user_ids.extend(batch_data['user_id'].tolist())
+            all_behaviors.extend(batch_data['behavior'])
+
+        sorted_data = sorted(zip(all_user_ids, all_behaviors), key=lambda x: x[0])
+        sorted_user_ids = [x[0] for x in sorted_data]
+        sorted_behaviors = [x[1] for x in sorted_data]
+
+        expected_user_ids = [1, 2, 3, 4, 5, 6, 7, 8]
+        expected_behaviors = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+        self.assertEqual(len(all_user_ids), 8, "Should read 8 rows with prefetch_concurrency")
+        self.assertEqual(sorted_user_ids, expected_user_ids)
+        self.assertEqual(sorted_behaviors, expected_behaviors)
 
     def test_blob_torch_read(self):
         """Test end-to-end blob functionality using blob descriptors."""
@@ -346,6 +388,12 @@ class TorchReadTest(unittest.TestCase):
         """Test torch read with large data volume on primary key table."""
 
         # Create PK table
+        large_pk_pa_schema = pa.schema([
+            pa.field('user_id', pa.int32(), nullable=False),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            ('dt', pa.string())
+        ])
         schema = Schema.from_pyarrow_schema(
             self.pa_schema,
             primary_keys=['user_id'],
@@ -378,7 +426,7 @@ class TorchReadTest(unittest.TestCase):
                 'behavior': [chr(ord('a') + (i % 26)) for i in range(batch_size)],
                 'dt': [f'p{i % 4}' for i in range(batch_size)],
             }
-            pa_table = pa.Table.from_pydict(data, schema=self.pa_schema)
+            pa_table = pa.Table.from_pydict(data, schema=large_pk_pa_schema)
             table_write.write_arrow(pa_table)
             table_commit.commit(table_write.prepare_commit())
             table_write.close()
@@ -598,6 +646,7 @@ class TorchReadTest(unittest.TestCase):
 
     def _write_test_table(self, table):
         write_builder = table.new_batch_write_builder()
+        table_pa_schema = self.pk_pa_schema if table.primary_keys else self.pa_schema
 
         # first write
         table_write = write_builder.new_write()
@@ -608,7 +657,7 @@ class TorchReadTest(unittest.TestCase):
             'behavior': ['a', 'b', 'c', 'd'],
             'dt': ['p1', 'p1', 'p2', 'p1'],
         }
-        pa_table = pa.Table.from_pydict(data1, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data1, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -623,7 +672,7 @@ class TorchReadTest(unittest.TestCase):
             'behavior': ['e', 'f', 'g', 'h'],
             'dt': ['p2', 'p1', 'p2', 'p1'],
         }
-        pa_table = pa.Table.from_pydict(data2, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(data2, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()

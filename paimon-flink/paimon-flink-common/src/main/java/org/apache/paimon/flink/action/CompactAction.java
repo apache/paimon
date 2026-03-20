@@ -267,7 +267,7 @@ public class CompactAction extends TableActionBase {
             predicate =
                     predicate
                             .visit(
-                                    new PredicateProjectionConverter(
+                                    PredicateProjectionConverter.fromProjection(
                                             table.rowType().projectIndexes(table.partitionKeys())))
                             .orElseThrow(
                                     () ->
@@ -346,13 +346,11 @@ public class CompactAction extends TableActionBase {
                             partitionSpec,
                             options.get(FlinkConnectorOptions.SCAN_PARALLELISM));
 
-            boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
             DataStream<InternalRow> partitioned =
                     FlinkStreamPartitioner.partition(
                             FlinkSinkBuilder.mapToInternalRow(
                                     sourcePair.getLeft(),
                                     realTable.rowType(),
-                                    blobAsDescriptor,
                                     table.catalogEnvironment().catalogContext()),
                             new RowDataChannelComputer(realTable.schema()),
                             null);

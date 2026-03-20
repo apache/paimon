@@ -143,6 +143,19 @@ public class BTreeFileMetaSelectorTest {
         result = selector.visitNotIn(ref, Arrays.asList(1, 7, 19, 30, 31));
         Assertions.assertThat(result).isNotEmpty();
         assertFiles(result.get(), Arrays.asList("file1", "file2", "file3", "file4", "file5"));
+
+        // 4. test between
+        result = selector.visitBetween(ref, 0, 15);
+        Assertions.assertThat(result).isNotEmpty();
+        assertFiles(result.get(), Arrays.asList("file1", "file2", "file4"));
+
+        result = selector.visitBetween(ref, 0, 30);
+        Assertions.assertThat(result).isNotEmpty();
+        assertFiles(result.get(), Arrays.asList("file1", "file2", "file3", "file4", "file5"));
+
+        result = selector.visitBetween(ref, 40, 50);
+        Assertions.assertThat(result).isNotEmpty();
+        Assertions.assertThat(result.get()).isEmpty();
     }
 
     private void assertFiles(List<GlobalIndexIOMeta> files, List<String> expected) {

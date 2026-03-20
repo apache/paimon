@@ -78,6 +78,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.AGG_FUNCTION;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_MODIFIABLE;
 import static org.apache.paimon.CoreOptions.DISTINCT;
@@ -87,6 +88,7 @@ import static org.apache.paimon.CoreOptions.IGNORE_RETRACT;
 import static org.apache.paimon.CoreOptions.IGNORE_UPDATE_BEFORE;
 import static org.apache.paimon.CoreOptions.LIST_AGG_DELIMITER;
 import static org.apache.paimon.CoreOptions.NESTED_KEY;
+import static org.apache.paimon.CoreOptions.PK_CLUSTERING_OVERRIDE;
 import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.DEFAULT_MAIN_BRANCH;
@@ -293,6 +295,14 @@ public class SchemaManager implements Serializable {
                                 CoreOptions.DISABLE_EXPLICIT_TYPE_CASTING
                                         .defaultValue()
                                         .toString()));
+
+        boolean addColumnBeforePartition =
+                Boolean.parseBoolean(
+                        oldOptions.getOrDefault(
+                                CoreOptions.ADD_COLUMN_BEFORE_PARTITION.key(),
+                                CoreOptions.ADD_COLUMN_BEFORE_PARTITION.defaultValue().toString()));
+        List<String> partitionKeys = oldTableSchema.partitionKeys();
+
         List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
         AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
         String newComment = oldTableSchema.comment();
@@ -310,7 +320,7 @@ public class SchemaManager implements Serializable {
             } else if (change instanceof RemoveOption) {
                 RemoveOption removeOption = (RemoveOption) change;
                 if (hasSnapshots.get()) {
-                    checkResetTableOption(removeOption.key());
+                    checkResetTableOption(oldOptions, removeOption.key());
                 }
                 newOptions.remove(removeOption.key());
             } else if (change instanceof UpdateComment) {
@@ -368,6 +378,17 @@ public class SchemaManager implements Serializable {
                                 throw new UnsupportedOperationException(
                                         "Unsupported move type: " + move.type());
                             }
+                        } else if (addColumnBeforePartition
+                                && !partitionKeys.isEmpty()
+                                && addColumn.fieldNames().length == 1) {
+                            int insertIndex = newFields.size();
+                            for (int i = 0; i < newFields.size(); i++) {
+                                if (partitionKeys.contains(newFields.get(i).name())) {
+                                    insertIndex = i;
+                                    break;
+                                }
+                            }
+                            newFields.add(insertIndex, dataField);
                         } else {
                             newFields.add(dataField);
                         }
@@ -1148,9 +1169,18 @@ public class SchemaManager implements Serializable {
                                 IGNORE_UPDATE_BEFORE.key()));
             }
         }
+
+        if (CLUSTERING_COLUMNS.key().equals(key)) {
+            if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())) {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Cannot change %s when %s enabled.",
+                                CLUSTERING_COLUMNS.key(), PK_CLUSTERING_OVERRIDE.key()));
+            }
+        }
     }
 
-    public static void checkResetTableOption(String key) {
+    public static void checkResetTableOption(Map<String, String> options, String key) {
         if (CoreOptions.IMMUTABLE_OPTIONS.contains(key)) {
             throw new UnsupportedOperationException(
                     String.format("Change '%s' is not supported yet.", key));
@@ -1158,6 +1188,13 @@ public class SchemaManager implements Serializable {
 
         if (CoreOptions.BUCKET.key().equals(key)) {
             throw new UnsupportedOperationException(String.format("Cannot reset %s.", key));
+        }
+
+        if (options.containsKey(PK_CLUSTERING_OVERRIDE.key())
+                && CLUSTERING_COLUMNS.key().equals(key)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot reset %s when %s enabled.", key, PK_CLUSTERING_OVERRIDE.key()));
         }
     }
 

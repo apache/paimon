@@ -179,8 +179,8 @@ function pytest_check() {
         TEST_DIR="pypaimon/tests/py36 pypaimon/tests/file_io_test.py"
         echo "Running tests for Python 3.6: $TEST_DIR"
     else
-        TEST_DIR="pypaimon/tests --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
-        echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests --ignore=pypaimon/tests/py36"
+        TEST_DIR="pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36 --ignore=pypaimon/tests/e2e --ignore=pypaimon/tests/torch_read_test.py"
+        echo "Running tests for Python $PYTHON_VERSION (excluding py36): pypaimon/tests pypaimon/acceptance --ignore=pypaimon/tests/py36"
     fi
 
     # the return value of a pipeline is the status of the last command to exit

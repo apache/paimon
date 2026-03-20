@@ -54,10 +54,12 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.AUTO_CREATE;
@@ -192,6 +194,11 @@ public class CatalogUtils {
     }
 
     public static List<Partition> listPartitionsFromFileSystem(Table table) {
+        return listPartitionsFromFileSystem(table, null);
+    }
+
+    public static List<Partition> listPartitionsFromFileSystem(
+            Table table, @Nullable List<Map<String, String>> partitionSpecs) {
         Options options = Options.fromMap(table.options());
         InternalRowPartitionComputer computer =
                 new InternalRowPartitionComputer(
@@ -204,17 +211,24 @@ public class CatalogUtils {
 
         // partitions should be seen even all files are level-0 when enable dv, see
         // https://github.com/apache/paimon/pull/6531 for details
-        List<PartitionEntry> partitionEntries;
         if (scan instanceof InnerTableScan) {
-            partitionEntries =
-                    ((InnerTableScan) scan).withLevelFilter(level -> true).listPartitionEntries();
-        } else {
-            partitionEntries = scan.listPartitionEntries();
+            ((InnerTableScan) scan).withLevelFilter(level -> true);
+            if (partitionSpecs != null) {
+                ((InnerTableScan) scan).withPartitionsFilter(partitionSpecs);
+            }
         }
 
+        List<PartitionEntry> partitionEntries = scan.listPartitionEntries();
+
         List<Partition> partitions = new ArrayList<>(partitionEntries.size());
+        Set<Map<String, String>> filterSet =
+                partitionSpecs == null ? null : new HashSet<>(partitionSpecs);
         for (PartitionEntry entry : partitionEntries) {
-            partitions.add(entry.toPartition(computer));
+            Partition partition = entry.toPartition(computer);
+            if (filterSet != null && !filterSet.contains(partition.spec())) {
+                continue;
+            }
+            partitions.add(partition);
         }
         return partitions;
     }
@@ -284,7 +298,8 @@ public class CatalogUtils {
                         isRestCatalog ? null : lockFactory,
                         isRestCatalog ? null : lockContext,
                         catalogContext,
-                        catalog.supportsVersionManagement());
+                        catalog.supportsVersionManagement(),
+                        catalog.supportsPartitionModification());
         Path path = new Path(schema.options().get(PATH.key()));
         FileStoreTable table =
                 FileStoreTableFactory.create(dataFileIO.apply(path), path, schema, catalogEnv);
@@ -424,6 +439,7 @@ public class CatalogUtils {
                 .fileIO(fileIO.apply(new Path(location)))
                 .identifier(identifier)
                 .location(location)
+                .options(options)
                 .comment(schema.comment())
                 .build();
     }

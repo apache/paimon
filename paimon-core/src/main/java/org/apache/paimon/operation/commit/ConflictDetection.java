@@ -80,6 +80,7 @@ public class ConflictDetection {
     private final BucketMode bucketMode;
     private final boolean deletionVectorsEnabled;
     private final boolean dataEvolutionEnabled;
+    private final boolean pkClusteringOverride;
     private final IndexFileHandler indexFileHandler;
     private final SnapshotManager snapshotManager;
     private final CommitScanner commitScanner;
@@ -96,6 +97,7 @@ public class ConflictDetection {
             BucketMode bucketMode,
             boolean deletionVectorsEnabled,
             boolean dataEvolutionEnabled,
+            boolean pkClusteringOverride,
             IndexFileHandler indexFileHandler,
             SnapshotManager snapshotManager,
             CommitScanner commitScanner) {
@@ -107,6 +109,7 @@ public class ConflictDetection {
         this.bucketMode = bucketMode;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
         this.dataEvolutionEnabled = dataEvolutionEnabled;
+        this.pkClusteringOverride = pkClusteringOverride;
         this.indexFileHandler = indexFileHandler;
         this.snapshotManager = snapshotManager;
         this.commitScanner = commitScanner;
@@ -272,6 +275,11 @@ public class ConflictDetection {
             return Optional.empty();
         }
 
+        // Not clustering by pk, no need to check key range
+        if (pkClusteringOverride) {
+            return Optional.empty();
+        }
+
         // group entries by partitions, buckets and levels
         Map<LevelIdentifier, List<SimpleFileEntry>> levels = new HashMap<>();
         for (SimpleFileEntry entry : mergedEntries) {
@@ -391,9 +399,7 @@ public class ConflictDetection {
                         .collect(Collectors.toList());
 
         RangeHelper<SimpleFileEntry> rangeHelper =
-                new RangeHelper<>(
-                        SimpleFileEntry::nonNullFirstRowId,
-                        f -> f.nonNullFirstRowId() + f.rowCount() - 1);
+                new RangeHelper<>(SimpleFileEntry::nonNullRowIdRange);
         List<List<SimpleFileEntry>> merged = rangeHelper.mergeOverlappingRanges(entries);
         for (List<SimpleFileEntry> group : merged) {
             List<SimpleFileEntry> dataFiles = new ArrayList<>();
@@ -450,9 +456,8 @@ public class ConflictDetection {
                     commitScanner.readIncrementalEntries(snapshot, changedPartitions);
             for (ManifestEntry entry : changes) {
                 DataFileMeta file = entry.file();
-                long firstRowId = file.nonNullFirstRowId();
-                if (firstRowId < checkNextRowId) {
-                    Range fileRange = new Range(firstRowId, firstRowId + file.rowCount() - 1);
+                Range fileRange = file.nonNullRowIdRange();
+                if (fileRange.from < checkNextRowId) {
                     for (Range range : historyIdRanges) {
                         if (range.hasIntersection(fileRange)) {
                             return Optional.of(

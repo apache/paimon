@@ -142,9 +142,15 @@ case class MergeIntoPaimonTable(
         }
       }
 
+      // If there is filter, we need to output the __paimon__file_path metadata column explicitly.
+      val targetDSWithFilePathCol = targetOnlyCondition.fold(targetDS) {
+        condition =>
+          createDataset(sparkSession, Filter.apply(condition, relation.withMetadataColumns()))
+      }
+
       def findTouchedFiles0(joinType: String): Array[String] = {
         findTouchedFiles(
-          targetDS.alias("_left").join(sourceDS, toColumn(mergeCondition), joinType),
+          targetDSWithFilePathCol.alias("_left").join(sourceDS, toColumn(mergeCondition), joinType),
           sparkSession,
           "_left." + FILE_PATH_COLUMN)
       }

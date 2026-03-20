@@ -24,6 +24,7 @@ import org.apache.paimon.arrow.converter.Arrow2PaimonVectorConverter;
 import org.apache.paimon.arrow.reader.ArrowBatchReader;
 import org.apache.paimon.arrow.writer.ArrowFieldWriterFactoryVisitor;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.BinaryVector;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
@@ -36,6 +37,7 @@ import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.arrow.memory.BufferAllocator;
@@ -137,6 +139,87 @@ public class ArrowFormatWriterTest {
                 }
             }
             vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testWriteVector() {
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "id", DataTypes.INT()),
+                                new DataField(1, "embed", DataTypes.VECTOR(3, DataTypes.FLOAT()))));
+        float[] values = new float[] {1.0f, 2.0f, 3.0f};
+        try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 16, true)) {
+            writer.write(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values)));
+
+            writer.flush();
+            VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+            ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+            Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+
+            Iterator<InternalRow> iterator = rows.iterator();
+            InternalRow row = iterator.next();
+
+            assertThat(row.getInt(0)).isEqualTo(1);
+            assertThat(row.getVector(1).toFloatArray()).isEqualTo(values);
+            vectorSchemaRoot.close();
+        }
+    }
+
+    @Test
+    public void testWriteVectorWithNulls() {
+        // Arrow2ColumnarVecFactory needs to handle bit-level checks on the validity buffer.
+        // Different lengths can cover validation across multiple bytes.
+        for (int length = 1; length <= 18; ++length) {
+            VectorType vectorType = DataTypes.VECTOR(length, DataTypes.FLOAT());
+            RowType rowType =
+                    new RowType(
+                            Arrays.asList(
+                                    new DataField(0, "id", DataTypes.INT()),
+                                    new DataField(1, "embed", vectorType)));
+            float[] values = new float[length];
+            for (int i = 0; i < length; ++i) {
+                values[i] = RND.nextInt(256);
+            }
+            try (ArrowFormatWriter writer = new ArrowFormatWriter(rowType, 1024, true)) {
+                writer.write(GenericRow.of(1, BinaryVector.fromPrimitiveArray(values)));
+                writer.write(GenericRow.of(2, null));
+                writer.write(GenericRow.of(3, BinaryVector.fromPrimitiveArray(values)));
+                writer.write(GenericRow.of(4, null));
+
+                writer.flush();
+                VectorSchemaRoot vectorSchemaRoot = writer.getVectorSchemaRoot();
+
+                ArrowBatchReader arrowBatchReader = new ArrowBatchReader(rowType, true);
+                Iterable<InternalRow> rows = arrowBatchReader.readBatch(vectorSchemaRoot);
+                Iterator<InternalRow> iterator = rows.iterator();
+
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(1);
+                    assertThat(row.isNullAt(1)).isEqualTo(false);
+                    assertThat(row.getVector(1).toFloatArray()).isEqualTo(values);
+                }
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(2);
+                    assertThat(row.isNullAt(1)).isEqualTo(true);
+                }
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(3);
+                    assertThat(row.isNullAt(1)).isEqualTo(false);
+                    assertThat(row.getVector(1).toFloatArray()).isEqualTo(values);
+                }
+                {
+                    InternalRow row = iterator.next();
+                    assertThat(row.getInt(0)).isEqualTo(4);
+                    assertThat(row.isNullAt(1)).isEqualTo(true);
+                }
+                vectorSchemaRoot.close();
+            }
         }
     }
 

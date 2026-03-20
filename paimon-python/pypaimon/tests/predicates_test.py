@@ -17,6 +17,7 @@
 ################################################################################
 import os
 import random
+import shutil
 import tempfile
 import unittest
 
@@ -24,7 +25,10 @@ import pandas as pd
 import pyarrow as pa
 
 from pypaimon import CatalogFactory, Schema
-from pypaimon.table.row.generic_row import GenericRowDeserializer
+from pypaimon.common.predicate import Predicate
+from pypaimon.manifest.schema.simple_stats import SimpleStats
+from pypaimon.table.row.generic_row import GenericRow, GenericRowDeserializer
+from pypaimon.table.row.offset_row import OffsetRow
 
 
 def _check_filtered_result(read_builder, expected_df):
@@ -80,6 +84,10 @@ class PredicateTest(unittest.TestCase):
         commit.close()
 
         cls.df = df
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tempdir, ignore_errors=True)
 
     def test_wrong_field_name(self):
         table = self.catalog.get_table('default.test_append')
@@ -342,7 +350,7 @@ class PredicateTest(unittest.TestCase):
         table = self.catalog.get_table('default.test_pk')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.is_not_in('f1', ['abc', 'abbc'])
-        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[2:4])
+        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[2, 3]])
 
     def test_between_append(self):
         table = self.catalog.get_table('default.test_append')
@@ -354,6 +362,30 @@ class PredicateTest(unittest.TestCase):
         table = self.catalog.get_table('default.test_pk')
         predicate_builder = table.new_read_builder().new_predicate_builder()
         predicate = predicate_builder.between('f0', 1, 3)
+        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:2])
+
+    def test_not_between_append(self):
+        table = self.catalog.get_table('default.test_append')
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        predicate = predicate_builder.not_between('f0', 2, 4)
+        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[0, 4]])
+
+    def test_not_between_pk(self):
+        table = self.catalog.get_table('default.test_pk')
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        predicate = predicate_builder.not_between('f0', 2, 4)
+        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[[0, 4]])
+
+    def test_like_append(self):
+        table = self.catalog.get_table('default.test_append')
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        predicate = predicate_builder.like('f1', 'ab%')
+        _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:1])
+
+    def test_like_pk(self):
+        table = self.catalog.get_table('default.test_pk')
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        predicate = predicate_builder.like('f1', '%bc')
         _check_filtered_result(table.new_read_builder().with_filter(predicate), self.df.loc[0:2])
 
     def test_and_predicates(self):
@@ -372,6 +404,64 @@ class PredicateTest(unittest.TestCase):
         predicate = predicate_builder.or_predicates([predicate1, predicate2])
         _check_filtered_result(table.new_read_builder().with_filter(predicate),
                                self.df.loc[[0, 3, 4]])
+
+    def test_is_null(self):
+        stat_no_count = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[None],
+        )
+        pred = Predicate(method="isNull", index=0, field="c", literals=None)
+        self.assertTrue(
+            pred.test_by_simple_stats(stat_no_count, 10),
+            "isNull must keep file when null_count is missing",
+        )
+        # null_count == 0 -> can prune
+        stat_zero = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[0],
+        )
+        self.assertFalse(pred.test_by_simple_stats(stat_zero, 10))
+        # null_count > 0 -> keep
+        stat_positive = SimpleStats(
+            min_values=GenericRow([], []),
+            max_values=GenericRow([], []),
+            null_counts=[3],
+        )
+        self.assertTrue(pred.test_by_simple_stats(stat_positive, 10))
+
+    def test_filter_with_null_and_or(self):
+        p_gt = Predicate(method='greaterThan', index=1, field='score', literals=[10])
+        p_null = Predicate(method='isNull', index=1, field='score', literals=[])
+        predicate = Predicate(method='or', index=None, field=None, literals=[p_gt, p_null])
+
+        record_null = OffsetRow([1, None], 0, 2)  # id=1, score=None
+        self.assertTrue(predicate.test(record_null))
+
+        record_ok = OffsetRow([1, 15], 0, 2)
+        self.assertTrue(predicate.test(record_ok))
+
+        predicate_safe = Predicate(method='or', index=None, field=None, literals=[p_null, p_gt])
+        self.assertTrue(predicate_safe.test(record_null))
+
+    def test_like_pattern_matching(self):
+        predicate = Predicate(method='like', index=0, field='name', literals=['a%c'])
+        self.assertTrue(predicate.test(OffsetRow(['abc'], 0, 1)))
+        self.assertTrue(predicate.test(OffsetRow(['aXYZc'], 0, 1)))
+        self.assertFalse(predicate.test(OffsetRow(['aXYZd'], 0, 1)))
+
+        underscore_pred = Predicate(method='like', index=0, field='name', literals=['a_c'])
+        self.assertTrue(underscore_pred.test(OffsetRow(['abc'], 0, 1)))
+        self.assertFalse(underscore_pred.test(OffsetRow(['aXYc'], 0, 1)))
+
+    def test_not_between_value(self):
+        predicate = Predicate(method='notBetween', index=0, field='val', literals=[3, 7])
+        self.assertTrue(predicate.test(OffsetRow([1], 0, 1)))
+        self.assertTrue(predicate.test(OffsetRow([10], 0, 1)))
+        self.assertFalse(predicate.test(OffsetRow([5], 0, 1)))
+        self.assertFalse(predicate.test(OffsetRow([3], 0, 1)))
+        self.assertFalse(predicate.test(OffsetRow([None], 0, 1)))
 
     def test_pk_reader_with_filter(self):
         pa_schema = pa.schema([

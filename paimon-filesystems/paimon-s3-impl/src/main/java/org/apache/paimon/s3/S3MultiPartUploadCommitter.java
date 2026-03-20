@@ -23,19 +23,20 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.MultiPartUploadStore;
 import org.apache.paimon.fs.Path;
 
-import com.amazonaws.services.s3.model.CompleteMultipartUploadResult;
-import com.amazonaws.services.s3.model.PartETag;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
+import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadResponse;
+import software.amazon.awssdk.services.s3.model.CompletedPart;
 
 import java.io.IOException;
 import java.util.List;
 
-/** S3 implementation of MultiPartUploadCommitter. */
+/** S3 implementation of MultiPartUploadCommitter (AWS SDK v2). */
 public class S3MultiPartUploadCommitter
-        extends BaseMultiPartUploadCommitter<PartETag, CompleteMultipartUploadResult> {
+        extends BaseMultiPartUploadCommitter<CompletedPart, CompleteMultipartUploadResponse> {
+
     public S3MultiPartUploadCommitter(
             String uploadId,
-            List<PartETag> uploadedParts,
+            List<CompletedPart> uploadedParts,
             String objectName,
             long position,
             Path targetPath) {
@@ -43,8 +44,8 @@ public class S3MultiPartUploadCommitter
     }
 
     @Override
-    protected MultiPartUploadStore<PartETag, CompleteMultipartUploadResult> multiPartUploadStore(
-            FileIO fileIO, Path targetPath) throws IOException {
+    protected MultiPartUploadStore<CompletedPart, CompleteMultipartUploadResponse>
+            multiPartUploadStore(FileIO fileIO, Path targetPath) throws IOException {
         S3FileIO s3FileIO = (S3FileIO) fileIO;
         org.apache.hadoop.fs.Path hadoopPath = s3FileIO.path(targetPath);
         S3AFileSystem fs = (S3AFileSystem) s3FileIO.getFileSystem(hadoopPath);

@@ -34,6 +34,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.PostponeUtils;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.utils.BlobDescriptorUtils;
 
 import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -206,13 +207,13 @@ public class FlinkSinkBuilder {
     public DataStreamSink<?> build() {
         setParallelismIfAdaptiveConflict();
         input = trySortInput(input);
-        boolean blobAsDescriptor = table.coreOptions().blobAsDescriptor();
+        CatalogContext contextForDescriptor =
+                BlobDescriptorUtils.getCatalogContext(
+                        table.catalogEnvironment().catalogContext(),
+                        table.coreOptions().toConfiguration());
+
         DataStream<InternalRow> input =
-                mapToInternalRow(
-                        this.input,
-                        table.rowType(),
-                        blobAsDescriptor,
-                        table.catalogEnvironment().catalogContext());
+                mapToInternalRow(this.input, table.rowType(), contextForDescriptor);
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
             SingleOutputStreamOperator<InternalRow> newInput =
                     input.forward()
@@ -244,14 +245,11 @@ public class FlinkSinkBuilder {
     public static DataStream<InternalRow> mapToInternalRow(
             DataStream<RowData> input,
             org.apache.paimon.types.RowType rowType,
-            boolean blobAsDescriptor,
             CatalogContext catalogContext) {
         SingleOutputStreamOperator<InternalRow> result =
                 input.map(
                                 (MapFunction<RowData, InternalRow>)
-                                        r ->
-                                                new FlinkRowWrapper(
-                                                        r, blobAsDescriptor, catalogContext))
+                                        r -> new FlinkRowWrapper(r, catalogContext))
                         .returns(
                                 org.apache.paimon.flink.utils.InternalTypeInfo.fromRowType(
                                         rowType));
@@ -337,7 +335,11 @@ public class FlinkSinkBuilder {
         if (tableSortInfo != null) {
             TableSorter sorter =
                     TableSorter.getSorter(
-                            input.getExecutionEnvironment(), input, table, tableSortInfo);
+                            input.getExecutionEnvironment(),
+                            input,
+                            table.coreOptions(),
+                            table.rowType(),
+                            tableSortInfo);
             return sorter.sort();
         }
         return input;

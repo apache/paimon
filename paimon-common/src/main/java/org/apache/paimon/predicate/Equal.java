@@ -27,8 +27,8 @@ import java.util.Optional;
 
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
-/** A {@link NullFalseLeafBinaryFunction} to eval equal. */
-public class Equal extends NullFalseLeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to eval equal. */
+public class Equal extends LeafBinaryFunction {
 
     public static final String NAME = "EQUAL";
 
@@ -56,5 +56,10 @@ public class Equal extends NullFalseLeafBinaryFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitEqual(fieldRef, literals.get(0));
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

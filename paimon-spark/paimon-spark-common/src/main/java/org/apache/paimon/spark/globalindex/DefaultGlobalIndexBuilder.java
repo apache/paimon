@@ -84,7 +84,14 @@ public class DefaultGlobalIndexBuilder implements Serializable {
         LongCounter rowCounter = new LongCounter(0);
         List<ResultEntry> resultEntries = writePaimonRows(data, rowCounter);
         List<IndexFileMeta> indexFileMetas =
-                toIndexFileMetas(table, rowRange, indexField.id(), indexType, resultEntries);
+                toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        indexField.id(),
+                        indexType,
+                        resultEntries);
         DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFileMetas);
         return new CommitMessageImpl(
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());
@@ -96,15 +103,28 @@ public class DefaultGlobalIndexBuilder implements Serializable {
                 (GlobalIndexSingletonWriter)
                         createIndexWriter(table, indexType, indexField, options);
 
-        InternalRow.FieldGetter getter =
-                InternalRow.createFieldGetter(
-                        indexField.type(), readType.getFieldIndex(indexField.name()));
-        rows.forEachRemaining(
-                row -> {
-                    Object indexO = getter.getFieldOrNull(row);
-                    indexWriter.write(indexO);
-                    rowCounter.add(1);
-                });
-        return indexWriter.finish();
+        try {
+            InternalRow.FieldGetter getter =
+                    InternalRow.createFieldGetter(
+                            indexField.type(), readType.getFieldIndex(indexField.name()));
+            rows.forEachRemaining(
+                    row -> {
+                        Object indexO = getter.getFieldOrNull(row);
+                        indexWriter.write(indexO);
+                        rowCounter.add(1);
+                    });
+            return indexWriter.finish();
+        } finally {
+            closeWriterQuietly(indexWriter);
+        }
+    }
+
+    private static void closeWriterQuietly(GlobalIndexSingletonWriter writer) {
+        if (writer instanceof java.io.Closeable) {
+            try {
+                ((java.io.Closeable) writer).close();
+            } catch (IOException ignored) {
+            }
+        }
     }
 }

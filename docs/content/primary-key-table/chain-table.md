@@ -30,7 +30,7 @@ Chain table is a new capability for primary key tables that transforms how you p
 Imagine a scenario where you periodically store a full snapshot of data (for example, once a day), even 
 though only a small portion changes between snapshots. ODS binlog dump is a typical example of this pattern.
 
-Taking a daily binlog dump job as an example. A batch job merges yesterday’s full dataset with today’s 
+Taking a daily binlog dump job as an example. A batch job merges yesterday's full dataset with today's
 incremental changes to produce a new full dataset. This approach has two clear drawbacks:
 * Full computation: Merge operation includes all data, and it will involve shuffle, which results in poor performance.
 * Full storage: Store a full set of data every day, and the changed data usually accounts for a very small proportion.
@@ -88,6 +88,7 @@ Notice that:
 - Chain table should ensure that the schema of each branch is consistent.
 - Only spark support now, flink will be supported later.
 - Chain compact is not supported for now, and it will be supported later.
+- Deletion vector is not supported for chain table.
 
 After creating a chain table, you can read and write data in the following ways.
 

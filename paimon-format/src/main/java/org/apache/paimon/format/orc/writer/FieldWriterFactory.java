@@ -18,6 +18,8 @@
 
 package org.apache.paimon.format.orc.writer;
 
+import org.apache.paimon.data.Blob;
+import org.apache.paimon.data.BlobDescriptor;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -46,6 +48,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.types.VariantType;
+import org.apache.paimon.types.VectorType;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
@@ -244,7 +247,21 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
 
     @Override
     public FieldWriter visit(BlobType blobType) {
-        throw new UnsupportedOperationException("Unsupported type: " + blobType);
+        return (rowId, column, getters, columnId) -> {
+            BytesColumnVector vector = (BytesColumnVector) column;
+            Blob blob = getters.getBlob(columnId);
+            try {
+                BlobDescriptor descriptor = blob.toDescriptor();
+                byte[] bytes = descriptor.serialize();
+                vector.setVal(rowId, bytes, 0, bytes.length);
+                return bytes.length;
+            } catch (Throwable t) {
+                throw new IllegalArgumentException(
+                        "blob-descriptor-field requires blob field value to be a "
+                                + "serialized BlobDescriptor (magic 'BLOBDESC').",
+                        t);
+            }
+        };
     }
 
     @Override
@@ -291,6 +308,11 @@ public class FieldWriterFactory implements DataTypeVisitor<FieldWriter> {
             }
             return totalSize;
         };
+    }
+
+    @Override
+    public FieldWriter visit(VectorType vectorType) {
+        throw new UnsupportedOperationException("Unsupported type: " + vectorType);
     }
 
     @Override

@@ -164,7 +164,12 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
 
-      // TODO: AlwaysTrue, AlwaysFalse
+      case ALWAYS_TRUE =>
+        PredicateBuilder.alwaysTrue()
+
+      case ALWAYS_FALSE =>
+        PredicateBuilder.alwaysFalse()
+
       case _ => throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
     }
   }
@@ -228,5 +233,7 @@ object SparkV2FilterConverter extends Logging {
   private val STRING_START_WITH = "STARTS_WITH"
   private val STRING_END_WITH = "ENDS_WITH"
   private val STRING_CONTAINS = "CONTAINS"
+  private val ALWAYS_TRUE = "ALWAYS_TRUE"
+  private val ALWAYS_FALSE = "ALWAYS_FALSE"
 
 }

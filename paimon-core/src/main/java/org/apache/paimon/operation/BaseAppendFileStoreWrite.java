@@ -63,7 +63,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.format.FileFormat.fileFormat;
-import static org.apache.paimon.types.DataTypeRoot.BLOB;
 import static org.apache.paimon.utils.StatsCollectorFactories.createStatsFactories;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
@@ -80,11 +79,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
     private final FileIndexOptions fileIndexOptions;
     private final RowType rowType;
 
+    private @Nullable BlobFileContext blobContext;
     private RowType writeType;
     private @Nullable List<String> writeCols;
     private boolean forceBufferSpill = false;
-    private boolean withBlob;
-    private @Nullable BlobConsumer blobConsumer;
 
     public BaseAppendFileStoreWrite(
             FileIO fileIO,
@@ -107,14 +105,15 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         this.writeCols = null;
         this.fileFormat = fileFormat(options);
         this.pathFactory = pathFactory;
-        this.withBlob = rowType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
-
+        this.blobContext = BlobFileContext.create(rowType, options);
         this.fileIndexOptions = options.indexColumnsOptions();
     }
 
     @Override
     public BaseAppendFileStoreWrite withBlobConsumer(BlobConsumer blobConsumer) {
-        this.blobConsumer = blobConsumer;
+        if (blobContext != null) {
+            blobContext = blobContext.withBlobConsumer(blobConsumer);
+        }
         return this;
     }
 
@@ -132,8 +131,10 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 ioManager,
                 schemaId,
                 fileFormat,
+                FileFormat.vectorFileFormat(options),
                 options.targetFileSize(false),
                 options.blobTargetFileSize(),
+                options.vectorTargetFileSize(),
                 writeType,
                 writeCols,
                 restoredMaxSeqNumber,
@@ -152,14 +153,16 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
                 fileIndexOptions,
                 options.asyncFileWrite(),
                 options.statsDenseStore(),
-                blobConsumer,
-                options.dataEvolutionEnabled());
+                options.dataEvolutionEnabled(),
+                blobContext);
     }
 
     @Override
     public void withWriteType(RowType writeType) {
         this.writeType = writeType;
-        this.withBlob = writeType.getFieldTypes().stream().anyMatch(t -> t.is(BLOB));
+        if (blobContext != null) {
+            blobContext = blobContext.withWriteType(writeType);
+        }
         int fullCount = rowType.getFieldCount();
         List<String> fullNames = rowType.getFieldNames();
         this.writeCols = writeType.getFieldNames();
@@ -292,7 +295,7 @@ public abstract class BaseAppendFileStoreWrite extends MemoryFileStoreWrite<Inte
         if (ioManager == null) {
             return;
         }
-        if (withBlob) {
+        if (blobContext != null) {
             return;
         }
         if (forceBufferSpill) {

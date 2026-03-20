@@ -36,7 +36,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -104,8 +104,8 @@ public class PartitionExpireTest {
         String branchName = CoreOptions.branch(options.toMap());
         TableSchema tableSchema = new SchemaManager(fileIO, tablePath, branchName).latest().get();
         deletedPartitions = new ArrayList<>();
-        PartitionHandler partitionHandler =
-                new PartitionHandler() {
+        PartitionModification partitionModification =
+                new PartitionModification() {
                     @Override
                     public void createPartitions(List<Map<String, String>> partitions)
                             throws Catalog.TableNotExistException {}
@@ -129,19 +129,15 @@ public class PartitionExpireTest {
                             throws Catalog.TableNotExistException {}
 
                     @Override
-                    public void markDonePartitions(List<Map<String, String>> partitions)
-                            throws Catalog.TableNotExistException {}
-
-                    @Override
                     public void close() throws Exception {}
                 };
 
         CatalogEnvironment env =
-                new CatalogEnvironment(null, null, null, null, null, null, false) {
+                new CatalogEnvironment(null, null, null, null, null, null, false, false) {
 
                     @Override
-                    public PartitionHandler partitionHandler() {
-                        return partitionHandler;
+                    public PartitionModification partitionModification() {
+                        return partitionModification;
                     }
                 };
         table = FileStoreTableFactory.create(fileIO, path, tableSchema, env);

@@ -22,6 +22,7 @@ from pypaimon.common.json_util import json_field
 
 SYSTEM_TABLE_SPLITTER = '$'
 SYSTEM_BRANCH_PREFIX = 'branch-'
+DEFAULT_MAIN_BRANCH = 'main'
 
 
 @dataclass
@@ -37,13 +38,49 @@ class Identifier:
 
     @classmethod
     def from_string(cls, full_name: str) -> "Identifier":
-        parts = full_name.split(".")
-        if len(parts) == 2:
-            return cls(parts[0], parts[1])
-        elif len(parts) == 3:
-            return cls(parts[0], parts[1], parts[2])
-        else:
-            raise ValueError("Invalid identifier format: {}".format(full_name))
+        """Parse a 'database.object' identifier, with optional backtick quoting."""
+        if not full_name or not full_name.strip():
+            raise ValueError("fullName cannot be null or empty")
+
+        # Check if backticks are used - if so, parse with backtick support
+        if '`' in full_name:
+            return cls._parse_with_backticks(full_name)
+
+        # Otherwise, use Java-compatible split on first period only
+        parts = full_name.split(".", 1)
+
+        if len(parts) != 2:
+            raise ValueError(
+                f"Cannot get splits from '{full_name}' to get database and object"
+            )
+
+        return cls(parts[0], parts[1])
+
+    @classmethod
+    def _parse_with_backticks(cls, full_name: str) -> "Identifier":
+        parts = []
+        current = ""
+        in_backticks = False
+
+        for char in full_name:
+            if char == '`':
+                in_backticks = not in_backticks
+            elif char == '.' and not in_backticks:
+                parts.append(current)
+                current = ""
+            else:
+                current += char
+
+        if current:
+            parts.append(current)
+
+        if in_backticks:
+            raise ValueError(f"Unclosed backtick in identifier: {full_name}")
+
+        if len(parts) != 2:
+            raise ValueError(f"Invalid identifier format: {full_name}")
+
+        return cls(parts[0], parts[1])
 
     def get_full_name(self) -> str:
         if self.branch:
@@ -61,6 +98,10 @@ class Identifier:
 
     def get_branch_name(self) -> Optional[str]:
         return self.branch
+
+    def get_branch_name_or_default(self) -> str:
+        """Get branch name or return default 'main' if branch is None."""
+        return self.branch if self.branch else "main"
 
     def is_system_table(self) -> bool:
         return self.object.startswith('$')

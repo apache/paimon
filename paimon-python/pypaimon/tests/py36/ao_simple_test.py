@@ -147,10 +147,10 @@ class AOSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 3, 5, 8, 12],
-            'item_id': [1001, 1002, 1003, 1005, 1008, 1012],
-            'behavior': ['a', 'b', 'c', 'd', 'g', 'k'],
-            'dt': ['p1', 'p1', 'p2', 'p2', 'p1', 'p1'],
+            'user_id': [1, 2, 3, 4, 5, 13],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1013],
+            'behavior': ['a', 'b', 'c', None, 'd', 'l'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 

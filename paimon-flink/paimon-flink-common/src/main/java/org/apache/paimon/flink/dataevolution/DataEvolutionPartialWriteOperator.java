@@ -35,7 +35,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.CommitIncrement;
@@ -72,15 +71,14 @@ public class DataEvolutionPartialWriteOperator
 
     // dataType
     private final RowType dataType;
-    private final InternalRow.FieldGetter[] fieldGetters;
     private final int rowIdIndex;
 
     // data type excludes of _ROW_ID field.
     private final RowType writeType;
 
-    private List<Committable> committables = new ArrayList<>();
-
     // --------------------- transient fields ---------------------------
+
+    private transient List<Committable> committables;
 
     // first-row-id related fields
     private transient FirstRowIdLookup firstRowIdLookup;
@@ -101,11 +99,6 @@ public class DataEvolutionPartialWriteOperator
         this.dataType =
                 SpecialFields.rowTypeWithRowId(table.rowType()).project(dataType.getFieldNames());
         this.rowIdIndex = this.dataType.getFieldIndex(SpecialFields.ROW_ID.name());
-        this.fieldGetters = new InternalRow.FieldGetter[dataType.getFieldCount()];
-        List<DataField> fields = this.dataType.getFields();
-        for (int i = 0; i < fields.size(); i++) {
-            this.fieldGetters[i] = InternalRow.createFieldGetter(fields.get(i).type(), i);
-        }
     }
 
     @Override
@@ -144,6 +137,8 @@ public class DataEvolutionPartialWriteOperator
                 (TableWriteImpl<InternalRow>)
                         table.newBatchWriteBuilder().newWrite().withWriteType(writeType);
         tableWrite = (AbstractFileStoreWrite<InternalRow>) (writeImpl.getWrite());
+
+        committables = new ArrayList<>();
     }
 
     @Override
@@ -305,24 +300,28 @@ public class DataEvolutionPartialWriteOperator
                             writtenNum, rowCount));
 
             // 2. finish writer
-            CommitIncrement written = writer.prepareCommit(false);
-            List<DataFileMeta> fileMetas = written.newFilesIncrement().newFiles();
-            Preconditions.checkState(
-                    fileMetas.size() == 1, "This is a bug, Writer could only produce one file");
-            DataFileMeta fileMeta = fileMetas.get(0).assignFirstRowId(firstRowId);
+            try {
+                CommitIncrement written = writer.prepareCommit(false);
+                List<DataFileMeta> fileMetas = written.newFilesIncrement().newFiles();
+                Preconditions.checkState(
+                        fileMetas.size() == 1, "This is a bug, Writer could only produce one file");
+                DataFileMeta fileMeta = fileMetas.get(0).assignFirstRowId(firstRowId);
 
-            CommitMessage commitMessage =
-                    new CommitMessageImpl(
-                            partition,
-                            0,
-                            null,
-                            new DataIncrement(
-                                    Collections.singletonList(fileMeta),
-                                    Collections.emptyList(),
-                                    Collections.emptyList()),
-                            CompactIncrement.emptyIncrement());
+                CommitMessage commitMessage =
+                        new CommitMessageImpl(
+                                partition,
+                                0,
+                                null,
+                                new DataIncrement(
+                                        Collections.singletonList(fileMeta),
+                                        Collections.emptyList(),
+                                        Collections.emptyList()),
+                                CompactIncrement.emptyIncrement());
 
-            return new Committable(Long.MAX_VALUE, commitMessage);
+                return new Committable(Long.MAX_VALUE, commitMessage);
+            } finally {
+                writer.close();
+            }
         }
 
         private boolean contains(long rowId) {

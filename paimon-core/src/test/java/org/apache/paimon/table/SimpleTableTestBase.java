@@ -1135,6 +1135,56 @@ public abstract class SimpleTableTestBase {
     }
 
     @Test
+    public void testCreateBranchWithIgnoreIfExists() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        table.createTag("test-tag", 2);
+        BranchManager branchManager = table.branchManager();
+
+        // Test create branch with ignoreIfExists=true (branch doesn't exist)
+        table.createBranch("new-branch", "test-tag", true);
+        assertThat(branchManager.branchExists("new-branch")).isTrue();
+
+        // Test create branch with ignoreIfExists=false (branch doesn't exist)
+        table.createBranch("another-branch", "test-tag", false);
+        assertThat(branchManager.branchExists("another-branch")).isTrue();
+
+        // Test create existing branch with ignoreIfExists=true (should succeed silently)
+        table.createBranch("new-branch", "test-tag", true);
+        assertThat(branchManager.branchExists("new-branch")).isTrue();
+
+        // Test create existing branch with ignoreIfExists=false (should throw exception)
+        assertThatThrownBy(() -> table.createBranch("new-branch", "test-tag", false))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'new-branch' already exists."));
+
+        // Test create empty branch with ignoreIfExists
+        table.createBranch("empty-branch", true);
+        assertThat(branchManager.branchExists("empty-branch")).isTrue();
+
+        // Test create existing empty branch with ignoreIfExists=true
+        table.createBranch("empty-branch", true);
+        assertThat(branchManager.branchExists("empty-branch")).isTrue();
+
+        // Test create existing empty branch with ignoreIfExists=false
+        assertThatThrownBy(() -> table.createBranch("empty-branch", false))
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'empty-branch' already exists."));
+    }
+
+    @Test
     public void testDeleteBranch() throws Exception {
         FileStoreTable table = createFileStoreTable();
 

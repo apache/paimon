@@ -36,6 +36,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -256,6 +258,20 @@ public class DataEvolutionFileStoreScanTest {
         assertThat(nullCounts.getInt(0)).isEqualTo(0);
         assertThat(nullCounts.getInt(1)).isEqualTo(1);
         assertThat(nullCounts.isNullAt(2)).isTrue();
+    }
+
+    @Test
+    public void testIntersectsRowRanges() {
+        List<Range> rowRanges =
+                Arrays.asList(
+                        new Range(20, 30), new Range(0, 10), new Range(5, 15), new Range(35, 40));
+        RowRangeIndex index = RowRangeIndex.create(rowRanges);
+
+        assertThat(index.intersects(14, 14)).isTrue();
+        assertThat(index.intersects(16, 19)).isFalse();
+        assertThat(index.intersects(31, 34)).isFalse();
+        assertThat(index.intersects(29, 31)).isTrue();
+        assertThat(index.intersects(100, 200)).isFalse();
     }
 
     private Schema createSchema(String... fieldNames) {

@@ -27,7 +27,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -91,8 +91,8 @@ public class PartitionStatisticsReporterTest {
         AtomicBoolean closed = new AtomicBoolean(false);
         Map<String, PartitionStatistics> partitionParams = Maps.newHashMap();
 
-        PartitionHandler partitionHandler =
-                new PartitionHandler() {
+        PartitionModification partitionModification =
+                new PartitionModification() {
 
                     @Override
                     public void createPartitions(List<Map<String, String>> partitions) {
@@ -105,21 +105,16 @@ public class PartitionStatisticsReporterTest {
                     }
 
                     @Override
-                    public void markDonePartitions(List<Map<String, String>> partitions) {
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
                     public void alterPartitions(List<PartitionStatistics> partitions) {
                         partitions.forEach(
-                                partition -> {
-                                    partitionParams.put(
-                                            PartitionPathUtils.generatePartitionPath(
-                                                    partition.spec(),
-                                                    table.rowType().project(table.partitionKeys()),
-                                                    false),
-                                            partition);
-                                });
+                                partition ->
+                                        partitionParams.put(
+                                                PartitionPathUtils.generatePartitionPath(
+                                                        partition.spec(),
+                                                        table.rowType()
+                                                                .project(table.partitionKeys()),
+                                                        false),
+                                                partition));
                     }
 
                     @Override
@@ -129,7 +124,7 @@ public class PartitionStatisticsReporterTest {
                 };
 
         PartitionStatisticsReporter action =
-                new PartitionStatisticsReporter(table, partitionHandler);
+                new PartitionStatisticsReporter(table, partitionModification);
         long time = 1729598544974L;
         action.report("c1=a/", time);
         assertThat(partitionParams).containsKey("c1=a/");

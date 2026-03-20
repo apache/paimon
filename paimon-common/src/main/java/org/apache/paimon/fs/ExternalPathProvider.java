@@ -32,7 +32,10 @@ public interface ExternalPathProvider extends Serializable {
 
     @Nullable
     static ExternalPathProvider create(
-            ExternalPathStrategy strategy, List<Path> externalTablePaths, Path relativeBucketPath) {
+            ExternalPathStrategy strategy,
+            List<Path> externalTablePaths,
+            Path relativeBucketPath,
+            @Nullable int[] weights) {
         switch (strategy) {
             case ENTROPY_INJECT:
                 return new EntropyInjectExternalPathProvider(
@@ -41,6 +44,13 @@ public interface ExternalPathProvider extends Serializable {
                 // specific fs can use round-robin with only one path
             case ROUND_ROBIN:
                 return new RoundRobinExternalPathProvider(externalTablePaths, relativeBucketPath);
+            case WEIGHTED:
+                if (externalTablePaths.size() < 2 || weights == null) {
+                    return new RoundRobinExternalPathProvider(
+                            externalTablePaths, relativeBucketPath);
+                }
+                return new WeightedExternalPathProvider(
+                        externalTablePaths, relativeBucketPath, weights);
             case NONE:
                 return null;
             default:

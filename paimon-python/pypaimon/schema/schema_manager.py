@@ -17,9 +17,11 @@
 ################################################################################
 from typing import Optional, List
 
+from pypaimon.common.identifier import DEFAULT_MAIN_BRANCH
 from pypaimon.catalog.catalog_exception import ColumnAlreadyExistException, ColumnNotExistException
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.json_util import JSON
+from pypaimon.common.options import Options, CoreOptions
 from pypaimon.schema.data_types import AtomicInteger, DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import (
@@ -181,7 +183,11 @@ def _apply_move(fields: List[DataField], new_field: Optional[DataField], move):
 
 
 def _handle_add_column(
-        change: AddColumn, new_fields: List[DataField], highest_field_id: AtomicInteger
+    change: AddColumn,
+    new_fields: List[DataField],
+    highest_field_id: AtomicInteger,
+    partition_keys: List[str],
+    add_column_before_partition: bool
 ):
     if not change.data_type.nullable:
         raise ValueError(
@@ -194,18 +200,41 @@ def _handle_add_column(
     new_field = DataField(field_id, field_name, change.data_type, change.comment)
     if change.move:
         _apply_move(new_fields, new_field, change.move)
+    elif (
+        add_column_before_partition
+        and partition_keys
+        and len(change.field_names) == 1
+    ):
+        insert_index = len(new_fields)
+        for i, field in enumerate(new_fields):
+            if field.name in partition_keys:
+                insert_index = i
+                break
+        new_fields.insert(insert_index, new_field)
     else:
         new_fields.append(new_field)
 
 
 class SchemaManager:
 
-    def __init__(self, file_io: FileIO, table_path: str):
+    def __init__(self, file_io: FileIO, table_path: str, branch: str = DEFAULT_MAIN_BRANCH):
+        from pypaimon.branch.branch_manager import BranchManager
         self.schema_prefix = "schema-"
         self.file_io = file_io
         self.table_path = table_path
-        self.schema_path = f"{table_path.rstrip('/')}/schema"
+        self.branch = BranchManager.normalize_branch(branch)
+        self.schema_path = f"{self.branch_path}/schema"
         self.schema_cache = {}
+
+    @property
+    def branch_path(self) -> str:
+        """Get the branch path for this schema manager."""
+        from pypaimon.branch.branch_manager import BranchManager
+        return BranchManager.branch_path(self.table_path, self.branch)
+
+    def copy_with_branch(self, branch_name: str) -> 'SchemaManager':
+        """Create a copy of SchemaManager for a different branch."""
+        return SchemaManager(self.file_io, self.table_path, branch_name)
 
     def latest(self) -> Optional['TableSchema']:
         try:
@@ -278,7 +307,7 @@ class SchemaManager:
                     f"Table schema does not exist at path: {self.table_path}. "
                     "This may happen if the table was deleted concurrently."
                 )
-            
+
             new_table_schema = self._generate_table_schema(old_table_schema, changes)
             try:
                 success = self.commit(new_table_schema)
@@ -306,6 +335,10 @@ class SchemaManager:
         highest_field_id = AtomicInteger(old_table_schema.highest_field_id)
         new_comment = old_table_schema.comment
 
+        # Get add_column_before_partition option
+        add_column_before_partition = CoreOptions(Options(old_table_schema.options)).add_column_before_partition()
+        partition_keys = old_table_schema.partition_keys
+
         for change in changes:
             if isinstance(change, SetOption):
                 new_options[change.key] = change.value
@@ -314,7 +347,10 @@ class SchemaManager:
             elif isinstance(change, UpdateComment):
                 new_comment = change.comment
             elif isinstance(change, AddColumn):
-                _handle_add_column(change, new_fields, highest_field_id)
+                _handle_add_column(
+                    change, new_fields, highest_field_id,
+                    partition_keys, add_column_before_partition
+                )
             elif isinstance(change, RenameColumn):
                 _assert_not_updating_partition_keys(
                     old_table_schema, change.field_names, "rename"

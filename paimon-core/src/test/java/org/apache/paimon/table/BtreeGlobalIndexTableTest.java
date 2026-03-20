@@ -24,16 +24,15 @@ import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
-import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -41,6 +40,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /** Test for BTree indexed batch scan. */
@@ -58,8 +58,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         RoaringNavigableMap64 rowIds = globalIndexScan(table, predicate);
         assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(1);
-        Assertions.assertThat(rowIds.toRangeList()).containsExactly(new Range(100L, 100L));
+        assertThat(rowIds.getLongCardinality()).isEqualTo(1);
+        assertThat(rowIds.toRangeList()).containsExactly(new Range(100L, 100L));
 
         Predicate predicate2 =
                 new PredicateBuilder(table.rowType())
@@ -72,8 +72,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
         rowIds = globalIndexScan(table, predicate2);
         assertNotNull(rowIds);
-        Assertions.assertThat(rowIds.getLongCardinality()).isEqualTo(3);
-        Assertions.assertThat(rowIds.toRangeList())
+        assertThat(rowIds.getLongCardinality()).isEqualTo(3);
+        assertThat(rowIds.toRangeList())
                 .containsExactlyInAnyOrder(
                         new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
 
@@ -89,7 +89,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                             readF1.add(row.getString(1).toString());
                         });
 
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400");
+        assertThat(readF1).containsExactly("a200", "a300", "a400");
     }
 
     @Test
@@ -120,7 +120,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                             readF1.add(row.getString(1).toString());
                         });
 
-        Assertions.assertThat(readF1).containsExactly("a200", "a300", "a400", "a56789");
+        assertThat(readF1).containsExactly("a200", "a300", "a400", "a56789");
     }
 
     @Test
@@ -160,16 +160,18 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                             result.add(row.getString(1).toString());
                         });
 
-        Assertions.assertThat(result).containsExactly("a200", "a56789");
+        assertThat(result).containsExactly("a200", "a56789");
     }
 
     private void createIndex(String fieldName) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         BTreeGlobalIndexBuilder builder =
-                new BTreeGlobalIndexBuilder(table)
-                        .withIndexType(BTreeGlobalIndexerFactory.IDENTIFIER)
-                        .withIndexField(fieldName);
-        List<CommitMessage> commitMessages = builder.build(builder.scan(), ioManager);
+                new BTreeGlobalIndexBuilder(table).withIndexField(fieldName);
+        List<DataSplit> dataSplits = builder.scan();
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        for (DataSplit dataSplit : dataSplits) {
+            commitMessages.addAll(builder.build(dataSplit, ioManager));
+        }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
         }

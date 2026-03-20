@@ -18,8 +18,9 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.TriFilter;
 
 import javax.annotation.Nullable;
 
@@ -29,13 +30,13 @@ public class BucketFilter {
     private final boolean onlyReadRealBuckets;
     private final @Nullable Integer specifiedBucket;
     private final @Nullable Filter<Integer> bucketFilter;
-    private final @Nullable BiFilter<Integer, Integer> totalAwareBucketFilter;
+    private final @Nullable TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter;
 
     public BucketFilter(
             boolean onlyReadRealBuckets,
             @Nullable Integer specifiedBucket,
             @Nullable Filter<Integer> bucketFilter,
-            @Nullable BiFilter<Integer, Integer> totalAwareBucketFilter) {
+            @Nullable TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
         this.onlyReadRealBuckets = onlyReadRealBuckets;
         this.specifiedBucket = specifiedBucket;
         this.bucketFilter = bucketFilter;
@@ -46,7 +47,7 @@ public class BucketFilter {
             boolean onlyReadRealBuckets,
             @Nullable Integer specifiedBucket,
             @Nullable Filter<Integer> bucketFilter,
-            @Nullable BiFilter<Integer, Integer> totalAwareBucketFilter) {
+            @Nullable TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
         if (!onlyReadRealBuckets
                 && specifiedBucket == null
                 && bucketFilter == null
@@ -63,7 +64,7 @@ public class BucketFilter {
         return specifiedBucket;
     }
 
-    public boolean test(int bucket, int totalBucket) {
+    public boolean test(BinaryRow partition, int bucket, int totalBucket) {
         if (onlyReadRealBuckets && bucket < 0) {
             return false;
         }
@@ -73,6 +74,7 @@ public class BucketFilter {
         if (bucketFilter != null && !bucketFilter.test(bucket)) {
             return false;
         }
-        return totalAwareBucketFilter == null || totalAwareBucketFilter.test(bucket, totalBucket);
+        return totalAwareBucketFilter == null
+                || totalAwareBucketFilter.test(partition, bucket, totalBucket);
     }
 }

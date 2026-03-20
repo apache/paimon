@@ -26,11 +26,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCre
 import java.util.List;
 import java.util.Optional;
 
-/**
- * A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like 'abc%' or filter like
- * 'abc_'}.
- */
-public class StartsWith extends NullFalseLeafBinaryFunction {
+/** A {@link LeafBinaryFunction} to evaluate {@code filter like 'abc%' or filter like 'abc_'}. */
+public class StartsWith extends LeafBinaryFunction {
 
     public static final String NAME = "STARTS_WITH";
 
@@ -68,5 +65,10 @@ public class StartsWith extends NullFalseLeafBinaryFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitStartsWith(fieldRef, literals.get(0));
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

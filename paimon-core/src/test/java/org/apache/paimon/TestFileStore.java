@@ -134,7 +134,6 @@ public class TestFileStore extends KeyValueFileStore {
                 options,
                 partitionType,
                 keyType,
-                keyType,
                 valueType,
                 keyValueFieldsExtractor,
                 mfFactory,
@@ -717,7 +716,8 @@ public class TestFileStore extends KeyValueFileStore {
 
         // delta file
         if (options.changelogProducer() == CoreOptions.ChangelogProducer.NONE) {
-            // TODO why we need to keep base manifests?
+            // See FileDeletionBase#cleanUnusedManifests
+            // about why we need to keep base manifest
             result.add(pathFactory.toManifestListPath(changelog.baseManifestList()));
             manifestList
                     .readDataManifests(changelog)

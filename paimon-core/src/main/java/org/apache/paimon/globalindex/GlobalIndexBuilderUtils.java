@@ -18,6 +18,8 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
@@ -35,7 +37,9 @@ import java.util.List;
 public class GlobalIndexBuilderUtils {
 
     public static List<IndexFileMeta> toIndexFileMetas(
-            FileStoreTable table,
+            FileIO fileIO,
+            IndexPathFactory indexPathFactory,
+            CoreOptions options,
             Range range,
             int indexFieldId,
             String indexType,
@@ -44,12 +48,11 @@ public class GlobalIndexBuilderUtils {
         List<IndexFileMeta> results = new ArrayList<>();
         for (ResultEntry entry : entries) {
             String fileName = entry.fileName();
-            GlobalIndexFileReadWrite readWrite = createGlobalIndexFileReadWrite(table);
-            long fileSize = readWrite.fileSize(fileName);
+            long fileSize = fileIO.getFileSize(indexPathFactory.toPath(fileName));
             GlobalIndexMeta globalIndexMeta =
                     new GlobalIndexMeta(range.from, range.to, indexFieldId, null, entry.meta());
 
-            Path externalPathDir = table.coreOptions().globalIndexExternalPath();
+            Path externalPathDir = options.globalIndexExternalPath();
             String externalPathString = null;
             if (externalPathDir != null) {
                 Path externalPath = new Path(externalPathDir, fileName);
@@ -66,6 +69,23 @@ public class GlobalIndexBuilderUtils {
             results.add(indexFileMeta);
         }
         return results;
+    }
+
+    /**
+     * Adjust rowsPerShard if the estimated shard count exceeds maxShard. Returns the adjusted
+     * rowsPerShard value.
+     */
+    public static long adjustRowsPerShard(long rowsPerShard, long totalRowCount, int maxShard) {
+        long estimatedShards = ceilDivision(totalRowCount, rowsPerShard);
+        if (estimatedShards > maxShard) {
+            return ceilDivision(totalRowCount, maxShard);
+        }
+        return rowsPerShard;
+    }
+
+    /** Integer ceiling division: returns ceil(a / b) for positive a and b. */
+    private static long ceilDivision(long a, long b) {
+        return (a + b - 1) / b;
     }
 
     public static GlobalIndexWriter createIndexWriter(

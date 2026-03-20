@@ -30,6 +30,7 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -87,7 +88,7 @@ public class BranchActionITCase extends ActionITCaseBase {
 
         executeSQL(
                 String.format(
-                        "CALL sys.create_branch(`table` => '%s.%s', branch => 'branch_name_named_argument', tag => 'tag2')",
+                        "CALL sys.create_branch('%s.%s', 'branch_name_named_argument', 'tag2')",
                         database, tableName));
         assertThat(branchManager.branchExists("branch_name_named_argument")).isTrue();
 
@@ -168,7 +169,7 @@ public class BranchActionITCase extends ActionITCaseBase {
 
         executeSQL(
                 String.format(
-                        "CALL sys.create_branch(`table` => '%s.%s', branch => 'empty_branch_named_argument')",
+                        "CALL sys.create_branch('%s.%s', 'empty_branch_named_argument')",
                         database, tableName));
         assertThat(branchManager.branchExists("empty_branch_named_argument")).isTrue();
 
@@ -211,6 +212,170 @@ public class BranchActionITCase extends ActionITCaseBase {
                         "empty_branch_name")
                 .run();
         assertThat(branchManager.branchExists("empty_branch_name")).isFalse();
+    }
+
+    @Test
+    void testCreateBranchWithIgnoreIfExists() throws Exception {
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        executeSQL(String.format("CALL sys.create_tag('%s.%s', 'tag1', 1)", database, tableName));
+        assertThat(tagManager.tagExists("tag1")).isTrue();
+
+        BranchManager branchManager = table.branchManager();
+
+        // Create branch without ignoreIfExists
+        executeSQL(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'branch_if_exists', 'tag1')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_if_exists")).isTrue();
+
+        // Try to create the same branch again without ignoreIfExists - should throw exception
+        try {
+            executeSQL(
+                    String.format(
+                            "CALL sys.create_branch('%s.%s', 'branch_if_exists', 'tag1')",
+                            database, tableName));
+            Assertions.fail("Expected exception not thrown");
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("already exists");
+        }
+
+        // Create branch with ignoreIfExists=true - should succeed silently
+        executeSQL(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'branch_if_exists', 'tag1', true)",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_if_exists")).isTrue();
+
+        // Create branch with ignoreIfExists=false - should throw exception
+        try {
+            executeSQL(
+                    String.format(
+                            "CALL sys.create_branch('%s.%s', 'branch_if_exists', 'tag1', false)",
+                            database, tableName));
+            Assertions.fail("Expected exception not thrown");
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("already exists");
+        }
+
+        // Test with action API
+        createAction(
+                        CreateBranchAction.class,
+                        "create_branch",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--branch_name",
+                        "branch_if_exists",
+                        "--tag_name",
+                        "tag1",
+                        "--ignore_if_exists",
+                        "true")
+                .run();
+        assertThat(branchManager.branchExists("branch_if_exists")).isTrue();
+
+        // Test creating new branch with ignoreIfExists=true (branch doesn't exist yet)
+        executeSQL(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'new_branch', 'tag1', true)",
+                        database, tableName));
+        assertThat(branchManager.branchExists("new_branch")).isTrue();
+
+        // Test creating new branch with ignoreIfExists=false (branch doesn't exist yet)
+        executeSQL(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'another_branch', 'tag1', false)",
+                        database, tableName));
+        assertThat(branchManager.branchExists("another_branch")).isTrue();
+    }
+
+    @Test
+    void testCreateEmptyBranchWithIgnoreIfExists() throws Exception {
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        BranchManager branchManager = table.branchManager();
+
+        // Create empty branch
+        executeSQL(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'empty_branch')", database, tableName));
+        assertThat(branchManager.branchExists("empty_branch")).isTrue();
+
+        // Try to create the same empty branch again without ignoreIfExists - should throw exception
+        try {
+            executeSQL(
+                    String.format(
+                            "CALL sys.create_branch('%s.%s', 'empty_branch')",
+                            database, tableName));
+            Assertions.fail("Expected exception not thrown");
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("already exists");
+        }
+
+        // Create empty branch with ignoreIfExists=true - should succeed silently
+        executeSQL(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'empty_branch', true)",
+                        database, tableName));
+        assertThat(branchManager.branchExists("empty_branch")).isTrue();
+
+        // Create empty branch with ignoreIfExists=false - should throw exception
+        try {
+            executeSQL(
+                    String.format(
+                            "CALL sys.create_branch('%s.%s', 'empty_branch', false)",
+                            database, tableName));
+            Assertions.fail("Expected exception not thrown");
+        } catch (Exception e) {
+            assertThat(e.getMessage()).contains("already exists");
+        }
     }
 
     @ParameterizedTest

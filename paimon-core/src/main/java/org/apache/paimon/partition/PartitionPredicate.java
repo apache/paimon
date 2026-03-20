@@ -28,6 +28,8 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.SimpleColStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateProjectionConverter;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.statistics.FullSimpleColStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -49,8 +51,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
-import static org.apache.paimon.predicate.PredicateBuilder.fieldIdxToPartitionIdx;
-import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternal;
 import static org.apache.paimon.utils.InternalRowPartitionComputer.convertSpecToInternalRow;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -473,15 +473,17 @@ public interface PartitionPredicate extends Serializable {
         }
 
         RowType partitionType = tableType.project(partitionKeys);
-        int[] partitionIdx = fieldIdxToPartitionIdx(tableType, partitionKeys);
+        PredicateProjectionConverter partitionProjection =
+                PredicateProjectionConverter.fromProjection(
+                        tableType.projectIndexes(partitionKeys));
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
+        Set<String> partitionKeySet = new HashSet<>(partitionKeys);
         for (Predicate p : dataPredicates) {
-            Optional<Predicate> mapped = transformFieldMapping(p, partitionIdx);
-            if (mapped.isPresent()) {
-                partitionFilters.add(mapped.get());
-            } else {
+            Optional<Predicate> projected = p.visit(partitionProjection);
+            projected.ifPresent(partitionFilters::add);
+            if (!partitionKeySet.containsAll(PredicateVisitor.collectFieldNames(p))) {
                 nonPartitionFilters.add(p);
             }
         }

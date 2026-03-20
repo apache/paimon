@@ -21,6 +21,7 @@ package org.apache.paimon.spark.globalindex;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -55,6 +56,7 @@ import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD;
 import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_ROW_COUNT_PER_SHARD;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -86,8 +88,17 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
 
+        int maxShard = tableOptions.get(GLOBAL_INDEX_BUILD_MAX_SHARD);
+        checkArgument(
+                maxShard > 0, "Option 'global-index.build.max-shard' must be greater than 0.");
+        List<ManifestEntry> entries =
+                table.store().newScan().withPartitionFilter(partitionPredicate).plan().files();
+        long totalRowCount = entries.stream().mapToLong(e -> e.file().rowCount()).sum();
+        rowsPerShard =
+                GlobalIndexBuilderUtils.adjustRowsPerShard(rowsPerShard, totalRowCount, maxShard);
+
         // generate splits for each partition && shard
-        Map<BinaryRow, List<IndexedSplit>> splits = split(table, partitionPredicate, rowsPerShard);
+        Map<BinaryRow, List<IndexedSplit>> splits = split(table, entries, rowsPerShard);
 
         JavaSparkContext javaSparkContext = new JavaSparkContext(spark.sparkContext());
         List<Pair<byte[], byte[]>> taskList = new ArrayList<>();
@@ -116,7 +127,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
 
         List<byte[]> commitMessageBytes =
                 javaSparkContext
-                        .parallelize(taskList)
+                        .parallelize(taskList, taskList.size())
                         .map(DefaultGlobalIndexTopoBuilder::buildIndex)
                         .collect();
         return CommitMessageSerializer.deserializeAll(commitMessageBytes);
@@ -139,11 +150,8 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
     }
 
     private static Map<BinaryRow, List<IndexedSplit>> split(
-            FileStoreTable table, PartitionPredicate partitions, long rowsPerShard) {
+            FileStoreTable table, List<ManifestEntry> entries, long rowsPerShard) {
         FileStorePathFactory pathFactory = table.store().pathFactory();
-        // Get all manifest entries from the table scan
-        List<ManifestEntry> entries =
-                table.store().newScan().withPartitionFilter(partitions).plan().files();
 
         // Group manifest entries by partition
         Map<BinaryRow, List<ManifestEntry>> entriesByPartition =
@@ -184,12 +192,11 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
                 }
 
                 // Calculate the row ID range this file covers
-                long fileStartRowId = firstRowId;
-                long fileEndRowId = firstRowId + file.rowCount() - 1;
+                Range fileRange = file.nonNullRowIdRange();
 
                 // Calculate which shards this file overlaps with
-                long startShardId = fileStartRowId / rowsPerShard;
-                long endShardId = fileEndRowId / rowsPerShard;
+                long startShardId = fileRange.from / rowsPerShard;
+                long endShardId = fileRange.to / rowsPerShard;
 
                 // Add this file to all shards it overlaps with
                 for (long shardId = startShardId; shardId <= endShardId; shardId++) {
@@ -273,10 +280,7 @@ public class DefaultGlobalIndexTopoBuilder implements GlobalIndexTopologyBuilder
         // Calculate the actual row range covered by the files
         long groupMinRowId = files.get(0).nonNullFirstRowId();
         long groupMaxRowId =
-                files.stream()
-                        .mapToLong(f -> f.nonNullFirstRowId() + f.rowCount() - 1)
-                        .max()
-                        .getAsLong();
+                files.stream().mapToLong(f -> f.nonNullRowIdRange().to).max().getAsLong();
 
         // Clamp to shard boundaries
         // Range.from >= shardStart, Range.to <= shardEnd

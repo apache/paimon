@@ -16,9 +16,12 @@
 # limitations under the License.
 ################################################################################
 
+import logging
 from typing import Dict, List, Optional
 
 from pypaimon.snapshot.snapshot import BATCH_COMMIT_IDENTIFIER
+
+logger = logging.getLogger(__name__)
 from pypaimon.write.commit_message import CommitMessage
 from pypaimon.write.file_store_commit import FileStoreCommit
 
@@ -48,21 +51,21 @@ class TableCommit:
         if not non_empty_messages:
             return
 
-        try:
-            if self.overwrite_partition is not None:
-                self.file_store_commit.overwrite(
-                    overwrite_partition=self.overwrite_partition,
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-            else:
-                self.file_store_commit.commit(
-                    commit_messages=non_empty_messages,
-                    commit_identifier=commit_identifier
-                )
-        except Exception as e:
-            self.file_store_commit.abort(commit_messages)
-            raise RuntimeError(f"Failed to commit: {str(e)}") from e
+        logger.info(
+            "Committing batch table %s, %d non-empty messages",
+            self.table.identifier, len(non_empty_messages)
+        )
+        if self.overwrite_partition is not None:
+            self.file_store_commit.overwrite(
+                overwrite_partition=self.overwrite_partition,
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
+        else:
+            self.file_store_commit.commit(
+                commit_messages=non_empty_messages,
+                commit_identifier=commit_identifier
+            )
 
     def abort(self, commit_messages: List[CommitMessage]):
         self.file_store_commit.abort(commit_messages)

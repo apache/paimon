@@ -17,7 +17,7 @@ limitations under the License.
 """
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from pypaimon.api.api_response import GetTableResponse, PagedList
+from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
 from pypaimon.catalog.catalog import Catalog
@@ -43,9 +43,12 @@ from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.snapshot.snapshot_commit import PartitionStatistics
 from pypaimon.table.file_store_table import FileStoreTable
 from pypaimon.table.format.format_table import FormatTable, Format
-
+from pypaimon.table.iceberg.iceberg_table import IcebergTable
+from pypaimon.table.object.object_table import ObjectTable
 
 FORMAT_TABLE_TYPE = "format-table"
+ICEBERG_TABLE_TYPE = "iceberg-table"
+OBJECT_TABLE_TYPE = "object-table"
 
 
 class RESTCatalog(Catalog):
@@ -138,12 +141,24 @@ class RESTCatalog(Catalog):
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
 
-    def drop_database(self, name: str, ignore_if_not_exists: bool = False):
+    def drop_database(self, name: str, ignore_if_not_exists: bool = False, cascade: bool = False):
+        if not cascade:
+            try:
+                tables = self.list_tables(name)
+                if tables:
+                    raise ValueError(
+                        f"Database {name} is not empty. "
+                        f"Use cascade=True to drop all tables first."
+                    )
+            except DatabaseNotExistException:
+                if not ignore_if_not_exists:
+                    raise
+                return
+
         try:
             self.rest_api.drop_database(name)
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
-                # Convert REST API exception to catalog exception
                 raise DatabaseNotExistException(name) from e
         except ForbiddenException as e:
             raise DatabaseNoPermissionException(name) from e
@@ -170,14 +185,16 @@ class RESTCatalog(Catalog):
             database_name: str,
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
-            table_name_pattern: Optional[str] = None
+            table_name_pattern: Optional[str] = None,
+            table_type: Optional[str] = None
     ) -> PagedList[str]:
         try:
             return self.rest_api.list_tables_paged(
                 database_name,
                 max_results,
                 page_token,
-                table_name_pattern
+                table_name_pattern,
+                table_type
             )
         except NoSuchResourceException as e:
             raise DatabaseNotExistException(database_name) from e
@@ -203,6 +220,20 @@ class RESTCatalog(Catalog):
             if not ignore_if_exists:
                 raise TableAlreadyExistException(identifier) from e
 
+    def rename_table(self, source_identifier: Union[str, Identifier], target_identifier: Union[str, Identifier]):
+        if not isinstance(source_identifier, Identifier):
+            source_identifier = Identifier.from_string(source_identifier)
+        if not isinstance(target_identifier, Identifier):
+            target_identifier = Identifier.from_string(target_identifier)
+        try:
+            self.rest_api.rename_table(source_identifier, target_identifier)
+        except NoSuchResourceException as e:
+            raise TableNotExistException(source_identifier) from e
+        except AlreadyExistsException as e:
+            raise TableAlreadyExistException(target_identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(source_identifier) from e
+
     def drop_table(self, identifier: Union[str, Identifier], ignore_if_not_exists: bool = False):
         if not isinstance(identifier, Identifier):
             identifier = Identifier.from_string(identifier)
@@ -224,16 +255,38 @@ class RESTCatalog(Catalog):
         if not partitions:
             raise ValueError("Partitions list cannot be empty.")
         table = self.get_table(identifier)
-        if isinstance(table, FormatTable):
+        if isinstance(table, (FormatTable, IcebergTable, ObjectTable)):
+            unsupported_type = type(table).__name__
             raise ValueError(
-                "drop_partitions is not supported for format tables. "
-                "Only Paimon (FileStore) tables support partition drop."
+                f"drop_partitions is not supported for table type '{unsupported_type}'. "
+                "Only Paimon (FileStore) tables support this operation."
             )
         commit = table.new_batch_write_builder().new_commit()
         try:
             commit.truncate_partitions(partitions)
         finally:
             commit.close()
+
+    def list_partitions_paged(
+            self,
+            identifier: Union[str, Identifier],
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ):
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.list_partitions_paged(
+                identifier,
+                max_results,
+                page_token,
+                partition_name_pattern
+            )
+        except NoSuchResourceException as e:
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
 
     def alter_table(
         self,
@@ -248,6 +301,58 @@ class RESTCatalog(Catalog):
         except NoSuchResourceException as e:
             if not ignore_if_not_exists:
                 raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def rollback_to(self, identifier, instant, from_snapshot=None):
+        """Rollback table by the given identifier and instant.
+
+        Args:
+            identifier: Path of the table (Identifier or string).
+            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
+            from_snapshot: Optional snapshot ID. Success only occurs when the
+                latest snapshot is this snapshot.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            TableNoPermissionException: If no permission to access this table.
+        """
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            self.rest_api.rollback_to(identifier, instant, from_snapshot)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
+                raise ValueError(
+                    "Rollback snapshot '{}' doesn't exist.".format(e.resource_name)) from e
+            elif e.resource_type == ErrorResponse.RESOURCE_TYPE_TAG:
+                raise ValueError(
+                    "Rollback tag '{}' doesn't exist.".format(e.resource_name)) from e
+            raise TableNotExistException(identifier) from e
+        except ForbiddenException as e:
+            raise TableNoPermissionException(identifier) from e
+
+    def load_snapshot(self, identifier: Union[str, Identifier]) -> Optional['TableSnapshot']:
+        """Load the latest snapshot for table.
+
+        Args:
+            identifier: Path of the table (Identifier or string).
+
+        Returns:
+            TableSnapshot instance or None if snapshot not found.
+
+        Raises:
+            TableNotExistException: If the table does not exist.
+            TableNoPermissionException: If no permission to access this table.
+        """
+        if not isinstance(identifier, Identifier):
+            identifier = Identifier.from_string(identifier)
+        try:
+            return self.rest_api.load_snapshot(identifier)
+        except NoSuchResourceException as e:
+            if e.resource_type == ErrorResponse.RESOURCE_TYPE_SNAPSHOT:
+                return None
+            raise TableNotExistException(identifier) from e
         except ForbiddenException as e:
             raise TableNoPermissionException(identifier) from e
 
@@ -295,6 +400,10 @@ class RESTCatalog(Catalog):
         if table_type == FORMAT_TABLE_TYPE:
             return self._create_format_table(identifier, metadata, internal_file_io, external_file_io)
         data_file_io = external_file_io if metadata.is_external else internal_file_io
+        if table_type == ICEBERG_TABLE_TYPE:
+            return self._create_iceberg_table(identifier, metadata, data_file_io)
+        if table_type == OBJECT_TABLE_TYPE:
+            return self._create_object_table(identifier, metadata, data_file_io)
         catalog_env = CatalogEnvironment(
             identifier=identifier,
             uuid=metadata.uuid,
@@ -329,6 +438,41 @@ class RESTCatalog(Catalog):
             table_schema=schema,
             location=location,
             format=fmt,
+            options=dict(schema.options),
+            comment=schema.comment,
+        )
+
+    def _create_iceberg_table(self,
+                              identifier: Identifier,
+                              metadata: TableMetadata,
+                              file_io: Callable[[str], Any],
+                              ) -> IcebergTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        file_io = file_io(location)
+        return IcebergTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
+            options=dict(schema.options),
+            comment=schema.comment,
+            uuid=metadata.uuid,
+        )
+
+    def _create_object_table(self,
+                             identifier: Identifier,
+                             metadata: TableMetadata,
+                             file_io: Callable[[str], Any],
+                             ) -> ObjectTable:
+        schema = metadata.schema
+        location = schema.options.get(CoreOptions.PATH.key())
+        file_io = file_io(location)
+        return ObjectTable(
+            file_io=file_io,
+            identifier=identifier,
+            table_schema=schema,
+            location=location,
             options=dict(schema.options),
             comment=schema.comment,
         )

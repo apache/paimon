@@ -21,10 +21,12 @@ from datetime import datetime
 from typing import List, Optional
 import time
 
+from pypaimon.utils.range import Range
 from pypaimon.data.timestamp import Timestamp
 from pypaimon.manifest.schema.simple_stats import (KEY_STATS_SCHEMA, VALUE_STATS_SCHEMA,
                                                    SimpleStats)
 from pypaimon.table.row.generic_row import GenericRow
+from pypaimon.utils.file_store_path_factory import _is_null_or_whitespace_only
 
 
 @dataclass
@@ -53,6 +55,11 @@ class DataFileMeta:
 
     # not a schema field, just for internal usage
     file_path: str = None
+
+    def row_id_range(self) -> Optional[Range]:
+        if self.first_row_id is None:
+            return None
+        return Range(self.first_row_id, self.first_row_id + self.row_count - 1)
 
     def get_creation_time(self) -> Optional[Timestamp]:
         return self.creation_time
@@ -124,11 +131,14 @@ class DataFileMeta:
             file_path=file_path,
         )
 
-    def set_file_path(self, table_path: str, partition: GenericRow, bucket: int):
+    def set_file_path(
+            self, table_path: str, partition: GenericRow, bucket: int,
+            default_part_value: str = "__DEFAULT_PARTITION__"):
         path_builder = table_path.rstrip('/')
         partition_dict = partition.to_dict()
         for field_name, field_value in partition_dict.items():
-            path_builder = f"{path_builder}/{field_name}={str(field_value)}"
+            part_value = default_part_value if _is_null_or_whitespace_only(field_value) else str(field_value)
+            path_builder = f"{path_builder}/{field_name}={part_value}"
         path_builder = f"{path_builder}/bucket-{str(bucket)}/{self.file_name}"
         self.file_path = path_builder
 
@@ -157,6 +167,10 @@ class DataFileMeta:
             write_cols=self.write_cols,
             file_path=self.file_path
         )
+
+    @staticmethod
+    def is_blob_file(file_name: str) -> bool:
+        return file_name.endswith(".blob")
 
     def assign_first_row_id(self, first_row_id: int) -> 'DataFileMeta':
         """Create a new DataFileMeta with the assigned first_row_id."""

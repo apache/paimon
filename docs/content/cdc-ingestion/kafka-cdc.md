@@ -103,6 +103,8 @@ To use this feature through `flink run`, run the following shell command.
     [--primary_keys <primary-keys>] \
     [--type_mapping to-string] \
     [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--metadata_column <metadata-column> [--metadata_column ...]] \
+    [--metadata_column_prefix <metadata-column-prefix>] \
     [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
@@ -215,6 +217,8 @@ To use this feature through `flink run`, run the following shell command.
     [--partition_keys <partition_keys>] \
     [--primary_keys <primary-keys>] \
     [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--metadata_column <metadata-column> [--metadata_column ...]] \
+    [--metadata_column_prefix <metadata-column-prefix>] \
     [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]

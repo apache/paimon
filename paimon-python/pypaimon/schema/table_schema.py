@@ -79,7 +79,7 @@ class TableSchema:
         partition_keys: List[str] = schema.partition_keys
         primary_keys: List[str] = schema.primary_keys
         options: Dict[str, str] = schema.options
-        highest_field_id: int = max(field.id for field in fields)
+        highest_field_id: int = max((field.id for field in fields), default=0)
 
         return TableSchema(
             TableSchema.CURRENT_VERSION,

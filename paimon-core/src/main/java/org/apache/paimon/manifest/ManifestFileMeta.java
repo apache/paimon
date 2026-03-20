@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -212,5 +213,10 @@ public class ManifestFileMeta {
 
     public ManifestFileMeta fromBytes(byte[] bytes) throws IOException {
         return SERIALIZER_THREAD_LOCAL.get().deserializeFromBytes(bytes);
+    }
+
+    public static boolean allContainsRowId(List<ManifestFileMeta> manifestFiles) {
+        return manifestFiles.stream()
+                .allMatch(meta -> meta.minRowId() != null && meta.maxRowId() != null);
     }
 }

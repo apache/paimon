@@ -129,6 +129,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -155,6 +156,7 @@ import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_I
 import static org.apache.paimon.flink.LogicalTypeConversion.toBlobType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.LogicalTypeConversion.toVectorType;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.SCHEMA;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
@@ -386,7 +388,6 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         try {
-            Table table = null;
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
@@ -1041,12 +1042,25 @@ public class FlinkCatalog extends AbstractCatalog {
                         field ->
                                 schemaBuilder.column(
                                         field.getName(),
-                                        blobFields.contains(field.getName())
-                                                ? toBlobType(field.getType())
-                                                : toDataType(field.getType()),
+                                        resolveDataType(field.getName(), field.getType(), options),
                                         columnComments.get(field.getName())));
 
         return schemaBuilder.build();
+    }
+
+    private static org.apache.paimon.types.DataType resolveDataType(
+            String fieldName,
+            org.apache.flink.table.types.logical.LogicalType logicalType,
+            Map<String, String> options) {
+        List<String> blobFields = CoreOptions.blobField(options);
+        if (blobFields.contains(fieldName)) {
+            return toBlobType(logicalType);
+        }
+        Set<String> vectorFields = CoreOptions.vectorField(options);
+        if (vectorFields.contains(fieldName)) {
+            return toVectorType(fieldName, logicalType, options);
+        }
+        return toDataType(logicalType);
     }
 
     private static Map<String, String> getColumnComments(CatalogBaseTable catalogTable) {

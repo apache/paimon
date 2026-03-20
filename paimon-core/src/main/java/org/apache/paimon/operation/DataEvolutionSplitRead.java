@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.ForceSingleBatchReader;
 import org.apache.paimon.data.BinaryRow;
@@ -62,6 +63,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
@@ -71,7 +74,9 @@ import static java.util.Collections.reverseOrder;
 import static java.util.Comparator.comparingLong;
 import static org.apache.paimon.format.blob.BlobFileFormat.isBlobFile;
 import static org.apache.paimon.table.SpecialFields.rowTypeWithRowTracking;
+import static org.apache.paimon.types.VectorType.isVectorStoreFile;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A union {@link SplitRead} to read multiple inner files to merge columns, note that this class
@@ -88,6 +93,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, FormatReaderMapping> formatReaderMappings;
     private final Function<Long, TableSchema> schemaFetcher;
+    private final CoreOptions coreOptions;
 
     protected RowType readRowType;
 
@@ -96,14 +102,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             SchemaManager schemaManager,
             TableSchema schema,
             RowType rowType,
-            FileFormatDiscover formatDiscover,
+            CoreOptions coreOptions,
             FileStorePathFactory pathFactory) {
         this.fileIO = fileIO;
         final Map<Long, TableSchema> cache = new HashMap<>();
         this.schemaFetcher =
                 schemaId -> cache.computeIfAbsent(schemaId, key -> schemaManager.schema(schemaId));
         this.schema = schema;
-        this.formatDiscover = formatDiscover;
+        this.formatDiscover = FileFormatDiscover.of(coreOptions);
+        this.coreOptions = coreOptions;
         this.pathFactory = pathFactory;
         this.formatReaderMappings = new HashMap<>();
         this.readRowType = rowType;
@@ -216,13 +223,10 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                         needMergeFiles,
                         file -> {
                             checkArgument(
-                                    isBlobFile(file.fileName()),
-                                    "Only blob file need to call this method.");
-                            return schemaFetcher
-                                    .apply(file.schemaId())
-                                    .logicalRowType()
-                                    .getField(file.writeCols().get(0))
-                                    .id();
+                                    isBlobFile(file.fileName())
+                                            || isVectorStoreFile(file.fileName()),
+                                    "Only blob/vector-store files need to call this method.");
+                            return schemaFetcher.apply(file.schemaId()).logicalRowType();
                         });
 
         long rowCount = fieldsFiles.get(0).rowCount();
@@ -371,6 +375,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                                     readRowType,
                                     formatReaderMapping.getReaderFactory(),
                                     formatReaderContext,
+                                    coreOptions.scanIgnoreCorruptFile(),
+                                    coreOptions.scanIgnoreLostFile(),
                                     formatReaderMapping.getIndexMapping(),
                                     formatReaderMapping.getCastMapping(),
                                     PartitionUtils.create(
@@ -398,6 +404,8 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 readRowType,
                 formatReaderMapping.getReaderFactory(),
                 formatReaderContext,
+                coreOptions.scanIgnoreCorruptFile(),
+                coreOptions.scanIgnoreLostFile(),
                 formatReaderMapping.getIndexMapping(),
                 formatReaderMapping.getCastMapping(),
                 PartitionUtils.create(formatReaderMapping.getPartitionPair(), partition),
@@ -409,25 +417,40 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     @VisibleForTesting
     public static List<FieldBunch> splitFieldBunches(
-            List<DataFileMeta> needMergeFiles, Function<DataFileMeta, Integer> blobFileToFieldId) {
-        return splitFieldBunches(needMergeFiles, blobFileToFieldId, false);
+            List<DataFileMeta> needMergeFiles, Function<DataFileMeta, RowType> fileToRowType) {
+        return splitFieldBunches(needMergeFiles, fileToRowType, false);
     }
 
     @VisibleForTesting
     public static List<FieldBunch> splitFieldBunches(
             List<DataFileMeta> needMergeFiles,
-            Function<DataFileMeta, Integer> blobFileToFieldId,
+            Function<DataFileMeta, RowType> fileToRowType,
             boolean rowIdPushDown) {
         List<FieldBunch> fieldsFiles = new ArrayList<>();
-        Map<Integer, BlobBunch> blobBunchMap = new HashMap<>();
+        Map<Integer, SpecialFieldBunch> blobBunchMap = new HashMap<>();
+        Map<VectorStoreBunchKey, SpecialFieldBunch> vectorStoreBunchMap = new TreeMap<>();
         long rowCount = -1;
         for (DataFileMeta file : needMergeFiles) {
             if (isBlobFile(file.fileName())) {
-                int fieldId = blobFileToFieldId.apply(file);
+                RowType rowType = fileToRowType.apply(file);
+                int fieldId = rowType.getField(file.writeCols().get(0)).id();
                 final long expectedRowCount = rowCount;
                 blobBunchMap
                         .computeIfAbsent(
-                                fieldId, key -> new BlobBunch(expectedRowCount, rowIdPushDown))
+                                fieldId,
+                                key -> new SpecialFieldBunch(expectedRowCount, rowIdPushDown))
+                        .add(file);
+            } else if (isVectorStoreFile(file.fileName())) {
+                RowType rowType = fileToRowType.apply(file);
+                String fileFormat = DataFilePathFactory.formatIdentifier(file.fileName());
+                VectorStoreBunchKey vectorStoreKey =
+                        new VectorStoreBunchKey(
+                                file.schemaId(), fileFormat, file.writeCols(), rowType);
+                final long expectedRowCount = rowCount;
+                vectorStoreBunchMap
+                        .computeIfAbsent(
+                                vectorStoreKey,
+                                key -> new SpecialFieldBunch(expectedRowCount, rowIdPushDown))
                         .add(file);
             } else {
                 // Normal file, just add it to the current merge split
@@ -436,6 +459,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
             }
         }
         fieldsFiles.addAll(blobBunchMap.values());
+        fieldsFiles.addAll(vectorStoreBunchMap.values());
         return fieldsFiles;
     }
 
@@ -467,7 +491,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
     }
 
     @VisibleForTesting
-    static class BlobBunch implements FieldBunch {
+    static class SpecialFieldBunch implements FieldBunch {
 
         final List<DataFileMeta> files;
         final long expectedRowCount;
@@ -478,7 +502,7 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         long latestMaxSequenceNumber = -1;
         long rowCount;
 
-        BlobBunch(long expectedRowCount, boolean rowIdPushDown) {
+        SpecialFieldBunch(long expectedRowCount, boolean rowIdPushDown) {
             this.files = new ArrayList<>();
             this.rowCount = 0;
             this.expectedRowCount = expectedRowCount;
@@ -486,14 +510,15 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
         }
 
         void add(DataFileMeta file) {
-            if (!isBlobFile(file.fileName())) {
-                throw new IllegalArgumentException("Only blob file can be added to a blob bunch.");
+            if (!isBlobFile(file.fileName()) && !isVectorStoreFile(file.fileName())) {
+                throw new IllegalArgumentException(
+                        "Only blob/vector-store file can be added to this bunch.");
             }
 
             if (file.nonNullFirstRowId() == latestFistRowId) {
                 if (file.maxSequenceNumber() >= latestMaxSequenceNumber) {
                     throw new IllegalArgumentException(
-                            "Blob file with same first row id should have decreasing sequence number.");
+                            "Blob/vector-store file with same first row id should have decreasing sequence number.");
                 }
                 return;
             }
@@ -512,11 +537,11 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                     if (firstRowId < expectedNextFirstRowId) {
                         checkArgument(
                                 file.maxSequenceNumber() < latestMaxSequenceNumber,
-                                "Blob file with overlapping row id should have decreasing sequence number.");
+                                "Blob/vector-store file with overlapping row id should have decreasing sequence number.");
                         return;
                     } else if (firstRowId > expectedNextFirstRowId) {
                         throw new IllegalArgumentException(
-                                "Blob file first row id should be continuous, expect "
+                                "Blob/vector-store file first row id should be continuous, expect "
                                         + expectedNextFirstRowId
                                         + " but got "
                                         + firstRowId);
@@ -525,17 +550,17 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
                 if (!files.isEmpty()) {
                     checkArgument(
                             file.schemaId() == files.get(0).schemaId(),
-                            "All files in a blob bunch should have the same schema id.");
+                            "All files in this bunch should have the same schema id.");
                     checkArgument(
                             file.writeCols().equals(files.get(0).writeCols()),
-                            "All files in a blob bunch should have the same write columns.");
+                            "All files in this bunch should have the same write columns.");
                 }
             }
             files.add(file);
             rowCount += file.rowCount();
             checkArgument(
                     rowCount <= expectedRowCount,
-                    "Blob files row count exceed the expect " + expectedRowCount);
+                    "Blob/vector-store files row count exceed the expect " + expectedRowCount);
             this.latestMaxSequenceNumber = file.maxSequenceNumber();
             this.latestFistRowId = file.nonNullFirstRowId();
             this.expectedNextFirstRowId = latestFistRowId + file.rowCount();
@@ -554,20 +579,21 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
     public static List<List<DataFileMeta>> mergeRangesAndSort(List<DataFileMeta> files) {
         // group by row id range
-        ToLongFunction<DataFileMeta> firstRowIdFunc = DataFileMeta::nonNullFirstRowId;
-        ToLongFunction<DataFileMeta> endRowIdF = f -> f.nonNullFirstRowId() + f.rowCount() - 1;
         ToLongFunction<DataFileMeta> maxSeqF = DataFileMeta::maxSequenceNumber;
-        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(firstRowIdFunc, endRowIdF);
+        RangeHelper<DataFileMeta> rangeHelper = new RangeHelper<>(DataFileMeta::nonNullRowIdRange);
         List<List<DataFileMeta>> result = rangeHelper.mergeOverlappingRanges(files);
 
-        // in group, sort by blob file and max_seq
+        // in group, sort by blob/vector-store file and max_seq
         for (List<DataFileMeta> group : result) {
-            // split to data files and blob files
+            // split to data files, blob files, vector-store files
             List<DataFileMeta> dataFiles = new ArrayList<>();
             List<DataFileMeta> blobFiles = new ArrayList<>();
+            List<DataFileMeta> vectorStoreFiles = new ArrayList<>();
             for (DataFileMeta f : group) {
                 if (isBlobFile(f.fileName())) {
                     blobFiles.add(f);
+                } else if (isVectorStoreFile(f.fileName())) {
+                    vectorStoreFiles.add(f);
                 } else {
                     dataFiles.add(f);
                 }
@@ -582,15 +608,114 @@ public class DataEvolutionSplitRead implements SplitRead<InternalRow> {
 
             // blob files sort by first row id then by reversed max sequence number
             blobFiles.sort(
-                    comparingLong(firstRowIdFunc)
+                    comparingLong(DataFileMeta::nonNullFirstRowId)
                             .thenComparing(reverseOrder(comparingLong(maxSeqF))));
 
-            // concat data files and blob files
+            // vector-store files sort by first row id then by reversed max sequence number
+            vectorStoreFiles.sort(
+                    comparingLong(DataFileMeta::nonNullFirstRowId)
+                            .thenComparing(reverseOrder(comparingLong(maxSeqF))));
+
+            // concat data files, blob files, vector-store files
             group.clear();
             group.addAll(dataFiles);
             group.addAll(blobFiles);
+            group.addAll(vectorStoreFiles);
         }
 
         return result;
+    }
+
+    static final class VectorStoreBunchKey implements Comparable<VectorStoreBunchKey> {
+        public final long schemaId;
+        public final String formatIdentifier;
+        public final List<String> writeCols;
+
+        public VectorStoreBunchKey(
+                long schemaId,
+                String formatIdentifier,
+                List<String> writeCols,
+                RowType preferredColOrder) {
+            this.schemaId = schemaId;
+            this.formatIdentifier = checkNotNull(formatIdentifier, "formatIdentifier");
+            this.writeCols = normalizeWriteCols(writeCols, preferredColOrder);
+        }
+
+        @Override
+        public int compareTo(VectorStoreBunchKey o) {
+            int c = Long.compare(this.schemaId, o.schemaId);
+            if (c != 0) {
+                return c;
+            }
+
+            c = this.formatIdentifier.compareTo(o.formatIdentifier);
+            if (c != 0) {
+                return c;
+            }
+
+            int n = Math.min(this.writeCols.size(), o.writeCols.size());
+            for (int i = 0; i < n; i++) {
+                c = this.writeCols.get(i).compareTo(o.writeCols.get(i));
+                if (c != 0) {
+                    return c;
+                }
+            }
+            return Integer.compare(this.writeCols.size(), o.writeCols.size());
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof VectorStoreBunchKey)) {
+                return false;
+            }
+            VectorStoreBunchKey that = (VectorStoreBunchKey) o;
+            return schemaId == that.schemaId
+                    && formatIdentifier.equals(that.formatIdentifier)
+                    && writeCols.equals(that.writeCols);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(schemaId, formatIdentifier, writeCols);
+        }
+
+        @Override
+        public String toString() {
+            return "VectorStoreBunchKey{schemaId="
+                    + schemaId
+                    + ", format="
+                    + formatIdentifier
+                    + ", writeCols="
+                    + writeCols
+                    + "}";
+        }
+
+        private static List<String> normalizeWriteCols(List<String> writeCols, RowType rowType) {
+            if (writeCols == null || writeCols.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            Map<String, Integer> colPosMap = new HashMap<>();
+            List<String> namesInRowType = rowType.getFieldNames();
+            for (int i = 0; i < namesInRowType.size(); i++) {
+                colPosMap.putIfAbsent(namesInRowType.get(i), i);
+            }
+
+            ArrayList<String> sorted = new ArrayList<>(writeCols);
+            sorted.sort(
+                    (a, b) -> {
+                        int ia = colPosMap.getOrDefault(a, Integer.MAX_VALUE);
+                        int ib = colPosMap.getOrDefault(b, Integer.MAX_VALUE);
+                        if (ia != ib) {
+                            return Integer.compare(ia, ib);
+                        }
+                        return a.compareTo(b);
+                    });
+
+            return sorted;
+        }
     }
 }

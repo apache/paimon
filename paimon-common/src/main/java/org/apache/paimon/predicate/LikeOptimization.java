@@ -39,8 +39,7 @@ public class LikeOptimization {
     /** Accepts simple LIKE patterns like "abc". */
     private static final Pattern NONE_PATTERN = Pattern.compile("[^%]+");
 
-    public static Optional<Pair<NullFalseLeafBinaryFunction, Object>> tryOptimize(
-            Object patternLiteral) {
+    public static Optional<Pair<LeafBinaryFunction, Object>> tryOptimize(Object patternLiteral) {
         if (patternLiteral == null) {
             throw new IllegalArgumentException("Pattern can not be null.");
         }

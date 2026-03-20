@@ -45,6 +45,12 @@ class RESTSimpleTest(RESTBaseTest):
             ('behavior', pa.string()),
             ('dt', pa.string()),
         ])
+        self.pk_pa_schema = pa.schema([
+            pa.field('user_id', pa.int64(), nullable=False),
+            ('item_id', pa.int64()),
+            ('behavior', pa.string()),
+            pa.field('dt', pa.string(), nullable=False),
+        ])
         self.data = {
             'user_id': [2, 4, 6, 8, 10],
             'item_id': [1001, 1002, 1003, 1004, 1005],
@@ -205,10 +211,10 @@ class RESTSimpleTest(RESTBaseTest):
         splits = read_builder.new_scan().with_shard(0, 3).plan().splits()
         actual = table_sort_by(table_read.to_arrow(splits), 'user_id')
         expected = pa.Table.from_pydict({
-            'user_id': [1, 2, 3, 5, 8, 12],
-            'item_id': [1001, 1002, 1003, 1005, 1008, 1012],
-            'behavior': ['a', 'b', 'c', 'd', 'g', 'k'],
-            'dt': ['p1', 'p1', 'p2', 'p2', 'p1', 'p1'],
+            'user_id': [1, 2, 3, 4, 5, 13],
+            'item_id': [1001, 1002, 1003, 1004, 1005, 1013],
+            'behavior': ['a', 'b', 'c', None, 'd', 'l'],
+            'dt': ['p1', 'p1', 'p2', 'p1', 'p2', 'p2'],
         }, schema=self.pa_schema)
         self.assertEqual(actual, expected)
 
@@ -597,17 +603,29 @@ class RESTSimpleTest(RESTBaseTest):
         self.rest_catalog.drop_table('default.test_with_shard', True)
         self.rest_catalog.create_table('default.test_with_shard', schema, False)
         table = self.rest_catalog.get_table('default.test_with_shard')
+        table_pa_schema = self.pk_pa_schema
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
         self.assertIsInstance(table_write.row_key_extractor, DynamicBucketRowKeyExtractor)
 
-        pa_table = pa.Table.from_pydict(self.data, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
+        table_write.write_arrow(pa_table)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
 
-        with self.assertRaises(ValueError) as context:
-            table_write.write_arrow(pa_table)
-
-        self.assertEqual(str(context.exception), "Can't extract bucket from row in dynamic bucket mode")
+        splits = []
+        read_builder = table.new_read_builder()
+        splits.extend(read_builder.new_scan().with_shard(0, 3).plan().splits())
+        splits.extend(read_builder.new_scan().with_shard(1, 3).plan().splits())
+        splits.extend(read_builder.new_scan().with_shard(2, 3).plan().splits())
+        table_read = read_builder.new_read()
+        actual = table_read.to_arrow(splits)
+        expected_sorted = table_sort_by(self.expected.cast(self.pk_pa_schema), 'user_id')
+        actual_sorted = table_sort_by(actual, 'user_id')
+        self.assertEqual(actual_sorted, expected_sorted)
 
     def test_with_shard_pk_fixed_bucket(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['user_id'], primary_keys=['user_id', 'dt'],
@@ -615,13 +633,14 @@ class RESTSimpleTest(RESTBaseTest):
         self.rest_catalog.drop_table('default.test_with_shard', True)
         self.rest_catalog.create_table('default.test_with_shard', schema, False)
         table = self.rest_catalog.get_table('default.test_with_shard')
+        table_pa_schema = self.pk_pa_schema
 
         write_builder = table.new_batch_write_builder()
         table_write = write_builder.new_write()
         table_commit = write_builder.new_commit()
         self.assertIsInstance(table_write.row_key_extractor, FixedBucketRowKeyExtractor)
 
-        pa_table = pa.Table.from_pydict(self.data, schema=self.pa_schema)
+        pa_table = pa.Table.from_pydict(self.data, schema=table_pa_schema)
         table_write.write_arrow(pa_table)
         table_commit.commit(table_write.prepare_commit())
         table_write.close()
@@ -636,13 +655,13 @@ class RESTSimpleTest(RESTBaseTest):
         table_read = read_builder.new_read()
         actual = table_read.to_arrow(splits)
         data_expected = {
-            'user_id': [4, 6, 2, 10, 8],
-            'item_id': [1002, 1003, 1001, 1005, 1004],
-            'behavior': ['b', 'c', 'a', 'e', 'd'],
-            'dt': ['2025-08-10', '2025-08-11', '2000-10-10', '2025-08-13', '2025-08-12']
+            'user_id': [4, 6, 2, 8, 10],
+            'item_id': [1002, 1003, 1001, 1004, 1005],
+            'behavior': ['b', 'c', 'a', 'd', 'e'],
+            'dt': ['2025-08-10', '2025-08-11', '2000-10-10', '2025-08-12', '2025-08-13']
         }
-        expected = pa.Table.from_pydict(data_expected, schema=self.pa_schema)
-        self.assertEqual(actual, expected)
+        expected = pa.Table.from_pydict(data_expected, schema=table_pa_schema)
+        self.assertEqual(actual.combine_chunks(), expected.combine_chunks())
 
     def test_with_shard_uniform_division(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'])
@@ -713,6 +732,11 @@ class RESTSimpleTest(RESTBaseTest):
         except TableAlreadyExistException:
             self.fail("create_table with ignore_if_exists=True should not raise TableAlreadyExistException")
 
+        # test drop database cascade false
+        with self.assertRaises(ValueError) as context:
+            self.rest_catalog.drop_database("db1", False, False)
+        self.assertIn("Database db1 is not empty", str(context.exception))
+
         # test drop table
         self.rest_catalog.drop_table("db1.tbl1", False)
         with self.assertRaises(TableNotExistException) as context:
@@ -734,6 +758,16 @@ class RESTSimpleTest(RESTBaseTest):
             self.rest_catalog.drop_database("db1", True)
         except DatabaseNotExistException:
             self.fail("drop_database with ignore_if_not_exists=True should not raise DatabaseNotExistException")
+
+        # test drop database cascade
+        self.rest_catalog.create_database("db2", False)
+        self.rest_catalog.create_table("db2.tbl2",
+                                       Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt']),
+                                       False)
+        self.rest_catalog.drop_database("db2", False, True)
+        with self.assertRaises(DatabaseNotExistException) as context:
+            self.rest_catalog.get_database("db2")
+        self.assertEqual("Database db2 does not exist", str(context.exception))
 
     def test_alter_table(self):
         catalog = self.rest_catalog

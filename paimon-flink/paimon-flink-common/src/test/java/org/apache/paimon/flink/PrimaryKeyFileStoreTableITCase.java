@@ -52,6 +52,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -304,6 +306,66 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         }
 
         assertThat(actual).containsExactlyInAnyOrder("+I[1, A]", "+I[2, B]", "+I[3, C]");
+    }
+
+    @Test
+    public void testTableReadWriteWithExternalPathWeightRobin() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        String externalPaths =
+                TraceableFileIO.SCHEME
+                        + "://"
+                        + externalPath1.toString()
+                        + ","
+                        + LocalFileIOLoader.SCHEME
+                        + "://"
+                        + externalPath2.toString();
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '1',"
+                        + "'write-only' = 'true',"
+                        + "'data-file.external-paths' = '"
+                        + externalPaths
+                        + "',"
+                        + "'data-file.external-paths.strategy' = 'weight-robin',"
+                        + "'data-file.external-paths.weights' = '10,5'"
+                        + ")");
+
+        CloseableIterator<Row> it = collect(sEnv.executeSql("SELECT * FROM T2"));
+
+        int fileNum = 30;
+        for (int i = 1; i <= fileNum; i++) {
+            sEnv.executeSql("INSERT INTO T2 VALUES (" + i + ", 'data" + i + "')").await();
+        }
+
+        List<String> actual = new ArrayList<>();
+        for (int i = 0; i < fileNum; i++) {
+            actual.add(it.next().toString());
+        }
+        // Verify all data is readable
+        assertThat(actual).hasSize(fileNum);
+
+        long filesInPath1 = 0;
+        long filesInPath2 = 0;
+        try {
+            filesInPath1 = Files.list(Paths.get(externalPath1.toString() + "/bucket-0")).count();
+            filesInPath2 = Files.list(Paths.get(externalPath2.toString() + "/bucket-0")).count();
+
+        } catch (NoSuchFileException ignored) {
+        }
+        long totalFiles = filesInPath1 + filesInPath2;
+
+        // Since the file sample size is small in IT case, we only verify the writing and reading
+        // For tests on file distribution by weights, see WeightedExternalPathProviderTest
+        assertThat(totalFiles).isEqualTo(fileNum);
     }
 
     @Test

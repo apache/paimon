@@ -24,7 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.PartitionEntry;
 import org.apache.paimon.partition.PartitionExpireStrategy;
 import org.apache.paimon.partition.PartitionValuesTimeExpireStrategy;
-import org.apache.paimon.table.PartitionHandler;
+import org.apache.paimon.table.PartitionModification;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -53,7 +53,7 @@ public class PartitionExpire {
     private final Duration checkInterval;
     private final FileStoreScan scan;
     private final FileStoreCommit commit;
-    @Nullable private final PartitionHandler partitionHandler;
+    @Nullable private final PartitionModification partitionModification;
     private LocalDateTime lastCheck;
     private final PartitionExpireStrategy strategy;
     private final boolean endInputCheckPartitionExpire;
@@ -66,7 +66,7 @@ public class PartitionExpire {
             PartitionExpireStrategy strategy,
             FileStoreScan scan,
             FileStoreCommit commit,
-            @Nullable PartitionHandler partitionHandler,
+            @Nullable PartitionModification partitionModification,
             boolean endInputCheckPartitionExpire,
             int maxExpireNum,
             int expireBatchSize) {
@@ -75,7 +75,7 @@ public class PartitionExpire {
         this.strategy = strategy;
         this.scan = scan;
         this.commit = commit;
-        this.partitionHandler = partitionHandler;
+        this.partitionModification = partitionModification;
         // Avoid the execution time of stream jobs from being too short and preventing partition
         // expiration
         long rndSeconds = 0;
@@ -95,7 +95,7 @@ public class PartitionExpire {
             PartitionExpireStrategy strategy,
             FileStoreScan scan,
             FileStoreCommit commit,
-            @Nullable PartitionHandler partitionHandler,
+            @Nullable PartitionModification partitionModification,
             int maxExpireNum,
             int expireBatchSize) {
         this(
@@ -104,7 +104,7 @@ public class PartitionExpire {
                 strategy,
                 scan,
                 commit,
-                partitionHandler,
+                partitionModification,
                 false,
                 maxExpireNum,
                 expireBatchSize);
@@ -177,9 +177,9 @@ public class PartitionExpire {
 
     private void doBatchExpire(
             List<Map<String, String>> expiredBatchPartitions, long commitIdentifier) {
-        if (partitionHandler != null) {
+        if (partitionModification != null) {
             try {
-                partitionHandler.dropPartitions(expiredBatchPartitions);
+                partitionModification.dropPartitions(expiredBatchPartitions);
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(e);
             }

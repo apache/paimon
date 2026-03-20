@@ -107,7 +107,7 @@ Alternatively, you can copy `paimon-spark-3.5_2.12-{{< version >}}.jar` under `s
 
 {{< tab "Catalog" >}}
 
-When starting `spark-sql`, use the following command to register Paimon’s Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/paimon`.
+When starting `spark-sql`, use the following command to register Paimon's Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/paimon`.
 
 ```bash
 spark-sql ... \
@@ -133,7 +133,7 @@ can use the `spark_catalog.${database_name}.${table_name}` to access Spark table
 
 {{< tab "Generic Catalog" >}}
 
-When starting `spark-sql`, use the following command to register Paimon’s Spark Generic catalog to replace Spark
+When starting `spark-sql`, use the following command to register Paimon's Spark Generic catalog to replace Spark
 default catalog `spark_catalog`. (default warehouse is Spark `spark.sql.warehouse.dir`)
 
 Currently, it is only recommended to use `SparkGenericCatalog` in the case of Hive metastore, Paimon will infer

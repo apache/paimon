@@ -24,9 +24,9 @@ import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
-import org.apache.spark.sql.catalyst.plans.logical.Assignment
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, MergeIntoTable, UpdateTable}
 
-trait RowLevelHelper extends SQLConfHelper {
+trait RowLevelHelper extends SQLConfHelper with AssignmentAlignmentHelper {
 
   val operation: RowLevelOp
 
@@ -94,5 +94,21 @@ trait RowLevelHelper extends SQLConfHelper {
     OptimizeMetadataOnlyDeleteFromPaimonTable.isMetadataOnlyDelete(
       table.getTable.asInstanceOf[FileStoreTable],
       condition)
+  }
+
+  /** Determines if DataSourceV2 update is not supported for the given table. */
+  protected def shouldFallbackToV1Update(table: SparkTable, updateTable: UpdateTable): Boolean = {
+    shouldFallbackToV1(table) ||
+    !updateTable.rewritable ||
+    !updateTable.aligned
+  }
+
+  /** Determines if DataSourceV2 merge into is not supported for the given table. */
+  protected def shouldFallbackToV1MergeInto(m: MergeIntoTable): Boolean = {
+    val relation = PaimonRelation.getPaimonRelation(m.targetTable)
+    val table = relation.table.asInstanceOf[SparkTable]
+    shouldFallbackToV1(table) ||
+    !m.rewritable ||
+    !m.aligned
   }
 }

@@ -254,8 +254,7 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument.Builder builder = SearchArgumentFactory.newBuilder();
         SearchArgument sarg =
                 builder.between("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L).build();
-        Predicate expected =
-                PredicateBuilder.and(BUILDER.greaterOrEqual(1, 100L), BUILDER.lessOrEqual(1, 200L));
+        Predicate expected = BUILDER.between(1, 100L, 200L);
         assertExpected(sarg, expected);
     }
 
@@ -267,8 +266,7 @@ public class SearchArgumentToPredicateConverterTest {
                         .between("f_bigint", PredicateLeaf.Type.LONG, 100L, 200L)
                         .end()
                         .build();
-        Predicate expected =
-                PredicateBuilder.or(BUILDER.lessThan(1, 100L), BUILDER.greaterThan(1, 200L));
+        Predicate expected = BUILDER.between(1, 100L, 200L).negate().get();
         assertExpected(sarg, expected);
     }
 

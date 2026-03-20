@@ -20,8 +20,10 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.DeletionVectorMeta;
+import org.apache.paimon.index.GlobalIndexMeta;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.utils.Range;
 
 import javax.annotation.Nullable;
 
@@ -93,7 +95,7 @@ public class IndexManifestFileHandler {
 
     private IndexManifestFileCombiner getIndexManifestFileCombine(String indexType) {
         if (!DELETION_VECTORS_INDEX.equals(indexType) && !HASH_INDEX.equals(indexType)) {
-            return new GlobalFileNameCombiner();
+            return new GlobalIndexCombiner();
         }
 
         if (DELETION_VECTORS_INDEX.equals(indexType) && BucketMode.BUCKET_UNAWARE == bucketMode) {
@@ -197,7 +199,7 @@ public class IndexManifestFileHandler {
     }
 
     /** We combine the previous and new index files by file name. */
-    static class GlobalFileNameCombiner implements IndexManifestFileCombiner {
+    static class GlobalIndexCombiner implements IndexManifestFileCombiner {
 
         @Override
         public List<IndexManifestEntry> combine(
@@ -219,10 +221,49 @@ public class IndexManifestFileHandler {
             for (IndexManifestEntry entry : removed) {
                 indexEntries.remove(entry.indexFile().fileName());
             }
+            validateRetainedIndexFiles(indexEntries.values(), added);
             for (IndexManifestEntry entry : added) {
                 indexEntries.put(entry.indexFile().fileName(), entry);
             }
             return new ArrayList<>(indexEntries.values());
+        }
+
+        private void validateRetainedIndexFiles(
+                Iterable<IndexManifestEntry> retainedIndexFiles,
+                List<IndexManifestEntry> addedIndexFiles) {
+            for (IndexManifestEntry retained : retainedIndexFiles) {
+                GlobalIndexMeta retainedMeta = retained.indexFile().globalIndexMeta();
+                if (retainedMeta == null) {
+                    continue;
+                }
+
+                for (IndexManifestEntry added : addedIndexFiles) {
+                    GlobalIndexMeta addedMeta = added.indexFile().globalIndexMeta();
+                    if (addedMeta == null
+                            || retainedMeta.indexFieldId() != addedMeta.indexFieldId()
+                            || !Range.intersect(
+                                    retainedMeta.rowRangeStart(),
+                                    retainedMeta.rowRangeEnd(),
+                                    addedMeta.rowRangeStart(),
+                                    addedMeta.rowRangeEnd())) {
+                        continue;
+                    }
+
+                    throw new IllegalStateException(
+                            String.format(
+                                    "Trying to add global index file %s of type %s for index field %s"
+                                            + " with row range [%s, %s], but previous file %s still exists"
+                                            + " with overlapping row range [%s, %s]. Remove the previous file first.",
+                                    added.indexFile().fileName(),
+                                    added.indexFile().indexType(),
+                                    addedMeta.indexFieldId(),
+                                    addedMeta.rowRangeStart(),
+                                    addedMeta.rowRangeEnd(),
+                                    retained.indexFile().fileName(),
+                                    retainedMeta.rowRangeStart(),
+                                    retainedMeta.rowRangeEnd()));
+                }
+            }
         }
     }
 

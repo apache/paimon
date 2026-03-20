@@ -130,6 +130,72 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
     }
   }
 
+  test(s"Paimon push down: apply TRIM/LTRM/RTRIM") {
+    // Spark support push down TRIM/LTRM/RTRIM since Spark 3.4.
+    if (gteqSpark3_4) {
+      withTable("t") {
+        sql("""
+              |CREATE TABLE t (id int, value int, dt STRING)
+              |using paimon
+              |PARTITIONED BY (dt)
+              |""".stripMargin)
+
+        sql("""
+              |INSERT INTO t values
+              |(1, 100, 'chelloc'), (1, 100, 'caa'), (1, 100, 'bbc')
+              |""".stripMargin)
+
+        val q =
+          """
+            |SELECT * FROM t
+            |WHERE TRIM('c', dt) = 'hello'
+            |""".stripMargin
+        assert(!checkFilterExists(q))
+
+        checkAnswer(
+          spark.sql(q),
+          Seq(Row(1, 100, "chelloc"))
+        )
+
+        val q1 =
+          """
+            |SELECT * FROM t
+            |WHERE LTRIM('c', dt) = 'aa'
+            |""".stripMargin
+        assert(!checkFilterExists(q1))
+
+        checkAnswer(
+          spark.sql(q1),
+          Seq(Row(1, 100, "caa"))
+        )
+
+        val q2 =
+          """
+            |SELECT * FROM t
+            |WHERE RTRIM('c', dt) = 'bb'
+            |""".stripMargin
+        assert(!checkFilterExists(q2))
+
+        checkAnswer(
+          spark.sql(q2),
+          Seq(Row(1, 100, "bbc"))
+        )
+
+        val q3 =
+          """
+            |SELECT * FROM t
+            |WHERE TRIM(LEADING 'c' FROM dt) = 'aa'
+            |""".stripMargin
+        assert(!checkFilterExists(q2))
+
+        checkAnswer(
+          spark.sql(q3),
+          Seq(Row(1, 100, "caa"))
+        )
+      }
+    }
+  }
+
   test(s"Paimon push down: apply UPPER") {
     // Spark support push down UPPER since Spark 3.4.
     if (gteqSpark3_4) {
@@ -803,6 +869,47 @@ abstract class PaimonPushDownTestBase extends PaimonSparkTestBase with AdaptiveS
           "SELECT * FROM T WHERE a IN (CAST(100.1234 AS DECIMAL(18,4)), CAST(300.9999 AS DECIMAL(18,4))) ORDER BY a"),
         Row(new java.math.BigDecimal("100.1234"), "a") ::
           Row(new java.math.BigDecimal("300.9999"), "c") :: Nil
+      )
+    }
+  }
+
+  test(s"Paimon pushdown: parquet timestamp filter") {
+    withTable("T") {
+      spark.sql(s"""
+                   |CREATE TABLE T (a TIMESTAMP, b STRING) using paimon TBLPROPERTIES
+                   |(
+                   |'file.format' = 'parquet',
+                   |'parquet.block.size' = '100',
+                   |'target-file-size' = '10g'
+                   |)
+                   |""".stripMargin)
+
+      spark.sql("""INSERT INTO T VALUES
+                  |(TIMESTAMP '2024-01-01 00:00:00', 'a'),
+                  |(TIMESTAMP '2024-01-02 12:30:00', 'b'),
+                  |(TIMESTAMP '2024-01-03 23:59:59', 'c'),
+                  |(TIMESTAMP '2024-01-01 12:00:00', 'd')
+                  |""".stripMargin)
+
+      // Test equals filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a = TIMESTAMP '2024-01-01 00:00:00'"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") :: Nil
+      )
+
+      // Test comparison filter
+      checkAnswer(
+        spark.sql("SELECT * FROM T WHERE a < TIMESTAMP '2024-01-02 00:00:00' ORDER BY a"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") ::
+          Row(java.sql.Timestamp.valueOf("2024-01-01 12:00:00"), "d") :: Nil
+      )
+
+      // Test between filter
+      checkAnswer(
+        spark.sql(
+          "SELECT * FROM T WHERE a BETWEEN TIMESTAMP '2024-01-01 00:00:00' AND TIMESTAMP '2024-01-02 00:00:00' ORDER BY a"),
+        Row(java.sql.Timestamp.valueOf("2024-01-01 00:00:00"), "a") ::
+          Row(java.sql.Timestamp.valueOf("2024-01-01 12:00:00"), "d") :: Nil
       )
     }
   }

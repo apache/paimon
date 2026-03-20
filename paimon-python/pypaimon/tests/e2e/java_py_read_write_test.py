@@ -16,6 +16,7 @@
 # limitations under the License.
 ################################################################################
 
+import datetime
 import os
 import sys
 import unittest
@@ -59,7 +60,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
             ('category', pa.string()),
             ('value', pa.float64()),
             ('ts', pa.timestamp('us')),
-            ('ts_ltz', pa.timestamp('us', tz='UTC'))
+            ('ts_ltz', pa.timestamp('us', tz='UTC')),
+            ('t', pa.time32('ms'))
         ])
 
         schema = Schema.from_pyarrow_schema(
@@ -78,7 +80,9 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'category': ['Fruit', 'Fruit', 'Vegetable', 'Vegetable', 'Meat', 'Meat'],
             'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
             'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
-            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True)
+            'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+            't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
+                  datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)]
         })
         # Write initial data
         write_builder = table.new_batch_write_builder()
@@ -129,6 +133,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 ('value', pa.float64()),
                 ('ts', pa.timestamp('us')),
                 ('ts_ltz', pa.timestamp('us', tz='UTC')),
+                ('t', pa.time32('ms')),
                 ('metadata', pa.struct([
                     pa.field('source', pa.string()),
                     pa.field('created_at', pa.int64()),
@@ -146,7 +151,7 @@ class JavaPyReadWriteTest(unittest.TestCase):
             primary_keys=['id'],
             options={
                 'dynamic-partition-overwrite': 'false',
-                'bucket': '2',
+                'bucket': '4',
                 'file.format': file_format,
                 "orc.timestamp-ltz.legacy.type": "false"
             }
@@ -179,6 +184,8 @@ class JavaPyReadWriteTest(unittest.TestCase):
                 'value': [1.5, 0.8, 0.6, 1.2, 5.0, 8.0],
                 'ts': pd.to_datetime([1000000, 1000001, 1000002, 1000003, 1000004, 1000005], unit='ms'),
                 'ts_ltz': pd.to_datetime([2000000, 2000001, 2000002, 2000003, 2000004, 2000005], unit='ms', utc=True),
+                't': [datetime.time(0, 0, 1), datetime.time(0, 0, 2), datetime.time(0, 0, 3),
+                      datetime.time(0, 0, 4), datetime.time(0, 0, 5), datetime.time(0, 0, 6)],
                 'metadata': [
                     {'source': 'store1', 'created_at': 1001, 'location': {'city': 'Beijing', 'country': 'China'}},
                     {'source': 'store1', 'created_at': 1002, 'location': {'city': 'Shanghai', 'country': 'China'}},
@@ -200,13 +207,18 @@ class JavaPyReadWriteTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
-        initial_result = table_read.to_pandas(table_scan.plan().splits())
-        print(f"Format: {file_format}, Result:\n{initial_result}")
-        self.assertEqual(len(initial_result), 6)
-        # Data order may vary due to partitioning/bucketing, so compare as sets
-        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
-        actual_names = set(initial_result['name'].tolist())
-        self.assertEqual(actual_names, expected_names)
+        result = table_read.to_pandas(table_scan.plan().splits())
+        print(f"Format: {file_format}, Result:\n{result}")
+        self.assertEqual(initial_data.to_dict(), result.to_dict())
+
+        from pypaimon.write.row_key_extractor import FixedBucketRowKeyExtractor
+        expected_bucket_first_row = 2
+        first_row = initial_data.head(1)
+        batch = pa.RecordBatch.from_pandas(first_row, schema=pa_schema)
+        extractor = FixedBucketRowKeyExtractor(table.table_schema)
+        _, buckets = extractor.extract_partition_bucket_batch(batch)
+        self.assertEqual(buckets[0], expected_bucket_first_row,
+                         "bucket for first row (id=1) with num_buckets=4 must be %d" % expected_bucket_first_row)
 
     @parameterized.expand(get_file_format_params())
     def test_read_pk_table(self, file_format):
@@ -223,13 +235,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
         print(f"Format: {file_format}, Result:\n{res}")
 
         # Verify data
-        self.assertEqual(len(res), 6)
+        self.assertEqual(len(res), 7)
         if file_format != "lance":
             self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
             self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
+            self.assertEqual(table.fields[6].type.type, "TIME(0)")
             from pypaimon.schema.data_types import RowType
-            self.assertIsInstance(table.fields[6].type, RowType)
-            metadata_fields = table.fields[6].type.fields
+            self.assertIsInstance(table.fields[7].type, RowType)
+            metadata_fields = table.fields[7].type.fields
             self.assertEqual(len(metadata_fields), 3)
             self.assertEqual(metadata_fields[0].name, 'source')
             self.assertEqual(metadata_fields[1].name, 'created_at')
@@ -237,9 +250,14 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertIsInstance(metadata_fields[2].type, RowType)
         
         # Data order may vary due to partitioning/bucketing, so compare as sets
-        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef'}
+        expected_names = {'Apple', 'Banana', 'Carrot', 'Broccoli', 'Chicken', 'Beef', 'Tofu'}
         actual_names = set(res['name'].tolist())
         self.assertEqual(actual_names, expected_names)
+
+        # Verify null partition value (default partition) is readable
+        tofu_row = res[res['name'] == 'Tofu']
+        self.assertEqual(len(tofu_row), 1)
+        self.assertTrue(pd.isna(tofu_row['category'].iloc[0]))
 
         # Verify metadata column can be read and contains nested structures
         if 'metadata' in res.columns:
@@ -416,3 +434,16 @@ class JavaPyReadWriteTest(unittest.TestCase):
             'v': ["v1", "v2", "v4"]
         })
         self.assertEqual(expected, actual)
+
+    @parameterized.expand([('json',), ('csv',)])
+    def test_read_compressed_text_append_table(self, file_format):
+        table = self.catalog.get_table(
+            f'default.mixed_test_append_tablej_{file_format}_gz')
+        read_builder = table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        splits = table_scan.plan().splits()
+        with self.assertRaises(NotImplementedError) as ctx:
+            table_read.to_arrow(splits)
+        self.assertIn(file_format, str(ctx.exception))
+        self.assertIn("not yet supported", str(ctx.exception))

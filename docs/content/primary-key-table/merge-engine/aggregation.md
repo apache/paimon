@@ -308,7 +308,7 @@ public static class BitmapContainsUDF extends ScalarFunction {
 
   Use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
 
-  Use `fields.<field-name>.count-limit=<Interger>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
+  Use `fields.<field-name>.count-limit=<Integer>` to specify the maximum number of rows in the nested table. When no nested-key, it will select data
   sequentially up to limit; but if nested-key is specified, it cannot guarantee the correctness of the aggregation result. This option can be used to
   avoid abnormal input.
 
@@ -387,6 +387,52 @@ public static class BitmapContainsUDF extends ScalarFunction {
 
 ### merge_map
   The merge_map function merge input maps. It only supports MAP type.
+
+### merge_map_with_keytime
+
+  The merge_map_with_keytime function merges input maps with key-level partial updates based on timestamps.
+  Each key in the map carries its own timestamp, and during merging, only the value with the latest timestamp for each key is retained.
+  It only supports `MAP<key_type, ROW<value_field, ts_field>>` type, where the ROW must have at least 2 fields.
+
+  Use `fields.<field-name>.ts-field=<field_name_in_row>` to specify the timestamp field name in the ROW type.
+  If not specified, the last field of the ROW is used as the timestamp by default.
+
+  When a key's value is null, the key will be removed from the map.
+  When the timestamp field is null, the entry will be skipped.
+
+  An example:
+
+  {{< tabs "merge_map_with_keytime-example" >}}
+
+  {{< tab "Flink" >}}
+
+  ```sql
+  CREATE TABLE my_table (
+      biz_order_id STRING,
+      key_value_map MAP<STRING, ROW<`value` STRING, `ts` STRING>>,
+      PRIMARY KEY (biz_order_id) NOT ENFORCED
+  ) WITH (
+      'merge-engine' = 'aggregation',
+      'fields.key_value_map.aggregate-function' = 'merge_map_with_keytime',
+      'fields.key_value_map.ts-field' = 'ts'
+  );
+  ```
+
+  {{< /tab >}}
+
+  {{< /tabs >}}
+
+  Given the following input records:
+
+  | biz_order_id | key_value_map |
+  |---|---|
+  | 1 | {"product_name": ("iPhone", "100"), "color": ("Black", "100")} |
+  | 1 | {"product_name": ("iPad", "200"), "price": ("999", "200")} |
+  | 1 | {"color": ("White", "50")} |
+
+  The final result will be:
+  `{"product_name": ("iPad", "200"), "color": ("Black", "100"), "price": ("999", "200")}` 
+  Note that `color` remains "Black" because its existing timestamp "100" is greater than the incoming "50".
 
 ### Types of cardinality sketches
 

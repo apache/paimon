@@ -72,7 +72,11 @@ public class PostponeBatchWriteOperator extends StatelessRowDataStoreWriteOperat
         super.open();
 
         int sinkParallelism = RuntimeContextUtils.getNumberOfParallelSubtasks(getRuntimeContext());
-        this.defaultNumBuckets = sinkParallelism <= 0 ? 1 : sinkParallelism;
+        sinkParallelism = sinkParallelism <= 0 ? 1 : sinkParallelism;
+        this.defaultNumBuckets =
+                Math.min(
+                        sinkParallelism,
+                        table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism());
 
         TableSchema schema = table.schema();
         this.partitionKeyExtractor = new RowPartitionKeyExtractor(schema);

@@ -237,6 +237,8 @@ public class JavaPyLanceE2ETest {
             write.write(createRow(4, "Broccoli", "Vegetable", 1.2));
             write.write(createRow(5, "Chicken", "Meat", 5.0));
             write.write(createRow(6, "Beef", "Meat", 8.0));
+            // Row with null partition value -> __DEFAULT_PARTITION__
+            write.write(GenericRow.of(7, BinaryString.fromString("Tofu"), null, 3.0));
 
             commit.commit(0, write.prepareCommit(true, 0));
         }
@@ -256,7 +258,8 @@ public class JavaPyLanceE2ETest {
                         "3, Carrot, Vegetable, 0.6",
                         "4, Broccoli, Vegetable, 1.2",
                         "5, Chicken, Meat, 5.0",
-                        "6, Beef, Meat, 8.0");
+                        "6, Beef, Meat, 8.0",
+                        "7, Tofu, NULL, 3.0");
     }
 
     @Test

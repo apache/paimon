@@ -290,6 +290,33 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Write merge schema: nested struct with new fields by sql") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("CREATE TABLE t (id INT, info STRUCT<key1 STRUCT<key2 STRING, key3 STRING>>)")
+        sql("INSERT INTO t VALUES (1, struct(struct('v2a', 'v3a')))")
+        sql("INSERT INTO t VALUES (2, struct(struct('v2b', 'v3b')))")
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(1, Row(Row("v2a", "v3a"))), Row(2, Row(Row("v2b", "v3b"))))
+        )
+
+        // insert data with new nested field key4 added BEFORE key3 to verify byName semantics
+        // inside struct (not positional). The named_struct ensures field names are explicit.
+        sql("INSERT INTO t BY NAME " +
+          "SELECT 3 AS id, " +
+          "named_struct('key1', named_struct('key2', 'v2c', 'key4', 'v4c', 'key3', 'v3c')) AS info")
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(
+            Row(1, Row(Row("v2a", "v3a", null))),
+            Row(2, Row(Row("v2b", "v3b", null))),
+            Row(3, Row(Row("v2c", "v3c", "v4c"))))
+        )
+      }
+    }
+  }
+
   test("Write merge schema: binary and boolean types") {
     withTable("t") {
       withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
@@ -328,4 +355,147 @@ class WriteMergeSchemaTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Write merge schema: nested struct with new fields by dataframe") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, info STRUCT<key1 STRUCT<key2 STRING, key3 STRING>>)")
+      sql("INSERT INTO t VALUES (1, struct(struct('v2a', 'v3a')))")
+
+      // Construct a DataFrame with new nested field key4 in different order using explicit schema
+      import org.apache.spark.sql.types._
+      val dataSchema = StructType(
+        Seq(
+          StructField("id", IntegerType),
+          StructField(
+            "info",
+            StructType(
+              Seq(
+                StructField(
+                  "key1",
+                  StructType(
+                    Seq(
+                      StructField("key2", StringType),
+                      StructField("key4", StringType),
+                      StructField("key3", StringType)
+                    )))
+              ))
+          )
+        ))
+      val data = java.util.Arrays.asList(
+        Row(2, Row(Row("v2b", "v4b", "v3b")))
+      )
+      spark
+        .createDataFrame(data, dataSchema)
+        .write
+        .format("paimon")
+        .mode("append")
+        .option("write.merge-schema", "true")
+        .saveAsTable("t")
+
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, Row(Row("v2a", "v3a", null))), Row(2, Row(Row("v2b", "v3b", "v4b"))))
+      )
+    }
+  }
+
+  test("Write merge schema: deeply nested struct with new fields") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("CREATE TABLE t (id INT, data STRUCT<a STRUCT<b STRUCT<c1 STRING, c2 STRING>>>)")
+        sql("INSERT INTO t VALUES (1, struct(struct(struct('c1v', 'c2v'))))")
+
+        // Add new field c3 at the deepest level
+        sql(
+          "INSERT INTO t BY NAME " +
+            "SELECT 2 AS id, " +
+            "named_struct('a', named_struct('b', named_struct('c1', 'c1v2', 'c3', 'c3v2', 'c2', 'c2v2'))) AS data")
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(
+            Row(1, Row(Row(Row("c1v", "c2v", null)))),
+            Row(2, Row(Row(Row("c1v2", "c2v2", "c3v2")))))
+        )
+      }
+    }
+  }
+
+  test("Write merge schema: nested struct new fields and top-level new column together") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("CREATE TABLE t (id INT, info STRUCT<f1 STRING, f2 STRING>)")
+        sql("INSERT INTO t VALUES (1, struct('a', 'b'))")
+
+        // Add both a new nested field f3 and a new top-level column extra
+        sql(
+          "INSERT INTO t BY NAME " +
+            "SELECT 2 AS id, " +
+            "named_struct('f1', 'c', 'f3', 'd', 'f2', 'e') AS info, " +
+            "'top' AS extra")
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(1, Row("a", "b", null), null), Row(2, Row("c", "e", "d"), "top"))
+        )
+      }
+    }
+  }
+
+  test("Write merge schema: nested struct with missing fields") {
+    withTable("t") {
+      withSparkSQLConf("spark.paimon.write.merge-schema" -> "true") {
+        sql("CREATE TABLE t (id INT, info STRUCT<f1 STRING, f2 STRING, f3 STRING>)")
+        sql("INSERT INTO t VALUES (1, struct('a', 'b', 'c'))")
+
+        // Data missing f1, no new fields — pure nested field missing
+        sql(
+          "INSERT INTO t BY NAME " +
+            "SELECT 2 AS id, " +
+            "named_struct('f2', 'y', 'f3', 'z') AS info")
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(1, Row("a", "b", "c")), Row(2, Row(null, "y", "z")))
+        )
+
+        // Data missing f2, and adding new field f4 in the middle
+        sql(
+          "INSERT INTO t BY NAME " +
+            "SELECT 3 AS id, " +
+            "named_struct('f1', 'x', 'f4', 'w', 'f3', 'z') AS info")
+
+        // Data missing f1, f4 at the end (no new fields, just missing + reorder)
+        sql(
+          "INSERT INTO t BY NAME " +
+            "SELECT 4 AS id, " +
+            "named_struct('f2', 'p', 'f3', 'q', 'f4', 'r') AS info")
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(
+            Row(1, Row("a", "b", "c", null)),
+            Row(2, Row(null, "y", "z", null)),
+            Row(3, Row("x", null, "z", "w")),
+            Row(4, Row(null, "p", "q", "r")))
+        )
+      }
+    }
+  }
+
+  test("Write merge schema: nested struct with type evolution") {
+    withTable("t") {
+      withSparkSQLConf(
+        "spark.paimon.write.merge-schema" -> "true",
+        "spark.paimon.write.merge-schema.explicit-cast" -> "true") {
+        sql("CREATE TABLE t (id INT, info STRUCT<f1 INT, f2 STRING>)")
+        sql("INSERT INTO t VALUES (1, struct(10, 'a'))")
+
+        // f1 evolves from INT to BIGINT, and add new field f3
+        sql(
+          "INSERT INTO t BY NAME " +
+            "SELECT 2 AS id, " +
+            "named_struct('f1', cast(20 as bigint), 'f3', 'new', 'f2', 'b') AS info")
+        checkAnswer(
+          sql("SELECT * FROM t ORDER BY id"),
+          Seq(Row(1, Row(10L, "a", null)), Row(2, Row(20L, "b", "new")))
+        )
+      }
+    }
+  }
 }

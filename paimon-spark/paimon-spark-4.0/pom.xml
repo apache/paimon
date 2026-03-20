@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Spark : 4.0 : 2.13</name>
 
     <properties>
-        <spark.version>4.0.1</spark.version>
+        <spark.version>4.0.2</spark.version>
     </properties>
 
     <dependencies>
@@ -120,13 +120,6 @@ under the License.
             <artifactId>spark-core_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.paimon</groupId>
-            <artifactId>paimon-lucene</artifactId>
-            <version>${project.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

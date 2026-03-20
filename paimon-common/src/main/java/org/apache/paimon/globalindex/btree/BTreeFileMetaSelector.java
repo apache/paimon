@@ -179,6 +179,22 @@ public class BTreeFileMetaSelector implements FunctionVisitor<Optional<List<Glob
     }
 
     @Override
+    public Optional<List<GlobalIndexIOMeta>> visitBetween(
+            FieldRef fieldRef, Object from, Object to) {
+        return Optional.of(
+                filter(
+                        meta -> {
+                            if (meta.onlyNulls()) {
+                                return false;
+                            }
+                            Object minKey = deserialize(meta.getFirstKey());
+                            Object maxKey = deserialize(meta.getLastKey());
+                            return comparator.compare(from, maxKey) <= 0
+                                    && comparator.compare(to, minKey) >= 0;
+                        }));
+    }
+
+    @Override
     public Optional<List<GlobalIndexIOMeta>> visitAnd(
             List<Optional<List<GlobalIndexIOMeta>>> children) {
         HashSet<GlobalIndexIOMeta> result = null;

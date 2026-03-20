@@ -178,7 +178,7 @@ class ReaderBasicTest(unittest.TestCase):
             ('f10', pa.decimal128(10, 2)),
             ('f11', pa.timestamp('ms')),
             ('f12', pa.date32()),
-            ('f13', pa.time64('us')),
+            ('f13', pa.time32('ms')),
         ])
         stats_enabled = random.random() < 0.5
         options = {'metadata.stats-mode': 'full'} if stats_enabled else {}
@@ -488,6 +488,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('name', pa.string()),
             ('price', pa.float64()),
         ])
+        pk_write_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
         pk_schema = Schema.from_pyarrow_schema(
             pk_pa_schema,
             primary_keys=['id'],
@@ -500,7 +505,7 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-        }, schema=pk_pa_schema)
+        }, schema=pk_write_schema)
 
         pk_write_builder = pk_table.new_batch_write_builder()
         pk_writer = pk_write_builder.new_write()
@@ -558,6 +563,11 @@ class ReaderBasicTest(unittest.TestCase):
             ('name', pa.string()),
             ('price', pa.float64()),
         ])
+        pk_pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+        ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=['id'],
@@ -570,7 +580,7 @@ class ReaderBasicTest(unittest.TestCase):
             'id': [1, 2, 3],
             'name': ['Alice', 'Bob', 'Charlie'],
             'price': [10.5, 20.3, 30.7],
-        }, schema=pa_schema)
+        }, schema=pk_pa_schema)
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()
@@ -640,9 +650,9 @@ class ReaderBasicTest(unittest.TestCase):
             DataField(10, "f10", AtomicType('BYTES'), 'desc'),
             DataField(11, "f11", AtomicType('DATE'), 'desc'),
             DataField(12, "f12", AtomicType('TIME(0)'), 'desc'),
-            DataField(13, "f13", AtomicType('TIME(3)'), 'desc'),
-            DataField(14, "f14", AtomicType('TIME(6)'), 'desc'),
-            DataField(15, "f15", AtomicType('TIME(9)'), 'desc'),
+            DataField(13, "f13", AtomicType('TIME(0)'), 'desc'),
+            DataField(14, "f14", AtomicType('TIME(0)'), 'desc'),
+            DataField(15, "f15", AtomicType('TIME(0)'), 'desc'),
             DataField(16, "f16", AtomicType('TIMESTAMP(0)'), 'desc'),
             DataField(17, "f17", AtomicType('TIMESTAMP(3)'), 'desc'),
             DataField(18, "f18", AtomicType('TIMESTAMP(6)'), 'desc'),
@@ -1047,6 +1057,12 @@ class ReaderBasicTest(unittest.TestCase):
             ('price', pa.float64()),
             ('category', pa.string())
         ])
+        pk_pa_schema = pa.schema([
+            pa.field('id', pa.int64(), nullable=False),
+            ('name', pa.string()),
+            ('price', pa.float64()),
+            ('category', pa.string())
+        ])
         schema = Schema.from_pyarrow_schema(
             pa_schema,
             primary_keys=['id'],
@@ -1060,7 +1076,7 @@ class ReaderBasicTest(unittest.TestCase):
             'name': ['Alice', 'Bob', 'Charlie', 'David', 'Eve'],
             'price': [10.5, 20.3, 30.7, 40.1, 50.9],
             'category': ['A', 'B', 'C', 'D', 'E']
-        }, schema=pa_schema)
+        }, schema=pk_pa_schema)
 
         write_builder = table.new_batch_write_builder()
         writer = write_builder.new_write()

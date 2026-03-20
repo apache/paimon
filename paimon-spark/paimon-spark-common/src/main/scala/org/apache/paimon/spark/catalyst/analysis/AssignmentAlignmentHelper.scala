@@ -89,21 +89,6 @@ trait AssignmentAlignmentHelper extends SQLConfHelper with ExpressionHelper {
     }
   }
 
-  /**
-   * Align all MergeActions in a MergeIntoTable based on the target table's output attributes.
-   * Returns a new MergeIntoTable with aligned matchedActions, notMatchedActions, and
-   * notMatchedBySourceActions.
-   */
-  protected def alignMergeIntoTable(
-      m: MergeIntoTable,
-      targetOutput: Seq[Attribute]): MergeIntoTable = {
-    m.copy(
-      matchedActions = m.matchedActions.map(alignMergeAction(_, targetOutput)),
-      notMatchedActions = m.notMatchedActions.map(alignMergeAction(_, targetOutput)),
-      notMatchedBySourceActions = m.notMatchedBySourceActions.map(alignMergeAction(_, targetOutput))
-    )
-  }
-
   private def recursiveAlignUpdates(
       targetAttrs: Seq[NamedExpression],
       updates: Seq[AttrUpdate],

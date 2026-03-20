@@ -42,7 +42,7 @@ def read_requirements():
 install_requires = read_requirements()
 
 long_description = "See Apache Paimon Python API \
-[Doc](https://paimon.apache.org/docs/master/program-api/python-api/) for usage."
+[Doc](https://paimon.apache.org/docs/master/pypaimon/python-api/) for usage."
 
 setup(
     name="pypaimon",
@@ -50,6 +50,11 @@ setup(
     packages=PACKAGES,
     include_package_data=True,
     install_requires=install_requires,
+    entry_points={
+        'console_scripts': [
+            'paimon=pypaimon.cli:main',
+        ],
+    },
     extras_require={
         'ray': [
             'ray>=2.10,<3; python_version>="3.7"',
@@ -57,18 +62,13 @@ setup(
         'torch': [
             'torch',
         ],
-        # faiss-cpu: optional for vector ANN index. 1.7.x has no wheel for 3.12+; 3.12+ use 1.10+.
-        'faiss': [
-            'faiss-cpu==1.7.2; python_version >= "3.6" and python_version < "3.7"',
-            'faiss-cpu==1.7.4; python_version >= "3.7" and python_version < "3.12"',
-            'faiss-cpu>=1.10,<2; python_version >= "3.12"',
+        'oss': [
+            'ossfs>=2021.8; python_version<"3.8"',
+            'ossfs>=2023; python_version>="3.8"'
         ],
-        'all': [
-            'ray>=2.10,<3; python_version>="3.7"',
-            'torch',
-            'faiss-cpu==1.7.2; python_version >= "3.6" and python_version < "3.7"',
-            'faiss-cpu==1.7.4; python_version >= "3.7" and python_version < "3.12"',
-            'faiss-cpu>=1.10,<2; python_version >= "3.12"',
+        'lance': [
+            'pylance>=0.20,<1; python_version>="3.9"',
+            'pylance>=0.10,<1; python_version>="3.8" and python_version<"3.9"'
         ],
     },
     description="Apache Paimon Python API",

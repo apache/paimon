@@ -41,6 +41,7 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.CLUSTERING_COLUMNS;
 import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL;
+import static org.apache.paimon.CoreOptions.CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE;
 import static org.apache.paimon.CoreOptions.CLUSTERING_STRATEGY;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CLUSTERING_SAMPLE_FACTOR;
@@ -104,13 +105,17 @@ public abstract class FlinkTableSinkBase
             throw new UnsupportedOperationException(
                     "Paimon doesn't support streaming INSERT OVERWRITE.");
         }
+        String name = tableIdentifier.asSummaryString();
+
         if (table instanceof FormatTable) {
             FormatTable formatTable = (FormatTable) table;
             return new PaimonDataStreamSinkProvider(
                     (dataStream) ->
                             new FlinkFormatTableDataStreamSink(
                                             formatTable, overwrite, staticPartitions)
-                                    .sinkFrom(dataStream));
+                                    .sinkFrom(dataStream),
+                    name,
+                    table);
         }
 
         Options conf = Options.fromMap(table.options());
@@ -122,7 +127,8 @@ public abstract class FlinkTableSinkBase
                             new DataStream<>(
                                     dataStream.getExecutionEnvironment(),
                                     dataStream.getTransformation()));
-                    if (!conf.get(CLUSTERING_INCREMENTAL)) {
+                    if (!conf.get(CLUSTERING_INCREMENTAL)
+                            || conf.get(CLUSTERING_INCREMENTAL_OPTIMIZE_WRITE)) {
                         builder.clusteringIfPossible(
                                 conf.get(CLUSTERING_COLUMNS),
                                 conf.get(CLUSTERING_STRATEGY),
@@ -134,7 +140,9 @@ public abstract class FlinkTableSinkBase
                     }
                     conf.getOptional(SINK_PARALLELISM).ifPresent(builder::parallelism);
                     return builder.build();
-                });
+                },
+                name,
+                table);
     }
 
     protected FlinkSinkBuilder createSinkBuilder() {

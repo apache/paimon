@@ -33,6 +33,8 @@ import java.io.IOException;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Base tests for spark read. */
 public class SparkChainTableITCase {
@@ -126,8 +128,8 @@ public class SparkChainTableITCase {
 
         setupChainTableBranches(spark, "chain_test");
         spark.close();
-        spark = builder.getOrCreate();
 
+        spark = builder.getOrCreate();
         /** Write main branch */
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250810') values (1, 1, '1'),(2, 1, '1');");
@@ -141,7 +143,7 @@ public class SparkChainTableITCase {
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250811') values (2, 2, '1-1' ),(4, 1, '1' );");
         spark.sql(
-                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250812') values (3, 2, '1-1' ),(4, 2, '1-1' );");
+                "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250812') values (3, 2, '1-1' ),(4, 2, '1-1' ),(7, 1, 'd7' );");
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250813') values (5, 1, '1' ),(6, 1, '1' );");
         spark.sql(
@@ -155,8 +157,8 @@ public class SparkChainTableITCase {
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250812') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1');");
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250814') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1'), (5, 1, '1' ), (6, 1, '1');");
-
         spark.close();
+
         spark = builder.getOrCreate();
         /** Main read */
         assertThat(
@@ -199,6 +201,48 @@ public class SparkChainTableITCase {
                         "[2,2,1-1,20250811]",
                         "[3,1,1,20250811]",
                         "[4,1,1,20250811]");
+
+        /** Chain read with filter */
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250811' and t1 = 1")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,1-1,20250811]");
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250811' and t1 = 4")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[4,1,1,20250811]");
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250811' and t1 = 7")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .isEmpty();
+
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt in ('20250811', '20250812') and t1 = 1")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,1-1,20250811]", "[1,2,1-1,20250812]");
+
+        /** Snapshot read with filter */
+        assertThat(
+                        spark.sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250812' and t1 = 7")
+                                .collectAsList())
+                .isEmpty();
 
         /** Multi partition Read */
         assertThat(
@@ -244,7 +288,8 @@ public class SparkChainTableITCase {
                         "[2,2,1-1,20250811]",
                         "[4,1,1,20250811]",
                         "[3,2,1-1,20250812]",
-                        "[4,2,1-1,20250812]");
+                        "[4,2,1-1,20250812]",
+                        "[7,1,d7,20250812]");
 
         /** Hybrid read */
         assertThat(
@@ -263,8 +308,8 @@ public class SparkChainTableITCase {
                         "[4,1,1,20250811]",
                         "[2,2,1-1,20250811]",
                         "[4,1,1,20250811]");
-
         spark.close();
+
         spark = builder.getOrCreate();
         spark.sql("set spark.paimon.branch=delta;");
         spark.sql(
@@ -280,12 +325,11 @@ public class SparkChainTableITCase {
                 spark.sql(
                         "SELECT t1,t2,t3 FROM `my_db1`.`chain_test$branch_delta` where dt = '20250814'");
         assertThat(df.count()).isEqualTo(1);
-
         spark.close();
+
         spark = builder.getOrCreate();
         /** Drop table */
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
-
         spark.close();
     }
 
@@ -319,8 +363,8 @@ public class SparkChainTableITCase {
 
         setupChainTableBranches(spark, "chain_test");
         spark.close();
-        spark = builder.getOrCreate();
 
+        spark = builder.getOrCreate();
         /** Write main branch */
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250810', hour = '22') values (1, 1, '1'),(2, 1, '1');");
@@ -348,8 +392,8 @@ public class SparkChainTableITCase {
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250811', hour = '00') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1');");
         spark.sql(
                 "insert overwrite table  `my_db1`.`chain_test` partition (dt = '20250811', hour = '02') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1'), (5, 1, '1' ), (6, 1, '1');");
-
         spark.close();
+
         spark = builder.getOrCreate();
         /** Main read */
         assertThat(
@@ -400,6 +444,16 @@ public class SparkChainTableITCase {
                         "[2,2,1-1,20250810,23]",
                         "[3,1,1,20250810,23]",
                         "[4,1,1,20250810,23]");
+
+        /** Chain read with non-partition filter */
+        assertThat(
+                        spark
+                                .sql(
+                                        "SELECT * FROM `my_db1`.`chain_test` where dt = '20250810' and hour = '23' and t1 = 1")
+                                .collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,2,1-1,20250810,23]");
 
         /** Multi partition Read */
         assertThat(
@@ -458,8 +512,8 @@ public class SparkChainTableITCase {
                         "[4,1,1,20250810,23]",
                         "[2,2,1-1,20250810,23]",
                         "[4,1,1,20250810,23]");
-
         spark.close();
+
         spark = builder.getOrCreate();
         spark.sql("set spark.paimon.branch=delta;");
         spark.sql(
@@ -475,8 +529,8 @@ public class SparkChainTableITCase {
                 spark.sql(
                         "SELECT t1,t2,t3 FROM `my_db1`.`chain_test$branch_delta` where dt = '20250811' and hour = '02'");
         assertThat(df.count()).isEqualTo(1);
-
         spark.close();
+
         spark = builder.getOrCreate();
         /** Drop table */
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test`;");
@@ -676,6 +730,116 @@ public class SparkChainTableITCase {
         // Drop table
         spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test_partial`;");
 
+        spark.close();
+    }
+
+    @Test
+    public void testDropSnapshotPartition(@TempDir java.nio.file.Path tempDir) throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+
+        spark.sql(
+                "CREATE TABLE IF NOT EXISTS \n"
+                        + "  `my_db1`.`chain_test_drop_partition` (\n"
+                        + "    `t1` BIGINT COMMENT 't1',\n"
+                        + "    `t2` BIGINT COMMENT 't2',\n"
+                        + "    `t3` STRING COMMENT 't3'\n"
+                        + "  ) PARTITIONED BY (`dt` STRING COMMENT 'dt') ROW FORMAT SERDE 'org.apache.paimon.hive.PaimonSerDe'\n"
+                        + "WITH\n"
+                        + "  SERDEPROPERTIES ('serialization.format' = '1') STORED AS INPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonInputFormat' OUTPUTFORMAT 'org.apache.paimon.hive.mapred.PaimonOutputFormat' TBLPROPERTIES (\n"
+                        + "    'bucket-key' = 't1',\n"
+                        + "    'primary-key' = 'dt,t1',\n"
+                        + "    'partition.timestamp-pattern' = '$dt',\n"
+                        + "    'partition.timestamp-formatter' = 'yyyyMMdd',\n"
+                        + "    'chain-table.enabled' = 'true',\n"
+                        + "    'bucket' = '2',\n"
+                        + "    'merge-engine' = 'deduplicate', \n"
+                        + "    'sequence.field' = 't2'\n"
+                        + "  )");
+
+        setupChainTableBranches(spark, "chain_test_drop_partition");
+        spark.close();
+
+        spark = builder.getOrCreate();
+        /** Write delta branch */
+        spark.sql("set spark.paimon.branch=delta;");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition` partition (dt = '20260101') values (1, 1, '1'),(2, 1, '1');");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition` partition (dt = '20260102') values (1, 2, '1-1' ),(3, 1, '1' );");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition` partition (dt = '20260103') values (2, 2, '1-1' ),(4, 1, '1' );");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition` partition (dt = '20260104') values (3, 2, '1-1' ),(4, 2, '1-1' );");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition` partition (dt = '20260105') values (5, 1, '1' ),(6, 1, '1' );");
+
+        /** Write snapshot branch */
+        spark.sql("set spark.paimon.branch=snapshot;");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition`  partition (dt = '20260101')  values (1, 2, '1-1'),(2, 1, '1'),(3, 1, '1');");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition` partition (dt = '20260103') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1');");
+        spark.sql(
+                "insert overwrite table  `my_db1`.`chain_test_drop_partition` partition (dt = '20260105') values (1, 2, '1-1'),(2, 2, '1-1'),(3, 2, '1-1'), (4, 2, '1-1'), (5, 1, '1' ), (6, 1, '1');");
+        spark.close();
+
+        final SparkSession session = builder.getOrCreate();
+        assertThatNoException()
+                .isThrownBy(
+                        () -> {
+                            session.sql(
+                                    "alter table `my_db1`.`chain_test_drop_partition$branch_snapshot` drop partition (dt = '20260105');");
+                        });
+        assertThatThrownBy(
+                () -> {
+                    session.sql(
+                            "alter table `my_db1`.`chain_test_drop_partition$branch_snapshot` drop partition (dt = '20260101');");
+                });
+        session.close();
+
+        spark = builder.getOrCreate();
+        /** Drop table */
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test_drop_partition`;");
+
+        spark.close();
+    }
+
+    @Test
+    public void testChainTableCacheInvalidation(@TempDir java.nio.file.Path tempDir)
+            throws IOException {
+        Path warehousePath = new Path("file:" + tempDir.toString());
+        SparkSession.Builder builder = createSparkSessionBuilder(warehousePath);
+        SparkSession spark = builder.getOrCreate();
+        spark.sql("CREATE DATABASE IF NOT EXISTS my_db1");
+        spark.sql("USE spark_catalog.my_db1");
+        spark.sql(
+                "CREATE TABLE chain_test_t ("
+                        + "    `t1` string ,"
+                        + "    `t2` string ,"
+                        + "    `t3` string"
+                        + ") PARTITIONED BY (`date` string)"
+                        + "TBLPROPERTIES ("
+                        + "   'chain-table.enabled' = 'true'"
+                        + "  ,'primary-key' = 'date,t1'"
+                        + "  ,'sequence.field' = 't2'"
+                        + "  ,'bucket-key' = 't1'"
+                        + "  ,'bucket' = '1'"
+                        + "  ,'partition.timestamp-pattern' = '$date'"
+                        + "  ,'partition.timestamp-formatter' = 'yyyyMMdd'"
+                        + ")");
+        setupChainTableBranches(spark, "chain_test_t");
+        spark.sql(
+                "insert overwrite `chain_test_t$branch_delta` partition (date = '20260224') values ('1', '1', '1');");
+        assertThat(
+                        spark.sql("SELECT * FROM `chain_test_t`").collectAsList().stream()
+                                .map(Row::toString)
+                                .collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("[1,1,1,20260224]");
+        spark.sql("DROP TABLE IF EXISTS `my_db1`.`chain_test_t`;");
         spark.close();
     }
 }

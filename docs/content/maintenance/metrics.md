@@ -294,6 +294,26 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Gauge</td>
             <td>The average total file size of all active (currently being written) buckets.</td>
         </tr>
+        <tr>
+            <td>maxSortBufferUsedBytes</td>
+            <td>Gauge</td>
+            <td>The maximum sort buffer memory currently used across all active compaction buckets, in bytes. High values relative to <code>maxSortBufferTotalBytes</code> indicate memory pressure during compaction; consider lowering <code>sort-spill-threshold</code> or reducing <code>sort-spill-buffer-size</code>.</td>
+        </tr>
+        <tr>
+            <td>avgSortBufferUsedBytes</td>
+            <td>Gauge</td>
+            <td>The average sort buffer memory used across all active compaction buckets, in bytes.</td>
+        </tr>
+        <tr>
+            <td>maxSortBufferUtilisationPercent</td>
+            <td>Gauge</td>
+            <td>The maximum sort buffer utilisation percentage (0–100) across all active compaction buckets. A value consistently near 100 indicates the sort buffer pool is exhausted and spilling to disk is occurring or imminent.</td>
+        </tr>
+        <tr>
+            <td>avgSortBufferUtilisationPercent</td>
+            <td>Gauge</td>
+            <td>The average sort buffer utilisation percentage across all active compaction buckets.</td>
+        </tr>
     </tbody>
 </table>
 
@@ -390,6 +410,12 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
             <td>Flink Source Operator</td>
             <td>Gauge</td>
             <td>Time difference between reading the data file and file creation.</td>
+        </tr>
+        <tr>
+            <td>sourceParallelismUpperBound</td>
+            <td>Flink Source Enumerator</td>
+            <td>Gauge</td>
+            <td>Recommended upper bound of parallelism for auto-scaling systems. Note: This is a recommendation, not a hard limit.</td>
         </tr>
     </tbody>
 </table>

@@ -20,13 +20,16 @@ from typing import Callable, Dict, List, Optional, Union
 
 from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest, CommitTableRequest,
                                       CreateDatabaseRequest,
-                                      CreateTableRequest, RenameTableRequest)
+                                      CreateTableRequest, RenameTableRequest,
+                                      RollbackTableRequest)
 from pypaimon.api.api_response import (CommitTableResponse, ConfigResponse,
                                        GetDatabaseResponse, GetTableResponse,
                                        GetTableTokenResponse,
                                        ListDatabasesResponse,
+                                       ListPartitionsResponse,
                                        ListTablesResponse, PagedList,
-                                       PagedResponse)
+                                       PagedResponse, GetTableSnapshotResponse,
+                                       Partition)
 from pypaimon.api.auth import AuthProviderFactory, RESTAuthFunction
 from pypaimon.api.client import HttpClient
 from pypaimon.api.resource_paths import ResourcePaths
@@ -46,6 +49,8 @@ class RESTApi:
     PAGE_TOKEN = "pageToken"
     DATABASE_NAME_PATTERN = "databaseNamePattern"
     TABLE_NAME_PATTERN = "tableNamePattern"
+    TABLE_TYPE = "tableType"
+    PARTITION_NAME_PATTERN = "partitionNamePattern"
     TOKEN_EXPIRATION_SAFE_TIME_MILLIS = 3_600_000
 
     def __init__(self, options: Union[Options, Dict[str, str]], config_required: bool = True):
@@ -228,6 +233,7 @@ class RESTApi:
             max_results: Optional[int] = None,
             page_token: Optional[str] = None,
             table_name_pattern: Optional[str] = None,
+            table_type: Optional[str] = None,
     ) -> PagedList[str]:
         if not database_name or not database_name.strip():
             raise ValueError("Database name cannot be empty")
@@ -235,7 +241,12 @@ class RESTApi:
         response = self.client.get_with_params(
             self.resource_paths.tables(database_name),
             self.__build_paged_query_params(
-                max_results, page_token, {self.TABLE_NAME_PATTERN: table_name_pattern}
+                max_results,
+                page_token,
+                {
+                    self.TABLE_NAME_PATTERN: table_name_pattern,
+                    self.TABLE_TYPE: table_type,
+                },
             ),
             ListTablesResponse,
             self.rest_auth_function,
@@ -350,6 +361,69 @@ class RESTApi:
             self.rest_auth_function
         )
         return response.is_success()
+
+    def rollback_to(self, identifier, instant, from_snapshot=None):
+        """Rollback table to the given instant.
+
+        Args:
+            identifier: The table identifier.
+            instant: The Instant (SnapshotInstant or TagInstant) to rollback to.
+            from_snapshot: Optional snapshot ID. Success only occurs when the
+                latest snapshot is this snapshot.
+
+        Raises:
+            NoSuchResourceException: If the table, snapshot or tag does not exist.
+            ForbiddenException: If no permission to access this table.
+        """
+        database_name, table_name = self.__validate_identifier(identifier)
+        request = RollbackTableRequest(instant=instant, from_snapshot=from_snapshot)
+        self.client.post(
+            self.resource_paths.rollback_table(database_name, table_name),
+            request,
+            self.rest_auth_function
+        )
+
+    def load_snapshot(self, identifier: Identifier) -> Optional['TableSnapshot']:
+        """Load latest snapshot for table.
+
+        Args:
+            identifier: Database name and table name.
+
+        Returns:
+            TableSnapshot instance or None if snapshot not found.
+        """
+        database_name, table_name = self.__validate_identifier(identifier)
+        response = self.client.get(
+            self.resource_paths.table_snapshot(database_name, table_name),
+            GetTableSnapshotResponse,
+            self.rest_auth_function
+        )
+        if response is None:
+            return None
+        return response.get_snapshot()
+
+    def list_partitions_paged(
+            self,
+            identifier: Identifier,
+            max_results: Optional[int] = None,
+            page_token: Optional[str] = None,
+            partition_name_pattern: Optional[str] = None,
+    ) -> PagedList[Partition]:
+        database_name, table_name = self.__validate_identifier(identifier)
+
+        response = self.client.get_with_params(
+            self.resource_paths.partitions(database_name, table_name),
+            self.__build_paged_query_params(
+                max_results,
+                page_token,
+                {self.PARTITION_NAME_PATTERN: partition_name_pattern},
+            ),
+            ListPartitionsResponse,
+            self.rest_auth_function,
+        )
+
+        partitions = response.data() or []
+        return PagedList(partitions, response.get_next_page_token())
 
     @staticmethod
     def __validate_identifier(identifier: Identifier):

@@ -28,6 +28,8 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.catalog.PropertyChange;
+import org.apache.paimon.consumer.ConsumerInfo;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -124,8 +126,12 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
+import static org.apache.paimon.CoreOptions.COMMIT_USER_PREFIX;
+import static org.apache.paimon.CoreOptions.END_INPUT_CHECK_PARTITION_EXPIRE;
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_STRATEGY;
+import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
 import static org.apache.paimon.CoreOptions.QUERY_AUTH_ENABLED;
 import static org.apache.paimon.CoreOptions.TYPE;
 import static org.apache.paimon.TableType.OBJECT_TABLE;
@@ -133,6 +139,7 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.rest.RESTApi.PAGE_TOKEN;
 import static org.apache.paimon.rest.RESTCatalogOptions.DLF_OSS_ENDPOINT;
+import static org.apache.paimon.rest.RESTCatalogOptions.IO_CACHE_ENABLED;
 import static org.apache.paimon.rest.auth.DLFToken.TOKEN_DATE_FORMATTER;
 import static org.apache.paimon.utils.SnapshotManagerTest.createSnapshotWithMillis;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -730,6 +737,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 catalog.listTableDetailsPaged(databaseName, 5, null, null, "non-existent-type");
         assertThat(nonExistentTypeWithMaxResults.getElements()).isEmpty();
         assertThat(nonExistentTypeWithMaxResults.getNextPageToken()).isNull();
+    }
+
+    @Test
+    public void testListTableDetails() throws Exception {
+        // List table details returns an empty list when there are no tables in the database
+        String databaseName = "table_details_db";
+        catalog.createDatabase(databaseName, false);
+        List<Table> tableDetails = catalog.listTableDetails(databaseName);
+        assertThat(tableDetails).isEmpty();
+
+        String[] tableNames = {"table1", "table2", "table3", "abd", "def", "opr", "table_name"};
+        String[] expectedTableNames = Arrays.stream(tableNames).sorted().toArray(String[]::new);
+        for (String tableName : tableNames) {
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName), DEFAULT_TABLE_SCHEMA, false);
+        }
+
+        tableDetails = catalog.listTableDetails(databaseName);
+        assertThat(tableDetails).hasSize(tableNames.length);
+        List<String> actualTableNames =
+                tableDetails.stream().map(Table::name).sorted().collect(Collectors.toList());
+        assertThat(actualTableNames).containsExactly(expectedTableNames);
+
+        // List table details throws DatabaseNotExistException when the database does not exist
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(() -> catalog.listTableDetails("non_existing_db"));
     }
 
     @Test
@@ -1612,6 +1645,63 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testListPartitionsByNamesExceedsLimit() throws Exception {
+        if (!supportPartitions()) {
+            return;
+        }
+
+        String databaseName = "partitions_by_names_limit_db";
+        catalog.dropDatabase(databaseName, true, true);
+        catalog.createDatabase(databaseName, true);
+        Identifier identifier = Identifier.create(databaseName, "table");
+
+        catalog.createTable(
+                identifier,
+                Schema.newBuilder()
+                        .option(METASTORE_PARTITIONED_TABLE.key(), "true")
+                        .option(METASTORE_TAG_TO_PARTITION.key(), "dt")
+                        .column("col", DataTypes.INT())
+                        .column("dt", DataTypes.STRING())
+                        .partitionKeys("dt")
+                        .build(),
+                true);
+
+        // Create a list with more than 1000 partition specs
+        List<Map<String, String>> tooManySpecs = new ArrayList<>();
+        for (int i = 0; i < 1001; i++) {
+            tooManySpecs.add(singletonMap("dt", String.format("202501%04d", i)));
+        }
+
+        // Should throw IllegalArgumentException
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> catalog.listPartitionsByNames(identifier, tooManySpecs));
+    }
+
+    @Test
+    void testPartitionExpire() throws Exception {
+        // create table
+        Identifier identifier = Identifier.create("test_db", "test_partition_expire");
+        Map<String, String> options = new HashMap<>();
+        options.put(PARTITION_EXPIRATION_STRATEGY.key(), "update-time");
+        options.put(PARTITION_EXPIRATION_TIME.key(), "1 ms");
+        options.put(END_INPUT_CHECK_PARTITION_EXPIRE.key(), "TRUE");
+        options.put(METASTORE_PARTITIONED_TABLE.key(), "TRUE");
+        createTable(identifier, options, Lists.newArrayList("col1"));
+
+        // write and expire table
+        Table table =
+                catalog.getTable(identifier)
+                        .copy(singletonMap(COMMIT_USER_PREFIX.key(), "my_user"));
+        batchWrite(table, Arrays.asList(1, 2, 3));
+        Thread.sleep(1000);
+        batchWrite(table, Arrays.asList(4, 5, 6));
+        Snapshot snapshot = table.latestSnapshot().get();
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
+        assertThat(snapshot.commitUser()).startsWith("my_user");
+    }
+
+    @Test
     void testRefreshFileIO() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         List<Identifier> identifiers =
@@ -1660,6 +1750,27 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
         RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
         RESTToken fileDataToken = fileIO.validToken();
         assertEquals("test-endpoint", fileDataToken.token().get("fs.oss.endpoint"));
+    }
+
+    @Test
+    void testValidTokenWithIOCacheEnabled() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(IO_CACHE_ENABLED.key(), "true");
+        this.catalog = newRestCatalogWithDataToken(options);
+        Identifier identifier =
+                Identifier.create("test_data_token", "table_for_testing_io_cache_enabled");
+        RESTToken expiredDataToken =
+                new RESTToken(
+                        ImmutableMap.of("akId", "akId", "akSecret", UUID.randomUUID().toString()),
+                        System.currentTimeMillis() + 3600_000L);
+        setDataTokenToRestServerForMock(identifier, expiredDataToken);
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+        RESTTokenFileIO fileIO = (RESTTokenFileIO) fileStoreTable.fileIO();
+        RESTToken fileDataToken = fileIO.validToken();
+
+        // Verify IO_CACHE_ENABLED is merged into token
+        assertEquals("true", fileDataToken.token().get(IO_CACHE_ENABLED.key()));
     }
 
     @Test
@@ -2499,15 +2610,146 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    void testListConsumers() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "consumers_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        // Create some snapshots
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+
+        // Create consumers
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
+
+        // Test listConsumersPaged
+        assertThat(catalog.listConsumersPaged(identifier, null, null).getElements().size())
+                .isEqualTo(2);
+
+        // Test with RESTApi directly
+        RESTApi api = ((RESTCatalog) catalog).api();
+        List<ConsumerInfo> consumers =
+                PagedList.listAllFromPagedApi(
+                        token -> api.listConsumersPaged(identifier, null, token));
+        assertThat(consumers)
+                .extracting(ConsumerInfo::getConsumerId)
+                .containsExactlyInAnyOrder("consumer1", "consumer2");
+        assertThat(consumers)
+                .extracting(ConsumerInfo::getNextSnapshot)
+                .containsExactlyInAnyOrder(1L, 2L);
+    }
+
+    @Test
+    void testResetConsumer() throws Exception {
+        Identifier identifier = Identifier.create("test_table_db", "reset_consumer_table");
+        catalog.createDatabase(identifier.getDatabaseName(), true);
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(new DataField(0, "col", DataTypes.INT())),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        emptyMap(),
+                        ""),
+                true);
+        FileStoreTable fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+
+        // Create some snapshots
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+        batchWrite(fileStoreTable, singletonList(1));
+
+        // Create consumers
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.resetConsumer("consumer1", new org.apache.paimon.consumer.Consumer(1));
+        consumerManager.resetConsumer("consumer2", new org.apache.paimon.consumer.Consumer(2));
+
+        // Verify initial state
+        List<ConsumerInfo> consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+
+        // Test reset consumer with new snapshot id
+        catalog.resetConsumer(identifier, "consumer1", 3L);
+
+        // Verify consumer1 has been reset
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(2);
+        assertThat(consumers)
+                .filteredOn(c -> c.getConsumerId().equals("consumer1"))
+                .extracting(ConsumerInfo::getNextSnapshot)
+                .containsExactly(3L);
+
+        // Test reset consumer with null snapshot id (delete consumer)
+        catalog.resetConsumer(identifier, "consumer2", null);
+
+        // Verify consumer2 has been deleted
+        consumers =
+                PagedList.listAllFromPagedApi(
+                        token ->
+                                ((RESTCatalog) catalog)
+                                        .api()
+                                        .listConsumersPaged(identifier, null, token));
+        assertThat(consumers).hasSize(1);
+        assertThat(consumers).extracting(ConsumerInfo::getConsumerId).containsExactly("consumer1");
+    }
+
+    @Test
     public void testObjectTable() throws Exception {
-        // create object table
+        // create object table with custom options
         catalog.createDatabase("test_db", false);
         Identifier identifier = Identifier.create("test_db", "object_table");
-        Schema schema = Schema.newBuilder().option(TYPE.key(), OBJECT_TABLE.toString()).build();
+        Schema schema =
+                Schema.newBuilder()
+                        .option(TYPE.key(), OBJECT_TABLE.toString())
+                        .option("custom-key", "custom-value")
+                        .build();
         catalog.createTable(identifier, schema, false);
         Table table = catalog.getTable(identifier);
         assertThat(table).isInstanceOf(ObjectTable.class);
         ObjectTable objectTable = (ObjectTable) table;
+
+        // verify options are preserved
+        assertThat(objectTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(objectTable.options().containsKey("path")).isTrue();
+
+        // verify copy merges dynamic options
+        ObjectTable copiedTable =
+                objectTable.copy(Collections.singletonMap("dynamic-key", "dynamic-value"));
+        assertThat(copiedTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(copiedTable.options()).containsEntry("dynamic-key", "dynamic-value");
+
+        // verify copy can override existing options
+        ObjectTable overriddenTable =
+                objectTable.copy(Collections.singletonMap("custom-key", "overridden"));
+        assertThat(overriddenTable.options()).containsEntry("custom-key", "overridden");
+
+        // verify original table is not modified after copy
+        assertThat(objectTable.options()).containsEntry("custom-key", "custom-value");
+        assertThat(objectTable.options()).doesNotContainKey("dynamic-key");
 
         // write file to object path
         FileIO fileIO = objectTable.fileIO();

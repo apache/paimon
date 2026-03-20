@@ -79,7 +79,8 @@ public class DataEvolutionTableCompactSource
         private final DataEvolutionCompactCoordinator compactionCoordinator;
 
         public CompactSourceReader(FileStoreTable table, PartitionPredicate partitions) {
-            compactionCoordinator = new DataEvolutionCompactCoordinator(table, partitions, false);
+            compactionCoordinator =
+                    new DataEvolutionCompactCoordinator(table, partitions, false, false);
         }
 
         @Override

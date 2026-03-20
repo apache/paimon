@@ -18,9 +18,10 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.OrderType;
 import org.apache.paimon.flink.action.SortCompactAction;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -33,26 +34,29 @@ public abstract class TableSorter {
 
     protected final StreamExecutionEnvironment batchTEnv;
     protected final DataStream<RowData> origin;
-    protected final FileStoreTable table;
+    protected final CoreOptions options;
+    protected final RowType rowType;
     protected final List<String> orderColNames;
 
     public TableSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
-            FileStoreTable table,
+            CoreOptions options,
+            RowType rowType,
             List<String> orderColNames) {
         this.batchTEnv = batchTEnv;
         this.origin = origin;
-        this.table = table;
+        this.options = options;
+        this.rowType = rowType;
         this.orderColNames = orderColNames;
         checkColNames();
     }
 
     private void checkColNames() {
-        if (orderColNames.size() < 1) {
+        if (orderColNames.isEmpty()) {
             throw new IllegalArgumentException("order column names should not be empty.");
         }
-        List<String> columnNames = table.rowType().getFieldNames();
+        List<String> columnNames = rowType.getFieldNames();
         for (String zColumn : orderColNames) {
             if (!columnNames.contains(zColumn)) {
                 throw new RuntimeException(
@@ -70,16 +74,17 @@ public abstract class TableSorter {
     public static TableSorter getSorter(
             StreamExecutionEnvironment batchTEnv,
             DataStream<RowData> origin,
-            FileStoreTable fileStoreTable,
+            CoreOptions options,
+            RowType rowType,
             TableSortInfo sortInfo) {
         OrderType sortStrategy = sortInfo.getSortStrategy();
         switch (sortStrategy) {
             case ORDER:
-                return new OrderSorter(batchTEnv, origin, fileStoreTable, sortInfo);
+                return new OrderSorter(batchTEnv, origin, options, rowType, sortInfo);
             case ZORDER:
-                return new ZorderSorter(batchTEnv, origin, fileStoreTable, sortInfo);
+                return new ZorderSorter(batchTEnv, origin, options, rowType, sortInfo);
             case HILBERT:
-                return new HilbertSorter(batchTEnv, origin, fileStoreTable, sortInfo);
+                return new HilbertSorter(batchTEnv, origin, options, rowType, sortInfo);
             default:
                 throw new IllegalArgumentException("cannot match order type: " + sortStrategy);
         }

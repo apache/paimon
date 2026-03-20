@@ -112,6 +112,11 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        return applyOffset(wrapped.visitBetween(fieldRef, from, to));
+    }
+
+    @Override
     public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         return applyOffset(
                 wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to)));

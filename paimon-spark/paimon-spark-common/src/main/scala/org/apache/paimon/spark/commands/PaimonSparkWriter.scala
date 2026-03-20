@@ -123,7 +123,9 @@ case class PaimonSparkWriter(
     val postponePartitionBucketComputer: Option[BinaryRow => Integer] =
       if (postponeBatchWriteFixedBucket) {
         val knownNumBuckets = PostponeUtils.getKnownNumBuckets(table)
-        val defaultPostponeNumBuckets = withInitBucketCol.rdd.getNumPartitions
+        val defaultPostponeNumBuckets = Math.min(
+          withInitBucketCol.rdd.getNumPartitions,
+          table.coreOptions().postponeBatchWriteFixedBucketMaxParallelism)
         Some((p: BinaryRow) => knownNumBuckets.getOrDefault(p, defaultPostponeNumBuckets))
       } else {
         None
@@ -136,7 +138,6 @@ case class PaimonSparkWriter(
       writeRowTracking,
       fullCompactionDeltaCommits,
       batchId,
-      coreOptions.blobAsDescriptor(),
       table.catalogEnvironment().catalogContext(),
       postponePartitionBucketComputer
     )
@@ -302,7 +303,10 @@ case class PaimonSparkWriter(
           }
         }
         val clusteringColumns = coreOptions.clusteringColumns()
-        if ((!coreOptions.clusteringIncrementalEnabled()) && (!clusteringColumns.isEmpty)) {
+        if (
+          (!coreOptions.clusteringIncrementalEnabled() || coreOptions
+            .clusteringIncrementalOptimizeWrite()) && (!clusteringColumns.isEmpty)
+        ) {
           val strategy = coreOptions.clusteringStrategy(tableSchema.fields().size())
           val sorter = TableSorter.getSorter(table, strategy, clusteringColumns)
           input = sorter.sort(data)
@@ -453,7 +457,6 @@ case class PaimonSparkWriter(
             val toPaimonRow = SparkRowUtils.toPaimonRow(
               rowType,
               rowKindColIdx,
-              table.coreOptions().blobAsDescriptor(),
               table.catalogEnvironment().catalogContext())
 
             bootstrapIterator.asScala

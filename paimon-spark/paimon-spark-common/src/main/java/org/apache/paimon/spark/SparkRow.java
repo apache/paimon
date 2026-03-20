@@ -27,6 +27,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.variant.Variant;
 import org.apache.paimon.spark.util.shim.TypeUtils;
@@ -61,24 +62,17 @@ public class SparkRow implements InternalRow, Serializable {
     private final RowType type;
     private final Row row;
     private final RowKind rowKind;
-    private final boolean blobAsDescriptor;
     private final UriReaderFactory uriReaderFactory;
 
     public SparkRow(RowType type, Row row) {
-        this(type, row, RowKind.INSERT, false, null);
+        this(type, row, RowKind.INSERT, null);
     }
 
-    public SparkRow(
-            RowType type,
-            Row row,
-            RowKind rowkind,
-            boolean blobAsDescriptor,
-            CatalogContext catalogContext) {
+    public SparkRow(RowType type, Row row, RowKind rowkind, CatalogContext catalogContext) {
         this.type = type;
         this.row = row;
         this.rowKind = rowkind;
-        this.blobAsDescriptor = blobAsDescriptor;
-        this.uriReaderFactory = blobAsDescriptor ? new UriReaderFactory(catalogContext) : null;
+        this.uriReaderFactory = new UriReaderFactory(catalogContext);
     }
 
     @Override
@@ -167,18 +161,25 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public Blob getBlob(int i) {
-        if (blobAsDescriptor) {
-            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(row.getAs(i));
+        byte[] bytes = row.getAs(i);
+        boolean blobDes = BlobDescriptor.isBlobDescriptor(bytes);
+        if (blobDes) {
+            BlobDescriptor blobDescriptor = BlobDescriptor.deserialize(bytes);
             UriReader uriReader = uriReaderFactory.create(blobDescriptor.uri());
             return Blob.fromDescriptor(uriReader, blobDescriptor);
         } else {
-            return new BlobData(row.getAs(i));
+            return new BlobData(bytes);
         }
     }
 
     @Override
     public InternalArray getArray(int i) {
         return new PaimonArray(((ArrayType) type.getTypeAt(i)).getElementType(), row.getList(i));
+    }
+
+    @Override
+    public InternalVector getVector(int pos) {
+        throw new UnsupportedOperationException("Not support VectorType yet.");
     }
 
     @Override
@@ -351,6 +352,11 @@ public class SparkRow implements InternalRow, Serializable {
                             ? JavaConverters.seqAsJavaList((scala.collection.Seq<Object>) o)
                             : (List<Object>) o;
             return new PaimonArray(((ArrayType) elementType).getElementType(), array);
+        }
+
+        @Override
+        public InternalVector getVector(int pos) {
+            throw new UnsupportedOperationException("Not support VectorType yet.");
         }
 
         @Override

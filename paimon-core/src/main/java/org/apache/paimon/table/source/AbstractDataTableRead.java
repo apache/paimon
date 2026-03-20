@@ -148,7 +148,7 @@ public abstract class AbstractDataTableRead implements InnerTableRead {
         if (readType != null) {
             int[] projection = schema.logicalRowType().getFieldIndices(readType.getFieldNames());
             Optional<Predicate> optional =
-                    predicate.visit(new PredicateProjectionConverter(projection));
+                    predicate.visit(PredicateProjectionConverter.fromProjection(projection));
             if (!optional.isPresent()) {
                 return reader;
             }

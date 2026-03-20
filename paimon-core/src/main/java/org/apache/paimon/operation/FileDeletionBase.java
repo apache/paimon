@@ -75,7 +75,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
     private final boolean cleanEmptyDirectories;
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
 
-    private final Executor deleteFileExecutor;
+    private final Executor fileExecutor;
 
     protected boolean changelogDecoupled;
 
@@ -102,7 +102,11 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         this.statsFileHandler = statsFileHandler;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.deletionBuckets = new HashMap<>();
-        this.deleteFileExecutor = FileOperationThreadPool.getExecutorService(deleteFileThreadNum);
+        this.fileExecutor = FileOperationThreadPool.getExecutorService(deleteFileThreadNum);
+    }
+
+    public Executor fileExecutor() {
+        return fileExecutor;
     }
 
     /**
@@ -330,6 +334,13 @@ public abstract class FileDeletionBase<T extends Snapshot> {
             boolean deleteDataManifestLists,
             boolean deleteChangelog) {
         if (deleteDataManifestLists) {
+            // deleteDataManifestLists will be false
+            // with changelog decouple + none changelog producer.
+            // Why don't we clean base manifest in this scenario?
+            // Because cleanUnusedManifestList is compared with the earliest snapshot.
+            // For none changelog producer, changelog files are the level 0 files.
+            // Even if these files are not used by the earliest snapshot,
+            // we have to keep them as changelog, and clean then in ChangelogDeletion.
             cleanUnusedManifestList(snapshot.baseManifestList(), skippingSet);
             cleanUnusedManifestList(snapshot.deltaManifestList(), skippingSet);
         }
@@ -461,7 +472,7 @@ public abstract class FileDeletionBase<T extends Snapshot> {
         List<CompletableFuture<Void>> deletionFutures = new ArrayList<>(files.size());
         for (F file : files) {
             deletionFutures.add(
-                    CompletableFuture.runAsync(() -> deletion.accept(file), deleteFileExecutor));
+                    CompletableFuture.runAsync(() -> deletion.accept(file), fileExecutor));
         }
 
         try {

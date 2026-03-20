@@ -30,7 +30,6 @@ import org.apache.paimon.operation.BucketedAppendFileStoreWrite;
 import org.apache.paimon.operation.DataEvolutionFileStoreScan;
 import org.apache.paimon.operation.DataEvolutionSplitRead;
 import org.apache.paimon.operation.RawFileSplitRead;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
@@ -41,12 +40,6 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.Comparator;
-import java.util.List;
-import java.util.Optional;
-
-import static org.apache.paimon.predicate.PredicateBuilder.and;
-import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStore} for reading and writing {@link InternalRow}. */
 public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
@@ -83,8 +76,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
-                options.fileIndexReadEnabled(),
-                options.rowTrackingEnabled());
+                options);
     }
 
     public DataEvolutionSplitRead newDataEvolutionRead() {
@@ -93,12 +85,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                     "Field merge read is only supported when data-evolution.enabled is true.");
         }
         return new DataEvolutionSplitRead(
-                fileIO,
-                schemaManager,
-                schema,
-                rowType,
-                FileFormatDiscover.of(options),
-                pathFactory());
+                fileIO, schemaManager, schema, rowType, options, pathFactory());
     }
 
     @Override
@@ -149,26 +136,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public AppendOnlyFileStoreScan newScan() {
         BucketSelectConverter bucketSelectConverter =
-                predicate -> {
-                    if (bucketMode() != BucketMode.HASH_FIXED) {
-                        return Optional.empty();
-                    }
-
-                    if (bucketKeyType.getFieldCount() == 0) {
-                        return Optional.empty();
-                    }
-
-                    List<Predicate> bucketFilters =
-                            pickTransformFieldMapping(
-                                    splitAnd(predicate),
-                                    rowType.getFieldNames(),
-                                    bucketKeyType.getFieldNames());
-                    if (!bucketFilters.isEmpty()) {
-                        return BucketSelectConverter.create(
-                                and(bucketFilters), bucketKeyType, options.bucketFunctionType());
-                    }
-                    return Optional.empty();
-                };
+                new BucketSelectConverter(
+                        bucketMode(),
+                        options.bucketFunctionType(),
+                        rowType,
+                        partitionType,
+                        bucketKeyType);
 
         if (options().dataEvolutionEnabled()) {
             return new DataEvolutionFileStoreScan(
@@ -191,7 +164,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 manifestFileFactory(),
                 options.scanManifestParallelism(),
                 options.fileIndexReadEnabled(),
-                options.deletionVectorsEnabled());
+                options.deletionVectorsEnabled(),
+                options.dataEvolutionEnabled());
     }
 
     @Override

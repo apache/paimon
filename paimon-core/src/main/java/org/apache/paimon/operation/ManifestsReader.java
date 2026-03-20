@@ -28,7 +28,7 @@ import org.apache.paimon.stats.SimpleStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BiFilter;
-import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -55,7 +55,7 @@ public class ManifestsReader {
     @Nullable private Integer specifiedLevel = null;
     @Nullable private PartitionPredicate partitionFilter = null;
     @Nullable private BiFilter<Integer, Integer> levelMinMaxFilter = null;
-    @Nullable protected List<Range> rowRanges;
+    @Nullable protected RowRangeIndex rowRangeIndex = null;
 
     public ManifestsReader(
             RowType partitionType,
@@ -108,8 +108,8 @@ public class ManifestsReader {
         return this;
     }
 
-    public ManifestsReader withRowRanges(List<Range> rowRanges) {
-        this.rowRanges = rowRanges;
+    public ManifestsReader withRowRangeIndex(RowRangeIndex rowRangeIndex) {
+        this.rowRangeIndex = rowRangeIndex;
         return this;
     }
 
@@ -150,7 +150,7 @@ public class ManifestsReader {
     }
 
     private boolean filterManifestByRowRanges(ManifestFileMeta manifest) {
-        if (rowRanges == null) {
+        if (rowRangeIndex == null) {
             return true;
         }
         Long min = manifest.minRowId();
@@ -159,14 +159,7 @@ public class ManifestsReader {
             return true;
         }
 
-        Range manifestRowRange = new Range(min, max);
-
-        for (Range expected : rowRanges) {
-            if (Range.intersection(manifestRowRange, expected) != null) {
-                return true;
-            }
-        }
-        return false;
+        return this.rowRangeIndex.intersects(min, max);
     }
 
     /** Note: Keep this thread-safe. */

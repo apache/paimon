@@ -109,6 +109,11 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
+    public Optional<GlobalIndexResult> visitBetween(FieldRef fieldRef, Object from, Object to) {
+        return union(reader -> reader.visitBetween(fieldRef, from, to));
+    }
+
+    @Override
     public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         return union(reader -> reader.visitVectorSearch(vectorSearch));
     }

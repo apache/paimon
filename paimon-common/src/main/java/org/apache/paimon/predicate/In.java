@@ -28,7 +28,7 @@ import java.util.Optional;
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
 /** A {@link LeafFunction} to eval in. */
-public class In extends LeafFunction {
+public class In extends LeafNAryFunction {
 
     private static final long serialVersionUID = 1L;
 
@@ -81,5 +81,10 @@ public class In extends LeafFunction {
     @Override
     public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
         return visitor.visitIn(fieldRef, literals);
+    }
+
+    @Override
+    public String toJson() {
+        return NAME;
     }
 }

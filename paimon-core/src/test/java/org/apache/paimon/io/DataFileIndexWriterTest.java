@@ -173,6 +173,7 @@ public class DataFileIndexWriterTest {
                         null,
                         null,
                         CoreOptions.ExternalPathStrategy.NONE,
+                        null,
                         false,
                         null);
 

@@ -140,7 +140,12 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     public DataTableScan newScan() {
         if (wrapped instanceof FallbackReadFileStoreTable) {
             FallbackReadFileStoreTable table = (FallbackReadFileStoreTable) wrapped;
-            return new FallbackReadScan(newScan(table.wrapped()), newScan(table.fallback()));
+            return new FallbackReadScan(
+                    newScan(table.wrapped()),
+                    newScan(table.fallback()),
+                    table.wrapped(),
+                    table.fallback(),
+                    table.wrapped().schema());
         }
         return newScan(wrapped);
     }
