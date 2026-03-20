@@ -53,7 +53,6 @@ import java.util.function.Supplier;
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     private final boolean crossPartitionUpdate;
-    private final RowType bucketKeyType;
     private final RowType keyType;
     private final RowType valueType;
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
@@ -68,7 +67,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             boolean crossPartitionUpdate,
             CoreOptions options,
             RowType partitionType,
-            RowType bucketKeyType,
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
@@ -77,7 +75,6 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             CatalogEnvironment catalogEnvironment) {
         super(fileIO, schemaManager, schema, tableName, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
-        this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
@@ -203,7 +200,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                         options.bucketFunctionType(),
                         schema.logicalRowType(),
                         partitionType,
-                        bucketKeyType);
+                        schema.logicalBucketKeyType());
 
         return new KeyValueFileStoreScan(
                 newManifestsReader(),

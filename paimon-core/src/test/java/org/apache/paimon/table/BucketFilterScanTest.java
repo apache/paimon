@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.predicate.Predicate;
@@ -32,6 +31,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -39,6 +40,26 @@ import static org.assertj.core.api.Assertions.assertThat;
  * table.
  */
 public class BucketFilterScanTest extends TableTestBase {
+
+    @Test
+    public void testBucketFilterWithCompoundPredicateOnAppendTable() throws Exception {
+        testBucketFilterWithCompoundPredicate(false);
+    }
+
+    @Test
+    public void testBucketFilterWithCompoundPredicateOnPkTable() throws Exception {
+        testBucketFilterWithCompoundPredicate(true);
+    }
+
+    @Test
+    public void testCompositeBucketFilterWithCompoundPredicateOnAppendTable() throws Exception {
+        testCompositeBucketFilterWithCompoundPredicate(false);
+    }
+
+    @Test
+    public void testCompositeBucketFilterWithCompoundPredicateOnPkTable() throws Exception {
+        testCompositeBucketFilterWithCompoundPredicate(true);
+    }
 
     /**
      * Tests bucket filtering with compound predicates on a single-field bucket key.
@@ -67,18 +88,21 @@ public class BucketFilterScanTest extends TableTestBase {
      *       partition-b combination.
      * </ol>
      */
-    @Test
-    public void testBucketFilterWithCompoundPredicate() throws Exception {
+    private void testBucketFilterWithCompoundPredicate(boolean pk) throws Exception {
         // ---- schema & table ----
-        Schema schema =
+        Schema.Builder builder =
                 Schema.newBuilder()
                         .column("a", DataTypes.INT())
                         .column("b", DataTypes.INT())
                         .column("c", DataTypes.INT())
                         .partitionKeys("a")
-                        .option(CoreOptions.BUCKET.key(), "10")
-                        .option(CoreOptions.BUCKET_KEY.key(), "b")
-                        .build();
+                        .option(BUCKET.key(), "10");
+        if (pk) {
+            builder.primaryKey("a", "b");
+        } else {
+            builder.option(BUCKET_KEY.key(), "b");
+        }
+        Schema schema = builder.build();
 
         Identifier tableId = identifier("test_bucket_filter");
         catalog.createTable(tableId, schema, false);
@@ -148,18 +172,21 @@ public class BucketFilterScanTest extends TableTestBase {
      *       targeting.
      * </ol>
      */
-    @Test
-    public void testCompositeBucketFilterWithCompoundPredicate() throws Exception {
+    private void testCompositeBucketFilterWithCompoundPredicate(boolean pk) throws Exception {
         // ---- schema & table ----
-        Schema schema =
+        Schema.Builder builder =
                 Schema.newBuilder()
                         .column("a", DataTypes.INT())
                         .column("b", DataTypes.INT())
                         .column("c", DataTypes.INT())
                         .partitionKeys("a")
-                        .option(CoreOptions.BUCKET.key(), "10")
-                        .option(CoreOptions.BUCKET_KEY.key(), "b,c")
-                        .build();
+                        .option(BUCKET.key(), "10");
+        if (pk) {
+            builder.primaryKey("a", "b", "c");
+        } else {
+            builder.option(BUCKET_KEY.key(), "b,c");
+        }
+        Schema schema = builder.build();
 
         Identifier tableId = identifier("test_composite_bucket_filter");
         catalog.createTable(tableId, schema, false);
