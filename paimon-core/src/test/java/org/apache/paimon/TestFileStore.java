@@ -134,7 +134,6 @@ public class TestFileStore extends KeyValueFileStore {
                 options,
                 partitionType,
                 keyType,
-                keyType,
                 valueType,
                 keyValueFieldsExtractor,
                 mfFactory,

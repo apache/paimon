@@ -46,6 +46,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RowRangeIndex;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TriFilter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,7 +88,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private boolean onlyReadRealBuckets = false;
     private Integer specifiedBucket = null;
     private Filter<Integer> bucketFilter = null;
-    private BiFilter<Integer, Integer> totalAwareBucketFilter = null;
+    private TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter = null;
     protected ScanMode scanMode = ScanMode.ALL;
     private Integer specifiedLevel = null;
     private Filter<Integer> levelFilter = null;
@@ -162,7 +163,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withTotalAwareBucketFilter(
-            BiFilter<Integer, Integer> totalAwareBucketFilter) {
+            TriFilter<BinaryRow, Integer, Integer> totalAwareBucketFilter) {
         this.totalAwareBucketFilter = totalAwareBucketFilter;
         return this;
     }
@@ -533,14 +534,21 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Function<InternalRow, Integer> levelGetter = ManifestEntrySerializer.levelGetter();
         BucketFilter bucketFilter = createBucketFilter();
         return row -> {
-            if ((partitionFilter != null && !partitionFilter.test(partitionGetter.apply(row)))) {
-                return false;
+            BinaryRow partition = null;
+            if (partitionFilter != null) {
+                partition = partitionGetter.apply(row);
+                if (!partitionFilter.test(partition)) {
+                    return false;
+                }
             }
 
             if (bucketFilter != null) {
                 int bucket = bucketGetter.apply(row);
                 int totalBucket = totalBucketGetter.apply(row);
-                if (!bucketFilter.test(bucket, totalBucket)) {
+                if (partition == null) {
+                    partition = partitionGetter.apply(row);
+                }
+                if (!bucketFilter.test(partition, bucket, totalBucket)) {
                     return false;
                 }
             }

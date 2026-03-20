@@ -19,160 +19,55 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions.BucketFunctionType;
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.bucket.BucketFunction;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.predicate.Equal;
-import org.apache.paimon.predicate.FieldRef;
-import org.apache.paimon.predicate.In;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BiFilter;
+import org.apache.paimon.utils.TriFilter;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
-
-import javax.annotation.concurrent.ThreadSafe;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
-import java.util.stream.Collectors;
 
-import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-import static org.apache.paimon.predicate.PredicateBuilder.splitOr;
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
 
 /** Bucket filter push down in scan to skip files. */
-public interface BucketSelectConverter {
+public class BucketSelectConverter {
 
-    int MAX_VALUES = 1000;
+    private final BucketMode bucketMode;
+    private final BucketFunctionType bucketFunctionType;
+    private final RowType rowType;
+    private final RowType partitionType;
+    private final RowType bucketKeyType;
 
-    Optional<BiFilter<Integer, Integer>> convert(Predicate predicate);
-
-    static Optional<BiFilter<Integer, Integer>> create(
-            Predicate bucketPredicate,
-            RowType bucketKeyType,
-            BucketFunctionType bucketFunctionType) {
-        @SuppressWarnings("unchecked")
-        List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
-
-        BucketFunction bucketFunction = BucketFunction.create(bucketFunctionType, bucketKeyType);
-
-        nextAnd:
-        for (Predicate andPredicate : splitAnd(bucketPredicate)) {
-            Integer reference = null;
-            List<Object> values = new ArrayList<>();
-            for (Predicate orPredicate : splitOr(andPredicate)) {
-                if (orPredicate instanceof LeafPredicate) {
-                    LeafPredicate leaf = (LeafPredicate) orPredicate;
-                    Optional<FieldRef> fieldRefOptional = leaf.fieldRefOptional();
-                    if (fieldRefOptional.isPresent()) {
-                        FieldRef fieldRef = fieldRefOptional.get();
-                        if (reference == null || reference == fieldRef.index()) {
-                            reference = fieldRef.index();
-                            if (leaf.function().equals(Equal.INSTANCE)
-                                    || leaf.function().equals(In.INSTANCE)) {
-                                values.addAll(
-                                        leaf.literals().stream()
-                                                .filter(Objects::nonNull)
-                                                .collect(Collectors.toList()));
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                // failed, go to next predicate
-                continue nextAnd;
-            }
-            if (reference != null) {
-                if (bucketValues[reference] != null) {
-                    // Repeated equals in And?
-                    return Optional.empty();
-                }
-
-                bucketValues[reference] = values;
-            }
-        }
-
-        int rowCount = 1;
-        for (List<Object> values : bucketValues) {
-            if (values == null) {
-                return Optional.empty();
-            }
-
-            rowCount *= values.size();
-            if (rowCount > MAX_VALUES) {
-                return Optional.empty();
-            }
-        }
-
-        InternalRowSerializer serializer = new InternalRowSerializer(bucketKeyType);
-        List<BinaryRow> bucketKeys = new ArrayList<>();
-        assembleRows(
-                bucketValues,
-                columns ->
-                        bucketKeys.add(
-                                serializer.toBinaryRow(GenericRow.of(columns.toArray())).copy()),
-                new ArrayList<>(),
-                0);
-
-        return Optional.of(new Selector(bucketKeys, bucketFunction));
+    public BucketSelectConverter(
+            BucketMode bucketMode,
+            BucketFunctionType bucketFunctionType,
+            RowType rowType,
+            RowType partitionType,
+            RowType bucketKeyType) {
+        this.bucketMode = bucketMode;
+        this.bucketFunctionType = bucketFunctionType;
+        this.rowType = rowType;
+        this.partitionType = partitionType;
+        this.bucketKeyType = bucketKeyType;
     }
 
-    static void assembleRows(
-            List<Object>[] rowValues,
-            Consumer<List<Object>> consumer,
-            List<Object> stack,
-            int columnIndex) {
-        List<Object> columnValues = rowValues[columnIndex];
-        for (Object value : columnValues) {
-            stack.add(value);
-            if (columnIndex == rowValues.length - 1) {
-                // last column, consume row
-                consumer.accept(stack);
-            } else {
-                assembleRows(rowValues, consumer, stack, columnIndex + 1);
-            }
-            stack.remove(stack.size() - 1);
-        }
-    }
-
-    /** Selector to select bucket from {@link Predicate}. */
-    @ThreadSafe
-    class Selector implements BiFilter<Integer, Integer> {
-
-        private final List<BinaryRow> bucketKeys;
-
-        private final BucketFunction bucketFunction;
-
-        private final Map<Integer, Set<Integer>> buckets = new ConcurrentHashMap<>();
-
-        public Selector(List<BinaryRow> bucketKeys, BucketFunction bucketFunction) {
-            this.bucketKeys = bucketKeys;
-            this.bucketFunction = bucketFunction;
+    public Optional<TriFilter<BinaryRow, Integer, Integer>> convert(Predicate predicate) {
+        if (bucketMode != BucketMode.HASH_FIXED && bucketMode != BucketMode.POSTPONE_MODE) {
+            return Optional.empty();
         }
 
-        @Override
-        public boolean test(Integer bucket, Integer numBucket) {
-            return buckets.computeIfAbsent(numBucket, k -> createBucketSet(numBucket))
-                    .contains(bucket);
+        if (bucketKeyType.getFieldCount() == 0) {
+            return Optional.empty();
         }
 
-        @VisibleForTesting
-        Set<Integer> createBucketSet(int numBucket) {
-            ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
-            for (BinaryRow key : bucketKeys) {
-                builder.add(bucketFunction.bucket(key, numBucket));
-            }
-            return builder.build();
+        Set<String> predicateFields = collectFieldNames(predicate);
+        if (!predicateFields.containsAll(bucketKeyType.getFieldNames())) {
+            return Optional.empty();
         }
+
+        return Optional.of(
+                new BucketSelector(
+                        predicate, bucketFunctionType, rowType, partitionType, bucketKeyType));
     }
 }
