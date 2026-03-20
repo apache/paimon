@@ -57,7 +57,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.data.variant.VariantMetadataUtils.path;
 import static org.apache.paimon.format.parquet.ParquetSchemaConverter.PAIMON_SCHEMA;
@@ -78,6 +80,19 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final DataField[] readFields;
     private final int batchSize;
     @Nullable private final FilterCompat.Filter filter;
+
+    /**
+     * Cache: fileSchema -> (requestedSchema, parquetFields).
+     *
+     * <p>Within one factory instance the readType is fixed, so the result of {@code
+     * clipParquetSchema(fileSchema)} is deterministic for a given {@code fileSchema}. Most
+     * Paimon-written files sharing the same schema version will have identical file schemas, so the
+     * cache will almost always have at most one entry. Keying by the actual {@code fileSchema}
+     * (rather than assuming all files have the same schema) keeps correctness for edge cases such
+     * as externally-migrated Parquet files whose on-disk schema may vary.
+     */
+    private final Map<MessageType, Pair<MessageType, List<ParquetField>>> schemaCache =
+            new ConcurrentHashMap<>();
 
     public ParquetReaderFactory(
             Options conf, RowType readType, int batchSize, @Nullable FilterCompat.Filter filter) {
@@ -102,7 +117,24 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                         builder.build(),
                         context.selection());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
-        MessageType requestedSchema = clipParquetSchema(fileSchema);
+
+        // clipParquetSchema and buildFieldsList are pure functions of (readFields, fileSchema).
+        // Cache the result keyed by fileSchema so that files sharing the same on-disk schema
+        // within this factory instance avoid redundant computation. Keying by fileSchema (rather
+        // than a simple "compute once" flag) correctly handles edge cases where different files
+        // read by the same factory instance may have different on-disk schemas, e.g. externally
+        // migrated Parquet files.
+        Pair<MessageType, List<ParquetField>> cached =
+                schemaCache.computeIfAbsent(
+                        fileSchema,
+                        fs -> {
+                            MessageType rs = clipParquetSchema(fs);
+                            MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(rs);
+                            List<ParquetField> f = buildFieldsList(readFields, columnIO, rs);
+                            return Pair.of(rs, f);
+                        });
+        MessageType requestedSchema = cached.getLeft();
+        List<ParquetField> fields = cached.getRight();
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
@@ -114,9 +146,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         reader.setRequestedSchema(requestedSchema);
         WritableColumnVector[] writableVectors = createWritableVectors();
-
-        MessageColumnIO columnIO = new ColumnIOFactory().getColumnIO(requestedSchema);
-        List<ParquetField> fields = buildFieldsList(readFields, columnIO, requestedSchema);
 
         return new VectorizedParquetRecordReader(
                 context.filePath(),
