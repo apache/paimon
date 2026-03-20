@@ -1391,6 +1391,7 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    @Immutable
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_INITIAL_BUCKETS =
             key("dynamic-bucket.initial-buckets")
                     .intType()
