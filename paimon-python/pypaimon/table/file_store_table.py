@@ -123,6 +123,11 @@ class FileStoreTable(Table):
             current_branch
         )
 
+    def changelog_manager(self):
+        """Get the changelog manager for this table."""
+        from pypaimon.changelog.changelog_manager import ChangelogManager
+        return ChangelogManager(self.file_io, self.table_path, self.current_branch())
+
     def create_tag(
             self,
             tag_name: str,
