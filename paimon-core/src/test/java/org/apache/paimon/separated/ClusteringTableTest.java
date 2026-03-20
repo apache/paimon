@@ -26,11 +26,14 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CloseableIterator;
@@ -331,6 +334,61 @@ class ClusteringTableTest {
         // Should only see the latest values
         assertThat(readRows())
                 .containsExactlyInAnyOrder(GenericRow.of(1, 50), GenericRow.of(2, 60));
+    }
+
+    // ==================== Clustering Column Filter Tests ====================
+
+    /** Test that equality filter on clustering column skips irrelevant files in the scan plan. */
+    @Test
+    public void testClusteringColumnEqualityFilterSkipsFiles() throws Exception {
+        // Write 3 commits with widely separated, non-overlapping b ranges
+        writeRows(Arrays.asList(GenericRow.of(1, 10), GenericRow.of(2, 20)));
+        writeRows(Arrays.asList(GenericRow.of(3, 100), GenericRow.of(4, 110)));
+        writeRows(Arrays.asList(GenericRow.of(5, 1000), GenericRow.of(6, 1010)));
+
+        // After compaction, expect at least 2 files with non-overlapping b ranges
+        int totalFiles = countFiles(table, null);
+        assertThat(totalFiles).isGreaterThanOrEqualTo(2);
+
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+
+        // b = 1005 → only file(s) covering [1000, 1010] match, skip file(s) with smaller b
+        assertThat(countFiles(table, pb.equal(1, 1005))).isLessThan(totalFiles);
+
+        // b = 15 → only file(s) covering [10, 20] match, skip file(s) with larger b
+        assertThat(countFiles(table, pb.equal(1, 15))).isLessThan(totalFiles);
+
+        // b = 5000 → no file covers this value, should return 0 files
+        assertThat(countFiles(table, pb.equal(1, 5000))).isEqualTo(0);
+    }
+
+    /** Test that range filter on clustering column skips irrelevant files in the scan plan. */
+    @Test
+    public void testClusteringColumnRangeFilterSkipsFiles() throws Exception {
+        // Write 3 commits with widely separated, non-overlapping b ranges
+        writeRows(Arrays.asList(GenericRow.of(1, 10), GenericRow.of(2, 20)));
+        writeRows(Arrays.asList(GenericRow.of(3, 100), GenericRow.of(4, 110)));
+        writeRows(Arrays.asList(GenericRow.of(5, 1000), GenericRow.of(6, 1010)));
+
+        // After compaction, expect at least 2 files with non-overlapping b ranges
+        int totalFiles = countFiles(table, null);
+        assertThat(totalFiles).isGreaterThanOrEqualTo(2);
+
+        PredicateBuilder pb = new PredicateBuilder(table.rowType());
+
+        // b > 500 → only file(s) covering [1000, 1010] match
+        assertThat(countFiles(table, pb.greaterThan(1, 500))).isLessThan(totalFiles);
+
+        // b < 50 → only file(s) covering [10, 20] match
+        assertThat(countFiles(table, pb.lessThan(1, 50))).isLessThan(totalFiles);
+
+        // 50 <= b <= 150 → only file(s) covering [100, 110] match
+        Predicate rangeFilter =
+                PredicateBuilder.and(pb.greaterOrEqual(1, 50), pb.lessOrEqual(1, 150));
+        assertThat(countFiles(table, rangeFilter)).isLessThan(totalFiles);
+
+        // b > 5 → all files match (all b values are > 5)
+        assertThat(countFiles(table, pb.greaterThan(1, 5))).isEqualTo(totalFiles);
     }
 
     // ==================== First-Row Mode Tests ====================
@@ -708,5 +766,15 @@ class ClusteringTableTest {
             result.add(GenericRow.of(row.getInt(0), row.getInt(1)));
         }
         return result;
+    }
+
+    private int countFiles(Table targetTable, Predicate filter) {
+        ReadBuilder readBuilder = targetTable.newReadBuilder();
+        if (filter != null) {
+            readBuilder.withFilter(filter);
+        }
+        return readBuilder.newScan().plan().splits().stream()
+                .mapToInt(split -> ((DataSplit) split).dataFiles().size())
+                .sum();
     }
 }

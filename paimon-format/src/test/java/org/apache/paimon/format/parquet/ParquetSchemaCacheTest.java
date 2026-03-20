@@ -35,8 +35,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
-import java.lang.reflect.Field;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -198,10 +196,7 @@ public class ParquetSchemaCacheTest {
         return cnt.get();
     }
 
-    private int getSchemaCacheSize(ParquetReaderFactory factory) throws Exception {
-        Field field = ParquetReaderFactory.class.getDeclaredField("schemaCache");
-        field.setAccessible(true);
-        Map<?, ?> cache = (Map<?, ?>) field.get(factory);
-        return cache.size();
+    private int getSchemaCacheSize(ParquetReaderFactory factory) {
+        return factory.requestedSchemaCache().size();
     }
 }

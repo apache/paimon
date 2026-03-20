@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
@@ -101,6 +102,11 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         this.readFields = readType.getFields().toArray(new DataField[0]);
         this.batchSize = batchSize;
         this.filter = filter;
+    }
+
+    @VisibleForTesting
+    Map<MessageType, RequestedSchema> requestedSchemaCache() {
+        return requestedSchemaCache;
     }
 
     @Override
