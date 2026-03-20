@@ -117,6 +117,10 @@ class PyArrowFileIO(FileIO):
         return bucket
 
     def _initialize_oss_fs(self, path) -> FileSystem:
+        if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
+            # Force disable EC2 metadata service
+            os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+
         client_kwargs = {
             "access_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_ID),
             "secret_key": self.properties.get(OssOptions.OSS_ACCESS_KEY_SECRET),
@@ -137,6 +141,10 @@ class PyArrowFileIO(FileIO):
         return pafs.S3FileSystem(**client_kwargs)
 
     def _initialize_s3_fs(self) -> FileSystem:
+        if self.properties.get(S3Options.S3_ACCESS_KEY_ID):
+            # Force disable EC2 metadata service
+            os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+
         client_kwargs = {
             "endpoint_override": self.properties.get(S3Options.S3_ENDPOINT),
             "access_key": self.properties.get(S3Options.S3_ACCESS_KEY_ID),
