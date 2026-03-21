@@ -1028,11 +1028,16 @@ public class RESTCatalogServer {
         FileStoreTable table = getFileTable(identifier);
         long schemaId = requestBody.getSchemaId();
         SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-        schemaManager.rollbackTo(
-                schemaId,
-                table.snapshotManager(),
-                table.tagManager(),
-                new ChangelogManager(table.fileIO(), table.location(), null));
+        try {
+            schemaManager.rollbackTo(
+                    schemaId,
+                    table.snapshotManager(),
+                    table.tagManager(),
+                    new ChangelogManager(table.fileIO(), table.location(), null));
+        } catch (Exception e) {
+            return mockResponse(new ErrorResponse(null, null, e.getMessage(), 500), 500);
+        }
+
         return new MockResponse().setResponseCode(200);
     }
 
