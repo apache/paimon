@@ -40,16 +40,25 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
     private final String filePathString;
     private final BlobFileMeta fileMeta;
     private final @Nullable SeekableInputStream in;
+    private final int fieldCount;
+    private final int blobIndex;
 
     private boolean returned;
 
     public BlobFormatReader(
-            FileIO fileIO, Path filePath, BlobFileMeta fileMeta, @Nullable SeekableInputStream in) {
+            FileIO fileIO,
+            Path filePath,
+            BlobFileMeta fileMeta,
+            @Nullable SeekableInputStream in,
+            int fieldCount,
+            int blobIndex) {
         this.fileIO = fileIO;
         this.filePath = filePath;
         this.filePathString = filePath.toString();
         this.fileMeta = fileMeta;
         this.in = in;
+        this.fieldCount = fieldCount;
+        this.blobIndex = blobIndex;
         this.returned = false;
     }
 
@@ -95,7 +104,9 @@ public class BlobFormatReader implements FileRecordReader<InternalRow> {
                     }
                 }
                 currentPosition++;
-                return GenericRow.of(blob);
+                GenericRow row = new GenericRow(fieldCount);
+                row.setField(blobIndex, blob);
+                return row;
             }
 
             @Override

@@ -277,6 +277,29 @@ public class BlobTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testRowTrackingWithBlobProjection() {
+        batchSql("INSERT INTO blob_table VALUES (1, 'paimon', X'48656C6C6F')");
+
+        // query _ROW_ID and blob field from row_tracking system table
+        // this previously caused ArrayIndexOutOfBoundsException because BlobFormatReader
+        // ignored the projectedRowType and always returned a single-field row
+        List<Row> result = batchSql("SELECT _ROW_ID, picture FROM blob_table$row_tracking");
+        assertThat(result).hasSize(1);
+        Row row = result.get(0);
+        assertThat(row.getField(0)).isNotNull();
+        assertThat((byte[]) row.getField(1)).isEqualTo(new byte[] {72, 101, 108, 108, 111});
+
+        // also verify selecting only _ROW_ID works
+        List<Row> rowIdOnly = batchSql("SELECT _ROW_ID FROM blob_table$row_tracking");
+        assertThat(rowIdOnly).hasSize(1);
+        assertThat(rowIdOnly.get(0).getField(0)).isNotNull();
+
+        // verify selecting all columns from row_tracking works
+        List<Row> allColumns = batchSql("SELECT * FROM blob_table$row_tracking");
+        assertThat(allColumns).hasSize(1);
+    }
+
+    @Test
     public void testBlobTypeSchemaEquals() throws Exception {
         // Step 1: Create a Paimon table with blob field via Flink SQL
         tEnv.executeSql(
