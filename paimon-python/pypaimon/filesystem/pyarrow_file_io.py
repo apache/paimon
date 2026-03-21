@@ -118,7 +118,10 @@ class PyArrowFileIO(FileIO):
 
     def _initialize_oss_fs(self, path) -> FileSystem:
         if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
-            # Force disable EC2 metadata service
+            # When explicit credentials are provided, disable the EC2 Instance Metadata
+            # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
+            # Uses setdefault so that an explicit user setting is never overridden.
+            # Note: this is process-wide and affects all AWS SDK clients.
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
@@ -142,7 +145,10 @@ class PyArrowFileIO(FileIO):
 
     def _initialize_s3_fs(self) -> FileSystem:
         if self.properties.get(S3Options.S3_ACCESS_KEY_ID):
-            # Force disable EC2 metadata service
+            # When explicit credentials are provided, disable the EC2 Instance Metadata
+            # Service (IMDS) probe to avoid multi-second timeouts in non-AWS environments.
+            # Uses setdefault so that an explicit user setting is never overridden.
+            # Note: this is process-wide and affects all AWS SDK clients.
             os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
         client_kwargs = {
