@@ -30,6 +30,7 @@ import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.CompressOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -54,7 +55,9 @@ import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.KeyValueWithLevelNoReusingSerializer;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -65,10 +68,13 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.concurrent.ExecutionException;
@@ -177,31 +183,113 @@ public class ClusteringCompactManager extends CompactFutureManager {
     }
 
     private void bootstrapKeyIndex(List<DataFileMeta> restoreFiles) {
+        // Build a combined RowType: key fields + one VARBINARY field for the encoded value
+        List<DataField> combinedFields = new ArrayList<>();
+        List<DataField> keyFields = keyType.getFields();
+        for (int i = 0; i < keyFields.size(); i++) {
+            DataField kf = keyFields.get(i);
+            combinedFields.add(new DataField(i, kf.name(), kf.type()));
+        }
+        int valueFieldIndex = keyFields.size();
+        combinedFields.add(
+                new DataField(
+                        valueFieldIndex, "_value_bytes", new VarBinaryType(Integer.MAX_VALUE)));
+        RowType combinedType = new RowType(combinedFields);
+
+        int[] sortFields = IntStream.range(0, keyType.getFieldCount()).toArray();
+        BinaryExternalSortBuffer sortBuffer =
+                BinaryExternalSortBuffer.create(
+                        ioManager,
+                        combinedType,
+                        sortFields,
+                        sortSpillBufferSize,
+                        pageSize,
+                        maxNumFileHandles,
+                        compression,
+                        MemorySize.MAX_VALUE,
+                        false);
+
         RowCompactedSerializer keySerializer = new RowCompactedSerializer(keyType);
-        for (DataFileMeta file : restoreFiles) {
-            if (file.level() == 0) {
-                continue;
-            }
-            int fileId = fileLevels.getFileIdByName(file.fileName());
-            // Read with DV (auto-skips deleted rows). Use FileRecordIterator.returnedPosition()
-            // to get correct physical positions even after DV filtering.
-            try (RecordReader<KeyValue> reader = keyReaderFactory.createRecordReader(file)) {
-                FileRecordIterator<KeyValue> batch;
-                while ((batch = (FileRecordIterator<KeyValue>) reader.readBatch()) != null) {
-                    KeyValue kv;
-                    while ((kv = batch.next()) != null) {
-                        int position = (int) batch.returnedPosition();
-                        byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
-                        ByteArrayOutputStream value = new ByteArrayOutputStream(8);
-                        encodeInt(value, fileId);
-                        encodeInt(value, position);
-                        kvDb.put(keyBytes, value.toByteArray());
-                    }
-                    batch.releaseBatch();
+        InternalRow.FieldGetter[] keyFieldGetters =
+                new InternalRow.FieldGetter[keyType.getFieldCount()];
+        for (int i = 0; i < keyType.getFieldCount(); i++) {
+            keyFieldGetters[i] = InternalRow.createFieldGetter(keyType.getTypeAt(i), i);
+        }
+        try {
+            // First pass: read all keys and write to sort buffer
+            for (DataFileMeta file : restoreFiles) {
+                if (file.level() == 0) {
+                    continue;
                 }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+                int fileId = fileLevels.getFileIdByName(file.fileName());
+                try (RecordReader<KeyValue> reader = keyReaderFactory.createRecordReader(file)) {
+                    FileRecordIterator<KeyValue> batch;
+                    while ((batch = (FileRecordIterator<KeyValue>) reader.readBatch()) != null) {
+                        KeyValue kv;
+                        while ((kv = batch.next()) != null) {
+                            int position = (int) batch.returnedPosition();
+                            ByteArrayOutputStream valueOut = new ByteArrayOutputStream(8);
+                            encodeInt(valueOut, fileId);
+                            encodeInt(valueOut, position);
+                            byte[] valueBytes = valueOut.toByteArray();
+
+                            GenericRow combinedRow = new GenericRow(combinedType.getFieldCount());
+                            for (int i = 0; i < keyType.getFieldCount(); i++) {
+                                combinedRow.setField(
+                                        i, keyFieldGetters[i].getFieldOrNull(kv.key()));
+                            }
+                            combinedRow.setField(valueFieldIndex, valueBytes);
+                            sortBuffer.write(combinedRow);
+                        }
+                        batch.releaseBatch();
+                    }
+                }
             }
+
+            // Second pass: read sorted output and bulk-load into kvDb
+            MutableObjectIterator<BinaryRow> sortedIterator = sortBuffer.sortedIterator();
+            BinaryRow binaryRow = new BinaryRow(combinedType.getFieldCount());
+            InternalRow.FieldGetter valueGetter =
+                    InternalRow.createFieldGetter(
+                            new VarBinaryType(Integer.MAX_VALUE), valueFieldIndex);
+
+            Iterator<Map.Entry<byte[], byte[]>> entryIterator =
+                    new Iterator<Map.Entry<byte[], byte[]>>() {
+                        private BinaryRow current = binaryRow;
+                        private boolean hasNext;
+
+                        {
+                            advance();
+                        }
+
+                        private void advance() {
+                            try {
+                                current = sortedIterator.next(current);
+                                hasNext = current != null;
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
+
+                        @Override
+                        public boolean hasNext() {
+                            return hasNext;
+                        }
+
+                        @Override
+                        public Map.Entry<byte[], byte[]> next() {
+                            byte[] key = keySerializer.serializeToBytes(current);
+                            byte[] value = (byte[]) valueGetter.getFieldOrNull(current);
+                            advance();
+                            return new AbstractMap.SimpleImmutableEntry<>(key, value);
+                        }
+                    };
+
+            kvDb.bulkLoad(entryIterator);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            sortBuffer.clear();
         }
     }
 

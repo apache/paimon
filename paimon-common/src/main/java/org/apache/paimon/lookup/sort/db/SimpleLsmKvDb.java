@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -94,6 +95,7 @@ public class SimpleLsmKvDb implements Closeable {
     private final SortLookupStoreFactory storeFactory;
     private final Comparator<MemorySlice> keyComparator;
     private final long memTableFlushThreshold;
+    private final long maxSstFileSize;
     private final LsmCompactor compactor;
 
     /** Active MemTable: key -> value bytes (empty byte[] = tombstone). */
@@ -127,6 +129,7 @@ public class SimpleLsmKvDb implements Closeable {
         this.storeFactory = storeFactory;
         this.keyComparator = keyComparator;
         this.memTableFlushThreshold = memTableFlushThreshold;
+        this.maxSstFileSize = maxSstFileSize;
         this.memTable = new TreeMap<>(keyComparator);
         this.memTableSize = 0;
         this.levels = new ArrayList<>();
@@ -223,6 +226,89 @@ public class SimpleLsmKvDb implements Closeable {
         }
         memTableSize += delta;
         maybeFlushMemTable();
+    }
+
+    /**
+     * Bulk-load globally sorted entries directly into SST files at the deepest level, bypassing
+     * MemTable, flush, and compaction entirely. The database must be empty when this is called.
+     *
+     * @param sortedEntries an iterator of key-value pairs in sorted order (by the DB's key
+     *     comparator)
+     */
+    public void bulkLoad(Iterator<Map.Entry<byte[], byte[]>> sortedEntries) throws IOException {
+        ensureOpen();
+        if (!memTable.isEmpty() || getSstFileCount() > 0) {
+            throw new IllegalStateException(
+                    "bulkLoad requires an empty database (no memTable entries and no SST files)");
+        }
+
+        int targetLevel = MAX_LEVELS - 1;
+        List<SstFileMetadata> targetLevelFiles = levels.get(targetLevel);
+
+        SortLookupStoreWriter currentWriter = null;
+        File currentSstFile = null;
+        MemorySlice currentFileMinKey = null;
+        MemorySlice currentFileMaxKey = null;
+        long currentBatchSize = 0;
+
+        try {
+            while (sortedEntries.hasNext()) {
+                Map.Entry<byte[], byte[]> entry = sortedEntries.next();
+                byte[] key = entry.getKey();
+                byte[] value = entry.getValue();
+
+                if (currentWriter == null) {
+                    currentSstFile = newSstFile();
+                    currentWriter = storeFactory.createWriter(currentSstFile, null);
+                    currentFileMinKey = MemorySlice.wrap(key);
+                    currentBatchSize = 0;
+                }
+
+                currentWriter.put(key, value);
+                currentFileMaxKey = MemorySlice.wrap(key);
+                currentBatchSize += key.length + value.length;
+
+                if (currentBatchSize >= maxSstFileSize) {
+                    currentWriter.close();
+                    targetLevelFiles.add(
+                            new SstFileMetadata(
+                                    currentSstFile,
+                                    currentFileMinKey,
+                                    currentFileMaxKey,
+                                    0,
+                                    targetLevel));
+                    currentWriter = null;
+                    currentSstFile = null;
+                    currentFileMinKey = null;
+                    currentFileMaxKey = null;
+                }
+            }
+
+            if (currentWriter != null) {
+                currentWriter.close();
+                targetLevelFiles.add(
+                        new SstFileMetadata(
+                                currentSstFile,
+                                currentFileMinKey,
+                                currentFileMaxKey,
+                                0,
+                                targetLevel));
+            }
+        } catch (IOException | RuntimeException e) {
+            if (currentWriter != null) {
+                try {
+                    currentWriter.close();
+                } catch (IOException suppressed) {
+                    e.addSuppressed(suppressed);
+                }
+            }
+            throw e;
+        }
+
+        LOG.info(
+                "Bulk-loaded {} SST files directly to level {}",
+                targetLevelFiles.size(),
+                targetLevel);
     }
 
     // -------------------------------------------------------------------------
