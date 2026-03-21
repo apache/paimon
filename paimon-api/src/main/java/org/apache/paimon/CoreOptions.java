@@ -1383,6 +1383,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to ignore consumer progress for the newly started job.");
 
+    public static final ConfigOption<Boolean> CONSUMER_CHANGELOG_ONLY =
+            key("consumer.changelog-only")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, consumer will only affect changelog expiration "
+                                    + "and will not prevent snapshot from being expired.");
+
     public static final ConfigOption<Long> DYNAMIC_BUCKET_TARGET_ROW_NUM =
             key("dynamic-bucket.target-row-num")
                     .longType()
@@ -2738,6 +2746,7 @@ public class CoreOptions implements Serializable {
                 .changelogRetainMin(options.getOptional(CHANGELOG_NUM_RETAINED_MIN).orElse(null))
                 .changelogTimeRetain(options.getOptional(CHANGELOG_TIME_RETAINED).orElse(null))
                 .changelogMaxDeletes(snapshotExpireLimit())
+                .consumerChangelogOnly(consumerChangelogOnly())
                 .build();
     }
 
@@ -3366,6 +3375,10 @@ public class CoreOptions implements Serializable {
 
     public boolean consumerIgnoreProgress() {
         return options.get(CONSUMER_IGNORE_PROGRESS);
+    }
+
+    public boolean consumerChangelogOnly() {
+        return options.get(CONSUMER_CHANGELOG_ONLY);
     }
 
     public boolean partitionedTableInMetastore() {

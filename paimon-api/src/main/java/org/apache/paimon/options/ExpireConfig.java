@@ -31,6 +31,7 @@ public class ExpireConfig {
     private final Duration changelogTimeRetain;
     private final int changelogMaxDeletes;
     private final boolean changelogDecoupled;
+    private final boolean consumerChangelogOnly;
 
     public ExpireConfig(
             int snapshotRetainMax,
@@ -40,7 +41,8 @@ public class ExpireConfig {
             int changelogRetainMax,
             int changelogRetainMin,
             Duration changelogTimeRetain,
-            int changelogMaxDeletes) {
+            int changelogMaxDeletes,
+            boolean consumerChangelogOnly) {
         this.snapshotRetainMax = snapshotRetainMax;
         this.snapshotRetainMin = snapshotRetainMin;
         this.snapshotTimeRetain = snapshotTimeRetain;
@@ -53,6 +55,7 @@ public class ExpireConfig {
                 changelogRetainMax > snapshotRetainMax
                         || changelogRetainMin > snapshotRetainMin
                         || changelogTimeRetain.compareTo(snapshotTimeRetain) > 0;
+        this.consumerChangelogOnly = consumerChangelogOnly;
     }
 
     public int getSnapshotRetainMax() {
@@ -91,6 +94,10 @@ public class ExpireConfig {
         return changelogDecoupled;
     }
 
+    public boolean isConsumerChangelogOnly() {
+        return consumerChangelogOnly;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
@@ -106,6 +113,7 @@ public class ExpireConfig {
         private Integer changelogRetainMin = null;
         private Duration changelogTimeRetain = null;
         private Integer changelogMaxDeletes = null;
+        private boolean consumerChangelogOnly = false;
 
         public static Builder builder() {
             return new Builder();
@@ -151,6 +159,11 @@ public class ExpireConfig {
             return this;
         }
 
+        public Builder consumerChangelogOnly(boolean consumerChangelogOnly) {
+            this.consumerChangelogOnly = consumerChangelogOnly;
+            return this;
+        }
+
         public ExpireConfig build() {
             return new ExpireConfig(
                     snapshotRetainMax,
@@ -160,7 +173,8 @@ public class ExpireConfig {
                     changelogRetainMax == null ? snapshotRetainMax : changelogRetainMax,
                     changelogRetainMin == null ? snapshotRetainMin : changelogRetainMin,
                     changelogTimeRetain == null ? snapshotTimeRetain : changelogTimeRetain,
-                    changelogMaxDeletes == null ? snapshotMaxDeletes : changelogMaxDeletes);
+                    changelogMaxDeletes == null ? snapshotMaxDeletes : changelogMaxDeletes,
+                    consumerChangelogOnly);
         }
     }
 }
