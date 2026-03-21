@@ -1124,21 +1124,13 @@ public class SchemaManager implements Serializable {
         // Collect all schemaIds referenced by snapshots, tags, and changelogs
         Set<Long> usedSchemaIds = new HashSet<>();
 
-        try {
-            snapshotManager
-                    .snapshotIdStream()
-                    .forEach(id -> usedSchemaIds.add(snapshotManager.snapshot(id).schemaId()));
-        } catch (IOException ignored) {
-            // no snapshots directory
-        }
-
+        snapshotManager.pickOrLatest(
+                snapshot -> {
+                    usedSchemaIds.add(snapshot.schemaId());
+                    return false;
+                });
         tagManager.taggedSnapshots().forEach(s -> usedSchemaIds.add(s.schemaId()));
-
-        try {
-            changelogManager.changelogs().forEachRemaining(c -> usedSchemaIds.add(c.schemaId()));
-        } catch (IOException ignored) {
-            // no changelogs directory
-        }
+        changelogManager.changelogs().forEachRemaining(c -> usedSchemaIds.add(c.schemaId()));
 
         // Check if any referenced schema is newer than the target
         Optional<Long> conflict =
@@ -1151,7 +1143,14 @@ public class SchemaManager implements Serializable {
         }
 
         // Delete all schemas newer than the target
-        listAllIds().stream().filter(id -> id > targetSchemaId).forEach(this::deleteSchema);
+        List<Long> toBeDeleted =
+                listAllIds().stream()
+                        .filter(id -> id > targetSchemaId)
+                        .collect(Collectors.toList());
+        toBeDeleted.sort((o1, o2) -> Long.compare(o2, o1));
+        for (Long id : toBeDeleted) {
+            fileIO.delete(toSchemaPath(id), false);
+        }
     }
 
     public static void checkAlterTableOption(
