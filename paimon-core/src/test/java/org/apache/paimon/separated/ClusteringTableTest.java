@@ -336,6 +336,56 @@ class ClusteringTableTest {
                 .containsExactlyInAnyOrder(GenericRow.of(1, 50), GenericRow.of(2, 60));
     }
 
+    /**
+     * Test that bootstrap correctly rebuilds the key index via bulkLoad from existing sorted files.
+     *
+     * <p>Each writeRows() call creates a new writer (and thus a new ClusteringCompactManager),
+     * which calls {@code keyIndex.bootstrap(restoreFiles)}. The bootstrap method reads all level >
+     * 0 files, sorts them externally, and bulk-loads into the LSM KV DB — bypassing the normal
+     * put-per-entry path. This test verifies that the bulkLoad-based index is correct by checking
+     * deduplication across multiple commits with overlapping keys.
+     */
+    @Test
+    public void testBootstrapBulkLoadIndex() throws Exception {
+        // Commit 1: write initial data → compaction produces level > 0 sorted files
+        writeRows(
+                Arrays.asList(
+                        GenericRow.of(1, 10),
+                        GenericRow.of(2, 20),
+                        GenericRow.of(3, 30),
+                        GenericRow.of(4, 40),
+                        GenericRow.of(5, 50)));
+
+        // Commit 2: new writer bootstraps index from level > 0 files via bulkLoad,
+        // then writes overlapping keys — updateIndex must find existing entries in the
+        // bulkLoaded index to generate correct deletion vectors
+        writeRows(
+                Arrays.asList(GenericRow.of(1, 100), GenericRow.of(3, 300), GenericRow.of(5, 500)));
+
+        // Verify dedup: keys 1,3,5 updated; keys 2,4 unchanged
+        assertThat(readRows())
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 100),
+                        GenericRow.of(2, 20),
+                        GenericRow.of(3, 300),
+                        GenericRow.of(4, 40),
+                        GenericRow.of(5, 500));
+
+        // Commit 3: another bootstrap from the updated sorted files,
+        // verifies bulkLoad works correctly after files have been rewritten
+        writeRows(
+                Arrays.asList(GenericRow.of(2, 200), GenericRow.of(4, 400), GenericRow.of(6, 600)));
+
+        assertThat(readRows())
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 100),
+                        GenericRow.of(2, 200),
+                        GenericRow.of(3, 300),
+                        GenericRow.of(4, 400),
+                        GenericRow.of(5, 500),
+                        GenericRow.of(6, 600));
+    }
+
     // ==================== Clustering Column Filter Tests ====================
 
     /** Test that equality filter on clustering column skips irrelevant files in the scan plan. */
