@@ -239,6 +239,65 @@ class FileStoreTableTest(unittest.TestCase):
             # Restore original catalog environment
             self.table.catalog_environment = original_env
 
+    def test_changelog_manager(self):
+        """Test that FileStoreTable has changelog_manager method."""
+        # Get changelog_manager
+        changelog_manager = self.table.changelog_manager()
+
+        # Verify changelog_manager type
+        from pypaimon.changelog.changelog_manager import ChangelogManager
+        self.assertIsInstance(changelog_manager, ChangelogManager)
+
+        # Verify changelog_manager has correct branch
+        from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
+        self.assertEqual(self.table.current_branch(), DEFAULT_MAIN_BRANCH)
+        self.assertEqual(changelog_manager.branch, DEFAULT_MAIN_BRANCH)
+
+    def test_changelog_manager_with_branch(self):
+        """Test changelog_manager with branch option."""
+        # Create table with branch option
+        branch_name = "feature"
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={
+                CoreOptions.BUCKET.key(): "2",
+                "branch": branch_name
+            }
+        )
+        self.catalog.create_table('default.test_changelog_branch_table', schema, False)
+        branch_table = self.catalog.get_table('default.test_changelog_branch_table')
+
+        # Get changelog_manager and verify it has correct branch
+        branch_changelog_manager = branch_table.changelog_manager()
+        self.assertEqual(branch_table.current_branch(), branch_name)
+        self.assertEqual(branch_changelog_manager.branch, branch_name)
+
+        # Verify changelog directory path is correct
+        expected_changelog_dir = f"{branch_table.table_path}/branch/branch-feature/changelog"
+        self.assertEqual(branch_changelog_manager.changelog_directory(), expected_changelog_dir)
+
+    def test_changelog_manager_path_generation(self):
+        """Test that changelog_manager generates correct paths."""
+        changelog_manager = self.table.changelog_manager()
+
+        # Test changelog directory path
+        expected_dir = f"{self.table.table_path}/changelog"
+        self.assertEqual(changelog_manager.changelog_directory(), expected_dir)
+
+        # Test changelog file path
+        snapshot_id = 123
+        expected_path = f"{self.table.table_path}/changelog/changelog-{snapshot_id}"
+        self.assertEqual(changelog_manager.long_lived_changelog_path(snapshot_id), expected_path)
+
+    def test_changelog_manager_latest_and_earliest_none(self):
+        """Test that latest and earliest changelog IDs are None when no changelog exists."""
+        changelog_manager = self.table.changelog_manager()
+
+        # No changelog files should exist yet
+        self.assertIsNone(changelog_manager.latest_long_lived_changelog_id())
+        self.assertIsNone(changelog_manager.earliest_long_lived_changelog_id())
+
     def test_current_branch(self):
         """Test that current_branch returns the branch from options."""
         from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
