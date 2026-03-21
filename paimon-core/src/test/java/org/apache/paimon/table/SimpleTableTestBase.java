@@ -1844,4 +1844,57 @@ public abstract class SimpleTableTestBase {
         assertThat(table.tagManager().allTagNames())
                 .containsExactlyInAnyOrderElementsOf(expectedTags);
     }
+
+    @Test
+    public void testRollbackSchemaSuccess() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema twice
+        schemaManager.commitChanges(SchemaChange.setOption("aa", "bb"));
+        long secondSchemaId = schemaManager.latest().get().id();
+        schemaManager.commitChanges(SchemaChange.setOption("cc", "dd"));
+        long thirdSchemaId = schemaManager.latest().get().id();
+
+        // rollback to first schema
+        table.rollbackSchema(firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+        assertThat(schemaManager.schemaExists(thirdSchemaId)).isFalse();
+    }
+
+    @Test
+    public void testRollbackSchemaFailedWithSnapshotReference() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing firstSchemaId
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(rowData(0, 0, 0L));
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        // evolve schema
+        schemaManager.commitChanges(SchemaChange.setOption("aa", "bb"));
+        long secondSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing secondSchemaId
+        table = createFileStoreTable();
+        write = table.newWrite(commitUser);
+        commit = table.newCommit(commitUser);
+        write.write(rowData(1, 10, 100L));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // rollback should fail because snapshot references secondSchemaId
+        FileStoreTable finalTable = table;
+        assertThatThrownBy(() -> finalTable.rollbackSchema(firstSchemaId))
+                .hasMessageContaining("Cannot rollback to schema " + firstSchemaId)
+                .hasMessageContaining("schema " + secondSchemaId + " is still referenced");
+    }
 }

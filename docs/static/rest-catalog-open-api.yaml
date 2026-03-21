@@ -669,6 +669,42 @@ paths:
                   $ref: '#/components/examples/TagNotExistError'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/rollback-schema:
+    post:
+      tags:
+        - table
+      summary: Rollback table schema
+      operationId: rollbackSchema
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackSchemaRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/TableNotExistErrorResponse'
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/token:
     get:
       tags:
@@ -2936,6 +2972,14 @@ components:
           type: integer
           format: int64
           nullable: true
+    RollbackSchemaRequest:
+      type: object
+      required:
+        - schemaId
+      properties:
+        schemaId:
+          type: integer
+          format: int64
     Instant:
       anyOf:
         - $ref: '#/components/schemas/SnapshotInstant'
