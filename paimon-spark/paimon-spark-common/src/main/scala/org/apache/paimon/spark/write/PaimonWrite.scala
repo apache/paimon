@@ -19,7 +19,7 @@
 package org.apache.paimon.spark.write
 
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.SaveMode
+import org.apache.paimon.spark.{BaseTable, SaveMode}
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.table.FileStoreTable
 
@@ -38,6 +38,6 @@ class PaimonWrite(val table: FileStoreTable, saveMode: SaveMode, options: Option
   }
 
   override def toString: String = {
-    s"table: ${table.fullName()}, saveMode: $saveMode, options: ${options.toMap}"
+    s"table: ${BaseTable.tableNameWithCatalog(table)}, saveMode: $saveMode, options: ${options.toMap}"
   }
 }

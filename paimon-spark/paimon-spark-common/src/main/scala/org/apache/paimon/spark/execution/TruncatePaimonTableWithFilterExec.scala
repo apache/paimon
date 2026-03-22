@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.execution
 
 import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.spark.BaseTable
 import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.table.{FileStoreTable, Table}
 import org.apache.paimon.utils.InternalRowPartitionComputer
@@ -69,7 +70,7 @@ case class TruncatePaimonTableWithFilterExec(
   override def output: Seq[Attribute] = Nil
 
   override def simpleString(maxFields: Int): String = {
-    s"TruncatePaimonTableWithFilterExec: ${table.fullName()}" +
+    s"TruncatePaimonTableWithFilterExec: ${BaseTable.tableNameWithCatalog(table)}" +
       partitionPredicate.map(p => s", PartitionPredicate: [$p]").getOrElse("")
   }
 }
