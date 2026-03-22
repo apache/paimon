@@ -113,9 +113,15 @@ public class RESTCatalog implements Catalog {
                         api.options(),
                         context.hadoopConf(),
                         context.preferIO(),
-                        context.fallbackIO());
+                        context.fallbackIO(),
+                        context.catalogName());
         this.dataTokenEnabled = api.options().get(RESTTokenFileIO.DATA_TOKEN_ENABLED);
         this.tableDefaultOptions = CatalogUtils.tableDefaultOptions(this.context.options().toMap());
+    }
+
+    @Override
+    public String name() {
+        return context.catalogName();
     }
 
     @Override

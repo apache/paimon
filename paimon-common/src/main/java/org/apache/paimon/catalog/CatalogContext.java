@@ -48,18 +48,21 @@ public class CatalogContext implements Serializable {
     private final SerializableConfiguration hadoopConf;
     @Nullable private final FileIOLoader preferIOLoader;
     @Nullable private final FileIOLoader fallbackIOLoader;
+    @Nullable private final String catalogName;
 
     private CatalogContext(
             Options options,
             @Nullable Configuration hadoopConf,
             @Nullable FileIOLoader preferIOLoader,
-            @Nullable FileIOLoader fallbackIOLoader) {
+            @Nullable FileIOLoader fallbackIOLoader,
+            @Nullable String catalogName) {
         this.options = checkNotNull(options);
         this.hadoopConf =
                 new SerializableConfiguration(
                         hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf);
         this.preferIOLoader = preferIOLoader;
         this.fallbackIOLoader = fallbackIOLoader;
+        this.catalogName = catalogName;
     }
 
     public static CatalogContext create(Path warehouse) {
@@ -69,28 +72,43 @@ public class CatalogContext implements Serializable {
     }
 
     public static CatalogContext create(Options options) {
-        return new CatalogContext(options, null, null, null);
+        return new CatalogContext(options, null, null, null, null);
     }
 
     public static CatalogContext create(Options options, Configuration hadoopConf) {
-        return new CatalogContext(options, hadoopConf, null, null);
+        return new CatalogContext(options, hadoopConf, null, null, null);
+    }
+
+    public static CatalogContext create(
+            Options options, Configuration hadoopConf, @Nullable String catalogName) {
+        return new CatalogContext(options, hadoopConf, null, null, catalogName);
     }
 
     public static CatalogContext create(Options options, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, null, null, fallbackIOLoader);
+        return new CatalogContext(options, null, null, fallbackIOLoader, null);
     }
 
     public static CatalogContext create(
             Options options, FileIOLoader preferIOLoader, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, null, preferIOLoader, fallbackIOLoader);
+        return new CatalogContext(options, null, preferIOLoader, fallbackIOLoader, null);
+    }
+
+    public static CatalogContext create(
+            Options options,
+            FileIOLoader preferIOLoader,
+            FileIOLoader fallbackIOLoader,
+            @Nullable String catalogName) {
+        return new CatalogContext(options, null, preferIOLoader, fallbackIOLoader, catalogName);
     }
 
     public static CatalogContext create(
             Options options,
             Configuration hadoopConf,
             FileIOLoader preferIOLoader,
-            FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, hadoopConf, preferIOLoader, fallbackIOLoader);
+            FileIOLoader fallbackIOLoader,
+            @Nullable String catalogName) {
+        return new CatalogContext(
+                options, hadoopConf, preferIOLoader, fallbackIOLoader, catalogName);
     }
 
     public Options options() {
@@ -110,5 +128,10 @@ public class CatalogContext implements Serializable {
     @Nullable
     public FileIOLoader fallbackIO() {
         return fallbackIOLoader;
+    }
+
+    @Nullable
+    public String catalogName() {
+        return catalogName;
     }
 }

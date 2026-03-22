@@ -1166,6 +1166,10 @@ public interface Catalog extends AutoCloseable {
 
     // ==================== Catalog Information ==========================
 
+    /** The name of this catalog. */
+    @Nullable
+    String name();
+
     /** Catalog options for re-creating this catalog. */
     Map<String, String> options();
 

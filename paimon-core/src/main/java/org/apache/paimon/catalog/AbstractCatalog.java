@@ -95,6 +95,12 @@ public abstract class AbstractCatalog implements Catalog {
         this.context = context;
     }
 
+    @Nullable
+    @Override
+    public String name() {
+        return context.catalogName();
+    }
+
     @Override
     public Map<String, String> options() {
         return context.options().toMap();

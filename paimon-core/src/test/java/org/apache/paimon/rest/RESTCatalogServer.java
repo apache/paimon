@@ -2663,6 +2663,7 @@ public class RESTCatalogServer {
         TableSchema schema = tableMetadata.schema();
         CatalogEnvironment catalogEnv =
                 new CatalogEnvironment(
+                        catalog.name(),
                         identifier,
                         tableMetadata.uuid(),
                         catalog.catalogLoader(),
