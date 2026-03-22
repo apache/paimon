@@ -278,6 +278,26 @@ SELECT * FROM my_table$files /*+ OPTIONS('scan.snapshot-id'='1') */;
 */
 ```
 
+### File Key Ranges Table
+
+You can query the key ranges and file location of each data file through the file key ranges table.
+This is useful for diagnosing data distribution and Global Index coverage.
+
+```sql
+SELECT * FROM my_table$file_key_ranges;
+
+/*
++-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+--------------+
+| partition | bucket |                      file_path | file_format | schema_id | level | record_count | file_size_in_bytes | min_key | max_key | first_row_id |
++-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+--------------+
+|       {3} |      0 | data-8f64af95-29cc-4342-adc... |         orc |         0 |     0 |            1 |                593 |     [c] |     [c] |            1 |
+|       {2} |      0 | data-8b369068-0d37-4011-aa5... |         orc |         0 |     0 |            1 |                593 |     [b] |     [b] |            2 |
+|       {1} |      0 | data-10abb5bc-0170-43ae-b6a... |         orc |         0 |     0 |            1 |                595 |     [a] |     [a] |            3 |
++-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+--------------+
+3 rows in set
+*/
+```
+
 ### Tags Table
 
 You can query the tag history information of the table through tags table, including which snapshots are the tags based on
