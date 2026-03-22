@@ -224,4 +224,21 @@ abstract class DescribeTableTestBase extends PaimonSparkTestBase {
       parameters.head.contains(PartitionStatistics.FIELD_LAST_FILE_CREATION_TIME))
     Assertions.assertTrue(parameters.head.contains(PartitionStatistics.FIELD_RECORD_COUNT))
   }
+
+  test("Paimon table name and scan description should include catalog name") {
+    spark.sql("CREATE TABLE T (id INT, name STRING)")
+    spark.sql("INSERT INTO T VALUES (1, 'a')")
+
+    // Table name should include catalog prefix
+    val relation = createRelationV2("T")
+    Assertions.assertTrue(
+      relation.table.name().startsWith("paimon."),
+      s"Table name should start with 'paimon.', but got: ${relation.table.name()}")
+
+    // Scan description should include catalog prefix
+    val scan = getScan("SELECT * FROM T")
+    Assertions.assertTrue(
+      scan.description().contains("paimon."),
+      s"Scan description should contain 'paimon.', but got: ${scan.description()}")
+  }
 }
