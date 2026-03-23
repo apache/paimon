@@ -563,17 +563,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackSchema(long schemaId) {
-                LongConsumer schemaRollback = catalogEnvironment.catalogSchemaRollback();
-                if (schemaRollback != null) {
-                    schemaRollback.accept(schemaId);
-                } else {
-        try {
-            schemaManager()
-                    .rollbackTo(schemaId, snapshotManager(), tagManager(), changelogManager());
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+        LongConsumer schemaRollback = catalogEnvironment.catalogSchemaRollback();
+        if (schemaRollback != null) {
+            schemaRollback.accept(schemaId);
+        } else {
+            try {
+                schemaManager()
+                        .rollbackTo(schemaId, snapshotManager(), tagManager(), changelogManager());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
-                }
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {
