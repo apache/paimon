@@ -56,8 +56,12 @@ import java.util.UUID;
 public class AbstractTestBase {
 
     protected static boolean isFlink2_1OrAbove() {
+        return isFlinkVersionGreaterThanOrEqualTo("2.1");
+    }
+
+    protected static boolean isFlinkVersionGreaterThanOrEqualTo(String baseFlinkVersion) {
         String flinkVersion = System.getProperty("test.flink.main.version");
-        return flinkVersion.compareTo("2.1") >= 0;
+        return flinkVersion.compareTo(baseFlinkVersion) >= 0;
     }
 
     private static final int DEFAULT_PARALLELISM = 16;
