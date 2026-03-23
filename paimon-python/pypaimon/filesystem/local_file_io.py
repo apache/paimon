@@ -460,20 +460,20 @@ class FuseLocalFileIO(LocalFileIO):
 
     All file operations receive paths like:
         oss://clg-paimon-xxx/db-xxx/tbl-xxx/manifest/manifest-xxx
-    This class replaces the remote_prefix with local_prefix so the actual
+    This class replaces the path prefix with fuse_path so the actual
     I/O goes through the FUSE mount point.
     """
 
-    def __init__(self, remote_prefix: str, local_prefix: str,
+    def __init__(self, path: str, fuse_path: str,
                  catalog_options: Optional[Options] = None):
-        super().__init__(path=local_prefix, catalog_options=catalog_options)
-        self.remote_prefix = remote_prefix
-        self.local_prefix = local_prefix
+        super().__init__(path=fuse_path, catalog_options=catalog_options)
+        self.path = path
+        self.fuse_path = fuse_path
 
     def _to_file(self, path: str) -> Path:
         return super()._to_file(self._translate(path))
 
     def _translate(self, path: str) -> str:
-        if path.startswith(self.remote_prefix):
-            return self.local_prefix + path[len(self.remote_prefix):]
+        if path.startswith(self.path):
+            return self.fuse_path + path[len(self.path):]
         return path

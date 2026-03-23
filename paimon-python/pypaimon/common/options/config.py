@@ -108,3 +108,13 @@ class FuseOptions:
         .default_value("strict")
         .with_description("Validation mode: strict, warn, or none")
     )
+
+    FUSE_LOCAL_PATH_MODE = (
+        ConfigOptions.key("fuse.local-path.mode")
+        .string_type()
+        .default_value("pvfs")
+        .with_description(
+            "FUSE path mode: 'pvfs' uses database/table logical names, "
+            "'raw' uses URI path segments directly"
+        )
+    )
