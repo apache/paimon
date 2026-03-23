@@ -59,7 +59,6 @@ class TestFuseLocalPath(unittest.TestCase):
         catalog._resolve_fuse_local_path = RESTCatalog._resolve_fuse_local_path.__get__(catalog)
         catalog._validate_fuse_path = RESTCatalog._validate_fuse_path.__get__(catalog)
         catalog._handle_validation_error = RESTCatalog._handle_validation_error.__get__(catalog)
-        catalog._resolve_fuse_validation_path = RESTCatalog._resolve_fuse_validation_path.__get__(catalog)
         catalog.file_io_for_data = RESTCatalog.file_io_for_data.__get__(catalog)
         catalog.file_io_from_options = MagicMock(return_value=MagicMock())
 

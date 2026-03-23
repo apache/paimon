@@ -433,8 +433,8 @@ class RESTCatalog(Catalog):
         """
         Resolve FUSE local path.
 
-        In 'pvfs' mode, use database/table logical names from identifier to build the path,
-        which works correctly with PVFS catalog-level FUSE mounts.
+        In 'pvfs' mode, use database/table logical names from identifier to build the path.
+        If identifier has no object name, returns database-level path (used for validation).
         In 'raw' mode, use URI path segments directly.
 
         Returns:
@@ -456,7 +456,11 @@ class RESTCatalog(Catalog):
                     "FUSE path mode 'pvfs' requires an Identifier to resolve "
                     "the local path, but identifier is None."
                 )
-            return f"{root}/{identifier.get_database_name()}/{identifier.get_object_name()}"
+            db = identifier.get_database_name()
+            obj = identifier.get_object_name()
+            if obj:
+                return f"{root}/{db}/{obj}"
+            return f"{root}/{db}"
 
         # raw mode: use URI path segments directly
         uri = urlparse(original_path)
@@ -487,7 +491,7 @@ class RESTCatalog(Catalog):
             self._fuse_validation_state = True
             return
 
-        expected_local = self._resolve_fuse_validation_path(remote_location)
+        expected_local = self._resolve_fuse_local_path(remote_location, Identifier.create("default", ""))
         local_file_io = LocalFileIO(expected_local, self.context.options)
 
         # Only validate if local path exists, handle based on validation mode
@@ -509,17 +513,6 @@ class RESTCatalog(Catalog):
         elif self.fuse_validation_mode == "warn":
             logger.warning(f"{error_msg}. Falling back to default FileIO.")
             self._fuse_validation_state = False  # Mark validation failed, fallback to default FileIO
-
-    def _resolve_fuse_validation_path(self, remote_location: str) -> str:
-        """Resolve FUSE local path for validation purposes (always uses raw URI parsing)."""
-        root = self.fuse_local_path_root.rstrip('/')
-        uri = urlparse(remote_location)
-        path_part = uri.path.lstrip('/')
-        if not uri.scheme:
-            segments = path_part.split('/')
-            if len(segments) > 1:
-                path_part = '/'.join(segments[1:])
-        return f"{root}/{path_part}"
 
     def load_table(self,
                    identifier: Identifier,
