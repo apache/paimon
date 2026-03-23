@@ -24,7 +24,6 @@ from dataclasses import dataclass
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
-from pypaimon.manifest.manifest_list import ManifestList
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.utils.snapshot_manager import SnapshotManager
