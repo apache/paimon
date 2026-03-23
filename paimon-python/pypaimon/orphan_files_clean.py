@@ -452,7 +452,6 @@ class OrphanFilesClean:
     def _get_used_files_for_branch(self, branch: str) -> Set[str]:
         """Get used files for a specific branch."""
         used_files: Set[str] = set()
-        branch_path = BranchManager.branch_path(self.table_path, branch)
 
         try:
             # Collect used files from snapshots
@@ -525,9 +524,6 @@ class OrphanFilesClean:
         # and extract the data file references
         # For now, this is a placeholder
         try:
-            branch_path = BranchManager.branch_path(self.table_path, branch)
-            manifest_list = ManifestList(branch_path, self.file_io)
-
             # Read data files from manifests
             if snapshot.base_manifest_list:
                 manifest_consumer(snapshot.base_manifest_list)
