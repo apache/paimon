@@ -82,6 +82,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
+import java.util.function.LongConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 
@@ -562,12 +563,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackSchema(long schemaId) {
+                LongConsumer schemaRollback = catalogEnvironment.catalogSchemaRollback();
+                if (schemaRollback != null) {
+                    schemaRollback.accept(schemaId);
+                } else {
         try {
             schemaManager()
                     .rollbackTo(schemaId, snapshotManager(), tagManager(), changelogManager());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+                }
     }
 
     public Snapshot findSnapshot(long fromSnapshotId) throws SnapshotNotExistException {

@@ -1959,6 +1959,32 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testRollbackSchemaFromTable() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_rollback_schema", "table_for_schema_from_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        // get initial schema id
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        // rollback schema to first version
+        table.rollbackSchema(firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+
+        // get schema from new table
+        table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.schema().id()).isEqualTo(1);
+    }
+
+    @Test
     public void testRollbackSchemaFailedWithSnapshotReference() throws Exception {
         Identifier identifier =
                 Identifier.create("test_rollback_schema_fail", "table_for_schema_fail");

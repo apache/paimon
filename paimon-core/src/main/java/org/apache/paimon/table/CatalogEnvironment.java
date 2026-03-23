@@ -39,6 +39,7 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 import java.util.Optional;
+import java.util.function.LongConsumer;
 
 /** Catalog environment in table which contains log factory, metastore client factory. */
 public class CatalogEnvironment implements Serializable {
@@ -135,6 +136,21 @@ public class CatalogEnvironment implements Serializable {
             return (instant, fromSnapshot) -> {
                 try {
                     catalog.rollbackTo(identifier, instant, fromSnapshot);
+                } catch (Catalog.TableNotExistException e) {
+                    throw new RuntimeException(e);
+                }
+            };
+        }
+        return null;
+    }
+
+    @Nullable
+    public LongConsumer catalogSchemaRollback() {
+        if (catalogLoader != null && supportsVersionManagement) {
+            Catalog catalog = catalogLoader.load();
+            return schemaId -> {
+                try {
+                    catalog.rollbackSchema(identifier, schemaId);
                 } catch (Catalog.TableNotExistException e) {
                     throw new RuntimeException(e);
                 }
