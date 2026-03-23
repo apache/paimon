@@ -19,17 +19,24 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -37,8 +44,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -163,17 +172,99 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(result).containsExactly("a200", "a56789");
     }
 
+    @Test
+    public void testBtreeWithNonIndexedRowRange() throws Exception {
+        write(10L);
+        append(10, 20);
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
+        createIndex("f1", Collections.singletonList(new Range(0L, 9L)));
+
+        assertThat(table.store().newGlobalIndexScanBuilder().shardList())
+                .containsExactly(new Range(0L, 9L));
+
+        Predicate predicate =
+                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a5"));
+        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
+
+        List<Split> splits = readBuilder.newScan().plan().splits();
+        assertThat(splits).hasSize(1);
+
+        IndexedSplit indexedSplit = (IndexedSplit) splits.get(0);
+        assertThat(indexedSplit.rowRanges())
+                .containsExactly(new Range(5L, 5L), new Range(10L, 19L));
+        assertThat(
+                        indexedSplit.dataSplit().dataFiles().stream()
+                                .map(DataFileMeta::firstRowId)
+                                .distinct()
+                                .sorted()
+                                .collect(Collectors.toList()))
+                .containsExactly(0L, 10L);
+
+        List<String> result = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(splits)
+                .forEachRemaining(row -> result.add(row.getString(1).toString()));
+        assertThat(result).containsExactly("a5");
+    }
+
     private void createIndex(String fieldName) throws Exception {
+        createIndex(fieldName, null);
+    }
+
+    private void createIndex(String fieldName, List<Range> rowRanges) throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         BTreeGlobalIndexBuilder builder =
                 new BTreeGlobalIndexBuilder(table).withIndexField(fieldName);
-        List<DataSplit> dataSplits = builder.scan();
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : dataSplits) {
+        for (DataSplit dataSplit : indexSplits(table, rowRanges, builder.scan())) {
             commitMessages.addAll(builder.build(dataSplit, ioManager));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
             commit.commit(commitMessages);
+        }
+    }
+
+    private List<DataSplit> indexSplits(
+            FileStoreTable table, List<Range> rowRanges, List<DataSplit> fallbackSplits) {
+        if (rowRanges == null) {
+            return fallbackSplits;
+        }
+
+        List<Split> splits =
+                table.newReadBuilder().withRowRanges(rowRanges).newScan().plan().splits();
+        return splits.stream()
+                .map(split -> ((IndexedSplit) split).dataSplit())
+                .collect(Collectors.toList());
+    }
+
+    private void append(int startInclusive, int endExclusive) throws Exception {
+        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeType0 = schemaDefault().rowType().project(Arrays.asList("f0", "f1"));
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+            for (int i = startInclusive; i < endExclusive; i++) {
+                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                commit.commit(write0.prepareCommit());
+            }
+        }
+
+        long rowId =
+                getTableDefault().snapshotManager().latestSnapshot().nextRowId()
+                        - (endExclusive - startInclusive);
+        builder = getTableDefault().newBatchWriteBuilder();
+        RowType writeType1 = schemaDefault().rowType().project(Collections.singletonList("f2"));
+        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
+            for (int i = startInclusive; i < endExclusive; i++) {
+                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
+            }
+            try (BatchTableCommit commit = builder.newCommit()) {
+                List<CommitMessage> commitables = write1.prepareCommit();
+                setFirstRowId(commitables, rowId);
+                commit.commit(commitables);
+            }
         }
     }
 
