@@ -286,9 +286,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 return lookupInternal(key);
             }
             List<BinaryRow> partitions =
-                    scanPartitions == null
-                            ? partitionLoader.partitions()
-                            : scanPartitions;
+                    scanPartitions == null ? partitionLoader.partitions() : scanPartitions;
             if (partitions.isEmpty()) {
                 return Collections.emptyList();
             }

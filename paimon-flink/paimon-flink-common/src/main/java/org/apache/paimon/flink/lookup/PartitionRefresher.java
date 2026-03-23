@@ -136,17 +136,14 @@ public class PartitionRefresher implements Closeable {
                         if (!newPath.mkdirs()) {
                             throw new RuntimeException("Failed to create dir: " + newPath);
                         }
-                        LookupTable newTable =
-                                copyWithNewPath(newPath, context, cacheRowFilter);
+                        LookupTable newTable = copyWithNewPath(newPath, context, cacheRowFilter);
                         newTable.specifyPartitions(newPartitions, partitionFilter);
                         newTable.open();
 
                         pendingLookupTable.set(newTable);
-                        LOG.info(
-                                "Async partition refresh completed for table {}.", tableName);
+                        LOG.info("Async partition refresh completed for table {}.", tableName);
                     } catch (Exception e) {
-                        LOG.error(
-                                "Async partition refresh failed for table {}.", tableName, e);
+                        LOG.error("Async partition refresh failed for table {}.", tableName, e);
                         partitionRefreshException.set(e);
                         if (newPath != null) {
                             FileIOUtils.deleteDirectoryQuietly(newPath);
