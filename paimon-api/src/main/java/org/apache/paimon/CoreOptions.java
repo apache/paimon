@@ -3378,7 +3378,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean consumerChangelogOnly() {
-        return options.get(CONSUMER_CHANGELOG_ONLY);
+        return options.get(CONSUMER_CHANGELOG_ONLY) && changelogLifecycleDecoupled();
     }
 
     public boolean partitionedTableInMetastore() {

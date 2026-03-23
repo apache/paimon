@@ -686,11 +686,13 @@ public class ExpireSnapshotsTest {
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(3L);
 
         // with consumerChangelogOnly=true, consumer should NOT prevent snapshot expiration
+        // but changelog decoupled so changelogs are created
         ExpireConfig configChangelogOnly =
                 ExpireConfig.builder()
                         .snapshotRetainMin(1)
                         .snapshotRetainMax(1)
                         .snapshotTimeRetain(Duration.ofMillis(Long.MAX_VALUE))
+                        .changelogRetainMax(Integer.MAX_VALUE)
                         .consumerChangelogOnly(true)
                         .build();
         store.newExpire(configChangelogOnly).expire();
@@ -699,6 +701,15 @@ public class ExpireSnapshotsTest {
         // earliest snapshot should be latestSnapshotId (consumer no longer protects snapshots)
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo((long) latestSnapshotId2);
         assertSnapshot(latestSnapshotId2, allData, snapshotPositions);
+
+        // changelog expiration should still be protected by consumer
+        ExpireSnapshots changelogExpire = store.newChangelogExpire(configChangelogOnly);
+        changelogExpire.expire();
+
+        // earliest changelog should be 3 (still protected by consumer)
+        Long earliestChangelogId = changelogManager.earliestLongLivedChangelogId();
+        assertThat(earliestChangelogId).isNotNull();
+        assertThat(earliestChangelogId).isEqualTo(3L);
 
         // clean up consumer file so assertCleaned passes
         consumerManager.deleteConsumer("myConsumer");
