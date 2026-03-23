@@ -46,16 +46,13 @@ import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -69,11 +66,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode.MEMORY;
-import static org.apache.paimon.lookup.rocksdb.RocksDBOptions.LOOKUP_CACHE_ROWS;
 
 /** Lookup table of full cache. */
 public abstract class FullCacheLookupTable implements LookupTable {
@@ -98,12 +93,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Nullable private List<BinaryRow> scanPartitions;
     @Nullable private Predicate partitionFilter;
     @Nullable private Filter<InternalRow> cacheRowFilter;
-
-    // ---- Partition refresh fields ----
-    private final boolean partitionRefreshAsync;
-    @Nullable private ExecutorService partitionRefreshExecutor;
-    private AtomicReference<LookupTable> pendingLookupTable;
-    private AtomicReference<Exception> partitionRefreshException;
 
     public FullCacheLookupTable(Context context) {
         this.table = context.table;
@@ -146,7 +135,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.refreshAsync = options.get(LOOKUP_REFRESH_ASYNC);
         this.cachedException = new AtomicReference<>();
         this.maxPendingSnapshotCount = options.get(LOOKUP_REFRESH_ASYNC_PENDING_SNAPSHOT_COUNT);
-        this.partitionRefreshAsync = options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC);
     }
 
     @Override
@@ -176,21 +164,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
                                                 "%s-lookup-refresh",
                                                 Thread.currentThread().getName())))
                         : null;
-        if (partitionRefreshAsync) {
-            initPartitionRefresh();
-        }
-    }
-
-    private void initPartitionRefresh() {
-        this.pendingLookupTable = new AtomicReference<>(null);
-        this.partitionRefreshException = new AtomicReference<>(null);
-        this.scanPartitions = scanPartitions != null ? scanPartitions : Collections.emptyList();
-        this.partitionRefreshExecutor =
-                Executors.newSingleThreadExecutor(
-                        new ExecutorThreadFactory(
-                                String.format(
-                                        "%s-lookup-refresh-partition",
-                                        Thread.currentThread().getName())));
     }
 
     private StateFactory createStateFactory() throws IOException {
@@ -363,118 +336,11 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     public abstract TableBulkLoader createBulkLoader();
 
-    // ---- Partition refresh implementation ----
-
-    @Override
-    public void startPartitionRefresh(
-            List<BinaryRow> newPartitions, @Nullable Predicate partitionFilter) throws Exception {
-        if (partitionRefreshAsync) {
-            asyncPartitionRefresh(newPartitions, partitionFilter);
-        } else {
-            syncPartitionRefresh(newPartitions, partitionFilter);
-        }
-    }
-
-    private void syncPartitionRefresh(
-            List<BinaryRow> newPartitions, @Nullable Predicate partitionFilter) throws Exception {
-        LOG.info(
-                "Synchronously refreshing partition for table {}, new partitions detected.",
-                table.name());
-        close();
-        specifyPartitions(newPartitions, partitionFilter);
-        open();
-        LOG.info("Synchronous partition refresh completed for table {}.", table.name());
-    }
-
-    private void asyncPartitionRefresh(
-            List<BinaryRow> newPartitions, @Nullable Predicate partitionFilter) {
-
-        LOG.info(
-                "Starting async partition refresh for table {}, new partitions detected.",
-                table.name());
-
-        partitionRefreshExecutor.submit(
-                () -> {
-                    File newPath = null;
-                    try {
-                        newPath =
-                                new File(
-                                        context.tempPath.getParent(),
-                                        "lookup-" + java.util.UUID.randomUUID());
-                        if (!newPath.mkdirs()) {
-                            throw new RuntimeException("Failed to create dir: " + newPath);
-                        }
-                        LookupTable newTable = copyWithNewPath(newPath);
-                        newTable.specifyPartitions(newPartitions, partitionFilter);
-                        newTable.open();
-
-                        pendingLookupTable.set(newTable);
-                        LOG.info("Async partition refresh completed for table {}.", table.name());
-                    } catch (Exception e) {
-                        LOG.error("Async partition refresh failed for table {}.", table.name(), e);
-                        partitionRefreshException.set(e);
-                        if (newPath != null) {
-                            FileIOUtils.deleteDirectoryQuietly(newPath);
-                        }
-                    }
-                });
-    }
-
-    @Override
-    public LookupTable copyWithNewPath(File newPath) {
-        Context newContext = context.copy(newPath);
-        Options options = Options.fromMap(context.table.options());
-        FullCacheLookupTable newTable = create(newContext, options.get(LOOKUP_CACHE_ROWS));
-        if (cacheRowFilter != null) {
-            newTable.specifyCacheRowFilter(cacheRowFilter);
-        }
-        return newTable;
-    }
-
-    @Nullable
-    @Override
-    public LookupTable checkPartitionRefreshCompletion() throws Exception {
-        if (!partitionRefreshAsync) {
-            return null;
-        }
-
-        Exception asyncException = partitionRefreshException.getAndSet(null);
-        if (asyncException != null) {
-            LOG.error(
-                    "Async partition refresh failed for table {}, " + "will stop running.",
-                    table.name(),
-                    asyncException);
-            throw asyncException;
-        }
-
-        LookupTable newTable = pendingLookupTable.getAndSet(null);
-        if (newTable == null) {
-            return null;
-        }
-
-        LOG.info("Switched to new lookup table for table {} with new partitions.", table.name());
-        return newTable;
-    }
-
-    @Override
-    public List<BinaryRow> scanPartitions() {
-        return scanPartitions;
-    }
-
     @Override
     public void close() throws IOException {
         try {
             if (refreshExecutor != null) {
                 ExecutorUtils.gracefulShutdown(1L, TimeUnit.MINUTES, refreshExecutor);
-            }
-            if (partitionRefreshExecutor != null) {
-                ExecutorUtils.gracefulShutdown(1L, TimeUnit.MINUTES, partitionRefreshExecutor);
-            }
-            if (pendingLookupTable != null) {
-                LookupTable pending = pendingLookupTable.getAndSet(null);
-                if (pending != null) {
-                    pending.close();
-                }
             }
         } finally {
             stateFactory.close();
