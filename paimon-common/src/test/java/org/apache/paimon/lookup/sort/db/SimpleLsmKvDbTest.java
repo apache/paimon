@@ -28,7 +28,11 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -1318,6 +1322,126 @@ public class SimpleLsmKvDbTest {
             Assertions.assertEquals("v4", getString(db, "yyy"));
         } finally {
             db.close();
+        }
+    }
+
+    @Test
+    public void testBulkLoad() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            // Prepare sorted entries
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            for (int i = 0; i < 100; i++) {
+                String key = String.format("key-%05d", i);
+                String value = String.format("value-%05d", i);
+                entries.add(
+                        new AbstractMap.SimpleImmutableEntry<>(
+                                key.getBytes(UTF_8), value.getBytes(UTF_8)));
+            }
+
+            db.bulkLoad(entries.iterator());
+
+            // All data at deepest level, no L0 files
+            Assertions.assertEquals(0, db.getLevelFileCount(0));
+            Assertions.assertTrue(db.getLevelFileCount(SimpleLsmKvDb.MAX_LEVELS - 1) > 0);
+
+            // All keys should be readable
+            for (int i = 0; i < 100; i++) {
+                String expected = String.format("value-%05d", i);
+                String actual = getString(db, String.format("key-%05d", i));
+                Assertions.assertEquals(expected, actual, "Mismatch at index " + i);
+            }
+        }
+    }
+
+    @Test
+    public void testBulkLoadMultipleSstFiles() throws IOException {
+        // Use a small maxSstFileSize to force multiple SST files
+        SimpleLsmKvDb db =
+                SimpleLsmKvDb.builder(new File(tempDir.toFile(), "bulk-multi-db"))
+                        .memTableFlushThreshold(1024)
+                        .maxSstFileSize(512)
+                        .blockSize(128)
+                        .level0FileNumCompactTrigger(4)
+                        .compressOptions(new CompressOptions("none", 1))
+                        .build();
+
+        try {
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            for (int i = 0; i < 200; i++) {
+                String key = String.format("key-%05d", i);
+                String value = String.format("value-%05d", i);
+                entries.add(
+                        new AbstractMap.SimpleImmutableEntry<>(
+                                key.getBytes(UTF_8), value.getBytes(UTF_8)));
+            }
+
+            db.bulkLoad(entries.iterator());
+
+            // Multiple SST files should be created at the deepest level
+            int deepestLevelFiles = db.getLevelFileCount(SimpleLsmKvDb.MAX_LEVELS - 1);
+            Assertions.assertTrue(
+                    deepestLevelFiles > 1,
+                    "Expected multiple SST files at deepest level, got " + deepestLevelFiles);
+            Assertions.assertEquals(0, db.getLevelFileCount(0));
+
+            // All keys should be readable
+            for (int i = 0; i < 200; i++) {
+                String expected = String.format("value-%05d", i);
+                String actual = getString(db, String.format("key-%05d", i));
+                Assertions.assertEquals(expected, actual, "Mismatch at index " + i);
+            }
+        } finally {
+            db.close();
+        }
+    }
+
+    @Test
+    public void testBulkLoadEmptyIterator() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            List<Map.Entry<byte[], byte[]>> empty = new ArrayList<>();
+            db.bulkLoad(empty.iterator());
+
+            Assertions.assertEquals(0, db.getSstFileCount());
+            Assertions.assertNull(getString(db, "any-key"));
+        }
+    }
+
+    @Test
+    public void testBulkLoadThenPutAndGet() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            // Bulk load initial data
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            for (int i = 0; i < 50; i++) {
+                String key = String.format("key-%05d", i);
+                String value = String.format("value-%05d", i);
+                entries.add(
+                        new AbstractMap.SimpleImmutableEntry<>(
+                                key.getBytes(UTF_8), value.getBytes(UTF_8)));
+            }
+            db.bulkLoad(entries.iterator());
+
+            // Now use normal put to add/overwrite data
+            putString(db, "key-00000", "overwritten");
+            putString(db, "key-99999", "new-key");
+
+            Assertions.assertEquals("overwritten", getString(db, "key-00000"));
+            Assertions.assertEquals("new-key", getString(db, "key-99999"));
+            Assertions.assertEquals("value-00025", getString(db, String.format("key-%05d", 25)));
+        }
+    }
+
+    @Test
+    public void testBulkLoadFailsOnNonEmptyDb() throws IOException {
+        try (SimpleLsmKvDb db = createDb()) {
+            putString(db, "existing", "data");
+
+            List<Map.Entry<byte[], byte[]>> entries = new ArrayList<>();
+            entries.add(
+                    new AbstractMap.SimpleImmutableEntry<>(
+                            "key".getBytes(UTF_8), "value".getBytes(UTF_8)));
+
+            Assertions.assertThrows(
+                    IllegalStateException.class, () -> db.bulkLoad(entries.iterator()));
         }
     }
 
