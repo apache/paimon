@@ -25,6 +25,12 @@ if sys.version_info[:2] == (3, 6):
 
 from pypaimon.catalog.catalog_factory import CatalogFactory
 from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
+from pypaimon.orphan_files_clean import (
+    OrphanFilesClean,
+    CleanOrphanFilesResult,
+    create_orphan_files_cleans,
+    execute_database_orphan_files,
+)
 from pypaimon.schema.schema import Schema
 from pypaimon.tag.tag import Tag
 from pypaimon.tag.tag_manager import TagManager
@@ -35,4 +41,8 @@ __all__ = [
     "Schema",
     "Tag",
     "TagManager",
+    "OrphanFilesClean",
+    "CleanOrphanFilesResult",
+    "create_orphan_files_cleans",
+    "execute_database_orphan_files",
 ]
