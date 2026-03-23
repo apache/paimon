@@ -18,20 +18,17 @@
 ################################################################################
 
 import logging
-import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional, Set, Tuple, Dict, Callable, Consumer
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional, Set, Tuple, Dict, Callable
 from dataclasses import dataclass
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.manifest.manifest_list import ManifestList
-from pypaimon.manifest.index_file_handler import IndexFileHandler
 from pypaimon.schema.table_schema import TableSchema
 from pypaimon.snapshot.snapshot import Snapshot
 from pypaimon.utils.snapshot_manager import SnapshotManager
 from pypaimon.utils.changelog_manager import ChangelogManager
-from pypaimon.tag.tag_manager import TagManager
 from pypaimon.branch.branch_manager import BranchManager
 
 logger = logging.getLogger(__name__)
@@ -258,7 +255,6 @@ class OrphanFilesClean:
         for status in statuses:
             path = status.path
             if file_status_filter(status) and path_filter(path):
-                file_name = path.split("/")[-1]
                 try:
                     result.append((path, status.len))
                 except Exception:
@@ -459,9 +455,6 @@ class OrphanFilesClean:
         branch_path = BranchManager.branch_path(self.table_path, branch)
 
         try:
-            # Get manifest file factory
-            manifest_list = ManifestList(branch_path, self.file_io)
-
             # Collect used files from snapshots
             self._collect_without_data_file(
                 branch,
@@ -539,7 +532,7 @@ class OrphanFilesClean:
             if snapshot.base_manifest_list:
                 manifest_consumer(snapshot.base_manifest_list)
         except Exception as e:
-            logger.warning("Failed to read manifest %s: %s", snapshot.base_manifest_list, e)
+            logger.warning("Failed to read manifest: %s", e)
 
     def _clean_empty_data_directory(self, delete_files: List[str]):
         """Clean empty data directories."""
