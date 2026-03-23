@@ -38,7 +38,7 @@ from pypaimon.common.options.config import CatalogOptions, FuseOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
-from pypaimon.filesystem.local_file_io import LocalFileIO
+from pypaimon.filesystem.local_file_io import LocalFileIO, FuseLocalFileIO
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
@@ -405,15 +405,19 @@ class RESTCatalog(Catalog):
         # Try to use FUSE local path
         if self.fuse_local_path_enabled:
             # Configuration error raises exception directly
-            local_path = self._resolve_fuse_local_path(table_path)
+            local_path = self._resolve_fuse_local_path(table_path, identifier)
 
             # Perform validation (only once)
             if self._fuse_validation_state is None:
                 self._validate_fuse_path()
 
-            # Validation passed, return local FileIO
+            # Validation passed, return FUSE-aware local FileIO
             if self._fuse_validation_state:
-                return LocalFileIO(local_path, self.context.options)
+                return FuseLocalFileIO(
+                    remote_prefix=table_path.rstrip('/'),
+                    local_prefix=local_path.rstrip('/'),
+                    catalog_options=self.context.options,
+                )
 
             # warn mode validation failed, fallback to default FileIO
             return RESTTokenFileIO(identifier, table_path, self.context.options) \
@@ -423,11 +427,13 @@ class RESTCatalog(Catalog):
         return RESTTokenFileIO(identifier, table_path, self.context.options) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
 
-    def _resolve_fuse_local_path(self, original_path: str) -> str:
+    def _resolve_fuse_local_path(self, original_path: str, identifier: Optional[Identifier] = None) -> str:
         """
         Resolve FUSE local path.
 
-        FUSE mount point is mapped to catalog level, so skip the catalog name in the path.
+        When identifier is provided, use database/table logical names to build the path,
+        which works correctly with PVFS catalog-level FUSE mounts.
+        Falls back to URI parsing when identifier is not provided.
 
         Returns:
             Local path
@@ -439,6 +445,14 @@ class RESTCatalog(Catalog):
             raise ValueError(
                 "FUSE local path is enabled but fuse.local-path.root is not configured"
             )
+
+        root = self.fuse_local_path_root.rstrip('/')
+
+        # Use identifier's logical names when available (handles PVFS correctly)
+        if identifier is not None:
+            db_name = identifier.get_database_name()
+            table_name = identifier.get_object_name()
+            return f"{root}/{db_name}/{table_name}"
 
         uri = urlparse(original_path)
 
@@ -456,7 +470,7 @@ class RESTCatalog(Catalog):
             if len(segments) > 1:
                 path_part = '/'.join(segments[1:])
 
-        return f"{self.fuse_local_path_root.rstrip('/')}/{path_part}"
+        return f"{root}/{path_part}"
 
     def _validate_fuse_path(self) -> None:
         """
