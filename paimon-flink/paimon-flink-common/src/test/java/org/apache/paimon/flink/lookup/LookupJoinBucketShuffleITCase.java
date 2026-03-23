@@ -22,6 +22,7 @@ import org.apache.paimon.flink.CatalogITCaseBase;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.configuration.BatchExecutionOptions;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -193,7 +194,7 @@ public class LookupJoinBucketShuffleITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testBucketShuffleNotAllowedWithAQE() throws Exception {
+    public void testBucketShuffleNotAllowedWithAQE() {
         String nonPrimaryKeyDimTable = createNonPrimaryKeyDimTable("col1");
         String query =
                 ("SELECT /*+ LOOKUP('table'='D', 'shuffle'='true') */ T.col1, D.col2 FROM T JOIN DIM "
@@ -212,11 +213,13 @@ public class LookupJoinBucketShuffleITCase extends CatalogITCaseBase {
                     .hasMessage(
                             "Custom shuffle lookup join is not supported in adaptive parallelism mode.");
         } else {
-            // Custom shuffle lookup join not supported in Flink 1.x.
-            List<Row> groundTruthRows = getGroundTruthRows();
-            List<Row> result1 =
-                    BlockingIterator.of(tEnv.executeSql(query).collect()).collect(ROW_NUMBER);
-            assertThat(result1).containsExactlyInAnyOrderElementsOf(groundTruthRows);
+            // Custom shuffle lookup join is not supported in Flink 1.x.
+            assertThatThrownBy(
+                            () ->
+                                    BlockingIterator.of(tEnv.executeSql(query).collect())
+                                            .collect(ROW_NUMBER))
+                    .isInstanceOf(ValidationException.class)
+                    .hasMessage("Unknown join strategy : LOOKUP");
         }
     }
 
