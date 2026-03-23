@@ -114,8 +114,19 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
-        return union(reader -> reader.visitVectorSearch(vectorSearch));
+    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+        Optional<ScoredGlobalIndexResult> result = Optional.empty();
+        for (GlobalIndexReader reader : readers) {
+            Optional<ScoredGlobalIndexResult> current = reader.visitVectorSearch(vectorSearch);
+            if (!current.isPresent()) {
+                continue;
+            }
+            if (!result.isPresent()) {
+                result = current;
+            }
+            result = Optional.of(result.get().or(current.get()));
+        }
+        return result;
     }
 
     private Optional<GlobalIndexResult> union(

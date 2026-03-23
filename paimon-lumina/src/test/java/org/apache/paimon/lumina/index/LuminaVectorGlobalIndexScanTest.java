@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.index.GlobalIndexMeta;
@@ -33,7 +34,6 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -45,6 +45,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -130,9 +131,15 @@ public class LuminaVectorGlobalIndexScanTest {
         commitIndex(indexFiles);
 
         float[] queryVector = new float[] {0.85f, 0.15f};
-        VectorSearch vectorSearch = new VectorSearch(queryVector, 3, vectorFieldName);
-        ReadBuilder readBuilder = table.newReadBuilder().withVectorSearch(vectorSearch);
-        TableScan scan = readBuilder.newScan();
+        VectorSearchBuilder vectorBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(queryVector)
+                        .withLimit(3)
+                        .withVectorColumn(vectorFieldName);
+        GlobalIndexResult indexResult =
+                vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan());
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan scan = readBuilder.newScan().withGlobalIndexResult(indexResult);
         List<Integer> ids = new ArrayList<>();
         readBuilder
                 .newRead()
@@ -239,9 +246,15 @@ public class LuminaVectorGlobalIndexScanTest {
         ipTable.newCommit(ipCommitUser).commit(1, Collections.singletonList(message));
 
         float[] queryVector = new float[] {1.0f, 0.0f};
-        VectorSearch vectorSearch = new VectorSearch(queryVector, 3, vectorFieldName);
-        ReadBuilder readBuilder = ipTable.newReadBuilder().withVectorSearch(vectorSearch);
-        TableScan scan = readBuilder.newScan();
+        VectorSearchBuilder vectorBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(queryVector)
+                        .withLimit(3)
+                        .withVectorColumn(vectorFieldName);
+        GlobalIndexResult indexResult =
+                vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan());
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan scan = readBuilder.newScan().withGlobalIndexResult(indexResult);
         List<Integer> ids = new ArrayList<>();
         readBuilder
                 .newRead()

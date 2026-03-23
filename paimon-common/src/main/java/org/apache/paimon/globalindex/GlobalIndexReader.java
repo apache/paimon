@@ -44,7 +44,7 @@ public interface GlobalIndexReader extends FunctionVisitor<Optional<GlobalIndexR
         throw new UnsupportedOperationException();
     }
 
-    default Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+    default Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         throw new UnsupportedOperationException();
     }
 }

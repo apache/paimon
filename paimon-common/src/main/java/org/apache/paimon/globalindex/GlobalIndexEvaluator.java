@@ -24,7 +24,6 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 
@@ -52,39 +51,8 @@ public class GlobalIndexEvaluator
         this.readersFunction = readersFunction;
     }
 
-    public Optional<GlobalIndexResult> evaluate(
-            @Nullable Predicate predicate, @Nullable VectorSearch vectorSearch) {
-        Optional<GlobalIndexResult> compoundResult = Optional.empty();
-        if (predicate != null) {
-            compoundResult = predicate.visit(this);
-        }
-        if (vectorSearch != null) {
-            int fieldId = rowType.getField(vectorSearch.fieldName()).id();
-            Collection<GlobalIndexReader> readers =
-                    indexReadersCache.computeIfAbsent(fieldId, readersFunction::apply);
-            if (compoundResult.isPresent()) {
-                vectorSearch = vectorSearch.withIncludeRowIds(compoundResult.get().results());
-            }
-            for (GlobalIndexReader fileIndexReader : readers) {
-                Optional<GlobalIndexResult> childResult = vectorSearch.visit(fileIndexReader);
-                if (!childResult.isPresent()) {
-                    continue;
-                }
-                GlobalIndexResult result = childResult.get();
-                // AND Operation
-                if (compoundResult.isPresent()) {
-                    GlobalIndexResult r1 = compoundResult.get();
-                    compoundResult = Optional.of(r1.and(result));
-                } else {
-                    compoundResult = Optional.of(result);
-                }
-
-                if (compoundResult.get().results().isEmpty()) {
-                    return compoundResult;
-                }
-            }
-        }
-        return compoundResult;
+    public Optional<GlobalIndexResult> evaluate(@Nullable Predicate predicate) {
+        return predicate == null ? Optional.empty() : predicate.visit(this);
     }
 
     @Override

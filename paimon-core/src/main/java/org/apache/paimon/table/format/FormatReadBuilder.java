@@ -30,7 +30,6 @@ import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FormatTable;
@@ -249,11 +248,6 @@ public class FormatReadBuilder implements ReadBuilder {
     @Override
     public ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex) {
         throw new UnsupportedOperationException("Format Table does not support withRowRangeIndex.");
-    }
-
-    @Override
-    public ReadBuilder withVectorSearch(VectorSearch vectorSearch) {
-        throw new UnsupportedOperationException("Format Table does not support withRowRanges.");
     }
 
     @Override

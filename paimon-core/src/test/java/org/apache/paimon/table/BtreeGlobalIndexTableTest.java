@@ -185,7 +185,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         for (Range range : ranges) {
             try (RowRangeGlobalIndexScanner scanner =
                     indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate, null);
+                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate);
                 if (!globalIndexResult.isPresent()) {
                     throw new RuntimeException("Can't find index result by scan");
                 }

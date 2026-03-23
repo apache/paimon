@@ -30,6 +30,8 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ReadBuilderImpl;
 import org.apache.paimon.table.source.StreamDataTableScan;
+import org.apache.paimon.table.source.VectorSearchBuilder;
+import org.apache.paimon.table.source.VectorSearchBuilderImpl;
 
 import java.util.Optional;
 
@@ -51,6 +53,11 @@ public interface InnerTable extends Table {
     @Override
     default ReadBuilder newReadBuilder() {
         return new ReadBuilderImpl(this);
+    }
+
+    @Override
+    default VectorSearchBuilder newVectorSearchBuilder() {
+        return new VectorSearchBuilderImpl(this);
     }
 
     @Override

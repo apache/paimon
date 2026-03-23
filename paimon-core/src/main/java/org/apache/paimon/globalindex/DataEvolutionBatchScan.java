@@ -30,7 +30,6 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.RowIdPredicateVisitor;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DataTableBatchScan;
@@ -64,7 +63,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
     private final DataTableBatchScan batchScan;
 
     private Predicate filter;
-    private VectorSearch vectorSearch;
     private RowRangeIndex pushedRowRangeIndex;
     private GlobalIndexResult globalIndexResult;
 
@@ -115,13 +113,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
             }
         }
         return filter;
-    }
-
-    @Override
-    public InnerTableScan withVectorSearch(VectorSearch vectorSearch) {
-        this.vectorSearch = vectorSearch;
-        batchScan.withVectorSearch(vectorSearch);
-        return this;
     }
 
     @Override
@@ -222,8 +213,12 @@ public class DataEvolutionBatchScan implements DataTableScan {
         return this;
     }
 
-    // To enable other system computing index result by their own.
-    public InnerTableScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
+    @Override
+    public DataEvolutionBatchScan withGlobalIndexResult(GlobalIndexResult globalIndexResult) {
+        if (globalIndexResult == null) {
+            return this;
+        }
+
         this.globalIndexResult = globalIndexResult;
         if (pushedRowRangeIndex != null) {
             throw new IllegalStateException(
@@ -265,7 +260,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         if (this.globalIndexResult != null) {
             return Optional.of(globalIndexResult);
         }
-        if (filter == null && vectorSearch == null) {
+        if (filter == null) {
             return Optional.empty();
         }
         if (!table.coreOptions().globalIndexEnabled()) {
@@ -288,7 +283,6 @@ public class DataEvolutionBatchScan implements DataTableScan {
                         indexedRowRanges,
                         indexScanBuilder,
                         filter,
-                        vectorSearch,
                         table.coreOptions().globalIndexThreadNum());
         if (!resultOptional.isPresent()) {
             return Optional.empty();
