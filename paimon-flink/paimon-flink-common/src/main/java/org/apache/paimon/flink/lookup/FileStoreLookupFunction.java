@@ -253,7 +253,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                     new PartitionRefresher(
                             options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC), table.name());
             this.partitionRefresher.init(
-                    partitionLoader == null ? Collections.emptyList() : partitionLoader.partitions());
+                    partitionLoader == null
+                            ? Collections.emptyList()
+                            : partitionLoader.partitions());
         }
     }
 
@@ -343,7 +345,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         // 2. check if async partition refresh has completed, and switch if so
         if (partitionRefresher != null && partitionRefresher.isPartitionRefreshAsync()) {
             LookupTable switchedTable =
-                    partitionRefresher.checkPartitionRefreshCompletion(partitionLoader.partitions());
+                    partitionRefresher.checkPartitionRefreshCompletion(
+                            partitionLoader.partitions());
             if (switchedTable != null) {
                 lookupTable.close();
                 lookupTable = switchedTable;
