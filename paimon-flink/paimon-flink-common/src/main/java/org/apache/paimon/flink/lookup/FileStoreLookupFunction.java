@@ -98,7 +98,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     // partition refresh
     @Nullable private transient PartitionRefresher partitionRefresher;
-    @Nullable private transient List<BinaryRow> scanPartitions;
 
     // interval of refreshing lookup table
     private transient Duration refreshInterval;
@@ -240,7 +239,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (!partitions.isEmpty()) {
                 lookupTable.specifyPartitions(
                         partitions, partitionLoader.createSpecificPartFilter());
-                this.scanPartitions = partitions;
             }
         }
 
@@ -254,7 +252,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             this.partitionRefresher =
                     new PartitionRefresher(
                             options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC), table.name());
-            this.partitionRefresher.init();
+            this.partitionRefresher.init(
+                    partitionLoader == null ? Collections.emptyList() : partitionLoader.partitions());
         }
     }
 
@@ -286,7 +285,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 return lookupInternal(key);
             }
             List<BinaryRow> partitions =
-                    scanPartitions == null ? partitionLoader.partitions() : scanPartitions;
+                    partitionRefresher == null
+                            ? partitionLoader.partitions()
+                            : partitionRefresher.getScanPartitions();
             if (partitions.isEmpty()) {
                 return Collections.emptyList();
             }
@@ -340,13 +341,13 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         // 2. check if async partition refresh has completed, and switch if so
-        if (partitionRefresher != null) {
-            LookupTable switchedTable = partitionRefresher.checkPartitionRefreshCompletion();
+        if (partitionRefresher != null && partitionRefresher.isPartitionRefreshAsync()) {
+            LookupTable switchedTable =
+                    partitionRefresher.checkPartitionRefreshCompletion(partitionLoader.partitions());
             if (switchedTable != null) {
                 lookupTable.close();
                 lookupTable = switchedTable;
                 path = ((FullCacheLookupTable) switchedTable).context.tempPath;
-                scanPartitions = partitionLoader.partitions();
             }
         }
 

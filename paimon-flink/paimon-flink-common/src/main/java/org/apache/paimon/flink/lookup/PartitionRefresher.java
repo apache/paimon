@@ -56,13 +56,21 @@ public class PartitionRefresher implements Closeable {
     private AtomicReference<LookupTable> pendingLookupTable;
     private AtomicReference<Exception> partitionRefreshException;
 
+    /** Current partitions being used for lookup. Updated when partition refresh completes. */
+    @Nullable private List<BinaryRow> scanPartitions;
+
     public PartitionRefresher(boolean partitionRefreshAsync, String tableName) {
         this.partitionRefreshAsync = partitionRefreshAsync;
         this.tableName = tableName;
     }
 
-    /** Initialize partition refresh resources. Should be called during table initialization. */
-    public void init() {
+    /**
+     * Initialize partition refresh resources. Should be called during table initialization.
+     *
+     * @param initialPartitions the initial partitions to use for lookup
+     */
+    public void init(List<BinaryRow> initialPartitions) {
+        this.scanPartitions = initialPartitions;
         if (!partitionRefreshAsync) {
             return;
         }
@@ -74,6 +82,11 @@ public class PartitionRefresher implements Closeable {
                                 String.format(
                                         "%s-lookup-refresh-partition",
                                         Thread.currentThread().getName())));
+    }
+
+    /** Get the current partitions being used for lookup. */
+    public List<BinaryRow> getScanPartitions() {
+        return scanPartitions;
     }
 
     /**
@@ -111,6 +124,7 @@ public class PartitionRefresher implements Closeable {
         lookupTable.close();
         lookupTable.specifyPartitions(newPartitions, partitionFilter);
         lookupTable.open();
+        this.scanPartitions = newPartitions;
         LOG.info("Synchronous partition refresh completed for table {}.", tableName);
     }
 
@@ -177,10 +191,12 @@ public class PartitionRefresher implements Closeable {
     /**
      * Check if an async partition refresh has completed.
      *
+     * @param newPartitions the new partitions to update after refresh completes
      * @return the new lookup table if ready, or null if no switch is needed
      */
     @Nullable
-    public LookupTable checkPartitionRefreshCompletion() throws Exception {
+    public LookupTable checkPartitionRefreshCompletion(List<BinaryRow> newPartitions)
+            throws Exception {
         if (!partitionRefreshAsync) {
             return null;
         }
@@ -199,6 +215,7 @@ public class PartitionRefresher implements Closeable {
             return null;
         }
 
+        this.scanPartitions = newPartitions;
         LOG.info("Switched to new lookup table for table {} with new partitions.", tableName);
         return newTable;
     }
@@ -215,5 +232,9 @@ public class PartitionRefresher implements Closeable {
                 pending.close();
             }
         }
+    }
+
+    public boolean isPartitionRefreshAsync() {
+        return partitionRefreshAsync;
     }
 }
