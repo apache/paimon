@@ -28,8 +28,6 @@ from pypaimon.filesystem.pvfs import PaimonVirtualFileSystem
 from pypaimon.orphan_files_clean import (
     OrphanFilesClean,
     CleanOrphanFilesResult,
-    create_orphan_files_cleans,
-    execute_database_orphan_files,
 )
 from pypaimon.schema.schema import Schema
 from pypaimon.tag.tag import Tag
@@ -43,6 +41,4 @@ __all__ = [
     "TagManager",
     "OrphanFilesClean",
     "CleanOrphanFilesResult",
-    "create_orphan_files_cleans",
-    "execute_database_orphan_files",
 ]

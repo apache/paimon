@@ -150,7 +150,7 @@ class TestOrphanFilesClean(unittest.TestCase):
             older_than_millis=older_than,
             dry_run=True,
         )
-        result = cleaner.clean()
+        cleaner.clean()
 
         # Verify directory still exists (not deleted in dry run)
         self.assertTrue(
@@ -355,7 +355,7 @@ class TestOrphanFilesClean(unittest.TestCase):
             older_than_millis=older_than,
             dry_run=False,
         )
-        result = cleaner.clean()
+        cleaner.clean()
 
         # Verify orphan files are deleted
         self.assertFalse(

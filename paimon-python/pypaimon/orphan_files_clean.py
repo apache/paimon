@@ -164,7 +164,7 @@ class OrphanFilesClean:
                 for branch_info in branch_infos or []:
                     branch_name = branch_info.base_name
                     if branch_name and branch_name.startswith("branch-"):
-                        branches.append(branch_name[len("branch-") :])
+                        branches.append(branch_name[len("branch-"):])
         except Exception as e:
             logger.warning("Failed to list branches: %s", e)
 
