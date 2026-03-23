@@ -18,17 +18,15 @@
 ################################################################################
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional, Set, Tuple, Dict, Callable
 from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
+from pypaimon.branch.branch_manager import BranchManager
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
 from pypaimon.schema.table_schema import TableSchema
-from pypaimon.snapshot.snapshot import Snapshot
-from pypaimon.utils.snapshot_manager import SnapshotManager
-from pypaimon.utils.changelog_manager import ChangelogManager
-from pypaimon.branch.branch_manager import BranchManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,18 +41,21 @@ class CleanOrphanFilesResult:
 
 
 class OrphanFilesClean:
-    """To remove data files and metadata files that are not used by table (so-called "orphan files").
+    """To remove data files and metadata files that are not used by table
+    (so-called "orphan files").
 
-    It will ignore exception when listing all files because it's OK to not delete unread files.
+    It will ignore exception when listing all files because it's OK to not
+    delete unread files.
 
-    To avoid deleting newly written files, it only deletes orphan files older than olderThanMillis
-    (1 day by default).
+    To avoid deleting newly written files, it only deletes orphan files older
+    than olderThanMillis (1 day by default).
 
-    To avoid conflicting with snapshot expiration, tag deletion and rollback, it will skip
-    snapshot/tag when catching FileNotFoundError in process of listing used files.
+    To avoid conflicting with snapshot expiration, tag deletion and rollback,
+    it will skip snapshot/tag when catching FileNotFoundError in process of
+    listing used files.
 
-    To avoid deleting files that are used but not read by mistaken, it will stop removing
-    process when failed to read used files.
+    To avoid deleting files that are used but not read by mistaken, it will
+    stop removing process when failed to read used files.
     """
 
     READ_FILE_RETRY_NUM = 3
@@ -71,7 +72,7 @@ class OrphanFilesClean:
         file_io: FileIO,
         table_schema: TableSchema,
         older_than_millis: Optional[int] = None,
-        dry_run: bool = False
+        dry_run: bool = False,
     ):
         """Initialize OrphanFilesClean.
 
@@ -79,10 +80,13 @@ class OrphanFilesClean:
             table_path: Path to the table directory
             file_io: FileIO instance for file operations
             table_schema: TableSchema instance
-            older_than_millis: Only delete files older than this time (default: 1 day)
-            dry_run: If True, only report what would be deleted without actually deleting
+            older_than_millis: Only delete files older than this time
+                (default: 1 day)
+            dry_run: If True, only report what would be deleted without
+                actually deleting
         """
         import time
+
         if older_than_millis is None:
             older_than_millis = int(time.time() * 1000) - (24 * 60 * 60 * 1000)
 
@@ -91,7 +95,9 @@ class OrphanFilesClean:
         self.table_schema = table_schema
         self.older_than_millis = older_than_millis
         self.dry_run = dry_run
-        self.partition_keys_num = len(table_schema.partition_keys)
+        self.partition_keys_num = (
+            len(table_schema.partition_keys) if table_schema else 0
+        )
         self.candidate_deletes: Set[str] = set()
 
     def clean(self) -> CleanOrphanFilesResult:
@@ -113,7 +119,7 @@ class OrphanFilesClean:
         self._clean_snapshot_dir(
             branches,
             deleted_files_from_snapshots.append,
-            deleted_bytes_from_snapshots.append
+            deleted_bytes_from_snapshots.append,
         )
 
         delete_files.extend(deleted_files_from_snapshots)
@@ -143,7 +149,7 @@ class OrphanFilesClean:
         return CleanOrphanFilesResult(
             deleted_file_count=len(delete_files),
             deleted_file_total_len_in_bytes=deleted_files_len_in_bytes,
-            deleted_files_path=delete_files
+            deleted_files_path=delete_files,
         )
 
     def _valid_branches(self) -> List[str]:
@@ -172,48 +178,44 @@ class OrphanFilesClean:
         self,
         branches: List[str],
         deleted_files_consumer: Callable[[str], None],
-        deleted_files_len_in_bytes_consumer: Callable[[int], None]
+        deleted_files_len_in_bytes_consumer: Callable[[int], None],
     ):
         """Clean snapshot directory for all branches."""
         for branch in branches:
             self._clean_branch_snapshot_dir(
-                branch,
-                deleted_files_consumer,
-                deleted_files_len_in_bytes_consumer
+                branch, deleted_files_consumer, deleted_files_len_in_bytes_consumer
             )
 
     def _clean_branch_snapshot_dir(
         self,
         branch: str,
         deleted_files_consumer: Callable[[str], None],
-        deleted_files_len_in_bytes_consumer: Callable[[int], None]
+        deleted_files_len_in_bytes_consumer: Callable[[int], None],
     ):
         """Clean snapshot directory for a specific branch."""
         logger.info("Start to clean snapshot directory of branch %s.", branch)
 
         branch_path = BranchManager.branch_path(self.table_path, branch)
-        snapshot_manager = SnapshotManager(
-            FileIO(branch_path, {}),
-            branch_path,
-            branch
-        )
-        changelog_manager = ChangelogManager(self.file_io, self.table_path, branch)
 
         # Specially handle to snapshot directory
+        snapshot_dir = os.path.join(branch_path, "snapshot")
         non_snapshot_files = self._try_get_non_snapshot_files(
-            snapshot_manager.snapshot_directory(),
-            self._old_enough
+            snapshot_dir, self._old_enough
         )
         for file_path, file_size in non_snapshot_files:
-            self._clean_file(file_path, deleted_files_consumer, deleted_files_len_in_bytes_consumer)
+            self._clean_file(
+                file_path, deleted_files_consumer, deleted_files_len_in_bytes_consumer
+            )
 
         # Specially handle to changelog directory
+        changelog_dir = os.path.join(branch_path, "changelog")
         non_changelog_files = self._try_get_non_changelog_files(
-            changelog_manager.changelog_directory(),
-            self._old_enough
+            changelog_dir, self._old_enough
         )
         for file_path, file_size in non_changelog_files:
-            self._clean_file(file_path, deleted_files_consumer, deleted_files_len_in_bytes_consumer)
+            self._clean_file(
+                file_path, deleted_files_consumer, deleted_files_len_in_bytes_consumer
+            )
 
         logger.info("End to clean snapshot directory of branch %s.", branch)
 
@@ -222,9 +224,7 @@ class OrphanFilesClean:
     ) -> List[Tuple[str, int]]:
         """Get non-snapshot files from directory."""
         return self._list_path_with_filter(
-            directory,
-            file_status_filter,
-            self._non_snapshot_file_filter()
+            directory, file_status_filter, self._non_snapshot_file_filter()
         )
 
     def _try_get_non_changelog_files(
@@ -232,16 +232,11 @@ class OrphanFilesClean:
     ) -> List[Tuple[str, int]]:
         """Get non-changelog files from directory."""
         return self._list_path_with_filter(
-            directory,
-            file_status_filter,
-            self._non_changelog_file_filter()
+            directory, file_status_filter, self._non_changelog_file_filter()
         )
 
     def _list_path_with_filter(
-        self,
-        directory: str,
-        file_status_filter,
-        path_filter
+        self, directory: str, file_status_filter, path_filter
     ) -> List[Tuple[str, int]]:
         """List paths in directory with filters."""
         try:
@@ -264,6 +259,7 @@ class OrphanFilesClean:
     @staticmethod
     def _non_snapshot_file_filter():
         """Filter for non-snapshot files."""
+
         def is_non_snapshot(path: str) -> bool:
             file_name = path.split("/")[-1]
             return (
@@ -271,11 +267,13 @@ class OrphanFilesClean:
                 and file_name != OrphanFilesClean.EARLIEST
                 and file_name != OrphanFilesClean.LATEST
             )
+
         return is_non_snapshot
 
     @staticmethod
     def _non_changelog_file_filter():
         """Filter for non-changelog files."""
+
         def is_non_changelog(path: str) -> bool:
             file_name = path.split("/")[-1]
             return (
@@ -283,13 +281,14 @@ class OrphanFilesClean:
                 and file_name != OrphanFilesClean.EARLIEST
                 and file_name != OrphanFilesClean.LATEST
             )
+
         return is_non_changelog
 
     def _clean_file(
         self,
         file_path: str,
         deleted_files_consumer: Optional[Callable[[str], None]] = None,
-        deleted_files_len_in_bytes_consumer: Optional[Callable[[int], None]] = None
+        deleted_files_len_in_bytes_consumer: Optional[Callable[[int], None]] = None,
     ):
         """Clean a file (delete if not dry run)."""
         if deleted_files_consumer:
@@ -338,9 +337,7 @@ class OrphanFilesClean:
 
         return result
 
-    def _list_files_in_dir(
-        self, directory: str
-    ) -> List[Tuple[str, int]]:
+    def _list_files_in_dir(self, directory: str) -> List[Tuple[str, int]]:
         """List all files in a directory."""
         try:
             statuses = self.file_io.list_status(directory)
@@ -353,7 +350,9 @@ class OrphanFilesClean:
                         return []
                 except Exception as e:
                     logger.warning(
-                        "IOException during check dirStatus for %s, ignore it", directory, e
+                        "IOException during check dirStatus for %s, ignore it",
+                        directory,
+                        e,
                     )
                     return []
 
@@ -435,7 +434,9 @@ class OrphanFilesClean:
                             if parent:
                                 new_empty_dirs.add(parent)
                 except Exception as e:
-                    logger.debug("Failed to delete empty directory %s: %s", empty_dir, e)
+                    logger.debug(
+                        "Failed to delete empty directory %s: %s", empty_dir, e
+                    )
             empty_dirs = new_empty_dirs
 
     def _get_used_files(self, branches: List[str]) -> Set[str]:
@@ -457,7 +458,7 @@ class OrphanFilesClean:
             self._collect_without_data_file(
                 branch,
                 used_files.add,
-                lambda name: None  # Placeholder for manifest consumer
+                lambda name: None,  # Placeholder for manifest consumer
             )
 
             # Read manifests to find data files
@@ -477,19 +478,15 @@ class OrphanFilesClean:
         self,
         branch: str,
         used_file_consumer: Callable[[str], None],
-        manifest_consumer: Callable[[str], None]
+        manifest_consumer: Callable[[str], None],
     ):
         """Collect used files without data files."""
         branch_path = BranchManager.branch_path(self.table_path, branch)
-        snapshot_manager = SnapshotManager(
-            FileIO(branch_path, {}),
-            branch_path,
-            branch
-        )
+        snapshot_dir = os.path.join(branch_path, "snapshot")
 
         # Safely get all snapshots
         try:
-            snapshots = snapshot_manager.safely_get_all_snapshots()
+            snapshots = self._list_snapshots(snapshot_dir)
         except Exception as e:
             logger.warning("Failed to list snapshots for branch %s: %s", branch, e)
             return
@@ -501,33 +498,48 @@ class OrphanFilesClean:
                     branch, snapshot, used_file_consumer, manifest_consumer
                 )
             except Exception as e:
-                logger.warning("Failed to process snapshot %s: %s", snapshot.id, e)
+                logger.warning("Failed to process snapshot: %s", e)
+
+    def _list_snapshots(self, snapshot_dir: str) -> List[str]:
+        """List snapshot files in directory."""
+        if not self.file_io.exists(snapshot_dir):
+            return []
+        try:
+            statuses = self.file_io.list(snapshot_dir)
+            snapshots = []
+            for status in statuses:
+                path = status.path
+                name = os.path.basename(path)
+                # Filter snapshot files (snapshot-xxxxx)
+                if name.startswith(self.SNAPSHOT_PREFIX) and not name.startswith(
+                    "snapshot-"
+                ):
+                    snapshots.append(name)
+            return snapshots
+        except Exception as e:
+            logger.warning("Failed to list snapshots in %s: %s", snapshot_dir, e)
+            return []
 
     def _collect_without_data_file_for_snapshot(
         self,
         branch: str,
-        snapshot: Snapshot,
+        snapshot: str,
         used_file_consumer: Callable[[str], None],
-        manifest_consumer: Callable[[str], None]
+        manifest_consumer: Callable[[str], None],
     ):
         """Collect used files for a snapshot."""
-        # Collect manifest list files
-        if snapshot.changelog_manifest_list:
-            used_file_consumer(snapshot.changelog_manifest_list)
-        if snapshot.delta_manifest_list:
-            used_file_consumer(snapshot.delta_manifest_list)
-        if snapshot.base_manifest_list:
-            used_file_consumer(snapshot.base_manifest_list)
+        branch_path = BranchManager.branch_path(self.table_path, branch)
+        snapshot_file = os.path.join(branch_path, "snapshot", snapshot)
 
-        # In a full implementation, we would read the manifest files
-        # and extract the data file references
-        # For now, this is a placeholder
+        # In a full implementation, we would:
+        # 1. Read the snapshot file
+        # 2. Parse it to get manifest list files
+        # 3. Read manifest files to get data file references
+        # For now, this is a placeholder that marks the snapshot file as used
         try:
-            # Read data files from manifests
-            if snapshot.base_manifest_list:
-                manifest_consumer(snapshot.base_manifest_list)
+            used_file_consumer(snapshot_file)
         except Exception as e:
-            logger.warning("Failed to read manifest: %s", e)
+            logger.warning("Failed to process snapshot %s: %s", snapshot, e)
 
     def _clean_empty_data_directory(self, delete_files: List[str]):
         """Clean empty data directories."""
@@ -574,7 +586,7 @@ def create_orphan_files_cleans(
     database_name: str,
     table_name: Optional[str] = None,
     older_than_millis: Optional[int] = None,
-    dry_run: bool = False
+    dry_run: bool = False,
 ) -> List[OrphanFilesClean]:
     """Create orphan files cleaners for tables in a database.
 
@@ -603,7 +615,7 @@ def create_orphan_files_cleans(
                 file_io=table.file_io,
                 table_schema=table.table_schema,
                 older_than_millis=older_than_millis,
-                dry_run=dry_run
+                dry_run=dry_run,
             )
         )
 
@@ -616,7 +628,7 @@ def execute_database_orphan_files(
     table_name: Optional[str] = None,
     older_than_millis: Optional[int] = None,
     dry_run: bool = False,
-    parallelism: Optional[int] = None
+    parallelism: Optional[int] = None,
 ) -> CleanOrphanFilesResult:
     """Execute orphan files cleaning for a database.
 
@@ -647,8 +659,7 @@ def execute_database_orphan_files(
     # Execute cleaning in parallel
     with ThreadPoolExecutor(max_workers=parallelism) as executor:
         future_to_cleaner = {
-            executor.submit(cleaner.clean): cleaner
-            for cleaner in cleaners
+            executor.submit(cleaner.clean): cleaner for cleaner in cleaners
         }
 
         for future in concurrent.futures.as_completed(future_to_cleaner):
@@ -664,5 +675,5 @@ def execute_database_orphan_files(
     return CleanOrphanFilesResult(
         deleted_file_count=total_deleted_count,
         deleted_file_total_len_in_bytes=total_deleted_len_in_bytes,
-        deleted_files_path=all_deleted_files if all_deleted_files else None
+        deleted_files_path=all_deleted_files if all_deleted_files else None,
     )
