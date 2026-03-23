@@ -154,13 +154,30 @@ class OrphanFilesClean:
 
     def _valid_branches(self) -> List[str]:
         """Get valid branches that have schemas."""
-        branches = BranchManager.branches(self.table_path)
+        branches = []
+
+        # Check if there's a branch directory and list branches
+        branch_dir = os.path.join(self.table_path, "branch")
+        try:
+            if self.file_io.exists(branch_dir):
+                branch_infos = self.file_io.list_status(branch_dir)
+                for branch_info in branch_infos or []:
+                    branch_name = branch_info.base_name
+                    if branch_name and branch_name.startswith("branch-"):
+                        branches.append(branch_name[len("branch-") :])
+        except Exception as e:
+            logger.warning("Failed to list branches: %s", e)
 
         # Check for abnormal branches (no schemas)
         abnormal_branches = []
         for branch in branches:
-            # Skip branch check for now - could implement later
-            pass
+            try:
+                branch_path = BranchManager.branch_path(self.table_path, branch)
+                schema_dir = os.path.join(branch_path, "schema")
+                if not self.file_io.exists(schema_dir):
+                    abnormal_branches.append(branch)
+            except Exception as e:
+                logger.warning("Failed to check branch %s: %s", branch, e)
 
         if abnormal_branches:
             raise RuntimeError(
@@ -168,7 +185,7 @@ class OrphanFilesClean:
                 "Orphan files cleaning aborted. Please check these branches manually."
             )
 
-        # Add main branch
+        # Add main branch if not present
         if "main" not in branches:
             branches.append("main")
 
@@ -250,7 +267,11 @@ class OrphanFilesClean:
             path = status.path
             if file_status_filter(status) and path_filter(path):
                 try:
-                    result.append((path, status.len))
+                    # LocalFileStatus uses 'size' attribute
+                    file_size = getattr(status, "size", getattr(status, "len", 0))
+                    if file_size is None:
+                        file_size = 0
+                    result.append((path, file_size))
                 except Exception:
                     result.append((path, 0))
 
@@ -350,7 +371,7 @@ class OrphanFilesClean:
                         return []
                 except Exception as e:
                     logger.warning(
-                        "IOException during check dirStatus for %s, ignore it",
+                        "IOException during check dirStatus for %s, ignore it: %s",
                         directory,
                         e,
                     )
@@ -360,7 +381,10 @@ class OrphanFilesClean:
             result = []
             for status in statuses:
                 if self._old_enough(status):
-                    result.append((status.path, status.len))
+                    file_size = getattr(status, "size", getattr(status, "len", 0))
+                    if file_size is None:
+                        file_size = 0
+                    result.append((status.path, file_size))
             return result
         except Exception as e:
             logger.warning("Failed to list directory %s: %s", directory, e)
@@ -368,9 +392,12 @@ class OrphanFilesClean:
 
     def _old_enough(self, status) -> bool:
         """Check if a file is old enough to be deleted."""
-        # FileStatus doesn't have modification_time, so we use len as a proxy
-        # In a real implementation, you'd want to check modification time
-        # For now, we'll consider all files old enough
+        # Check if file has mtime attribute
+        if hasattr(status, "mtime"):
+            file_mtime_seconds = status.mtime
+            file_mtime_millis = int(file_mtime_seconds * 1000)
+            return file_mtime_millis < self.older_than_millis
+        # If no mtime attribute, consider it old enough
         return True
 
     def _list_paimon_file_dirs(self) -> List[str]:
@@ -505,7 +532,7 @@ class OrphanFilesClean:
         if not self.file_io.exists(snapshot_dir):
             return []
         try:
-            statuses = self.file_io.list(snapshot_dir)
+            statuses = self.file_io.list_status(snapshot_dir)
             snapshots = []
             for status in statuses:
                 path = status.path
