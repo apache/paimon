@@ -442,6 +442,18 @@ public class RESTCatalog implements Catalog {
         }
     }
 
+    @Override
+    public void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        try {
+            api.rollbackSchema(identifier, schemaId);
+        } catch (NoSuchResourceException e) {
+            throw new TableNotExistException(identifier);
+        } catch (ForbiddenException e) {
+            throw new TableNoPermissionException(identifier, e);
+        }
+    }
+
     private TableMetadata loadTableMetadata(Identifier identifier) throws TableNotExistException {
         // if the table is system table, we need to load table metadata from the system table's data
         // table

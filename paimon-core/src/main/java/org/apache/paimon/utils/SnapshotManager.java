@@ -272,11 +272,12 @@ public class SnapshotManager implements Serializable {
         }
 
         for (long snapshotId = latestId; snapshotId >= earliestId; snapshotId--) {
-            if (snapshotExists(snapshotId)) {
-                Snapshot snapshot = snapshot(snapshotId);
+            try {
+                Snapshot snapshot = tryGetSnapshot(snapshotId);
                 if (predicate.test(snapshot)) {
                     return snapshot.id();
                 }
+            } catch (FileNotFoundException ignored) {
             }
         }
 

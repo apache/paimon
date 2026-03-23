@@ -45,10 +45,12 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.ChangelogManager;
 import org.apache.paimon.utils.LazyField;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.FluentIterable;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -66,10 +68,12 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -1097,6 +1101,56 @@ public class SchemaManager implements Serializable {
      */
     public void deleteSchema(long schemaId) {
         fileIO.deleteQuietly(toSchemaPath(schemaId));
+    }
+
+    /**
+     * Rollback to a specific schema version. All schema versions greater than the target will be
+     * deleted. This operation will fail if any snapshot, tag, or changelog references a schema
+     * version greater than the target.
+     *
+     * @param targetSchemaId the schema version to rollback to.
+     * @param snapshotManager the snapshot manager to check snapshot references.
+     * @param tagManager the tag manager to check tag references.
+     * @param changelogManager the changelog manager to check changelog references.
+     */
+    public void rollbackTo(
+            long targetSchemaId,
+            SnapshotManager snapshotManager,
+            TagManager tagManager,
+            ChangelogManager changelogManager)
+            throws IOException {
+        checkArgument(schemaExists(targetSchemaId), "Schema %s does not exist.", targetSchemaId);
+
+        // Collect all schemaIds referenced by snapshots, tags, and changelogs
+        Set<Long> usedSchemaIds = new HashSet<>();
+
+        snapshotManager.pickOrLatest(
+                snapshot -> {
+                    usedSchemaIds.add(snapshot.schemaId());
+                    return false;
+                });
+        tagManager.taggedSnapshots().forEach(s -> usedSchemaIds.add(s.schemaId()));
+        changelogManager.changelogs().forEachRemaining(c -> usedSchemaIds.add(c.schemaId()));
+
+        // Check if any referenced schema is newer than the target
+        Optional<Long> conflict =
+                usedSchemaIds.stream().filter(id -> id > targetSchemaId).min(Long::compareTo);
+        if (conflict.isPresent()) {
+            throw new RuntimeException(
+                    String.format(
+                            "Cannot rollback to schema %d, schema %d is still referenced by snapshots/tags/changelogs.",
+                            targetSchemaId, conflict.get()));
+        }
+
+        // Delete all schemas newer than the target
+        List<Long> toBeDeleted =
+                listAllIds().stream()
+                        .filter(id -> id > targetSchemaId)
+                        .collect(Collectors.toList());
+        toBeDeleted.sort((o1, o2) -> Long.compare(o2, o1));
+        for (Long id : toBeDeleted) {
+            fileIO.delete(toSchemaPath(id), false);
+        }
     }
 
     public static void checkAlterTableOption(

@@ -218,6 +218,14 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void rollbackSchema(long schemaId) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support rollbackSchema.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void createBranch(String branchName) {
         throw new UnsupportedOperationException(
                 String.format(

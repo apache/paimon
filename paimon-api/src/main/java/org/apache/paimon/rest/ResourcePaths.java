@@ -120,6 +120,17 @@ public class ResourcePaths {
                 ROLLBACK);
     }
 
+    public String rollbackSchemaTable(String databaseName, String objectName) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(objectName),
+                "rollback-schema");
+    }
+
     public String registerTable(String databaseName) {
         return SLASH.join(V1, prefix, DATABASES, encodeString(databaseName), REGISTER);
     }

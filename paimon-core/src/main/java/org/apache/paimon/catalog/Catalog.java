@@ -810,6 +810,22 @@ public interface Catalog extends AutoCloseable {
             throws Catalog.TableNotExistException;
 
     /**
+     * Rollback table schema to a specific schema version. All schema versions greater than the
+     * target will be deleted. This operation will fail if any snapshot, tag, or changelog
+     * references a schema version greater than the target.
+     *
+     * @param identifier path of the table
+     * @param schemaId the target schema version to rollback to
+     * @throws Catalog.TableNotExistException if the table does not exist
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    default void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
      * Create a new branch for this table. By default, an empty branch will be created using the
      * latest schema. If you provide {@code #fromTag}, a branch will be created from the tag and the
      * data files will be inherited from it.

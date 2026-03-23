@@ -375,6 +375,11 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void rollbackSchema(long schemaId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void createBranch(String branchName) {
         throw new UnsupportedOperationException();
     }

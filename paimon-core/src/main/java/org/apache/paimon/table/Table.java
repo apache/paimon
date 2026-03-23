@@ -157,6 +157,10 @@ public interface Table extends Serializable {
     @Experimental
     void rollbackTo(String tagName);
 
+    /** Rollback table's schema to a specific schema version. */
+    @Experimental
+    void rollbackSchema(long schemaId);
+
     /** Create an empty branch. */
     @Experimental
     void createBranch(String branchName);

@@ -256,6 +256,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void rollbackSchema(long schemaId) {
+        wrapped.rollbackSchema(schemaId);
+    }
+
+    @Override
     public void createBranch(String branchName) {
         wrapped.createBranch(branchName);
     }

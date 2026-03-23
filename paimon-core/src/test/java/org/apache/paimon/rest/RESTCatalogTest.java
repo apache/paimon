@@ -1934,6 +1934,97 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
     }
 
     @Test
+    public void testRollbackSchema() throws Exception {
+        Identifier identifier = Identifier.create("test_rollback_schema", "table_for_schema");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        // get initial schema id
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        // rollback schema to first version
+        catalog.rollbackSchema(identifier, firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+
+        // rollback to non-existent schema should fail
+        assertThatThrownBy(() -> catalog.rollbackSchema(identifier, 999))
+                .isInstanceOf(Exception.class);
+    }
+
+    @Test
+    public void testRollbackSchemaFromTable() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_rollback_schema", "table_for_schema_from_table");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        // get initial schema id
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+        assertThat(secondSchemaId).isEqualTo(firstSchemaId + 1);
+
+        // rollback schema to first version
+        table.rollbackSchema(firstSchemaId);
+        assertThat(schemaManager.latest().get().id()).isEqualTo(firstSchemaId);
+        assertThat(schemaManager.schemaExists(secondSchemaId)).isFalse();
+
+        // get schema from new table
+        table = (FileStoreTable) catalog.getTable(identifier);
+        assertThat(table.schema().id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testRollbackSchemaFailedWithSnapshotReference() throws Exception {
+        Identifier identifier =
+                Identifier.create("test_rollback_schema_fail", "table_for_schema_fail");
+        createTable(identifier, Maps.newHashMap(), Lists.newArrayList("col1"));
+
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        long firstSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing firstSchemaId
+        StreamTableWrite write = table.newWrite("commitUser");
+        StreamTableCommit commit = table.newCommit("commitUser");
+        write.write(GenericRow.of(1));
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.close();
+        commit.close();
+
+        // evolve schema
+        catalog.alterTable(identifier, SchemaChange.setOption("aa", "bb"), false);
+        long secondSchemaId = schemaManager.latest().get().id();
+
+        // write data to create a snapshot referencing secondSchemaId
+        table = (FileStoreTable) catalog.getTable(identifier);
+        write = table.newWrite("commitUser");
+        commit = table.newCommit("commitUser");
+        write.write(GenericRow.of(2));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // rollback should fail because snapshot references secondSchemaId
+        assertThatThrownBy(() -> catalog.rollbackSchema(identifier, firstSchemaId))
+                .hasMessageContaining("Cannot rollback to schema " + firstSchemaId)
+                .hasMessageContaining(
+                        "schema "
+                                + secondSchemaId
+                                + " is still referenced by snapshots/tags/changelogs");
+    }
+
+    @Test
     public void testDataTokenExpired() throws Exception {
         this.catalog = newRestCatalogWithDataToken();
         Identifier identifier =

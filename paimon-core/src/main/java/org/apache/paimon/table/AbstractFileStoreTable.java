@@ -72,6 +72,8 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cach
 import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -80,6 +82,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.function.BiConsumer;
+import java.util.function.LongConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 
@@ -555,6 +558,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
             RollbackHelper rollbackHelper = rollbackHelper();
             rollbackHelper.cleanLargerThan(taggedSnapshot);
             rollbackHelper.createSnapshotFileIfNeeded(taggedSnapshot);
+        }
+    }
+
+    @Override
+    public void rollbackSchema(long schemaId) {
+        LongConsumer schemaRollback = catalogEnvironment.catalogSchemaRollback();
+        if (schemaRollback != null) {
+            schemaRollback.accept(schemaId);
+        } else {
+            try {
+                schemaManager()
+                        .rollbackTo(schemaId, snapshotManager(), tagManager(), changelogManager());
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
     }
 

@@ -51,6 +51,7 @@ import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
 import org.apache.paimon.rest.requests.RegisterTableRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
+import org.apache.paimon.rest.requests.RollbackSchemaRequest;
 import org.apache.paimon.rest.requests.RollbackTableRequest;
 import org.apache.paimon.rest.responses.AlterDatabaseResponse;
 import org.apache.paimon.rest.responses.AuthTableQueryResponse;
@@ -706,6 +707,24 @@ public class RESTApi {
         RollbackTableRequest request = new RollbackTableRequest(instant, fromSnapshot);
         client.post(
                 resourcePaths.rollbackTable(
+                        identifier.getDatabaseName(), identifier.getObjectName()),
+                request,
+                restAuthFunction);
+    }
+
+    /**
+     * Rollback schema for table.
+     *
+     * @param identifier database name and table name.
+     * @param schemaId the target schema version to rollback to
+     * @throws NoSuchResourceException Exception thrown on HTTP 404 means the table not exists
+     * @throws ForbiddenException Exception thrown on HTTP 403 means don't have the permission for
+     *     this table
+     */
+    public void rollbackSchema(Identifier identifier, long schemaId) {
+        RollbackSchemaRequest request = new RollbackSchemaRequest(schemaId);
+        client.post(
+                resourcePaths.rollbackSchemaTable(
                         identifier.getDatabaseName(), identifier.getObjectName()),
                 request,
                 restAuthFunction);

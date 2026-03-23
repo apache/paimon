@@ -223,6 +223,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void rollbackSchema(Identifier identifier, long schemaId)
+            throws Catalog.TableNotExistException {
+        wrapped.rollbackSchema(identifier, schemaId);
+    }
+
+    @Override
     public void createBranch(Identifier identifier, String branch, @Nullable String fromTag)
             throws TableNotExistException, BranchAlreadyExistException, TagNotExistException {
         wrapped.createBranch(identifier, branch, fromTag);
