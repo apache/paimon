@@ -27,6 +27,7 @@ import org.apache.paimon.flink.lookup.partitioner.BucketIdExtractor;
 import org.apache.paimon.flink.lookup.partitioner.BucketShufflePartitioner;
 import org.apache.paimon.flink.lookup.partitioner.BucketShuffleStrategy;
 import org.apache.paimon.flink.lookup.partitioner.ShuffleStrategy;
+import org.apache.paimon.flink.sink.AdaptiveParallelism;
 import org.apache.paimon.flink.utils.RuntimeContextUtils;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -69,6 +70,7 @@ import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
@@ -279,6 +281,14 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         int numBuckets;
         ShuffleStrategy strategy = null;
         if (useCustomShuffle) {
+            try {
+                checkArgument(
+                        !AdaptiveParallelism.isEnabled(this.context.getConfiguration()),
+                        "Custom shuffle lookup join is not supported in adaptive parallelism mode.");
+            } catch (NoClassDefFoundError ignored) {
+                // before 1.17, there is no adaptive parallelism
+            }
+
             numBuckets = table.store().options().bucket();
             BucketIdExtractor extractor =
                     new BucketIdExtractor(
