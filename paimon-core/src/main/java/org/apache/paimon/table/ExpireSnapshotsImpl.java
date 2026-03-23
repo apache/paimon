@@ -124,8 +124,11 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         long maxExclusive = latestSnapshotId - retainMin + 1;
 
         // the snapshot being read by the consumer cannot be deleted
-        maxExclusive =
-                Math.min(maxExclusive, consumerManager.minNextSnapshot().orElse(Long.MAX_VALUE));
+        if (!expireConfig.isConsumerChangelogOnly()) {
+            maxExclusive =
+                    Math.min(
+                            maxExclusive, consumerManager.minNextSnapshot().orElse(Long.MAX_VALUE));
+        }
 
         // protected by 'snapshot.expire.limit'
         // (the maximum number of snapshots allowed to expire at a time)
