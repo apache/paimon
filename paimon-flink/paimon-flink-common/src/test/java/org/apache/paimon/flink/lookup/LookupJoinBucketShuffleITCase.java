@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.flink.CatalogITCaseBase;
+import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.configuration.BatchExecutionOptions;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -199,18 +200,22 @@ public class LookupJoinBucketShuffleITCase extends CatalogITCaseBase {
                                 + "for system_time as of T.proc_time AS D ON T.col1 = D.col1")
                         .replace("DIM", nonPrimaryKeyDimTable);
 
-        List<Row> groundTruthRows = getGroundTruthRows();
         tEnv.getConfig().set(BatchExecutionOptions.ADAPTIVE_AUTO_PARALLELISM_ENABLED, true);
 
         if (isFlinkVersionGreaterThanOrEqualTo("2.0")) {
-            assertThatThrownBy(() -> streamSqlBlockIter(query).collect(ROW_NUMBER))
+            assertThatThrownBy(
+                            () ->
+                                    BlockingIterator.of(tEnv.executeSql(query).collect())
+                                            .collect(ROW_NUMBER))
                     .rootCause()
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage(
                             "Custom shuffle lookup join is not supported in adaptive parallelism mode.");
         } else {
             // Custom shuffle lookup join not supported in Flink 1.x.
-            List<Row> result1 = streamSqlBlockIter(query).collect(ROW_NUMBER);
+            List<Row> groundTruthRows = getGroundTruthRows();
+            List<Row> result1 =
+                    BlockingIterator.of(tEnv.executeSql(query).collect()).collect(ROW_NUMBER);
             assertThat(result1).containsExactlyInAnyOrderElementsOf(groundTruthRows);
         }
     }

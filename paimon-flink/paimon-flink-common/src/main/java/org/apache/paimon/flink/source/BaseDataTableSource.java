@@ -41,6 +41,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -70,6 +71,7 @@ import java.util.OptionalLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.flink.configuration.ExecutionOptions.RUNTIME_MODE;
 import static org.apache.flink.util.Preconditions.checkArgument;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
@@ -283,7 +285,11 @@ public abstract class BaseDataTableSource extends FlinkTableSource
         if (useCustomShuffle) {
             try {
                 checkArgument(
-                        !AdaptiveParallelism.isEnabled(this.context.getConfiguration()),
+                        this.context
+                                        .getConfiguration()
+                                        .get(RUNTIME_MODE)
+                                        .equals(RuntimeExecutionMode.STREAMING)
+                                || !AdaptiveParallelism.isEnabled(this.context.getConfiguration()),
                         "Custom shuffle lookup join is not supported in adaptive parallelism mode.");
             } catch (NoClassDefFoundError ignored) {
                 // before 1.17, there is no adaptive parallelism
