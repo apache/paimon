@@ -564,11 +564,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public void rollbackSchema(long schemaId) {
         try {
             schemaManager()
-                    .rollbackTo(
-                            schemaId,
-                            snapshotManager(),
-                            tagManager(),
-                            new ChangelogManager(fileIO(), location(), null));
+                    .rollbackTo(schemaId, snapshotManager(), tagManager(), changelogManager());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
