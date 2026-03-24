@@ -319,7 +319,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                     indexedSplit.rowRanges().size() == 1,
                     "Expected exactly one row range for the split, but found: %s",
                     indexedSplit.rowRanges());
-            return Pair.of(indexedSplit.rowRanges().get(0), indexedSplit.dataSplit());
+            return Pair.of(indexedSplit.rowRanges().get(0), indexedSplit);
         }
 
         return Pair.of(calcRowRange(dataSplit), dataSplit);
