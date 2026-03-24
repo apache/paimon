@@ -458,6 +458,12 @@ public interface PartitionPredicate extends Serializable {
                 partitionType, createBinaryPartitions(values, partitionType, defaultPartValue));
     }
 
+    static Optional<PartitionPredicate> splitPartitionPredicate(
+            Predicate dataPredicates, RowType tableType, List<String> partitionKeys) {
+        return splitPartitionPredicatesAndDataPredicates(dataPredicates, tableType, partitionKeys)
+                .getLeft();
+    }
+
     static Pair<Optional<PartitionPredicate>, List<Predicate>>
             splitPartitionPredicatesAndDataPredicates(
                     Predicate dataPredicates, RowType tableType, List<String> partitionKeys) {

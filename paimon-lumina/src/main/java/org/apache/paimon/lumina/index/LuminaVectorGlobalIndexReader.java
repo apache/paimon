@@ -22,6 +22,7 @@ import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.globalindex.GlobalIndexIOMeta;
 import org.apache.paimon.globalindex.GlobalIndexReader;
 import org.apache.paimon.globalindex.GlobalIndexResult;
+import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
@@ -82,7 +83,7 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         try {
             ensureLoaded();
             return Optional.ofNullable(search(vectorSearch));
@@ -95,9 +96,9 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
         }
     }
 
-    private GlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
+    private ScoredGlobalIndexResult search(VectorSearch vectorSearch) throws IOException {
         validateSearchVector(vectorSearch.vector());
-        float[] queryVector = ((float[]) vectorSearch.vector()).clone();
+        float[] queryVector = vectorSearch.vector().clone();
         int limit = vectorSearch.limit();
         LuminaVectorMetric indexMetric = indexMeta.metric();
 

@@ -111,7 +111,6 @@ trait BaseScan extends Scan with SupportsReportStatistics with Logging {
     }
     pushedLimit.foreach(_readBuilder.withLimit)
     pushedTopN.foreach(_readBuilder.withTopN)
-    pushedVectorSearch.foreach(_readBuilder.withVectorSearch)
     _readBuilder.dropStats()
   }
 

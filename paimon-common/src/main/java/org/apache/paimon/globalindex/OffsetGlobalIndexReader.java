@@ -117,9 +117,9 @@ public class OffsetGlobalIndexReader implements GlobalIndexReader {
     }
 
     @Override
-    public Optional<GlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
-        return applyOffset(
-                wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to)));
+    public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+        return wrapped.visitVectorSearch(vectorSearch.offsetRange(this.offset, this.to))
+                .map(r -> r.offset(offset));
     }
 
     private Optional<GlobalIndexResult> applyOffset(Optional<GlobalIndexResult> result) {

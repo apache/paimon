@@ -94,9 +94,11 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
                 .containsExactlyInAnyOrder(
                         new Range(200L, 200L), new Range(300L, 300L), new Range(400L, 400L));
 
-        DataEvolutionBatchScan scan = (DataEvolutionBatchScan) table.newScan();
         RoaringNavigableMap64 finalRowIds = rowIds;
-        scan.withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
+        DataEvolutionBatchScan scan =
+                (DataEvolutionBatchScan)
+                        table.newScan()
+                                .withGlobalIndexResult(GlobalIndexResult.create(() -> finalRowIds));
 
         List<String> readF1 = new ArrayList<>();
         table.newRead()
@@ -252,7 +254,7 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
         for (Range range : ranges) {
             try (RowRangeGlobalIndexScanner scanner =
                     indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate, null);
+                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate);
                 if (!globalIndexResult.isPresent()) {
                     throw new RuntimeException("Can't find index result by scan");
                 }

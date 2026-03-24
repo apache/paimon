@@ -32,6 +32,7 @@ import org.apache.paimon.table.format.FormatReadBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.VectorSearchBuilder;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SimpleFileReader;
 
@@ -270,6 +271,11 @@ public interface FormatTable extends Table {
                     newOptions,
                     comment,
                     catalogContext);
+        }
+
+        @Override
+        public VectorSearchBuilder newVectorSearchBuilder() {
+            throw new UnsupportedOperationException("FormatTable does not support vector search.");
         }
 
         @Override

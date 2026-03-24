@@ -24,7 +24,6 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.TopN;
-import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Range;
@@ -167,13 +166,6 @@ public interface ReadBuilder extends Serializable {
      * @param rowRangeIndex the indexed row id ranges to be read
      */
     ReadBuilder withRowRangeIndex(RowRangeIndex rowRangeIndex);
-
-    /**
-     * Push vector search to the reader.
-     *
-     * @param vectorSearch
-     */
-    ReadBuilder withVectorSearch(VectorSearch vectorSearch);
 
     /** Delete stats in scan plan result. */
     ReadBuilder dropStats();
