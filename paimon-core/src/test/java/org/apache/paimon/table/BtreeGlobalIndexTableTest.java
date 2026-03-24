@@ -218,8 +218,15 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         BTreeGlobalIndexBuilder builder =
                 new BTreeGlobalIndexBuilder(table).withIndexField(fieldName);
+        List<DataSplit> dataSplits =
+                builder.scan()
+                        .map(org.apache.paimon.utils.Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
-        for (DataSplit dataSplit : indexSplits(table, rowRanges, builder.scan())) {
+        for (DataSplit dataSplit : indexSplits(table, rowRanges, dataSplits)) {
             commitMessages.addAll(builder.build(dataSplit, ioManager));
         }
         try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {

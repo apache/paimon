@@ -532,7 +532,15 @@ public class JavaPyE2ETest {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(builder.scan().get(0), IOManager.create(warehouse.toString())));
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
         }
 
         // assert index
@@ -600,7 +608,15 @@ public class JavaPyE2ETest {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(builder.scan().get(0), IOManager.create(warehouse.toString())));
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
         }
 
         // assert index
@@ -670,7 +686,15 @@ public class JavaPyE2ETest {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table).withIndexField("k");
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
             commit.commit(
-                    builder.build(builder.scan().get(0), IOManager.create(warehouse.toString())));
+                    builder.build(
+                            builder.scan()
+                                    .map(org.apache.paimon.utils.Pair::getValue)
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Expected scan result when building index."))
+                                    .get(0),
+                            IOManager.create(warehouse.toString())));
         }
 
         // assert index

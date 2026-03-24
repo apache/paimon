@@ -46,10 +46,13 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Range;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -63,6 +66,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -88,12 +92,19 @@ public class BTreeIndexTopoBuilder {
                 indexBuilder = indexBuilder.withPartitionPredicate(partitionPredicate);
             }
 
-            List<DataSplit> splits = splitByContiguousRowRange(indexBuilder.scan());
+            Optional<Pair<RowRangeIndex, List<DataSplit>>> indexRangeAndSplits =
+                    indexBuilder.scan();
+            if (!indexRangeAndSplits.isPresent()) {
+                return false;
+            }
+
+            Pair<RowRangeIndex, List<DataSplit>> scanResult = indexRangeAndSplits.get();
+            List<DataSplit> splits = splitByContiguousRowRange(scanResult.getRight());
             if (splits.isEmpty()) {
                 return false;
             }
-            Map<BinaryRow, Map<Range, List<DataSplit>>> partitionRangeSplits =
-                    groupSplitsByRange(splits);
+            Map<BinaryRow, Map<Range, List<Split>>> partitionRangeSplits =
+                    groupSplitsByRange(scanResult.getLeft(), splits);
             if (partitionRangeSplits.isEmpty()) {
                 return false;
             }
@@ -120,13 +131,12 @@ public class BTreeIndexTopoBuilder {
             sortColumns.add(indexColumn);
             int partitionFieldSize = table.partitionKeys().size();
             BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
-            for (Map.Entry<BinaryRow, Map<Range, List<DataSplit>>> partitionEntry :
+            for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                     partitionRangeSplits.entrySet()) {
                 BinaryRow partition = partitionEntry.getKey();
-                for (Map.Entry<Range, List<DataSplit>> entry :
-                        partitionEntry.getValue().entrySet()) {
+                for (Map.Entry<Range, List<Split>> entry : partitionEntry.getValue().entrySet()) {
                     Range range = entry.getKey();
-                    List<DataSplit> rangeSplits = entry.getValue();
+                    List<Split> rangeSplits = entry.getValue();
                     if (rangeSplits.isEmpty()) {
                         continue;
                     }
@@ -184,7 +194,7 @@ public class BTreeIndexTopoBuilder {
     protected static DataStream<Committable> executeForPartitionRange(
             StreamExecutionEnvironment env,
             Range range,
-            List<DataSplit> rangeSplits,
+            List<Split> rangeSplits,
             ReadBuilder readBuilder,
             BTreeGlobalIndexBuilder indexBuilder,
             int partitionFieldSize,
@@ -200,10 +210,8 @@ public class BTreeIndexTopoBuilder {
         int parallelism = Math.max((int) (range.count() / recordsPerRange), 1);
         parallelism = Math.min(parallelism, maxParallelism);
 
-        DataStream<DataSplit> sourceStream =
-                env.fromData(
-                                new JavaTypeInfo<>(DataSplit.class),
-                                rangeSplits.toArray(new DataSplit[0]))
+        DataStream<Split> sourceStream =
+                env.fromData(new JavaTypeInfo<>(Split.class), rangeSplits.toArray(new Split[0]))
                         .name("Global Index Source " + " range=" + range)
                         .setParallelism(1);
 
@@ -264,7 +272,7 @@ public class BTreeIndexTopoBuilder {
     private static class ReadDataOperator
             extends org.apache.flink.table.runtime.operators.TableStreamOperator<RowData>
             implements org.apache.flink.streaming.api.operators.OneInputStreamOperator<
-                    DataSplit, RowData> {
+                    Split, RowData> {
 
         private static final long serialVersionUID = 1L;
 
@@ -283,8 +291,8 @@ public class BTreeIndexTopoBuilder {
         }
 
         @Override
-        public void processElement(StreamRecord<DataSplit> element) throws Exception {
-            DataSplit split = element.getValue();
+        public void processElement(StreamRecord<Split> element) throws Exception {
+            Split split = element.getValue();
             try (RecordReader<InternalRow> reader = tableRead.createReader(split)) {
                 reader.forEachRemaining(
                         row -> output.collect(new StreamRecord<>(new FlinkRowData(row))));

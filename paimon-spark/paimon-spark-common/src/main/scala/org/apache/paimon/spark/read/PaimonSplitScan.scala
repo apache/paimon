@@ -42,11 +42,11 @@ class PaimonSplitScanBuilder(val table: KnownSplitsTable) extends PaimonBaseScan
 /** For internal use only. */
 case class PaimonSplitScan(
     table: InnerTable,
-    dataSplits: Array[DataSplit],
+    dataSplits: Array[Split],
     requiredSchema: StructType,
     pushedPartitionFilters: Seq[PartitionPredicate],
     pushedDataFilters: Seq[Predicate])
   extends BaseScan {
 
-  protected def getInputSplits: Array[Split] = dataSplits.asInstanceOf[Array[Split]]
+  protected def getInputSplits: Array[Split] = dataSplits
 }
