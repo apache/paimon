@@ -291,7 +291,7 @@ public class DataEvolutionBatchScan implements DataTableScan {
         GlobalIndexResult result = resultOptional.get();
         if (!nonIndexedRowRanges.isEmpty()) {
             for (Range range : nonIndexedRowRanges) {
-                result.or(GlobalIndexResult.fromRange(range));
+                result = result.or(GlobalIndexResult.fromRange(range));
             }
         }
 
