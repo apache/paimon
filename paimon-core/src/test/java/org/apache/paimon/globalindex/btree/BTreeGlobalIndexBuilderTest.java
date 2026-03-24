@@ -51,6 +51,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /** Test class for {@link BTreeGlobalIndexBuilder}. */
 public class BTreeGlobalIndexBuilderTest extends TableTestBase {
@@ -107,7 +108,13 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
         builder.withIndexField("f0");
         builder.withPartitionPredicate(partitionPredicate);
-        List<DataSplit> dataSplits = builder.scan();
+        List<DataSplit> dataSplits =
+                builder.scan()
+                        .map(Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected scan result when building index."));
         List<CommitMessage> commitMessages = new ArrayList<>();
         for (DataSplit dataSplit : dataSplits) {
             commitMessages.addAll(builder.build(dataSplit, ioManager));
@@ -160,9 +167,9 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
         builder.withIndexField("f0");
 
-        List<DataSplit> splits = builder.incrementalScan();
-        Assertions.assertTrue(
-                splits.isEmpty(), "incrementalScan on empty table should return empty");
+        Assertions.assertFalse(
+                builder.incrementalScan().isPresent(),
+                "incrementalScan on empty table should return empty");
     }
 
     @Test
@@ -174,9 +181,8 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
         builder.withIndexField("f0");
 
-        List<DataSplit> splits = builder.incrementalScan();
-        Assertions.assertTrue(
-                splits.isEmpty(),
+        Assertions.assertFalse(
+                builder.incrementalScan().isPresent(),
                 "incrementalScan should return empty when all data is already indexed");
     }
 
@@ -205,7 +211,12 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         BTreeGlobalIndexBuilder builder = new BTreeGlobalIndexBuilder(table);
         builder.withIndexField("f0");
 
-        List<DataSplit> splits = builder.incrementalScan();
+        Optional<Pair<org.apache.paimon.utils.RowRangeIndex, List<DataSplit>>> incrementalScan =
+                builder.incrementalScan();
+        Assertions.assertTrue(
+                incrementalScan.isPresent(),
+                "incrementalScan should return non-empty splits for newly written data");
+        List<DataSplit> splits = incrementalScan.get().getRight();
         Assertions.assertFalse(
                 splits.isEmpty(),
                 "incrementalScan should return non-empty splits for newly written data");
@@ -259,7 +270,13 @@ public class BTreeGlobalIndexBuilderTest extends TableTestBase {
         builder.withIndexField("f0");
         builder.withPartitionPredicate(PartitionPredicate.fromPredicate(partType, predicate));
 
-        List<DataSplit> splits = builder.incrementalScan();
+        List<DataSplit> splits =
+                builder.incrementalScan()
+                        .map(Pair::getRight)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Expected incremental scan result for new data."));
         Assertions.assertFalse(splits.isEmpty());
 
         for (DataSplit split : splits) {

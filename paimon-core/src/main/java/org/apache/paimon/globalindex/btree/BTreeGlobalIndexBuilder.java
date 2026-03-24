@@ -25,8 +25,10 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexWriter;
+import org.apache.paimon.globalindex.IndexedSplit;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
@@ -53,12 +55,14 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RangeHelper;
+import org.apache.paimon.utils.RowRangeIndex;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -66,6 +70,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
@@ -90,6 +95,7 @@ public class BTreeGlobalIndexBuilder implements Serializable {
 
     // readRowType is composed by partition fields, indexed field and _ROW_ID field
     private RowType readRowType;
+    @Nullable private Snapshot snapshot;
 
     @Nullable private PartitionPredicate partitionPredicate;
 
@@ -121,36 +127,58 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return this;
     }
 
-    public List<DataSplit> scan() {
-        SnapshotReader snapshotReader = table.newSnapshotReader();
-        if (partitionPredicate != null) {
-            snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
-        }
-
-        return snapshotReader.read().dataSplits();
+    public BTreeGlobalIndexBuilder withSnapshot(Snapshot snapshot) {
+        this.snapshot = snapshot;
+        return this;
     }
 
-    public List<DataSplit> incrementalScan() {
+    public Optional<Pair<RowRangeIndex, List<DataSplit>>> scan() {
         SnapshotReader snapshotReader = table.newSnapshotReader();
         if (partitionPredicate != null) {
             snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
         }
-        Snapshot latestSnapshot = snapshotReader.snapshotManager().latestSnapshot();
-        if (latestSnapshot == null) {
-            return Collections.emptyList();
+        Snapshot snapshot =
+                this.snapshot != null
+                        ? this.snapshot
+                        : snapshotReader.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return Optional.empty();
         }
-        snapshotReader = snapshotReader.withSnapshot(latestSnapshot);
+        snapshotReader = snapshotReader.withSnapshot(snapshot);
+        Range dataRange = new Range(0, snapshot.nextRowId() - 1);
+
+        return Optional.of(
+                Pair.of(
+                        RowRangeIndex.create(Collections.singletonList(dataRange)),
+                        snapshotReader.read().dataSplits()));
+    }
+
+    public Optional<Pair<RowRangeIndex, List<DataSplit>>> incrementalScan() {
+        SnapshotReader snapshotReader = table.newSnapshotReader();
+        if (partitionPredicate != null) {
+            snapshotReader = snapshotReader.withPartitionFilter(partitionPredicate);
+        }
+        Snapshot snapshot =
+                this.snapshot != null
+                        ? this.snapshot
+                        : snapshotReader.snapshotManager().latestSnapshot();
+        if (snapshot == null) {
+            return Optional.empty();
+        }
+        snapshotReader = snapshotReader.withSnapshot(snapshot);
 
         Preconditions.checkArgument(indexField != null, "indexField must be set before scan.");
-
-        Range dataRange = new Range(0, latestSnapshot.nextRowId() - 1);
-        List<Range> indexedRanges = indexedRowRanges(latestSnapshot);
+        Range dataRange = new Range(0, snapshot.nextRowId() - 1);
+        List<Range> indexedRanges = indexedRowRanges(snapshot);
         List<Range> nonIndexedRanges = dataRange.exclude(indexedRanges);
         if (nonIndexedRanges.isEmpty()) {
-            return Collections.emptyList();
+            return Optional.empty();
         }
         snapshotReader = snapshotReader.withRowRanges(nonIndexedRanges);
-        return snapshotReader.read().dataSplits();
+        return Optional.of(
+                Pair.of(
+                        RowRangeIndex.create(nonIndexedRanges),
+                        snapshotReader.read().dataSplits()));
     }
 
     private List<Range> indexedRowRanges(Snapshot snapshot) {
@@ -278,6 +306,25 @@ public class BTreeGlobalIndexBuilder implements Serializable {
                 partition, 0, null, dataIncrement, CompactIncrement.emptyIncrement());
     }
 
+    public static Pair<Range, Split> calcRowRangeWithRowIndex(
+            RowRangeIndex rowRangeIndex, DataSplit dataSplit) {
+        if (rowRangeIndex != null) {
+            IndexedSplit indexedSplit =
+                    (IndexedSplit)
+                            DataEvolutionBatchScan.wrapToIndexSplits(
+                                            Arrays.asList(dataSplit), rowRangeIndex, null)
+                                    .splits()
+                                    .get(0);
+            checkArgument(
+                    indexedSplit.rowRanges().size() == 1,
+                    "Expected exactly one row range for the split, but found: %s",
+                    indexedSplit.rowRanges());
+            return Pair.of(indexedSplit.rowRanges().get(0), indexedSplit.dataSplit());
+        }
+
+        return Pair.of(calcRowRange(dataSplit), dataSplit);
+    }
+
     public static Range calcRowRange(DataSplit dataSplit) {
         List<Range> ranges = calcRowRanges(singletonList(dataSplit));
         if (ranges.isEmpty()) {
@@ -304,32 +351,34 @@ public class BTreeGlobalIndexBuilder implements Serializable {
         return result;
     }
 
-    public static Map<BinaryRow, Map<Range, List<DataSplit>>> groupSplitsByRange(
-            List<DataSplit> splits) {
-        Map<BinaryRow, List<Pair<Range, DataSplit>>> partitionSplitRanges = new HashMap<>();
+    public static Map<BinaryRow, Map<Range, List<Split>>> groupSplitsByRange(
+            RowRangeIndex rowRangeIndex, List<DataSplit> splits) {
+        Map<BinaryRow, List<Pair<Range, Split>>> partitionSplitRanges = new HashMap<>();
         for (DataSplit split : splits) {
-            Range splitRange = calcRowRange(split);
+            Pair<Range, Split> keyPair = calcRowRangeWithRowIndex(rowRangeIndex, split);
+            Range splitRange = keyPair.getKey();
+            Split splitWithRange = keyPair.getValue();
             if (splitRange == null) {
                 continue;
             }
             BinaryRow partition = split.partition();
             partitionSplitRanges
                     .computeIfAbsent(partition, p -> new ArrayList<>())
-                    .add(Pair.of(splitRange, split));
+                    .add(Pair.of(splitRange, splitWithRange));
         }
 
-        Map<BinaryRow, Map<Range, List<DataSplit>>> result = new HashMap<>();
-        for (Map.Entry<BinaryRow, List<Pair<Range, DataSplit>>> partitionEntry :
+        Map<BinaryRow, Map<Range, List<Split>>> result = new HashMap<>();
+        for (Map.Entry<BinaryRow, List<Pair<Range, Split>>> partitionEntry :
                 partitionSplitRanges.entrySet()) {
-            List<Pair<Range, DataSplit>> splitRanges = partitionEntry.getValue();
+            List<Pair<Range, Split>> splitRanges = partitionEntry.getValue();
             splitRanges.sort(
-                    Comparator.comparingLong((Pair<Range, DataSplit> e) -> e.getKey().from)
+                    Comparator.comparingLong((Pair<Range, Split> e) -> e.getKey().from)
                             .thenComparingLong(e -> e.getKey().to));
 
-            Map<Range, List<DataSplit>> partitionRanges = new LinkedHashMap<>();
+            Map<Range, List<Split>> partitionRanges = new LinkedHashMap<>();
             Range current = null;
-            List<DataSplit> currentSplits = new ArrayList<>();
-            for (Map.Entry<Range, DataSplit> entry : splitRanges) {
+            List<Split> currentSplits = new ArrayList<>();
+            for (Map.Entry<Range, Split> entry : splitRanges) {
                 Range splitRange = entry.getKey();
                 if (current == null) {
                     current = splitRange;

@@ -21,7 +21,7 @@ package org.apache.paimon.spark.util
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.schema.PaimonMetadataColumn.{PATH_AND_INDEX_META_COLUMNS, ROW_TRACKING_META_COLUMNS}
 import org.apache.paimon.table.{InnerTable, KnownSplitsTable}
-import org.apache.paimon.table.source.DataSplit
+import org.apache.paimon.table.source.Split
 
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.catalyst.SQLConfHelper
@@ -35,7 +35,7 @@ trait ScanPlanHelper extends SQLConfHelper {
 
   /** Create a new scan plan from a relation with the given data splits, condition(optional). */
   def createNewScanPlan(
-      dataSplits: Seq[DataSplit],
+      dataSplits: Seq[Split],
       relation: DataSourceV2Relation,
       condition: Option[Expression]): LogicalPlan = {
     val newRelation = createNewScanPlan(dataSplits, relation)
@@ -46,7 +46,7 @@ trait ScanPlanHelper extends SQLConfHelper {
   }
 
   def createNewScanPlan(
-      dataSplits: Seq[DataSplit],
+      dataSplits: Seq[Split],
       relation: DataSourceV2Relation): DataSourceV2Relation = {
     relation.table match {
       case sparkTable @ SparkTable(table: InnerTable) =>
@@ -73,9 +73,7 @@ trait ScanPlanHelper extends SQLConfHelper {
 
 /** This wrapper is only used in java code, e.g. Procedure. */
 object ScanPlanHelper extends ScanPlanHelper {
-  def createNewScanPlan(
-      dataSplits: Array[DataSplit],
-      relation: DataSourceV2Relation): LogicalPlan = {
+  def createNewScanPlan(dataSplits: Array[Split], relation: DataSourceV2Relation): LogicalPlan = {
     ScanPlanHelper.createNewScanPlan(dataSplits.toSeq, relation)
   }
 }
