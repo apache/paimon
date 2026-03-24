@@ -83,6 +83,11 @@ class BatchTableCommit(TableCommit):
     def commit(self, commit_messages: List[CommitMessage]):
         self._commit(commit_messages, BATCH_COMMIT_IDENTIFIER)
 
+    def truncate_table(self) -> None:
+        """Truncate the entire table, deleting all data."""
+        self._check_committed()
+        self.file_store_commit.truncate_table(BATCH_COMMIT_IDENTIFIER)
+
     def truncate_partitions(self, partitions: List[Dict[str, str]]) -> None:
         self._check_committed()
         self.file_store_commit.drop_partitions(partitions, BATCH_COMMIT_IDENTIFIER)

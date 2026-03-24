@@ -228,6 +228,17 @@ class FileStoreCommit:
             allow_rollback=False,
         )
 
+    def truncate_table(self, commit_identifier: int) -> None:
+        """Truncate the entire table, deleting all data."""
+        self._try_commit(
+            commit_kind="OVERWRITE",
+            commit_identifier=commit_identifier,
+            commit_entries_plan=lambda snapshot: self._generate_overwrite_entries(
+                snapshot, None, []),
+            detect_conflicts=True,
+            allow_rollback=False,
+        )
+
     def _try_commit(self, commit_kind, commit_identifier, commit_entries_plan,
                     detect_conflicts=False, allow_rollback=False):
 
