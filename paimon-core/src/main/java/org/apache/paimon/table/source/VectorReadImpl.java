@@ -41,11 +41,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.TreeSet;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.utils.ManifestReadThreadPool.randomlyExecuteSequentialReturn;
@@ -114,9 +115,10 @@ public class VectorReadImpl implements VectorRead {
 
     private Optional<RoaringNavigableMap64> preFilter(List<VectorSearchSplit> splits) {
         Set<IndexFileMeta> scalarIndexFiles =
-                splits.stream()
-                        .flatMap(split -> split.scalarIndexFiles().stream())
-                        .collect(Collectors.toSet());
+                new TreeSet<>(Comparator.comparing(IndexFileMeta::fileName));
+        for (VectorSearchSplit split : splits) {
+            scalarIndexFiles.addAll(split.scalarIndexFiles());
+        }
         if (scalarIndexFiles.isEmpty()) {
             return Optional.empty();
         }

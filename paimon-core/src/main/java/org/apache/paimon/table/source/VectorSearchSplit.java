@@ -28,6 +28,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.List;
+import java.util.Objects;
 
 /** Split of vector search. */
 public class VectorSearchSplit implements Serializable {
@@ -94,5 +95,36 @@ public class VectorSearchSplit implements Serializable {
         this.rowRangeEnd = view.readLong();
         this.vectorIndexFiles = serializer.deserializeList(view);
         this.scalarIndexFiles = serializer.deserializeList(view);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        VectorSearchSplit that = (VectorSearchSplit) o;
+        return rowRangeStart == that.rowRangeStart
+                && rowRangeEnd == that.rowRangeEnd
+                && Objects.equals(vectorIndexFiles, that.vectorIndexFiles)
+                && Objects.equals(scalarIndexFiles, that.scalarIndexFiles);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(rowRangeStart, rowRangeEnd, vectorIndexFiles, scalarIndexFiles);
+    }
+
+    @Override
+    public String toString() {
+        return "VectorSearchSplit{"
+                + "rowRangeStart="
+                + rowRangeStart
+                + ", rowRangeEnd="
+                + rowRangeEnd
+                + ", vectorIndexFiles="
+                + vectorIndexFiles
+                + ", scalarIndexFiles="
+                + scalarIndexFiles
+                + '}';
     }
 }
