@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -45,6 +46,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -200,6 +202,141 @@ public class FallbackReadFileStoreTableTest {
         assertThat(fs2.isFallback())
                 .as("Partition that only exists in fallback branch should be read from fallback")
                 .isTrue();
+    }
+
+    /**
+     * Reproduces issue #7503: when main branch has more partition keys (e.g. dt, t1) than the
+     * fallback branch (e.g. dt only), a query predicate containing extra keys (t1) must not be
+     * pushed to the fallback scan, and the partition-ownership comparison must use the fallback key
+     * layout so that fallback-only partitions are correctly identified and read.
+     *
+     * <p>Setup:
+     *
+     * <ul>
+     *   <li>Main table: PARTITIONED BY (dt, a) — simulates t1 with multi-key partition
+     *   <li>Fallback table: PARTITIONED BY (dt) — simulates branch_snapshot with fewer keys
+     *   <li>Main (delta): dt=20250811, a=aaa → row (20250811, aaa, x_new)
+     *   <li>Fallback (snapshot): dt=20250810 → rows (20250810, aaa, x), (20250810, bbb, y)
+     * </ul>
+     *
+     * <p>Query: WHERE dt=20250811. Expected: fallback dt=20250810 data is NOT returned (not in
+     * predicate), delta dt=20250811 data IS returned. The extra key "a" in the predicate must be
+     * stripped before pushing to fallback to avoid incorrect filtering.
+     *
+     * <p>Query: WHERE dt=20250810. Expected: no delta data, fallback dt=20250810 data IS returned.
+     * Previously the bug caused fallback to never be read (because BinaryRow {dt,a} never equals
+     * BinaryRow {dt}, so all fallback partitions appeared "remaining" but the predicate stripped
+     * them; or they were incorrectly filtered by the extra key).
+     */
+    @Test
+    public void testFallbackWithSubsetPartitionKeys() throws Exception {
+        // Row type shared by both tables: columns dt, a, val
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"dt", "a", "val"});
+
+        // Main table: partitioned by (dt, a)
+        Path mainPath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString() + "/main");
+        FileIO mainFileIO = FileIOFinder.find(mainPath);
+        TableSchema mainSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), mainPath),
+                        new Schema(
+                                rowType.getFields(),
+                                Arrays.asList("dt", "a"),
+                                Collections.emptyList(),
+                                Collections.emptyMap(),
+                                ""));
+        AppendOnlyFileStoreTable mainTable =
+                new AppendOnlyFileStoreTable(mainFileIO, mainPath, mainSchema);
+
+        // Fallback table: partitioned by (dt) only
+        Path fallbackPath =
+                new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString() + "/fallback");
+        FileIO fallbackFileIO = FileIOFinder.find(fallbackPath);
+        TableSchema fallbackSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), fallbackPath),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.singletonList("dt"),
+                                Collections.emptyList(),
+                                Collections.emptyMap(),
+                                ""));
+        AppendOnlyFileStoreTable fallbackTable =
+                new AppendOnlyFileStoreTable(fallbackFileIO, fallbackPath, fallbackSchema);
+
+        // Delta (main): dt=20250811, a=aaa
+        writeDataIntoTable(
+                mainTable,
+                0,
+                GenericRow.of(
+                        org.apache.paimon.data.BinaryString.fromString("20250811"),
+                        org.apache.paimon.data.BinaryString.fromString("aaa"),
+                        org.apache.paimon.data.BinaryString.fromString("x_new")));
+
+        // Snapshot (fallback): dt=20250810, a=aaa and a=bbb
+        writeDataIntoTable(
+                fallbackTable,
+                0,
+                GenericRow.of(
+                        org.apache.paimon.data.BinaryString.fromString("20250810"),
+                        org.apache.paimon.data.BinaryString.fromString("aaa"),
+                        org.apache.paimon.data.BinaryString.fromString("x")),
+                GenericRow.of(
+                        org.apache.paimon.data.BinaryString.fromString("20250810"),
+                        org.apache.paimon.data.BinaryString.fromString("bbb"),
+                        org.apache.paimon.data.BinaryString.fromString("y")));
+
+        FallbackReadFileStoreTable combined =
+                new FallbackReadFileStoreTable(mainTable, fallbackTable);
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+
+        // Case 1: WHERE dt=20250811 — only delta data; fallback dt=20250810 not included
+        DataTableScan scan1 = combined.newScan();
+        scan1.withFilter(
+                builder.equal(0, org.apache.paimon.data.BinaryString.fromString("20250811")));
+        List<Split> splits1 = scan1.plan().splits();
+        // dt=20250811 is owned by main branch; should be 1 non-fallback split
+        assertThat(splits1).isNotEmpty();
+        for (Split s : splits1) {
+            assertThat(((FallbackReadFileStoreTable.FallbackSplit) s).isFallback()).isFalse();
+        }
+
+        // Case 2: WHERE dt=20250810 — only fallback data; delta has no dt=20250810
+        DataTableScan scan2 = combined.newScan();
+        scan2.withFilter(
+                builder.equal(0, org.apache.paimon.data.BinaryString.fromString("20250810")));
+        List<Split> splits2 = scan2.plan().splits();
+        // dt=20250810 not in main; must be read from fallback
+        assertThat(splits2).isNotEmpty();
+        boolean hasFallback = false;
+        for (Split s : splits2) {
+            if (((FallbackReadFileStoreTable.FallbackSplit) s).isFallback()) {
+                hasFallback = true;
+            }
+        }
+        assertThat(hasFallback)
+                .as(
+                        "dt=20250810 exists only in fallback; extra key 'a' must not prevent "
+                                + "fallback from being found (Bug #7503)")
+                .isTrue();
+
+        // Case 3: WHERE dt=20250811 AND a=aaa — extra key 'a' must be stripped before
+        // pushing to fallback scan; fallback should not be incorrectly filtered out
+        DataTableScan scan3 = combined.newScan();
+        scan3.withFilter(
+                PredicateBuilder.and(
+                        builder.equal(
+                                0, org.apache.paimon.data.BinaryString.fromString("20250811")),
+                        builder.equal(1, org.apache.paimon.data.BinaryString.fromString("aaa"))));
+        List<Split> splits3 = scan3.plan().splits();
+        assertThat(splits3).isNotEmpty();
+        // dt=20250811 owned by main; no fallback splits expected
+        for (Split s : splits3) {
+            assertThat(((FallbackReadFileStoreTable.FallbackSplit) s).isFallback()).isFalse();
+        }
     }
 
     private void writeDataIntoTable(

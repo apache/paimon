@@ -33,6 +33,9 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateProjectionConverter;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.predicate.TopN;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -49,6 +52,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SegmentsCache;
 
 import org.slf4j.Logger;
@@ -58,6 +62,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -191,7 +196,12 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     public DataTableScan newScan() {
         validateSchema();
         return new FallbackReadScan(
-                wrapped.newScan(), fallback.newScan(), wrapped, fallback, wrapped.schema());
+                wrapped.newScan(),
+                fallback.newScan(),
+                wrapped,
+                fallback,
+                wrapped.schema(),
+                fallback.schema());
     }
 
     protected void validateSchema() {
@@ -361,7 +371,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         protected final FileStoreTable wrappedTable;
         protected final FileStoreTable fallbackTable;
         protected final TableSchema tableSchema;
+        protected final TableSchema fallbackSchema;
         private PartitionPredicate partitionPredicate;
+        private PartitionPredicate fallbackPartitionPredicate;
 
         public FallbackReadScan(
                 DataTableScan mainScan,
@@ -369,11 +381,22 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                 FileStoreTable wrappedTable,
                 FileStoreTable fallbackTable,
                 TableSchema tableSchema) {
+            this(mainScan, fallbackScan, wrappedTable, fallbackTable, tableSchema, tableSchema);
+        }
+
+        public FallbackReadScan(
+                DataTableScan mainScan,
+                DataTableScan fallbackScan,
+                FileStoreTable wrappedTable,
+                FileStoreTable fallbackTable,
+                TableSchema tableSchema,
+                TableSchema fallbackSchema) {
             this.mainScan = mainScan;
             this.fallbackScan = fallbackScan;
             this.wrappedTable = wrappedTable;
             this.fallbackTable = fallbackTable;
             this.tableSchema = tableSchema;
+            this.fallbackSchema = fallbackSchema;
         }
 
         @Override
@@ -386,7 +409,8 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public FallbackReadScan withFilter(Predicate predicate) {
             mainScan.withFilter(predicate);
-            fallbackScan.withFilter(predicate);
+            Predicate fallbackPredicate = trimPredicateToPartitionKeys(predicate, fallbackSchema);
+            fallbackScan.withFilter(fallbackPredicate);
             if (predicate != null) {
                 Pair<Optional<PartitionPredicate>, List<Predicate>> pair =
                         PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
@@ -394,6 +418,16 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                                 tableSchema.logicalRowType(),
                                 tableSchema.partitionKeys());
                 setPartitionPredicate(pair.getLeft().orElse(null));
+                // Derive fallback partition predicate using the fallback schema's partition keys
+                // so that the predicate is properly projected to partition-row coordinates.
+                if (fallbackPredicate != null) {
+                    Pair<Optional<PartitionPredicate>, List<Predicate>> fallbackPair =
+                            PartitionPredicate.splitPartitionPredicatesAndDataPredicates(
+                                    fallbackPredicate,
+                                    fallbackSchema.logicalRowType(),
+                                    fallbackSchema.partitionKeys());
+                    setFallbackPartitionPredicate(fallbackPair.getLeft().orElse(null));
+                }
             }
             return this;
         }
@@ -408,13 +442,23 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public FallbackReadScan withPartitionFilter(Map<String, String> partitionSpec) {
             mainScan.withPartitionFilter(partitionSpec);
-            fallbackScan.withPartitionFilter(partitionSpec);
+            Map<String, String> fallbackSpec =
+                    trimPartitionSpecToKeys(partitionSpec, fallbackSchema.partitionKeys());
+            fallbackScan.withPartitionFilter(fallbackSpec);
             if (partitionSpec != null) {
                 setPartitionPredicate(
                         PartitionPredicate.fromMap(
                                 tableSchema.logicalPartitionType(),
                                 partitionSpec,
                                 CoreOptions.fromMap(tableSchema.options()).partitionDefaultName()));
+                setFallbackPartitionPredicate(
+                        fallbackSpec == null
+                                ? null
+                                : PartitionPredicate.fromMap(
+                                        fallbackSchema.logicalPartitionType(),
+                                        fallbackSpec,
+                                        CoreOptions.fromMap(fallbackSchema.options())
+                                                .partitionDefaultName()));
             }
             return this;
         }
@@ -434,13 +478,26 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public InnerTableScan withPartitionsFilter(List<Map<String, String>> partitions) {
             mainScan.withPartitionsFilter(partitions);
-            fallbackScan.withPartitionsFilter(partitions);
             if (partitions != null) {
+                List<Map<String, String>> fallbackPartitions =
+                        partitions.stream()
+                                .map(
+                                        p ->
+                                                trimPartitionSpecToKeys(
+                                                        p, fallbackSchema.partitionKeys()))
+                                .collect(Collectors.toList());
+                fallbackScan.withPartitionsFilter(fallbackPartitions);
                 setPartitionPredicate(
                         PartitionPredicate.fromMaps(
                                 tableSchema.logicalPartitionType(),
                                 partitions,
                                 CoreOptions.fromMap(tableSchema.options()).partitionDefaultName()));
+                setFallbackPartitionPredicate(
+                        PartitionPredicate.fromMaps(
+                                fallbackSchema.logicalPartitionType(),
+                                fallbackPartitions,
+                                CoreOptions.fromMap(fallbackSchema.options())
+                                        .partitionDefaultName()));
             }
             return this;
         }
@@ -448,7 +505,9 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
             mainScan.withPartitionFilter(partitionPredicate);
-            fallbackScan.withPartitionFilter(partitionPredicate);
+            // Do not push main-schema PartitionPredicate to fallback; fallback listing uses
+            // fallbackPartitionPredicate which was set via
+            // withFilter/withPartitionFilter(Predicate)
             if (partitionPredicate != null) {
                 setPartitionPredicate(partitionPredicate);
             }
@@ -458,11 +517,16 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public FallbackReadScan withPartitionFilter(Predicate partitionPredicate) {
             mainScan.withPartitionFilter(partitionPredicate);
-            fallbackScan.withPartitionFilter(partitionPredicate);
+            Predicate fallbackPredicate =
+                    trimPredicateToPartitionKeys(partitionPredicate, fallbackSchema);
+            fallbackScan.withPartitionFilter(fallbackPredicate);
             if (partitionPredicate != null) {
                 setPartitionPredicate(
                         PartitionPredicate.fromPredicate(
                                 tableSchema.logicalPartitionType(), partitionPredicate));
+                setFallbackPartitionPredicate(
+                        PartitionPredicate.fromPredicate(
+                                fallbackSchema.logicalPartitionType(), fallbackPredicate));
             }
             return this;
         }
@@ -508,21 +572,28 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
          * <p>Partitions that exist in the main branch (based on partition predicates only) are
          * treated as complete and are read from the main branch with the full predicate. Partitions
          * that exist only in the fallback branch are read from the fallback branch.
+         *
+         * <p>When main and fallback branches have different partition schemas (e.g. main has (dt,
+         * a, b) and fallback has (dt)), main partition rows are projected to the fallback key
+         * layout before deduplication so that fallback-only partitions are correctly identified.
          */
         @Override
         public TableScan.Plan plan() {
             List<Split> splits = new ArrayList<>();
-            Set<BinaryRow> completePartitions =
-                    new HashSet<>(
-                            newPartitionListingScan(true, partitionPredicate).listPartitions());
+            List<BinaryRow> mainPartitions =
+                    newPartitionListingScan(true, partitionPredicate).listPartitions();
+            List<BinaryRow> fallbackPartitions =
+                    newPartitionListingScan(false, null).listPartitions();
+            Set<BinaryRow> coveredFallbackPartitions =
+                    findCoveredFallbackPartitions(mainPartitions, fallbackPartitions);
             for (Split split : mainScan.plan().splits()) {
                 DataSplit dataSplit = (DataSplit) split;
                 splits.add(toFallbackSplit(dataSplit, false));
             }
 
             List<BinaryRow> remainingPartitions =
-                    newPartitionListingScan(false, partitionPredicate).listPartitions().stream()
-                            .filter(p -> !completePartitions.contains(p))
+                    fallbackPartitions.stream()
+                            .filter(p -> !coveredFallbackPartitions.contains(p))
                             .collect(Collectors.toList());
             if (!remainingPartitions.isEmpty()) {
                 fallbackScan.withPartitionFilter(remainingPartitions);
@@ -536,7 +607,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public List<PartitionEntry> listPartitionEntries() {
             DataTableScan mainListingScan = newPartitionListingScan(true, partitionPredicate);
-            DataTableScan fallbackListingScan = newPartitionListingScan(false, partitionPredicate);
+            DataTableScan fallbackListingScan = newPartitionListingScan(false, null);
             List<PartitionEntry> partitionEntries =
                     new ArrayList<>(mainListingScan.listPartitionEntries());
             Set<BinaryRow> partitions =
@@ -559,13 +630,161 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
             return partitionPredicate;
         }
 
+        protected void setFallbackPartitionPredicate(PartitionPredicate predicate) {
+            this.fallbackPartitionPredicate = predicate;
+        }
+
+        protected PartitionPredicate getFallbackPartitionPredicate() {
+            return fallbackPartitionPredicate;
+        }
+
+        /**
+         * Finds which fallback partitions are already covered by the main branch.
+         *
+         * <p>When main and fallback have the same partition schema, a fallback partition is covered
+         * if its BinaryRow appears in the main partition set.
+         *
+         * <p>When schemas differ (e.g. main has (dt, a, b) and fallback has (dt)), a fallback
+         * partition {dt=X} is covered if main has ANY partition with the same dt value. Comparison
+         * is done by projecting main partition rows to the fallback key columns using object-array
+         * serialization.
+         */
+        private Set<BinaryRow> findCoveredFallbackPartitions(
+                List<BinaryRow> mainPartitions, List<BinaryRow> fallbackPartitions) {
+            List<String> mainKeys = tableSchema.partitionKeys();
+            List<String> fallbackKeys = fallbackSchema.partitionKeys();
+            if (mainKeys.equals(fallbackKeys) || fallbackKeys.isEmpty()) {
+                return new HashSet<>(mainPartitions);
+            }
+            // Build index: fallbackKeys[i] -> position in mainKeys
+            int[] fallbackToMain = new int[fallbackKeys.size()];
+            for (int i = 0; i < fallbackKeys.size(); i++) {
+                int mainIdx = mainKeys.indexOf(fallbackKeys.get(i));
+                if (mainIdx < 0) {
+                    // Fallback has a key not in main — cannot project; no coverage
+                    return new HashSet<>();
+                }
+                fallbackToMain[i] = mainIdx;
+            }
+            RowType mainPartitionType = tableSchema.logicalPartitionType();
+            RowType fallbackPartitionType = fallbackSchema.logicalPartitionType();
+            RowDataToObjectArrayConverter mainConverter =
+                    new RowDataToObjectArrayConverter(mainPartitionType);
+            // Build a set of string keys representing the fallback-key values found in main
+            Set<String> mainFallbackKeyValues = new HashSet<>();
+            for (BinaryRow mainRow : mainPartitions) {
+                Object[] mainObjects = mainConverter.convert(mainRow);
+                mainFallbackKeyValues.add(buildPartitionKeyString(mainObjects, fallbackToMain));
+            }
+            // Collect fallback partition rows whose key string is covered by main
+            RowDataToObjectArrayConverter fallbackConverter =
+                    new RowDataToObjectArrayConverter(fallbackPartitionType);
+            int[] identity = new int[fallbackKeys.size()];
+            for (int i = 0; i < identity.length; i++) {
+                identity[i] = i;
+            }
+            Set<BinaryRow> covered = new HashSet<>();
+            for (BinaryRow fallbackRow : fallbackPartitions) {
+                Object[] fallbackObjects = fallbackConverter.convert(fallbackRow);
+                if (mainFallbackKeyValues.contains(
+                        buildPartitionKeyString(fallbackObjects, identity))) {
+                    covered.add(fallbackRow);
+                }
+            }
+            return covered;
+        }
+
+        private static String buildPartitionKeyString(Object[] objects, int[] indices) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < indices.length; i++) {
+                if (i > 0) {
+                    sb.append('\u0000');
+                }
+                sb.append(objects[indices[i]]);
+            }
+            return sb.toString();
+        }
+
         private DataTableScan newPartitionListingScan(
                 boolean isMain, PartitionPredicate scanPartitionPredicate) {
             DataTableScan scan = isMain ? wrappedTable.newScan() : fallbackTable.newScan();
-            if (scanPartitionPredicate != null) {
-                scan.withPartitionFilter(scanPartitionPredicate);
+            PartitionPredicate predicate =
+                    isMain ? scanPartitionPredicate : fallbackPartitionPredicate;
+            if (predicate != null) {
+                scan.withPartitionFilter(predicate);
             }
             return scan;
+        }
+
+        /**
+         * Trims a predicate to only include parts that reference partition keys in the fallback
+         * schema, re-indexed to fallback row type positions. Prevents extra partition keys (e.g. a,
+         * b) from being pushed down to a fallback branch that only knows about a subset (e.g. dt).
+         *
+         * <p>Returns null if no fallback partition key predicates are found.
+         */
+        private Predicate trimPredicateToPartitionKeys(Predicate predicate, TableSchema schema) {
+            if (predicate == null) {
+                return null;
+            }
+            List<String> fallbackPartitionKeys = schema.partitionKeys();
+            if (fallbackPartitionKeys.isEmpty()) {
+                return null;
+            }
+            if (tableSchema.partitionKeys().equals(fallbackPartitionKeys)) {
+                return predicate;
+            }
+            Set<String> fallbackKeySet = new HashSet<>(fallbackPartitionKeys);
+            RowType mainRowType = tableSchema.logicalRowType();
+            RowType fallbackRowType = schema.logicalRowType();
+
+            // Build mapping: main-column-index -> fallback-column-index
+            // for columns that are partition keys of the fallback branch.
+            int[] mainToFallback = new int[mainRowType.getFieldCount()];
+            Arrays.fill(mainToFallback, -1);
+            for (int i = 0; i < mainRowType.getFieldCount(); i++) {
+                String fieldName = mainRowType.getFieldNames().get(i);
+                if (fallbackKeySet.contains(fieldName)) {
+                    int fallbackIdx = fallbackRowType.getFieldIndex(fieldName);
+                    if (fallbackIdx >= 0) {
+                        mainToFallback[i] = fallbackIdx;
+                    }
+                }
+            }
+
+            // For each AND-leaf of the predicate, keep only those whose referenced fields
+            // all belong to fallback partition keys, and re-index them.
+            PredicateProjectionConverter converter =
+                    PredicateProjectionConverter.fromMapping(mainToFallback);
+            List<Predicate> fallbackPredicates = new ArrayList<>();
+            for (Predicate leaf : PredicateBuilder.splitAnd(predicate)) {
+                Set<String> fields = PredicateVisitor.collectFieldNames(leaf);
+                if (fallbackKeySet.containsAll(fields)) {
+                    leaf.visit(converter).ifPresent(fallbackPredicates::add);
+                }
+            }
+            if (fallbackPredicates.isEmpty()) {
+                return null;
+            }
+            return PredicateBuilder.and(fallbackPredicates);
+        }
+
+        /**
+         * Trims a partition spec map to only include entries whose keys are in the given partition
+         * key list. Returns null if the result would be empty.
+         */
+        private Map<String, String> trimPartitionSpecToKeys(
+                Map<String, String> partitionSpec, List<String> partitionKeys) {
+            if (partitionSpec == null) {
+                return null;
+            }
+            Map<String, String> result = new HashMap<>();
+            for (String key : partitionKeys) {
+                if (partitionSpec.containsKey(key)) {
+                    result.put(key, partitionSpec.get(key));
+                }
+            }
+            return result.isEmpty() ? null : result;
         }
     }
 
