@@ -95,19 +95,17 @@ public class PartitionRefresher implements Closeable {
      * @param newPartitions the new partitions to refresh to
      * @param partitionFilter the partition filter for the new partitions
      * @param lookupTable the current lookup table to refresh
-     * @param context the context of the current lookup table
      * @param cacheRowFilter the cache row filter, may be null
      */
     public void startPartitionRefresh(
             List<BinaryRow> newPartitions,
             @Nullable Predicate partitionFilter,
             LookupTable lookupTable,
-            FullCacheLookupTable.Context context,
             @Nullable Filter<InternalRow> cacheRowFilter)
             throws Exception {
         if (partitionRefreshAsync) {
             asyncPartitionRefresh(
-                    newPartitions, partitionFilter, lookupTable, context, cacheRowFilter);
+                    newPartitions, partitionFilter, ((FullCacheLookupTable) lookupTable).context, cacheRowFilter);
         } else {
             syncPartitionRefresh(newPartitions, partitionFilter, lookupTable);
         }
@@ -131,7 +129,6 @@ public class PartitionRefresher implements Closeable {
     private void asyncPartitionRefresh(
             List<BinaryRow> newPartitions,
             @Nullable Predicate partitionFilter,
-            LookupTable lookupTable,
             FullCacheLookupTable.Context context,
             @Nullable Filter<InternalRow> cacheRowFilter) {
 
