@@ -252,9 +252,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 new PartitionRefresher(
                         options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC), table.name());
         this.partitionRefresher.init(
-                partitionLoader == null
-                        ? Collections.emptyList()
-                        : partitionLoader.partitions());
+                partitionLoader == null ? Collections.emptyList() : partitionLoader.partitions());
     }
 
     @Nullable

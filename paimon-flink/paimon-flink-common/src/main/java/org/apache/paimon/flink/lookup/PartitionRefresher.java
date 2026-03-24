@@ -105,7 +105,10 @@ public class PartitionRefresher implements Closeable {
             throws Exception {
         if (partitionRefreshAsync) {
             asyncPartitionRefresh(
-                    newPartitions, partitionFilter, ((FullCacheLookupTable) lookupTable).context, cacheRowFilter);
+                    newPartitions,
+                    partitionFilter,
+                    ((FullCacheLookupTable) lookupTable).context,
+                    cacheRowFilter);
         } else {
             syncPartitionRefresh(newPartitions, partitionFilter, lookupTable);
         }
