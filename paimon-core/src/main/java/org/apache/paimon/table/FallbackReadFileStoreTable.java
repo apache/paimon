@@ -505,11 +505,15 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         @Override
         public InnerTableScan withPartitionFilter(PartitionPredicate partitionPredicate) {
             mainScan.withPartitionFilter(partitionPredicate);
-            // Do not push main-schema PartitionPredicate to fallback; fallback listing uses
-            // fallbackPartitionPredicate which was set via
-            // withFilter/withPartitionFilter(Predicate)
             if (partitionPredicate != null) {
                 setPartitionPredicate(partitionPredicate);
+            }
+            // Only push PartitionPredicate to fallback when both branches share the same
+            // partition keys; otherwise the predicate is in main-schema coordinates and may
+            // reference keys that don't exist in the fallback schema (subset-key case).
+            if (tableSchema.partitionKeys().equals(fallbackSchema.partitionKeys())) {
+                fallbackScan.withPartitionFilter(partitionPredicate);
+                setFallbackPartitionPredicate(partitionPredicate);
             }
             return this;
         }
