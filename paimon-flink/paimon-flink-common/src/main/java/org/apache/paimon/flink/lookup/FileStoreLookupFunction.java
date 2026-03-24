@@ -97,7 +97,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient LookupTable lookupTable;
 
     // partition refresh
-    private transient PartitionRefresher partitionRefresher;
+    @Nullable private transient PartitionRefresher partitionRefresher;
 
     // interval of refreshing lookup table
     private transient Duration refreshInterval;
@@ -240,19 +240,19 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 lookupTable.specifyPartitions(
                         partitions, partitionLoader.createSpecificPartFilter());
             }
+            if (partitionLoader instanceof DynamicPartitionLoader) {
+                // Initialize partition refresher
+                this.partitionRefresher =
+                        new PartitionRefresher(
+                                options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC), table.name());
+                this.partitionRefresher.init(partitionLoader.partitions());
+            }
         }
 
         if (cacheRowFilter != null) {
             lookupTable.specifyCacheRowFilter(cacheRowFilter);
         }
         lookupTable.open();
-
-        // Initialize partition refresher
-        this.partitionRefresher =
-                new PartitionRefresher(
-                        options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC), table.name());
-        this.partitionRefresher.init(
-                partitionLoader == null ? Collections.emptyList() : partitionLoader.partitions());
     }
 
     @Nullable
@@ -282,7 +282,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (partitionLoader == null) {
                 return lookupInternal(key);
             }
-            List<BinaryRow> partitions = partitionRefresher.getScanPartitions();
+            List<BinaryRow> partitions =
+                    partitionRefresher != null
+                            ? partitionRefresher.getScanPartitions()
+                            : partitionLoader.partitions();
             if (partitions.isEmpty()) {
                 return Collections.emptyList();
             }
