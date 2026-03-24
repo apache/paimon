@@ -298,7 +298,6 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertIsNone(changelog_manager.latest_long_lived_changelog_id())
         self.assertIsNone(changelog_manager.earliest_long_lived_changelog_id())
 
-
     def test_current_branch(self):
         """Test that current_branch returns the branch from options."""
         from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
