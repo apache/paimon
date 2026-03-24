@@ -65,7 +65,7 @@ public interface ClientPool<C, E extends Exception> {
                     continue;
                 }
                 try {
-                    client = reconnect(client);
+                    client = ensureActiveClient(client);
                     return action.run(client);
                 } finally {
                     clients.addFirst(client);
@@ -73,8 +73,11 @@ public interface ClientPool<C, E extends Exception> {
             }
         }
 
-        /** Validate and potentially replace a client before use. */
-        protected C reconnect(C client) {
+        /**
+         * Validates that the client is still active before use. Subclasses should override this
+         * method to provide protocol-specific validation and reconnection logic.
+         */
+        protected C ensureActiveClient(C client) {
             return client;
         }
 

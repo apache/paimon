@@ -54,7 +54,7 @@ public class JdbcClientPool extends ClientPool.ClientPoolImpl<Connection, SQLExc
     }
 
     @Override
-    protected Connection reconnect(Connection connection) {
+    protected Connection ensureActiveClient(Connection connection) {
         try {
             if (connection.isClosed()
                     || !connection.isValid(CONNECTION_VALIDATION_TIMEOUT_SECONDS)) {
