@@ -247,13 +247,13 @@ public class LuminaVectorGlobalIndexScanTest {
 
         float[] queryVector = new float[] {1.0f, 0.0f};
         VectorSearchBuilder vectorBuilder =
-                table.newVectorSearchBuilder()
+                ipTable.newVectorSearchBuilder()
                         .withVector(queryVector)
                         .withLimit(3)
                         .withVectorColumn(vectorFieldName);
         GlobalIndexResult indexResult =
                 vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan());
-        ReadBuilder readBuilder = table.newReadBuilder();
+        ReadBuilder readBuilder = ipTable.newReadBuilder();
         TableScan scan = readBuilder.newScan().withGlobalIndexResult(indexResult);
         List<Integer> ids = new ArrayList<>();
         readBuilder
