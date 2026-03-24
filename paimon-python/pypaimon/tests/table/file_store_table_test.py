@@ -298,6 +298,7 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertIsNone(changelog_manager.latest_long_lived_changelog_id())
         self.assertIsNone(changelog_manager.earliest_long_lived_changelog_id())
 
+
     def test_current_branch(self):
         """Test that current_branch returns the branch from options."""
         from pypaimon.branch.branch_manager import DEFAULT_MAIN_BRANCH
@@ -338,3 +339,102 @@ class FileStoreTableTest(unittest.TestCase):
         # Verify other properties are preserved
         self.assertEqual(copied_table.identifier, self.table.identifier)
         self.assertEqual(copied_table.table_path, self.table.table_path)
+
+    def test_truncate_table(self):
+        """Test truncate_table functionality."""
+        # Create a write builder
+        write_builder = self.table.new_batch_write_builder()
+        table_write = write_builder.new_write()
+        table_commit = write_builder.new_commit()
+
+        # Write some data (use int32 for user_id to match table schema)
+        data = pa.Table.from_pydict({
+            'user_id': [1, 2, 3],
+            'item_id': [100, 200, 300],
+            'behavior': ['view', 'click', 'purchase'],
+            'dt': ['2024-01-01', '2024-01-02', '2024-01-03']
+        }, schema=self.pa_schema)
+        table_write.write_arrow(data)
+        table_commit.commit(table_write.prepare_commit())
+        table_write.close()
+        table_commit.close()
+
+        # Verify data was written
+        read_builder = self.table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result_before = table_read.to_arrow(table_scan.plan().splits())
+        self.assertEqual(result_before.num_rows, 3)
+
+        # Truncate the table
+        write_builder = self.table.new_batch_write_builder()
+        table_commit = write_builder.new_commit()
+        table_commit.truncate_table()
+        table_commit.close()
+
+        # Verify data is truncated
+        read_builder = self.table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result_after = table_read.to_arrow(table_scan.plan().splits())
+        self.assertEqual(result_after.num_rows, 0)
+
+        # Verify new snapshot was created
+        snapshot = self.table.snapshot_manager().get_latest_snapshot()
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.commit_kind, 'OVERWRITE')
+
+    def test_truncate_empty_table(self):
+        """Test truncate_table on an empty table."""
+        # Truncate empty table - should still work
+        write_builder = self.table.new_batch_write_builder()
+        table_commit = write_builder.new_commit()
+        table_commit.truncate_table()
+        table_commit.close()
+
+        # Verify table is still empty
+        read_builder = self.table.new_read_builder()
+        table_scan = read_builder.new_scan()
+        table_read = read_builder.new_read()
+        result = table_read.to_arrow(table_scan.plan().splits())
+        self.assertEqual(result.num_rows, 0)
+
+    def test_truncate_table_multiple_times(self):
+        """Test multiple consecutive truncate operations."""
+        # Write and truncate multiple times
+        for i in range(3):
+            # Write some data
+            write_builder = self.table.new_batch_write_builder()
+            table_write = write_builder.new_write()
+            table_commit = write_builder.new_commit()
+
+            data = pa.Table.from_pydict({
+                'user_id': [i, i + 1],
+                'item_id': [i * 100, (i + 1) * 100],
+                'behavior': ['view', 'click'],
+                'dt': [f'2024-01-{i+1:02d}', f'2024-01-{i+2:02d}']
+            }, schema=self.pa_schema)
+            table_write.write_arrow(data)
+            table_commit.commit(table_write.prepare_commit())
+            table_write.close()
+            table_commit.close()
+
+            # Verify data was written
+            read_builder = self.table.new_read_builder()
+            table_scan = read_builder.new_scan()
+            table_read = read_builder.new_read()
+            result = table_read.to_arrow(table_scan.plan().splits())
+            self.assertEqual(result.num_rows, 2)
+
+            # Truncate
+            write_builder = self.table.new_batch_write_builder()
+            table_commit = write_builder.new_commit()
+            table_commit.truncate_table()
+            table_commit.close()
+
+            # Verify data is truncated
+            read_builder = self.table.new_read_builder()
+            table_scan = read_builder.new_scan()
+            table_read = read_builder.new_read()
+            result = table_read.to_arrow(table_scan.plan().splits())
+            self.assertEqual(result.num_rows, 0)
