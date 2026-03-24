@@ -175,7 +175,7 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
     @Test
     public void testBtreeWithNonIndexedRowRange() throws Exception {
         write(10L);
-        append(10, 20);
+        append(0, 10);
 
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
         createIndex("f1", Collections.singletonList(new Range(0L, 9L)));
@@ -206,7 +206,8 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .newRead()
                 .createReader(splits)
                 .forEachRemaining(row -> result.add(row.getString(1).toString()));
-        assertThat(result).containsExactly("a5");
+        assertThat(result)
+                .containsExactly("a5", "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9");
     }
 
     private void createIndex(String fieldName) throws Exception {
@@ -241,29 +242,17 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private void append(int startInclusive, int endExclusive) throws Exception {
         BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
-        RowType writeType0 = schemaDefault().rowType().project(Arrays.asList("f0", "f1"));
-        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType0)) {
+        RowType writeType = schemaDefault().rowType();
+        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType)) {
             for (int i = startInclusive; i < endExclusive; i++) {
-                write0.write(GenericRow.of(i, BinaryString.fromString("a" + i)));
+                write0.write(
+                        GenericRow.of(
+                                i,
+                                BinaryString.fromString("a" + i),
+                                BinaryString.fromString("b" + i)));
             }
             try (BatchTableCommit commit = builder.newCommit()) {
                 commit.commit(write0.prepareCommit());
-            }
-        }
-
-        long rowId =
-                getTableDefault().snapshotManager().latestSnapshot().nextRowId()
-                        - (endExclusive - startInclusive);
-        builder = getTableDefault().newBatchWriteBuilder();
-        RowType writeType1 = schemaDefault().rowType().project(Collections.singletonList("f2"));
-        try (BatchTableWrite write1 = builder.newWrite().withWriteType(writeType1)) {
-            for (int i = startInclusive; i < endExclusive; i++) {
-                write1.write(GenericRow.of(BinaryString.fromString("b" + i)));
-            }
-            try (BatchTableCommit commit = builder.newCommit()) {
-                List<CommitMessage> commitables = write1.prepareCommit();
-                setFirstRowId(commitables, rowId);
-                commit.commit(commitables);
             }
         }
     }
