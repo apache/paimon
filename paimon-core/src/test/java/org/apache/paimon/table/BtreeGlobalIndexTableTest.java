@@ -22,11 +22,10 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexResult;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
+import org.apache.paimon.globalindex.GlobalIndexScanner;
 import org.apache.paimon.globalindex.IndexedSplit;
-import org.apache.paimon.globalindex.RowRangeGlobalIndexScanner;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
-import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -44,9 +43,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -172,44 +169,6 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
         assertThat(result).containsExactly("a200", "a56789");
     }
 
-    @Test
-    public void testBtreeWithNonIndexedRowRange() throws Exception {
-        write(10L);
-        append(0, 10);
-
-        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier());
-        createIndex("f1", Collections.singletonList(new Range(0L, 9L)));
-
-        assertThat(table.store().newGlobalIndexScanBuilder().shardList())
-                .containsExactly(new Range(0L, 9L));
-
-        Predicate predicate =
-                new PredicateBuilder(table.rowType()).equal(1, BinaryString.fromString("a5"));
-        ReadBuilder readBuilder = table.newReadBuilder().withFilter(predicate);
-
-        List<Split> splits = readBuilder.newScan().plan().splits();
-        assertThat(splits).hasSize(1);
-
-        IndexedSplit indexedSplit = (IndexedSplit) splits.get(0);
-        assertThat(indexedSplit.rowRanges())
-                .containsExactly(new Range(5L, 5L), new Range(10L, 19L));
-        assertThat(
-                        indexedSplit.dataSplit().dataFiles().stream()
-                                .map(DataFileMeta::firstRowId)
-                                .distinct()
-                                .sorted()
-                                .collect(Collectors.toList()))
-                .containsExactly(0L, 10L);
-
-        List<String> result = new ArrayList<>();
-        readBuilder
-                .newRead()
-                .createReader(splits)
-                .forEachRemaining(row -> result.add(row.getString(1).toString()));
-        assertThat(result)
-                .containsExactly("a5", "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9");
-    }
-
     private void createIndex(String fieldName) throws Exception {
         createIndex(fieldName, null);
     }
@@ -266,20 +225,9 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
 
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
-        GlobalIndexScanBuilder indexScanBuilder = table.store().newGlobalIndexScanBuilder();
-        List<Range> ranges = indexScanBuilder.shardList();
-        GlobalIndexResult globalFileIndexResult = GlobalIndexResult.createEmpty();
-        for (Range range : ranges) {
-            try (RowRangeGlobalIndexScanner scanner =
-                    indexScanBuilder.withRowRange(range).build()) {
-                Optional<GlobalIndexResult> globalIndexResult = scanner.scan(predicate);
-                if (!globalIndexResult.isPresent()) {
-                    throw new RuntimeException("Can't find index result by scan");
-                }
-                globalFileIndexResult = globalFileIndexResult.or(globalIndexResult.get());
-            }
+        try (GlobalIndexScanner scanner =
+                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate)) {
+            return scanner.scan(predicate).get().results();
         }
-
-        return globalFileIndexResult.results();
     }
 }

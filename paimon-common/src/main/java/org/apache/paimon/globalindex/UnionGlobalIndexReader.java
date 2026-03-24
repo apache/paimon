@@ -21,10 +21,19 @@ package org.apache.paimon.globalindex;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.VectorSearch;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.ThreadPoolUtils.randomlyExecuteSequentialReturn;
 
 /**
  * A {@link GlobalIndexReader} that combines results from multiple readers by performing a union
@@ -33,9 +42,16 @@ import java.util.function.Function;
 public class UnionGlobalIndexReader implements GlobalIndexReader {
 
     private final List<GlobalIndexReader> readers;
+    private final @Nullable ExecutorService executor;
 
     public UnionGlobalIndexReader(List<GlobalIndexReader> readers) {
+        this(readers, null);
+    }
+
+    public UnionGlobalIndexReader(
+            List<GlobalIndexReader> readers, @Nullable ExecutorService executor) {
         this.readers = readers;
+        this.executor = executor;
     }
 
     @Override
@@ -116,8 +132,9 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     @Override
     public Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
         Optional<ScoredGlobalIndexResult> result = Optional.empty();
-        for (GlobalIndexReader reader : readers) {
-            Optional<ScoredGlobalIndexResult> current = reader.visitVectorSearch(vectorSearch);
+        List<Optional<ScoredGlobalIndexResult>> results =
+                executeAllReaders(reader -> reader.visitVectorSearch(vectorSearch));
+        for (Optional<ScoredGlobalIndexResult> current : results) {
             if (!current.isPresent()) {
                 continue;
             }
@@ -132,8 +149,8 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
     private Optional<GlobalIndexResult> union(
             Function<GlobalIndexReader, Optional<GlobalIndexResult>> visitor) {
         Optional<GlobalIndexResult> result = Optional.empty();
-        for (GlobalIndexReader reader : readers) {
-            Optional<GlobalIndexResult> current = visitor.apply(reader);
+        List<Optional<GlobalIndexResult>> results = executeAllReaders(visitor);
+        for (Optional<GlobalIndexResult> current : results) {
             if (!current.isPresent()) {
                 continue;
             }
@@ -141,6 +158,21 @@ public class UnionGlobalIndexReader implements GlobalIndexReader {
                 result = current;
             }
             result = Optional.of(result.get().or(current.get()));
+        }
+        return result;
+    }
+
+    private <R> List<R> executeAllReaders(Function<GlobalIndexReader, R> function) {
+        if (executor == null) {
+            return readers.stream().map(function).collect(Collectors.toList());
+        }
+
+        Iterator<R> iterator =
+                randomlyExecuteSequentialReturn(
+                        executor, reader -> singletonList(function.apply(reader)), readers);
+        List<R> result = new ArrayList<>();
+        while (iterator.hasNext()) {
+            result.add(iterator.next());
         }
         return result;
     }

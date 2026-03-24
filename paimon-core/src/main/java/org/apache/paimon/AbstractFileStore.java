@@ -26,8 +26,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilder;
-import org.apache.paimon.globalindex.GlobalIndexScanBuilderImpl;
 import org.apache.paimon.iceberg.IcebergCommitCallback;
 import org.apache.paimon.iceberg.IcebergOptions;
 import org.apache.paimon.index.IndexFileHandler;
@@ -522,16 +520,5 @@ abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public void setSnapshotCache(Cache<Path, Snapshot> cache) {
         this.snapshotCache = cache;
-    }
-
-    @Override
-    public GlobalIndexScanBuilder newGlobalIndexScanBuilder() {
-        return new GlobalIndexScanBuilderImpl(
-                options.toConfiguration(),
-                schema.logicalRowType(),
-                fileIO,
-                pathFactory().globalIndexFileFactory(),
-                snapshotManager(),
-                newIndexFileHandler());
     }
 }

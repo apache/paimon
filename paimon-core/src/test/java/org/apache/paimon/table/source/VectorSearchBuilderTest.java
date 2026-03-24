@@ -25,16 +25,20 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
+import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
 import org.apache.paimon.globalindex.testvector.TestVectorGlobalIndexerFactory;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -52,6 +56,10 @@ import org.apache.paimon.utils.Range;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -355,6 +363,150 @@ public class VectorSearchBuilderTest extends TableTestBase {
                                 + result2.results().getIntCardinality());
     }
 
+    @Test
+    public void testScanPartialRangeIntersection() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        // Write 10 rows
+        float[][] allVectors = new float[10][];
+        for (int i = 0; i < 10; i++) {
+            allVectors[i] = new float[] {(float) Math.cos(i * 0.3), (float) Math.sin(i * 0.3)};
+        }
+        writeVectors(table, allVectors);
+
+        // Build ONE vector index covering full range [0,9]
+        buildAndCommitVectorIndex(table, allVectors, new Range(0, 9));
+
+        // Build ONE btree index covering partial range [3,7]
+        buildAndCommitBTreeIndex(table, new int[] {3, 4, 5, 6, 7}, new Range(3, 7));
+
+        // VectorScanImpl should attach scalar index because [3,7] intersects [0,9]
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 5);
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(5)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(plan.splits()).hasSize(1);
+        VectorSearchSplit split = plan.splits().get(0);
+        assertThat(split.rowRangeStart()).isEqualTo(0);
+        assertThat(split.rowRangeEnd()).isEqualTo(9);
+        assertThat(split.vectorIndexFiles()).isNotEmpty();
+        // Scalar index [3,7] intersects vector range [0,9] → attached
+        assertThat(split.scalarIndexFiles()).isNotEmpty();
+
+        // Read with pre-filter: id >= 5, btree covers [3,7] so rows 5,6,7 from btree
+        GlobalIndexResult result =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(5)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter)
+                        .newVectorRead()
+                        .read(plan);
+
+        assertThat(result).isInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(result.results().isEmpty()).isFalse();
+        // Pre-filter restricts to rows matching id >= 5 from btree [3,7]
+        for (long rowId : result.results()) {
+            assertThat(rowId).isBetween(5L, 7L);
+        }
+    }
+
+    @Test
+    public void testPreFilterMatchesZeroRows() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {
+            {1.0f, 0.0f},
+            {0.95f, 0.1f},
+            {0.0f, 1.0f},
+            {0.1f, 0.95f}
+        };
+        writeVectors(table, vectors);
+
+        Range range = new Range(0, 3);
+        buildAndCommitVectorIndex(table, vectors, range);
+        buildAndCommitBTreeIndex(table, new int[] {0, 1, 2, 3}, range);
+
+        // Filter id > 100: btree covers ids 0-3, so preFilter matches zero rows
+        Predicate impossibleFilter = new PredicateBuilder(table.rowType()).greaterThan(0, 100);
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(4)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(impossibleFilter);
+
+        VectorScan.Plan plan = searchBuilder.newVectorScan().scan();
+        assertThat(plan.splits()).hasSize(1);
+        // Scalar index is attached since field matches filter
+        assertThat(plan.splits().get(0).scalarIndexFiles()).isNotEmpty();
+
+        // Read: preFilter returns empty bitmap → vector search returns no results
+        GlobalIndexResult result = searchBuilder.newVectorRead().read(plan);
+        assertThat(result.results().isEmpty()).isTrue();
+    }
+
+    @Test
+    public void testVectorSearchSplitSerialization() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        float[][] vectors = {{1.0f, 0.0f}, {0.0f, 1.0f}};
+        writeVectors(table, vectors);
+
+        Range range = new Range(0, 1);
+        buildAndCommitVectorIndex(table, vectors, range);
+        buildAndCommitBTreeIndex(table, new int[] {0, 1}, range);
+
+        Predicate filter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 0);
+        VectorScan.Plan plan =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {1.0f, 0.0f})
+                        .withLimit(2)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(filter)
+                        .newVectorScan()
+                        .scan();
+
+        assertThat(plan.splits()).hasSize(1);
+        VectorSearchSplit original = plan.splits().get(0);
+
+        // Serialize
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        try (ObjectOutputStream out = new ObjectOutputStream(bos)) {
+            out.writeObject(original);
+        }
+
+        // Deserialize
+        VectorSearchSplit deserialized;
+        try (ObjectInputStream in =
+                new ObjectInputStream(new ByteArrayInputStream(bos.toByteArray()))) {
+            deserialized = (VectorSearchSplit) in.readObject();
+        }
+
+        // Verify all fields match
+        assertThat(deserialized.rowRangeStart()).isEqualTo(original.rowRangeStart());
+        assertThat(deserialized.rowRangeEnd()).isEqualTo(original.rowRangeEnd());
+        assertThat(deserialized.vectorIndexFiles()).hasSize(original.vectorIndexFiles().size());
+        assertThat(deserialized.scalarIndexFiles()).hasSize(original.scalarIndexFiles().size());
+        for (int i = 0; i < original.vectorIndexFiles().size(); i++) {
+            assertThat(deserialized.vectorIndexFiles().get(i).fileName())
+                    .isEqualTo(original.vectorIndexFiles().get(i).fileName());
+        }
+        for (int i = 0; i < original.scalarIndexFiles().size(); i++) {
+            assertThat(deserialized.scalarIndexFiles().get(i).fileName())
+                    .isEqualTo(original.scalarIndexFiles().get(i).fileName());
+        }
+    }
+
     // ====================== Helper methods ======================
 
     private void writeVectors(FileStoreTable table, float[][] vectors) throws Exception {
@@ -487,6 +639,169 @@ public class VectorSearchBuilderTest extends TableTestBase {
                 write.write(GenericRow.of(partition, i, new GenericArray(vectors[i])));
             }
             commit.commit(write.prepareCommit());
+        }
+    }
+
+    @Test
+    public void testVectorSearchWithBTreePreFilter() throws Exception {
+        createTableDefault();
+        FileStoreTable table = getTableDefault();
+
+        // Write 10 rows: ids 0-9 with vectors
+        // Rows 0-4: vectors near (1,0)
+        // Rows 5-9: vectors near (0,1)
+        float[][] allVectors = {
+            {1.0f, 0.0f}, // row 0
+            {0.95f, 0.1f}, // row 1
+            {0.98f, 0.05f}, // row 2
+            {0.9f, 0.15f}, // row 3
+            {0.85f, 0.2f}, // row 4
+            {0.0f, 1.0f}, // row 5
+            {0.1f, 0.95f}, // row 6
+            {0.05f, 0.98f}, // row 7
+            {0.15f, 0.9f}, // row 8
+            {0.2f, 0.85f} // row 9
+        };
+        writeVectors(table, allVectors);
+
+        Range range1 = new Range(0, 4);
+        Range range2 = new Range(5, 9);
+
+        // Build two vector index files for each range
+        buildAndCommitVectorIndex(
+                table,
+                new float[][] {
+                    allVectors[0], allVectors[1], allVectors[2], allVectors[3], allVectors[4]
+                },
+                range1);
+        buildAndCommitVectorIndex(
+                table,
+                new float[][] {
+                    allVectors[5], allVectors[6], allVectors[7], allVectors[8], allVectors[9]
+                },
+                range2);
+
+        // Build two btree indexes on 'id' field for each range
+        buildAndCommitBTreeIndex(table, new int[] {0, 1, 2, 3, 4}, range1);
+        buildAndCommitBTreeIndex(table, new int[] {5, 6, 7, 8, 9}, range2);
+
+        // --- Test VectorScanImpl: verify splits contain scalar index files ---
+        Predicate idFilter = new PredicateBuilder(table.rowType()).greaterOrEqual(0, 5);
+        VectorSearchBuilder searchBuilder =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.1f, 0.9f})
+                        .withLimit(5)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .withFilter(idFilter);
+
+        VectorScan.Plan plan = searchBuilder.newVectorScan().scan();
+        assertThat(plan.splits()).isNotEmpty();
+        // Every split should have vector index files
+        for (VectorSearchSplit split : plan.splits()) {
+            assertThat(split.vectorIndexFiles()).isNotEmpty();
+        }
+        // At least one split should have scalar (btree) index files
+        long scalarCount =
+                plan.splits().stream().filter(s -> !s.scalarIndexFiles().isEmpty()).count();
+        assertThat(scalarCount).isGreaterThan(0);
+
+        // --- Test VectorReadImpl: pre-filter should narrow results ---
+        // Query vector near (0,1) with filter id >= 5
+        // Without filter: rows 5,6,7,8,9 are closest
+        // With filter id >= 5: btree pre-filter restricts to rows 5-9
+        GlobalIndexResult resultWithFilter = searchBuilder.newVectorRead().read(plan);
+        assertThat(resultWithFilter).isInstanceOf(ScoredGlobalIndexResult.class);
+        assertThat(resultWithFilter.results().isEmpty()).isFalse();
+        for (long rowId : resultWithFilter.results()) {
+            assertThat(rowId).isBetween(5L, 9L);
+        }
+
+        // Compare with no-filter search (should include results from both ranges)
+        GlobalIndexResult resultNoFilter =
+                table.newVectorSearchBuilder()
+                        .withVector(new float[] {0.1f, 0.9f})
+                        .withLimit(10)
+                        .withVectorColumn(VECTOR_FIELD_NAME)
+                        .executeLocal();
+        assertThat(resultNoFilter.results().getIntCardinality())
+                .isGreaterThan(resultWithFilter.results().getIntCardinality());
+    }
+
+    private void buildAndCommitVectorIndex(FileStoreTable table, float[][] vectors, Range rowRange)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField vectorField = table.rowType().getField(VECTOR_FIELD_NAME);
+
+        GlobalIndexSingletonWriter writer =
+                (GlobalIndexSingletonWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table,
+                                TestVectorGlobalIndexerFactory.IDENTIFIER,
+                                vectorField,
+                                options);
+        for (float[] vec : vectors) {
+            writer.write(vec);
+        }
+        List<ResultEntry> entries = writer.finish();
+
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        vectorField.id(),
+                        TestVectorGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
+        }
+    }
+
+    private void buildAndCommitBTreeIndex(FileStoreTable table, int[] ids, Range rowRange)
+            throws Exception {
+        Options options = table.coreOptions().toConfiguration();
+        DataField idField = table.rowType().getField("id");
+
+        GlobalIndexParallelWriter writer =
+                (GlobalIndexParallelWriter)
+                        GlobalIndexBuilderUtils.createIndexWriter(
+                                table, BTreeGlobalIndexerFactory.IDENTIFIER, idField, options);
+        for (int id : ids) {
+            long relativeRowId = id - rowRange.from;
+            writer.write(id, relativeRowId);
+        }
+        List<ResultEntry> entries = writer.finish();
+
+        List<IndexFileMeta> indexFiles =
+                GlobalIndexBuilderUtils.toIndexFileMetas(
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        table.coreOptions(),
+                        rowRange,
+                        idField.id(),
+                        BTreeGlobalIndexerFactory.IDENTIFIER,
+                        entries);
+
+        DataIncrement dataIncrement = DataIncrement.indexIncrement(indexFiles);
+        CommitMessage message =
+                new CommitMessageImpl(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        dataIncrement,
+                        CompactIncrement.emptyIncrement());
+        try (BatchTableCommit commit = table.newBatchWriteBuilder().newCommit()) {
+            commit.commit(Collections.singletonList(message));
         }
     }
 
