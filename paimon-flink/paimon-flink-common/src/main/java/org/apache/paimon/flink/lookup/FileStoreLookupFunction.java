@@ -97,7 +97,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient LookupTable lookupTable;
 
     // partition refresh
-    @Nullable private transient PartitionRefresher partitionRefresher;
+    private transient PartitionRefresher partitionRefresher;
 
     // interval of refreshing lookup table
     private transient Duration refreshInterval;

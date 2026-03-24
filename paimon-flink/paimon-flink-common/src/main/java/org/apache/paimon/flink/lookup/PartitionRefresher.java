@@ -57,7 +57,7 @@ public class PartitionRefresher implements Closeable {
     private AtomicReference<Exception> partitionRefreshException;
 
     /** Current partitions being used for lookup. Updated when partition refresh completes. */
-    @Nullable private List<BinaryRow> scanPartitions;
+    private List<BinaryRow> scanPartitions;
 
     public PartitionRefresher(boolean partitionRefreshAsync, String tableName) {
         this.partitionRefreshAsync = partitionRefreshAsync;
