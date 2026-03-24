@@ -167,8 +167,7 @@ class FileScanner:
         table,
         manifest_scanner: Callable[[], List[ManifestFileMeta]],
         predicate: Optional[Predicate] = None,
-        limit: Optional[int] = None,
-        vector_search: Optional['VectorSearch'] = None
+        limit: Optional[int] = None
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
@@ -177,7 +176,6 @@ class FileScanner:
         self.predicate = predicate
         self.predicate_for_stats = remove_row_id_filter(predicate) if predicate else None
         self.limit = limit
-        self.vector_search = vector_search
 
         self.snapshot_manager = SnapshotManager(table)
         self.manifest_list_manager = ManifestListManager(table)
@@ -299,66 +297,26 @@ class FileScanner:
         return self.read_manifest_entries(manifest_files)
 
     def _eval_global_index(self):
-        from pypaimon.globalindex.global_index_result import GlobalIndexResult
-        from pypaimon.globalindex.global_index_scan_builder import \
-            GlobalIndexScanBuilder
-        from pypaimon.utils.range import Range
-
-        # No filter and no vector search - nothing to evaluate
-        if self.predicate is None and self.vector_search is None:
+        # No filter - nothing to evaluate
+        if self.predicate is None:
             return None
 
         # Check if global index is enabled
         if not self.table.options.global_index_enabled():
             return None
 
-        # Get latest snapshot
-        snapshot = self.snapshot_manager.get_latest_snapshot()
-        if snapshot is None:
+        from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
+
+        try:
+            scanner = GlobalIndexScanner.create(
+                self.table,
+                partition_filter=self.partition_key_predicate,
+                predicate=self.predicate
+            )
+            with scanner:
+                return scanner.scan(self.predicate)
+        except Exception:
             return None
-
-        # Check if table has store with global index scan builder
-        index_scan_builder = self.table.new_global_index_scan_builder()
-        if index_scan_builder is None:
-            return None
-
-        # Set partition predicate and snapshot
-        index_scan_builder.with_partition_predicate(
-            self.partition_key_predicate
-        ).with_snapshot(snapshot)
-
-        # Get indexed row ranges
-        indexed_row_ranges = index_scan_builder.shard_list()
-        if not indexed_row_ranges:
-            return None
-
-        # Get next row ID from snapshot
-        next_row_id = snapshot.next_row_id
-        if next_row_id is None:
-            return None
-
-        # Calculate non-indexed row ranges
-        non_indexed_row_ranges = Range(0, next_row_id - 1).exclude(indexed_row_ranges)
-
-        # Get thread number from options (can be None, meaning use default)
-        thread_num = self.table.options.global_index_thread_num()
-
-        # Scan global index in parallel
-        result = GlobalIndexScanBuilder.parallel_scan(
-            indexed_row_ranges,
-            index_scan_builder,
-            self.predicate,
-            self.vector_search,
-            thread_num
-        )
-
-        if result is None:
-            return None
-
-        for row_range in non_indexed_row_ranges:
-            result = result.or_(GlobalIndexResult.from_range(row_range))
-
-        return result
 
     def read_manifest_entries(self, manifest_files: List[ManifestFileMeta]) -> List[ManifestEntry]:
         max_workers = self.table.options.scan_manifest_parallelism(os.cpu_count() or 8)

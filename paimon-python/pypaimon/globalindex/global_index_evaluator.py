@@ -23,7 +23,6 @@ from typing import Callable, Collection, Dict, List, Optional
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.common.predicate import Predicate
-from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.schema.data_types import DataField
 
 
@@ -44,44 +43,13 @@ class GlobalIndexEvaluator:
 
     def evaluate(
         self,
-        predicate: Optional[Predicate],
-        vector_search: Optional[VectorSearch]
+        predicate: Optional[Predicate]
     ) -> Optional[GlobalIndexResult]:
         compound_result: Optional[GlobalIndexResult] = None
         
         # Evaluate predicate first
         if predicate is not None:
             compound_result = self._visit_predicate(predicate)
-        
-        # Evaluate vector search
-        if vector_search is not None:
-            field = self._field_by_name.get(vector_search.field_name)
-            if field is None:
-                raise ValueError(f"Field not found: {vector_search.field_name}")
-            
-            field_id = field.id
-            readers = self._index_readers_cache.get(field_id)
-            if readers is None:
-                readers = self._readers_function(field)
-                self._index_readers_cache[field_id] = readers
-            
-            # If we have a compound result from predicates, use it to filter vector search
-            if compound_result is not None:
-                vector_search = vector_search.with_include_row_ids(compound_result.results())
-            
-            for reader in readers:
-                child_result = vector_search.visit(reader)
-                if child_result is None:
-                    continue
-                
-                # AND operation
-                if compound_result is not None:
-                    compound_result = compound_result.and_(child_result)
-                else:
-                    compound_result = child_result
-                
-                if compound_result.is_empty():
-                    return compound_result
         
         return compound_result
 
@@ -141,7 +109,7 @@ class GlobalIndexEvaluator:
                 continue
             
             if compound_result is not None:
-                compound_result = compound_result.and_(child_result)
+                compound_result = compound_result.or_(child_result)
             else:
                 compound_result = child_result
             

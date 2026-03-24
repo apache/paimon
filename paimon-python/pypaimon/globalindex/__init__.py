@@ -26,10 +26,7 @@ from pypaimon.globalindex.vector_search_result import (
 )
 from pypaimon.globalindex.global_index_meta import GlobalIndexMeta, GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_evaluator import GlobalIndexEvaluator
-from pypaimon.globalindex.global_index_scan_builder import (
-    GlobalIndexScanBuilder,
-    RowRangeGlobalIndexScanner,
-)
+from pypaimon.globalindex.global_index_scanner import GlobalIndexScanner
 from pypaimon.utils.range import Range
 
 __all__ = [
@@ -43,7 +40,6 @@ __all__ = [
     'GlobalIndexMeta',
     'GlobalIndexIOMeta',
     'GlobalIndexEvaluator',
-    'GlobalIndexScanBuilder',
-    'RowRangeGlobalIndexScanner',
+    'GlobalIndexScanner',
     'Range',
 ]

@@ -19,11 +19,7 @@
 """Global index reader interface."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pypaimon.globalindex.global_index_result import GlobalIndexResult
-    from pypaimon.globalindex.vector_search import VectorSearch
+from typing import List, Optional
 
 
 class FieldRef:
