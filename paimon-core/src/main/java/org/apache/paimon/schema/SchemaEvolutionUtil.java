@@ -238,7 +238,8 @@ public class SchemaEvolutionUtil {
                 converterMapping[i] =
                         new CastFieldGetter(
                                 InternalRowUtils.createNullCheckingFieldGetter(dataField.type(), i),
-                                createCastExecutor(dataField.type(), tableField.type()));
+                                createCastExecutor(dataField.type(), tableField.type()),
+                                tableField.name());
             }
         }
 
