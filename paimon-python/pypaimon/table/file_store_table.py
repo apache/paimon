@@ -341,25 +341,6 @@ class FileStoreTable(Table):
     def new_read_builder(self) -> 'ReadBuilder':
         return ReadBuilder(self)
 
-    def new_global_index_scan_builder(self) -> Optional['GlobalIndexScanBuilder']:
-        if not self.options.global_index_enabled():
-            return None
-
-        from pypaimon.globalindex.global_index_scan_builder_impl import (
-            GlobalIndexScanBuilderImpl
-        )
-
-        from pypaimon.index.index_file_handler import IndexFileHandler
-
-        return GlobalIndexScanBuilderImpl(
-            options=self.table_schema.options,
-            row_type=self.fields,
-            file_io=self.file_io,
-            index_path_factory=self.path_factory().global_index_path_factory(),
-            snapshot_manager=self.snapshot_manager(),
-            index_file_handler=IndexFileHandler(table=self)
-        )
-
     def new_stream_read_builder(self) -> 'StreamReadBuilder':
         return StreamReadBuilder(self)
 

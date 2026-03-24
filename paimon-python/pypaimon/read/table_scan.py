@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.predicate import Predicate
@@ -26,9 +26,6 @@ from pypaimon.read.scanner.file_scanner import FileScanner
 from pypaimon.snapshot.snapshot_manager import SnapshotManager
 from pypaimon.manifest.manifest_list_manager import ManifestListManager
 
-if TYPE_CHECKING:
-    from pypaimon.globalindex.vector_search import VectorSearch
-
 
 class TableScan:
     """Implementation of TableScan for native Python reading."""
@@ -37,15 +34,13 @@ class TableScan:
         self,
         table,
         predicate: Optional[Predicate],
-        limit: Optional[int],
-        vector_search: Optional['VectorSearch'] = None
+        limit: Optional[int]
     ):
         from pypaimon.table.file_store_table import FileStoreTable
 
         self.table: FileStoreTable = table
         self.predicate = predicate
         self.limit = limit
-        self.vector_search = vector_search
         self.file_scanner = self._create_file_scanner()
 
     def plan(self) -> Plan:
@@ -115,8 +110,7 @@ class TableScan:
                 self.table,
                 tag_manifest_scanner,
                 self.predicate,
-                self.limit,
-                vector_search=self.vector_search
+                self.limit
             )
 
         def all_manifests():
@@ -127,8 +121,7 @@ class TableScan:
             self.table,
             all_manifests,
             self.predicate,
-            self.limit,
-            vector_search=self.vector_search
+            self.limit
         )
 
     def with_shard(self, idx_of_this_subtask, number_of_para_subtasks) -> 'TableScan':

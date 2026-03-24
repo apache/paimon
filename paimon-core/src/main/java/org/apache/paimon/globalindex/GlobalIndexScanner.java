@@ -26,9 +26,13 @@ import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.ManifestReadThreadPool;
 import org.apache.paimon.utils.Range;
 
 import java.io.Closeable;
@@ -42,57 +46,46 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.CoreOptions.GLOBAL_INDEX_THREAD_NUM;
+import static org.apache.paimon.predicate.PredicateVisitor.collectFieldNames;
+import static org.apache.paimon.table.source.snapshot.TimeTravelUtil.tryTravelOrLatest;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Scanner for shard-based global indexes. */
-public class RowRangeGlobalIndexScanner implements Closeable {
+public class GlobalIndexScanner implements Closeable {
 
     private final Options options;
+    private final ExecutorService executor;
     private final GlobalIndexEvaluator globalIndexEvaluator;
     private final IndexPathFactory indexPathFactory;
 
-    public RowRangeGlobalIndexScanner(
+    public GlobalIndexScanner(
             Options options,
             RowType rowType,
             FileIO fileIO,
             IndexPathFactory indexPathFactory,
-            Range range,
-            List<IndexManifestEntry> entries) {
+            Collection<IndexFileMeta> indexFiles) {
         this.options = options;
-        for (IndexManifestEntry entry : entries) {
-            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
-            checkArgument(
-                    meta != null
-                            && Range.intersect(
-                                    range.from, range.to, meta.rowRangeStart(), meta.rowRangeEnd()),
-                    "All index files must have an intersection with row range ["
-                            + range.from
-                            + ", "
-                            + range.to
-                            + ")");
-        }
-
+        this.executor =
+                ManifestReadThreadPool.getExecutorService(options.get(GLOBAL_INDEX_THREAD_NUM));
         this.indexPathFactory = indexPathFactory;
-
         GlobalIndexFileReader indexFileReader = meta -> fileIO.newInputStream(meta.filePath());
-
         Map<Integer, Map<String, Map<Range, List<IndexFileMeta>>>> indexMetas = new HashMap<>();
-        for (IndexManifestEntry entry : entries) {
-            GlobalIndexMeta meta = entry.indexFile().globalIndexMeta();
-            checkArgument(meta != null, "Global index meta must not be null");
+        for (IndexFileMeta indexFile : indexFiles) {
+            GlobalIndexMeta meta = checkNotNull(indexFile.globalIndexMeta());
             int fieldId = meta.indexFieldId();
-            String indexType = entry.indexFile().indexType();
+            String indexType = indexFile.indexType();
             indexMetas
                     .computeIfAbsent(fieldId, k -> new HashMap<>())
                     .computeIfAbsent(indexType, k -> new HashMap<>())
                     .computeIfAbsent(
-                            new Range(meta.rowRangeStart(), meta.rowRangeStart()),
+                            new Range(meta.rowRangeStart(), meta.rowRangeEnd()),
                             k -> new ArrayList<>())
-                    .add(entry.indexFile());
+                    .add(indexFile);
         }
 
         IntFunction<Collection<GlobalIndexReader>> readersFunction =
@@ -102,6 +95,44 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                                 indexMetas.get(fieldId),
                                 rowType.getField(fieldId));
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
+    }
+
+    public static GlobalIndexScanner create(
+            FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
+        return new GlobalIndexScanner(
+                table.coreOptions().toConfiguration(),
+                table.rowType(),
+                table.fileIO(),
+                table.store().pathFactory().globalIndexFileFactory(),
+                indexFiles);
+    }
+
+    public static GlobalIndexScanner create(
+            FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
+        Set<Integer> filterFieldIds =
+                collectFieldNames(filter).stream()
+                        .filter(name -> table.rowType().containsField(name))
+                        .map(name -> table.rowType().getField(name).id())
+                        .collect(Collectors.toSet());
+        Filter<IndexManifestEntry> indexFileFilter =
+                entry -> {
+                    if (partitionFilter != null && !partitionFilter.test(entry.partition())) {
+                        return false;
+                    }
+                    GlobalIndexMeta globalIndex = entry.indexFile().globalIndexMeta();
+                    if (globalIndex == null) {
+                        return false;
+                    }
+                    return filterFieldIds.contains(globalIndex.indexFieldId());
+                };
+
+        List<IndexFileMeta> indexFiles =
+                table.store().newIndexFileHandler().scan(tryTravelOrLatest(table), indexFileFilter)
+                        .stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .collect(Collectors.toList());
+
+        return create(table, indexFiles);
     }
 
     public Optional<GlobalIndexResult> scan(Predicate predicate) {
@@ -142,7 +173,7 @@ public class RowRangeGlobalIndexScanner implements Closeable {
                     unionReader.add(innerReader);
                 }
 
-                readers.add(new UnionGlobalIndexReader(unionReader));
+                readers.add(new UnionGlobalIndexReader(unionReader, executor));
             }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create global index reader", e);
