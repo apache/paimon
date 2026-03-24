@@ -240,9 +240,10 @@ class JavaPyReadWriteTest(unittest.TestCase):
             self.assertEqual(table.fields[4].type.type, "TIMESTAMP(6)")
             self.assertEqual(table.fields[5].type.type, "TIMESTAMP(6) WITH LOCAL TIME ZONE")
             self.assertEqual(table.fields[6].type.type, "TIME(0)")
+            self.assertEqual(table.fields[7].type.type, "BINARY(20)")
             from pypaimon.schema.data_types import RowType
-            self.assertIsInstance(table.fields[7].type, RowType)
-            metadata_fields = table.fields[7].type.fields
+            self.assertIsInstance(table.fields[8].type, RowType)
+            metadata_fields = table.fields[8].type.fields
             self.assertEqual(len(metadata_fields), 3)
             self.assertEqual(metadata_fields[0].name, 'source')
             self.assertEqual(metadata_fields[1].name, 'created_at')
@@ -258,6 +259,12 @@ class JavaPyReadWriteTest(unittest.TestCase):
         tofu_row = res[res['name'] == 'Tofu']
         self.assertEqual(len(tofu_row), 1)
         self.assertTrue(pd.isna(tofu_row['category'].iloc[0]))
+
+        if file_format != "lance" and 'bin_data' in res.columns:
+            apple_row = res[res['name'] == 'Apple']
+            self.assertEqual(apple_row['bin_data'].iloc[0], b'apple_bin_data')
+            carrot_row = res[res['name'] == 'Carrot']
+            self.assertEqual(carrot_row['bin_data'].iloc[0], b'carrot')
 
         # Verify metadata column can be read and contains nested structures
         if 'metadata' in res.columns:

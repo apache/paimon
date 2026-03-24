@@ -645,7 +645,7 @@ class ReaderBasicTest(unittest.TestCase):
             DataField(5, "f5", AtomicType('DOUBLE'), 'desc'),
             DataField(6, "f6", AtomicType('BOOLEAN'), 'desc'),
             DataField(7, "f7", AtomicType('STRING'), 'desc'),
-            DataField(8, "f8", AtomicType('BINARY(12)'), 'desc'),
+            DataField(8, "f8", AtomicType('BYTES'), 'desc'),
             DataField(9, "f9", AtomicType('DECIMAL(10, 6)'), 'desc'),
             DataField(10, "f10", AtomicType('BYTES'), 'desc'),
             DataField(11, "f11", AtomicType('DATE'), 'desc'),
