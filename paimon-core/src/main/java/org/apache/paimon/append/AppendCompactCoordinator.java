@@ -130,6 +130,7 @@ public class AppendCompactCoordinator {
             try {
                 entry = filesIterator.next();
             } catch (EndOfScanException e) {
+                batchRemainFiles = false;
                 if (!files.isEmpty()) {
                     files.forEach(this::notifyNewFiles);
                     return true;
@@ -144,6 +145,7 @@ public class AppendCompactCoordinator {
         }
 
         if (files.isEmpty()) {
+            batchRemainFiles = false;
             return false;
         }
 
