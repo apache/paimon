@@ -309,6 +309,12 @@ under the License.
             <td>Ratio of the deleted rows in a data file to be forced compacted for append-only table.</td>
         </tr>
         <tr>
+            <td><h5>compaction.file-num-limit</h5></td>
+            <td style="word-wrap: break-word;">100000</td>
+            <td>Integer</td>
+            <td>To avoid OOM caused by scanning compaction files, you can use this option to limit the for unaware-bucket append table compaction.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.force-rewrite-all-files</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
