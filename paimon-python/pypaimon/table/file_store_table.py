@@ -86,6 +86,10 @@ class FileStoreTable(Table):
         """Get the current branch name from options."""
         return self.options.branch()
 
+    def comment(self) -> Optional[str]:
+        """Get the table comment."""
+        return self.table_schema.comment
+
     def consumer_manager(self):
         """Get the consumer manager for this table."""
         from pypaimon.consumer.consumer_manager import ConsumerManager
