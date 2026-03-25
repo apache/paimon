@@ -119,11 +119,13 @@ public class VectorReadImpl implements VectorRead {
         for (VectorSearchSplit split : splits) {
             scalarIndexFiles.addAll(split.scalarIndexFiles());
         }
-        if (scalarIndexFiles.isEmpty()) {
+
+        Optional<GlobalIndexScanner> optionalScanner =
+                GlobalIndexScanner.create(table, scalarIndexFiles);
+        if (!optionalScanner.isPresent()) {
             return Optional.empty();
         }
-
-        try (GlobalIndexScanner scanner = GlobalIndexScanner.create(table, scalarIndexFiles)) {
+        try (GlobalIndexScanner scanner = optionalScanner.get()) {
             return scanner.scan(filter).map(GlobalIndexResult::results);
         } catch (IOException e) {
             throw new RuntimeException(e);

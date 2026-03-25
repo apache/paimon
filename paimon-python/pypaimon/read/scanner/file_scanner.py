@@ -313,6 +313,8 @@ class FileScanner:
                 partition_filter=self.partition_key_predicate,
                 predicate=self.predicate
             )
+            if scanner is None:
+                return None
             with scanner:
                 return scanner.scan(self.predicate)
         except Exception:
