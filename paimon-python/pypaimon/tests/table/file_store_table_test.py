@@ -339,6 +339,50 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertEqual(copied_table.identifier, self.table.identifier)
         self.assertEqual(copied_table.table_path, self.table.table_path)
 
+    def test_comment_none(self):
+        """Test that comment() returns None when table has no comment."""
+        # Default table created without comment should return None
+        self.assertIsNone(self.table.comment())
+
+    def test_comment_with_value(self):
+        """Test that comment() returns the correct comment when table has one."""
+        # Create a table with a comment
+        comment_text = "This is a test table comment"
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={CoreOptions.BUCKET.key(): "2"},
+            comment=comment_text
+        )
+        self.catalog.create_table('default.test_comment_table', schema, False)
+        comment_table = self.catalog.get_table('default.test_comment_table')
+
+        # Verify comment is returned correctly
+        self.assertEqual(comment_table.comment(), comment_text)
+
+
+    def test_comment_preserved_after_copy(self):
+        """Test that comment is preserved after copying the table."""
+        # Create a table with a comment
+        comment_text = "Test comment for copy"
+        schema = Schema.from_pyarrow_schema(
+            self.pa_schema,
+            partition_keys=['dt'],
+            options={CoreOptions.BUCKET.key(): "2"},
+            comment=comment_text
+        )
+        self.catalog.create_table('default.test_comment_copy_table', schema, False)
+        original_table = self.catalog.get_table('default.test_comment_copy_table')
+
+        # Verify original table has comment
+        self.assertEqual(original_table.comment(), comment_text)
+
+        # Copy the table
+        copied_table = original_table.copy({})
+
+        # Verify comment is preserved in copied table
+        self.assertEqual(copied_table.comment(), comment_text)
+
     def test_truncate_table(self):
         """Test truncate_table functionality."""
         # Create a write builder
