@@ -25,6 +25,7 @@ import org.apache.paimon.data.BlobRef;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.rest.TestHttpWebServer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.UriReader;
@@ -297,6 +298,36 @@ public class BlobTableITCase extends CatalogITCaseBase {
         // verify selecting all columns from row_tracking works
         List<Row> allColumns = batchSql("SELECT * FROM blob_table$row_tracking");
         assertThat(allColumns).hasSize(1);
+    }
+
+    @Test
+    public void testWriteBlobWithHttpUrlDescriptor() throws Exception {
+        TestHttpWebServer httpServer = new TestHttpWebServer("/blob_data");
+        httpServer.start();
+        try {
+            String blobContent = "hello-http-blob";
+            String httpUrl = httpServer.getBaseUrl();
+
+            // Enqueue response for the write phase
+            httpServer.enqueueResponse(blobContent, 200);
+
+            // Use sys.path_to_descriptor with HTTP URL
+            batchSql(
+                    "INSERT INTO blob_table_descriptor VALUES (1, 'http-blob', sys.path_to_descriptor('"
+                            + httpUrl
+                            + "'))");
+
+            // Read back with blob-as-descriptor=false to get raw data
+            batchSql("ALTER TABLE blob_table_descriptor SET ('blob-as-descriptor'='false')");
+            List<Row> result = batchSql("SELECT * FROM blob_table_descriptor");
+            assertThat(result).hasSize(1);
+            assertThat(result.get(0).getField(0)).isEqualTo(1);
+            assertThat(result.get(0).getField(1)).isEqualTo("http-blob");
+            assertThat((byte[]) result.get(0).getField(2))
+                    .isEqualTo(blobContent.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } finally {
+            httpServer.stop();
+        }
     }
 
     @Test
