@@ -1,6 +1,6 @@
 ---
 title: "Incremental Clustering"
-weight: 4
+weight: 2
 type: docs
 aliases:
 - /append-table/incremental-clustering.html
