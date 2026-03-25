@@ -40,11 +40,6 @@ public class CastFieldGetter {
     }
 
     @SuppressWarnings("unchecked")
-    public CastFieldGetter(InternalRow.FieldGetter fieldGetter, CastExecutor<?, ?> castExecutor) {
-        this(fieldGetter, castExecutor, null);
-    }
-
-    @SuppressWarnings("unchecked")
     public <V> V getFieldOrNull(InternalRow row) {
         Object value = fieldGetter.getFieldOrNull(row);
         if (value == null) {
@@ -55,8 +50,7 @@ public class CastFieldGetter {
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format(
-                            "Failed to cast value for field '%s': %s",
-                            fieldName != null ? fieldName : "<unknown>", e.getMessage()),
+                            "Failed to cast value for field '%s': %s", fieldName, e.getMessage()),
                     e);
         }
     }
