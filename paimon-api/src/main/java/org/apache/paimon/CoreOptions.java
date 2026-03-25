@@ -874,6 +874,14 @@ public class CoreOptions implements Serializable {
                             "For file set [f_0,...,f_N], the minimum file number to trigger a compaction for "
                                     + "append-only table.");
 
+    public static final ConfigOption<Integer> COMPACTION_FILE_NUM_LIMIT =
+            key("compaction.file-num-limit")
+                    .intType()
+                    .defaultValue(100_000)
+                    .withDescription(
+                            "To avoid OOM caused by scanning compaction files, you can use this option to limit the "
+                                    + "for unaware-bucket append table compaction.");
+
     public static final ConfigOption<Double> COMPACTION_DELETE_RATIO_THRESHOLD =
             key("compaction.delete-ratio-threshold")
                     .doubleType()
@@ -3024,6 +3032,10 @@ public class CoreOptions implements Serializable {
 
     public int compactionMinFileNum() {
         return options.get(COMPACTION_MIN_FILE_NUM);
+    }
+
+    public int compactionFileNumLimit() {
+        return options.get(COMPACTION_FILE_NUM_LIMIT);
     }
 
     public double compactionDeleteRatioThreshold() {

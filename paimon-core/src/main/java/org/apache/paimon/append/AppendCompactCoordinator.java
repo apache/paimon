@@ -69,8 +69,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class AppendCompactCoordinator {
 
-    private static final int FILES_BATCH = 100_000;
-
     protected static final int REMOVE_AGE = 10;
     protected static final int COMPACT_AGE = 5;
 
@@ -80,10 +78,14 @@ public class AppendCompactCoordinator {
     private final double deleteThreshold;
     private final long openFileCost;
     private final int minFileNum;
+    private final int fileNumLimit;
     private final DvMaintainerCache dvMaintainerCache;
     private final FilesIterator filesIterator;
 
     final Map<BinaryRow, SubCoordinator> subCoordinators = new HashMap<>();
+
+    private final boolean isStreaming;
+    private boolean batchRemainFiles;
 
     public AppendCompactCoordinator(FileStoreTable table, boolean isStreaming) {
         this(table, isStreaming, null);
@@ -101,11 +103,13 @@ public class AppendCompactCoordinator {
         this.deleteThreshold = options.compactionDeleteRatioThreshold();
         this.openFileCost = options.splitOpenFileCost();
         this.minFileNum = options.compactionMinFileNum();
+        this.fileNumLimit = options.compactionFileNumLimit();
         this.dvMaintainerCache =
                 options.deletionVectorsEnabled()
                         ? new DvMaintainerCache(table.store().newIndexFileHandler())
                         : null;
         this.filesIterator = new FilesIterator(table, isStreaming, partitionPredicate);
+        this.isStreaming = isStreaming;
     }
 
     public List<AppendCompactTask> run() {
@@ -121,7 +125,7 @@ public class AppendCompactCoordinator {
     @VisibleForTesting
     boolean scan() {
         Map<BinaryRow, List<DataFileMeta>> files = new HashMap<>();
-        for (int i = 0; i < FILES_BATCH; i++) {
+        for (int i = 0; i < fileNumLimit; i++) {
             ManifestEntry entry;
             try {
                 entry = filesIterator.next();
@@ -143,8 +147,21 @@ public class AppendCompactCoordinator {
             return false;
         }
 
+        if (!isStreaming) {
+            try {
+                ManifestEntry entry = filesIterator.next();
+                batchRemainFiles = entry != null;
+            } catch (EndOfScanException e) {
+                batchRemainFiles = false;
+            }
+        }
+
         files.forEach(this::notifyNewFiles);
         return true;
+    }
+
+    public boolean batchRemainFiles() {
+        return batchRemainFiles;
     }
 
     @VisibleForTesting
