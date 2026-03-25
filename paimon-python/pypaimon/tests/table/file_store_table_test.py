@@ -360,7 +360,6 @@ class FileStoreTableTest(unittest.TestCase):
         # Verify comment is returned correctly
         self.assertEqual(comment_table.comment(), comment_text)
 
-
     def test_comment_preserved_after_copy(self):
         """Test that comment is preserved after copying the table."""
         # Create a table with a comment
