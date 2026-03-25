@@ -97,17 +97,21 @@ public class GlobalIndexScanner implements Closeable {
         this.globalIndexEvaluator = new GlobalIndexEvaluator(rowType, readersFunction);
     }
 
-    public static GlobalIndexScanner create(
+    public static Optional<GlobalIndexScanner> create(
             FileStoreTable table, Collection<IndexFileMeta> indexFiles) {
-        return new GlobalIndexScanner(
-                table.coreOptions().toConfiguration(),
-                table.rowType(),
-                table.fileIO(),
-                table.store().pathFactory().globalIndexFileFactory(),
-                indexFiles);
+        if (indexFiles.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                new GlobalIndexScanner(
+                        table.coreOptions().toConfiguration(),
+                        table.rowType(),
+                        table.fileIO(),
+                        table.store().pathFactory().globalIndexFileFactory(),
+                        indexFiles));
     }
 
-    public static GlobalIndexScanner create(
+    public static Optional<GlobalIndexScanner> create(
             FileStoreTable table, PartitionPredicate partitionFilter, Predicate filter) {
         Set<Integer> filterFieldIds =
                 collectFieldNames(filter).stream()
@@ -131,7 +135,6 @@ public class GlobalIndexScanner implements Closeable {
                         .stream()
                         .map(IndexManifestEntry::indexFile)
                         .collect(Collectors.toList());
-
         return create(table, indexFiles);
     }
 
