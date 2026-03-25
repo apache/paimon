@@ -24,22 +24,52 @@ under the License.
 
 # Apache Paimon
 
-Apache Paimon is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
-for both streaming and batch operations. Paimon innovatively combines lake format and LSM (Log-structured merge-tree) 
-structure, bringing realtime streaming updates into the lake architecture.
+Apache Paimon is a lake format for building Lakehouse Architecture for both streaming and batch
+operations. Paimon provides large-scale data lake storage for analytics, realtime streaming updates
+powered by LSM (Log-structured merge-tree) structure, and multimodal data management for AI workloads
+— all in a single unified format.
 
-Paimon offers the following core capabilities:
+## Large-Scale Data Lake
 
-- Realtime updates:
-  - Primary key table supports writing of large-scale updates, has very high update performance, typically through Flink Streaming.
-  - Support defining Merge Engines, update records however you like. Deduplicate to keep last row, or partial-update, or aggregate records, or first-row, you decide.
-  - Support defining changelog-producer, produce correct and complete changelog in updates for merge engines, simplifying your streaming analytics.
-- Huge Append Data Processing:
-  - Append table (no primary-key) provides large scale batch & streaming processing capability. Automatic Small File Merge.
-  - Supports Data Compaction with z-order sorting to optimize file layout, provides fast queries based on data skipping using indexes such as minmax.
-- Data Lake Capabilities: 
-  - Scalable metadata: supports storing Petabyte large-scale datasets and storing a large number of partitions.
-  - Supports ACID Transactions & Time Travel & Schema Evolution.
+Paimon is built for huge analytic datasets. A single table can contain tens of petabytes of data, and even
+these huge tables can be read efficiently without a distributed SQL engine.
+
+- **Time travel** enables reproducible queries that use exactly the same table snapshot, or lets users easily
+  examine changes. Version rollback allows users to quickly correct problems by resetting tables to a good state.
+- **Scan planning is fast** — data files are pruned with partition and column-level stats, using table metadata. 
+  File Index (BloomFilter, Bitmap, Range Bitmap) and aggregate push-down further accelerate queries.
+- **Schema evolution** supports add, drop, update, or rename columns, and has no side-effects.
+- **Rich ecosystem** — adds tables to compute engines including Flink, Spark, Hive, Trino, Presto, StarRocks, and
+  Doris, working just like a SQL table.
+- **Incremental Clustering** with z-order/hilbert/order sorting to optimize data layout at low cost.
+
+## Realtime Data Lake
+
+Paimon's Primary Key Table brings realtime streaming updates into the lake architecture, powered by the LSM
+(Log-structured merge-tree) structure.
+
+- **Large-scale streaming updates** with very high performance, typically through Flink Streaming.
+- **Multiple Merge Engines**: Deduplicate to keep last row, Partial Update to progressively complete records, 
+  Aggregation to aggregate values, or First Row to keep the earliest record — update records however you like.
+- **Multiple Table Modes**: Merge On Read (MOR), Copy On Write (COW), and Merge On Write (MOW) with Deletion Vectors
+  for flexible read/write trade-offs.
+- **Changelog Producers** (None, Input, Lookup, Full Compaction) produce correct and complete changelog for merge
+  engines, simplifying your streaming analytics.
+- **CDC Ingestion** from MySQL, Kafka, MongoDB, Pulsar, PostgreSQL, and Flink CDC with schema evolution support.
+
+## Multimodal Data Lake
+
+Paimon is a multimodal lakehouse for AI. Keep multimodal data, metadata, and embeddings in the same table and query
+them via vector search, full-text search, or SQL.
+
+- **Data Evolution** for efficient row-level updates and partial column changes without rewriting entire files — add
+  new features (columns) as your application evolves, without copying existing data.
+- **Blob Table** for storing multimodal data (images, videos, audio, documents, model weights) with separated storage
+  layout — blob data is stored in dedicated `.blob` files while metadata stays in standard columnar files.
+- **Global Index** with BTree Index for high-performance scalar lookups and Vector Index (DiskANN) for approximate
+  nearest neighbor search.
+- **PyPaimon** native Python SDK with no JDK dependency, seamlessly integrating with the Python AI ecosystem
+  including Ray, PyTorch, Pandas and PyArrow for data loading, training, and inference workflows.
 
 {{< columns >}}
 
