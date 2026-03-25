@@ -53,7 +53,7 @@ CREATE TABLE my_table (
 After this, data files within each bucket will be physically sorted by `city` instead of `id`. Queries like
 `SELECT * FROM my_table WHERE city = 'Beijing'` can skip irrelevant data files by checking their min/max statistics
 on the clustering column.
-
+s
 ## How It Works
 
 PK Clustering Override replaces the default LSM compaction with a two-phase clustering compaction:
@@ -82,16 +82,6 @@ temporary files to reduce memory consumption, preventing OOM during multi-way me
 | `clustering.columns` | Must be set (one or more non-primary-key columns) |
 | `deletion-vectors.enabled` | Must be `true` |
 | `merge-engine` | `deduplicate` (default) or `first-row` only |
-| `sequence.fields` | Must **not** be set |
-| `record-level.expire-time` | Must **not** be set |
-
-## Related Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `clustering.columns` | (none) | Comma-separated column names used as the physical sort order for data files. |
-| `sort-spill-threshold` | (auto) | When the number of merge readers exceeds this value, smaller files are spilled to row-based temp files to reduce memory usage. |
-| `sort-spill-buffer-size` | `64 mb` | Buffer size used for external sort during Phase 1 rewrite. |
 
 ## When to Use
 
@@ -106,3 +96,4 @@ It is **not** suitable when:
 - Point lookups by primary key are the dominant access pattern (default LSM sort is already optimal).
 - You need `partial-update` or `aggregation` merge engine.
 - `sequence.fields` or `record-level.expire-time` is required.
+- Changelog producer`lookup` or `full-compaction` is required.

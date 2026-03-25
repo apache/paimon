@@ -38,6 +38,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
+import static org.apache.paimon.schema.SchemaValidation.validatePkClusteringOverride;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Factory to create {@link ClusteringCompactManager}. */
@@ -66,32 +67,7 @@ public class ClusteringCompactManagerFactory implements KvCompactionManagerFacto
         this.keyType = keyType;
         this.valueType = valueType;
         this.cacheManager = cacheManager;
-
-        if (options.clusteringColumns().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Cannot support 'pk-clustering-override' mode without 'clustering.columns'.");
-        }
-        if (!options.deletionVectorsEnabled()) {
-            throw new UnsupportedOperationException(
-                    "Cannot support deletion-vectors disabled in 'pk-clustering-override' mode.");
-        }
-        if (options.recordLevelExpireTime() != null) {
-            throw new UnsupportedOperationException(
-                    "Cannot support record level expire time enabled in 'pk-clustering-override' mode.");
-        }
-        if (options.mergeEngine() != CoreOptions.MergeEngine.DEDUPLICATE
-                && options.mergeEngine() != CoreOptions.MergeEngine.FIRST_ROW) {
-            throw new UnsupportedOperationException(
-                    "Cannot support merge engine: "
-                            + options.mergeEngine()
-                            + " in 'pk-clustering-override' mode.");
-        }
-        if (!options.sequenceField().isEmpty()) {
-            throw new UnsupportedOperationException(
-                    "Cannot support sequence field: "
-                            + options.sequenceField()
-                            + " in 'pk-clustering-override' mode.");
-        }
+        validatePkClusteringOverride(options);
     }
 
     @Override
