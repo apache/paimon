@@ -25,7 +25,11 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Literal}
 import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
+import org.apache.spark.sql.connector.catalog.TableCapability
+import org.apache.spark.sql.connector.catalog.TableCapability._
 import org.apache.spark.sql.connector.expressions.{Expressions, Transform}
+import org.apache.spark.sql.connector.expressions.filter.Predicate
+import org.apache.spark.sql.connector.write.{LogicalWriteInfo, SupportsOverwriteV2, Write, WriteBuilder}
 import org.apache.spark.sql.execution.datasources._
 import org.apache.spark.sql.execution.datasources.v2.csv.{CSVScanBuilder, CSVTable}
 import org.apache.spark.sql.execution.datasources.v2.json.JsonTable
@@ -123,6 +127,18 @@ trait PartitionedFormatTable extends SupportsPartitionManagement {
 
   val fileIndex: PartitioningAwareFileIndex
 
+  override def capabilities(): util.Set[TableCapability] = {
+    util.EnumSet.of(BATCH_READ, BATCH_WRITE, OVERWRITE_DYNAMIC, OVERWRITE_BY_FILTER)
+  }
+
+  protected def wrapWriteBuilderWithOverwrite(original: WriteBuilder): WriteBuilder = {
+    new WriteBuilder with SupportsOverwriteV2 {
+      override def build(): Write = original.build()
+      override def canOverwrite(predicates: Array[Predicate]): Boolean = true
+      override def overwrite(predicates: Array[Predicate]): WriteBuilder = this
+    }
+  }
+
   override def partitionSchema(): StructType = partitionSchema_
 
   override def partitioning(): Array[Transform] = {
@@ -172,6 +188,10 @@ class PartitionedCSVTable(
   extends CSVTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
   with PartitionedFormatTable {
 
+  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    wrapWriteBuilderWithOverwrite(super.newWriteBuilder(info))
+  }
+
   override def newScanBuilder(options: CaseInsensitiveStringMap): CSVScanBuilder = {
     val mergedOptions =
       this.options.asCaseSensitiveMap().asScala ++ options.asCaseSensitiveMap().asScala
@@ -203,6 +223,10 @@ class PartitionedTextTable(
     override val partitionSchema_ : StructType)
   extends TextTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
   with PartitionedFormatTable {
+
+  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    wrapWriteBuilderWithOverwrite(super.newWriteBuilder(info))
+  }
 
   override def newScanBuilder(options: CaseInsensitiveStringMap): TextScanBuilder = {
     val mergedOptions =
@@ -236,6 +260,10 @@ class PartitionedOrcTable(
 ) extends OrcTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
   with PartitionedFormatTable {
 
+  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    wrapWriteBuilderWithOverwrite(super.newWriteBuilder(info))
+  }
+
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     SparkFormatTable.createFileIndex(
       options,
@@ -257,6 +285,10 @@ class PartitionedParquetTable(
 ) extends ParquetTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
   with PartitionedFormatTable {
 
+  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    wrapWriteBuilderWithOverwrite(super.newWriteBuilder(info))
+  }
+
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     SparkFormatTable.createFileIndex(
       options,
@@ -277,6 +309,10 @@ class PartitionedJsonTable(
     override val partitionSchema_ : StructType)
   extends JsonTable(name, sparkSession, options, paths, userSpecifiedSchema, fallbackFileFormat)
   with PartitionedFormatTable {
+
+  override def newWriteBuilder(info: LogicalWriteInfo): WriteBuilder = {
+    wrapWriteBuilderWithOverwrite(super.newWriteBuilder(info))
+  }
 
   override lazy val fileIndex: PartitioningAwareFileIndex = {
     SparkFormatTable.createFileIndex(
