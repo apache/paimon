@@ -164,12 +164,21 @@ class TableUpsertByKey:
             for i in range(partition_data.num_rows)
         ]
 
-        # 2. Per-partition duplicate check
+        # 2. Deduplicate: keep last occurrence of each key
+        key_to_last_idx: Dict[_KeyTuple, int] = {}
+        for i, key_tuple in enumerate(input_key_tuples):
+            key_to_last_idx[key_tuple] = i  # last write wins
+
         input_key_set = set(input_key_tuples)
         if len(input_key_tuples) != len(input_key_set):
-            raise ValueError(
-                f"Input data contains duplicate values in upsert_keys columns "
-                f"{match_keys} within partition {partition_spec}."
+            original_count = len(input_key_tuples)
+            dedup_indices = sorted(key_to_last_idx.values())
+            partition_data = partition_data.take(dedup_indices)
+            input_key_tuples = [input_key_tuples[i] for i in dedup_indices]
+            logger.info(
+                "Deduplicated input from %d to %d rows in partition %s "
+                "(kept last occurrence).",
+                original_count, len(input_key_tuples), partition_spec,
             )
 
         # 3. Scan partition in batches, build key → _ROW_ID only for
