@@ -76,7 +76,7 @@ class GlobalIndexScanner:
         return GlobalIndexEvaluator(fields, readers_function)
 
     @staticmethod
-    def create(table, index_files=None, partition_filter=None, predicate=None):
+    def create(table, index_files=None, partition_filter=None, predicate=None) -> Optional['GlobalIndexScanner']:
         """Create a GlobalIndexScanner.
 
         Can be called in two ways:
@@ -86,6 +86,8 @@ class GlobalIndexScanner:
         from pypaimon.index.index_file_handler import IndexFileHandler
 
         if index_files is not None:
+            if len(index_files) == 0:
+                return None
             return GlobalIndexScanner(
                 options=table.table_schema.options,
                 fields=table.fields,
@@ -117,6 +119,8 @@ class GlobalIndexScanner:
         entries = index_file_handler.scan(snapshot, index_file_filter)
         scanned_index_files = [entry.index_file for entry in entries]
 
+        if len(scanned_index_files) == 0:
+            return None
         return GlobalIndexScanner(
             options=table.table_schema.options,
             fields=table.fields,

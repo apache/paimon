@@ -248,7 +248,7 @@ public class BitmapGlobalIndexTableTest extends DataEvolutionTestBase {
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
         try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate)) {
+                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
             return scanner.scan(predicate).get().results();
         }
     }

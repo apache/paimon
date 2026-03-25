@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.globalindex.DataEvolutionBatchScan;
 import org.apache.paimon.globalindex.GlobalIndexResult;
 import org.apache.paimon.globalindex.GlobalIndexScanner;
@@ -29,13 +28,10 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Range;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -206,27 +202,10 @@ public class BtreeGlobalIndexTableTest extends DataEvolutionTestBase {
                 .collect(Collectors.toList());
     }
 
-    private void append(int startInclusive, int endExclusive) throws Exception {
-        BatchWriteBuilder builder = getTableDefault().newBatchWriteBuilder();
-        RowType writeType = schemaDefault().rowType();
-        try (BatchTableWrite write0 = builder.newWrite().withWriteType(writeType)) {
-            for (int i = startInclusive; i < endExclusive; i++) {
-                write0.write(
-                        GenericRow.of(
-                                i,
-                                BinaryString.fromString("a" + i),
-                                BinaryString.fromString("b" + i)));
-            }
-            try (BatchTableCommit commit = builder.newCommit()) {
-                commit.commit(write0.prepareCommit());
-            }
-        }
-    }
-
     private RoaringNavigableMap64 globalIndexScan(FileStoreTable table, Predicate predicate)
             throws Exception {
         try (GlobalIndexScanner scanner =
-                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate)) {
+                GlobalIndexScanner.create(table, PartitionPredicate.ALWAYS_TRUE, predicate).get()) {
             return scanner.scan(predicate).get().results();
         }
     }
