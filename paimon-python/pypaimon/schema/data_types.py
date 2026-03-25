@@ -477,18 +477,10 @@ class PyarrowFieldParser:
                 return pyarrow.bool_()
             elif type_name == 'STRING' or type_name.startswith('CHAR') or type_name.startswith('VARCHAR'):
                 return pyarrow.string()
-            elif type_name == 'BYTES' or type_name.startswith('VARBINARY'):
+            elif type_name == 'BYTES' or type_name.startswith('VARBINARY') or type_name.startswith('BINARY'):
                 return pyarrow.binary()
             elif type_name == 'BLOB':
                 return pyarrow.large_binary()
-            elif type_name.startswith('BINARY'):
-                if type_name == 'BINARY':
-                    return pyarrow.binary(1)
-                match = re.fullmatch(r'BINARY\((\d+)\)', type_name)
-                if match:
-                    length = int(match.group(1))
-                    if length > 0:
-                        return pyarrow.binary(length)
             elif type_name.startswith('DECIMAL'):
                 if type_name == 'DECIMAL':
                     return pyarrow.decimal128(10, 0)  # default to 10, 0
