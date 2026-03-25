@@ -84,7 +84,7 @@ This statement updates only the `b` column in the target table `target_table` ba
 `source_table`. The `id` column and `c` column remain unchanged, and new records are inserted with the specified values. The difference between this and table those are not enabled with data evolution is that only the `b` column data is written to new files.
 
 Note that: 
-* Data Evolution Table does not support 'Delete', 'Update', or 'Compact' statement yet.
+* Data Evolution Table does not support 'Delete' and 'Update' statement yet.
 * Merge Into for Data Evolution Table does not support 'WHEN NOT MATCHED BY SOURCE' clause.
 
 ### Flink
