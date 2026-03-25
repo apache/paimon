@@ -149,6 +149,7 @@ class JindoFileSystemHandler(FileSystemHandler):
             config.set("fs.oss.endpoint", endpoint_clean)
         if region:
             config.set("fs.oss.region", region)
+        config.set("fs.oss.user.agent.features", "pypaimon")
 
         self._jindo_fs = jfs.connect(self.root_path, "root", config)
 

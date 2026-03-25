@@ -34,18 +34,13 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
 from pypaimon.table.row.generic_row import GenericRow
 from pypaimon.table.row.row_kind import RowKind
 from pypaimon.write.blob_format_writer import BlobFormatWriter
-
-try:
-    from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
-except ImportError:
-    JINDO_AVAILABLE = False
-    JindoFileSystemHandler = None
 
 
 def _pyarrow_lt_7():
@@ -65,8 +60,7 @@ class PyArrowFileIO(FileIO):
         self._oss_impl = self.properties.get(OssOptions.OSS_IMPL)
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
-            # Try to use JindoFileSystem if available, otherwise fall back to S3FileSystem
-            if self._oss_impl == "jindo" and JINDO_AVAILABLE:
+            if self._oss_impl == "jindo":
                 self.filesystem = self._initialize_jindo_fs(path)
             else:
                 self.filesystem = self._initialize_oss_fs(path)
