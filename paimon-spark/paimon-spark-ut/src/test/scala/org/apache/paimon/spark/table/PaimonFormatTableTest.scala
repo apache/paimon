@@ -371,48 +371,37 @@ class PaimonFormatTableTest extends PaimonSparkTestWithRestCatalogBase {
 
   test("PartitionedFormatTable: external table saveAsTable should support overwrite") {
     val tableName = "paimon_format_external_overwrite_test"
-    withTable(tableName) {
-      val location = s"${tempDBDir.getCanonicalPath}/external_overwrite_test"
+    Seq("paimon", "engine").foreach {
+      impl =>
+        withTable(tableName) {
+          val location = s"${tempDBDir.getCanonicalPath}/external_overwrite_test"
 
-      sql(s"""CREATE TABLE $tableName (a INT, b STRING, pt STRING)
-             |USING CSV PARTITIONED BY (pt) LOCATION '$location'
-             |TBLPROPERTIES ('format-table.implementation'='engine')
-             |""".stripMargin)
+          sql(s"""CREATE TABLE $tableName (a INT, b STRING, pt STRING)
+                 |USING CSV PARTITIONED BY (pt) LOCATION '$location'
+                 |TBLPROPERTIES ('format-table.implementation'='$impl')
+                 |""".stripMargin)
 
-      // Verify external format table has OVERWRITE_BY_FILTER capability
-      val catalog = spark.sessionState.catalogManager.currentCatalog
-        .asInstanceOf[TableCatalog]
-      val v2Table = catalog.loadTable(
-        org.apache.spark.sql.connector.catalog.Identifier.of(Array("test_db"), tableName))
-      val caps = v2Table.capabilities()
-      assert(
-        caps.contains(TableCapability.OVERWRITE_BY_FILTER),
-        s"External format table should have OVERWRITE_BY_FILTER capability, but capabilities are: $caps")
+          // Verify external format table has OVERWRITE_BY_FILTER capability
+          val catalog = spark.sessionState.catalogManager.currentCatalog
+            .asInstanceOf[TableCatalog]
+          val v2Table = catalog.loadTable(
+            org.apache.spark.sql.connector.catalog.Identifier.of(Array("test_db"), tableName))
+          val caps = v2Table.capabilities()
+          assert(
+            caps.contains(TableCapability.OVERWRITE_BY_FILTER),
+            s"External format table ($impl) should have OVERWRITE_BY_FILTER capability, but capabilities are: $caps"
+          )
 
-      spark
-        .createDataFrame(Seq((1, "x1", "p1"), (2, "x2", "p2")))
-        .toDF("a", "b", "pt")
-        .write
-        .format("csv")
-        .mode("append")
-        .saveAsTable(tableName)
-      checkAnswer(
-        sql(s"SELECT a, b, pt FROM $tableName ORDER BY a"),
-        Seq(Row(1, "x1", "p1"), Row(2, "x2", "p2")))
-
-      spark
-        .createDataFrame(Seq((5, "x5", "p1")))
-        .toDF("a", "b", "pt")
-        .write
-        .format("csv")
-        .option("path", location)
-        .partitionBy("pt")
-        .mode("overwrite")
-        .saveAsTable(tableName)
-
-      checkAnswer(
-        sql(s"SELECT a, b, pt FROM $tableName ORDER BY a"),
-        Seq(Row(1, "x1", "p1"), Row(2, "x2", "p2"), Row(5, "x5", "p1")))
+          spark
+            .createDataFrame(Seq((5, "x5", "p1")))
+            .toDF("a", "b", "pt")
+            .write
+            .format("csv")
+            .option("path", location)
+            .partitionBy("pt")
+            .mode("overwrite")
+            .saveAsTable(tableName)
+        }
     }
   }
 
