@@ -493,21 +493,93 @@ class TableUpsertByKeyTest(unittest.TestCase):
             tu.upsert_by_arrow_with_key(data, upsert_keys=['id'])
         self.assertIn('empty', str(ctx.exception))
 
-    def test_duplicate_keys_in_input_raises(self):
-        """Duplicate composite keys in input data should raise ValueError."""
+    def test_duplicate_keys_in_input_keeps_last(self):
+        """Duplicate keys in input data should keep the last occurrence."""
         table = self._create_table()
-        data = pa.Table.from_pydict({
-            'id': [1, 1],
-            'name': ['A', 'B'],
+        self._write(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
             'age': [25, 30],
             'city': ['NYC', 'LA'],
-        }, schema=self.pa_schema)
+        }, schema=self.pa_schema))
 
-        with self.assertRaises(ValueError) as ctx:
-            wb = table.new_batch_write_builder()
-            tu = wb.new_update()
-            tu.upsert_by_arrow_with_key(data, upsert_keys=['id'])
-        self.assertIn('duplicate', str(ctx.exception).lower())
+        # id=1 appears twice; the second row (name='A_last') should win
+        data = pa.Table.from_pydict({
+            'id': [1, 1],
+            'name': ['A_first', 'A_last'],
+            'age': [90, 91],
+            'city': ['X', 'Y'],
+        }, schema=self.pa_schema)
+        self._upsert(table, data, upsert_keys=['id'])
+
+        result = self._read_all(table)
+        rows = {r: (n, a, c) for r, n, a, c in zip(
+            result['id'].to_pylist(),
+            result['name'].to_pylist(),
+            result['age'].to_pylist(),
+            result['city'].to_pylist(),
+        )}
+        # id=1 updated with last duplicate row
+        self.assertEqual(rows[1], ('A_last', 91, 'Y'))
+        # id=2 unchanged
+        self.assertEqual(rows[2], ('Bob', 30, 'LA'))
+
+    def test_duplicate_keys_all_new_keeps_last(self):
+        """Duplicate keys in input on empty table keeps the last occurrence."""
+        table = self._create_table()
+
+        # id=1 appears three times; last row should win
+        data = pa.Table.from_pydict({
+            'id': [1, 1, 1, 2],
+            'name': ['A1', 'A2', 'A3', 'B'],
+            'age': [10, 20, 30, 40],
+            'city': ['X1', 'X2', 'X3', 'Y'],
+        }, schema=self.pa_schema)
+        self._upsert(table, data, upsert_keys=['id'])
+
+        result = self._read_all(table)
+        self.assertEqual(result.num_rows, 2)
+        rows = {r: (n, a, c) for r, n, a, c in zip(
+            result['id'].to_pylist(),
+            result['name'].to_pylist(),
+            result['age'].to_pylist(),
+            result['city'].to_pylist(),
+        )}
+        self.assertEqual(rows[1], ('A3', 30, 'X3'))
+        self.assertEqual(rows[2], ('B', 40, 'Y'))
+
+    def test_duplicate_keys_partitioned_keeps_last(self):
+        """Duplicate keys in a partitioned table keep the last per partition."""
+        table = self._create_table(
+            pa_schema=self.partitioned_pa_schema,
+            partition_keys=['region'],
+        )
+        self._write(table, pa.Table.from_pydict({
+            'id': [1, 2],
+            'name': ['Alice', 'Bob'],
+            'age': [25, 30],
+            'region': ['US', 'EU'],
+        }, schema=self.partitioned_pa_schema))
+
+        # id=1 duplicated in US partition; id=2 duplicated in EU partition
+        data = pa.Table.from_pydict({
+            'id': [1, 1, 2, 2],
+            'name': ['A_first', 'A_last', 'B_first', 'B_last'],
+            'age': [50, 51, 60, 61],
+            'region': ['US', 'US', 'EU', 'EU'],
+        }, schema=self.partitioned_pa_schema)
+        self._upsert(table, data, upsert_keys=['id'])
+
+        result = self._read_all(table)
+        self.assertEqual(result.num_rows, 2)
+        rows = {(r, reg): (n, a) for r, n, a, reg in zip(
+            result['id'].to_pylist(),
+            result['name'].to_pylist(),
+            result['age'].to_pylist(),
+            result['region'].to_pylist(),
+        )}
+        self.assertEqual(rows[(1, 'US')], ('A_last', 51))
+        self.assertEqual(rows[(2, 'EU')], ('B_last', 61))
 
     def test_partitioned_table_missing_partition_col_in_data_raises(self):
         """Input data missing partition column should raise ValueError."""

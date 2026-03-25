@@ -231,7 +231,7 @@ table_commit.close()
 **Notes**
 
 - Execution is driven **partition-by-partition**: only one partition's key set is loaded into memory at a time.
-- Duplicate keys in the input data will raise an error.
+- Duplicate keys in the input data are automatically deduplicated — the **last occurrence** is kept.
 - The upsert is atomic per commit — all matched updates and new appends are included in the same commit.
 
 ## Update Columns By Shards
