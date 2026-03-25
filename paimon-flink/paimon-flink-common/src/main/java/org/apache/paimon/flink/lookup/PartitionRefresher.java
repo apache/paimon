@@ -26,12 +26,11 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
-
+import org.apache.paimon.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -52,25 +51,18 @@ public class PartitionRefresher implements Closeable {
     private final boolean partitionRefreshAsync;
     private final String tableName;
 
-    @Nullable private ExecutorService partitionRefreshExecutor;
+    private ExecutorService partitionRefreshExecutor;
     private AtomicReference<LookupTable> pendingLookupTable;
     private AtomicReference<Exception> partitionRefreshException;
 
     /** Current partitions being used for lookup. Updated when partition refresh completes. */
-    private List<BinaryRow> scanPartitions;
+    private List<BinaryRow> currentPartitions;
 
-    public PartitionRefresher(boolean partitionRefreshAsync, String tableName) {
+    public PartitionRefresher(
+            boolean partitionRefreshAsync, String tableName, List<BinaryRow> initialPartitions) {
         this.partitionRefreshAsync = partitionRefreshAsync;
         this.tableName = tableName;
-    }
-
-    /**
-     * Initialize partition refresh resources. Should be called during table initialization.
-     *
-     * @param initialPartitions the initial partitions to use for lookup
-     */
-    public void init(List<BinaryRow> initialPartitions) {
-        this.scanPartitions = initialPartitions;
+        this.currentPartitions = initialPartitions;
         if (!partitionRefreshAsync) {
             return;
         }
@@ -85,8 +77,8 @@ public class PartitionRefresher implements Closeable {
     }
 
     /** Get the current partitions being used for lookup. */
-    public List<BinaryRow> getScanPartitions() {
-        return scanPartitions;
+    public List<BinaryRow> currentPartitions() {
+        return currentPartitions;
     }
 
     /**
@@ -97,7 +89,7 @@ public class PartitionRefresher implements Closeable {
      * @param lookupTable the current lookup table to refresh
      * @param cacheRowFilter the cache row filter, may be null
      */
-    public void startPartitionRefresh(
+    public void startRefresh(
             List<BinaryRow> newPartitions,
             @Nullable Predicate partitionFilter,
             LookupTable lookupTable,
@@ -125,7 +117,7 @@ public class PartitionRefresher implements Closeable {
         lookupTable.close();
         lookupTable.specifyPartitions(newPartitions, partitionFilter);
         lookupTable.open();
-        this.scanPartitions = newPartitions;
+        this.currentPartitions = newPartitions;
         LOG.info("Synchronous partition refresh completed for table {}.", tableName);
     }
 
@@ -150,7 +142,13 @@ public class PartitionRefresher implements Closeable {
                         if (!newPath.mkdirs()) {
                             throw new RuntimeException("Failed to create dir: " + newPath);
                         }
-                        LookupTable newTable = copyWithNewPath(newPath, context, cacheRowFilter);
+                        FullCacheLookupTable.Context newContext = context.copy(newPath);
+                        Options options = Options.fromMap(context.table.options());
+                        FullCacheLookupTable newTable =
+                                FullCacheLookupTable.create(newContext, options.get(LOOKUP_CACHE_ROWS));
+                        if (cacheRowFilter != null) {
+                            newTable.specifyCacheRowFilter(cacheRowFilter);
+                        }
                         newTable.specifyPartitions(newPartitions, partitionFilter);
                         newTable.open();
 
@@ -167,35 +165,14 @@ public class PartitionRefresher implements Closeable {
     }
 
     /**
-     * Create a new LookupTable instance with the same configuration but a different temp path.
-     *
-     * @param newPath the new temp path
-     * @param context the context of the current lookup table
-     * @param cacheRowFilter the cache row filter, may be null
-     * @return a new LookupTable instance (not yet opened)
-     */
-    public LookupTable copyWithNewPath(
-            File newPath,
-            FullCacheLookupTable.Context context,
-            @Nullable Filter<InternalRow> cacheRowFilter) {
-        FullCacheLookupTable.Context newContext = context.copy(newPath);
-        Options options = Options.fromMap(context.table.options());
-        FullCacheLookupTable newTable =
-                FullCacheLookupTable.create(newContext, options.get(LOOKUP_CACHE_ROWS));
-        if (cacheRowFilter != null) {
-            newTable.specifyCacheRowFilter(cacheRowFilter);
-        }
-        return newTable;
-    }
-
-    /**
      * Check if an async partition refresh has completed.
      *
      * @param newPartitions the new partitions to update after refresh completes
-     * @return the new lookup table if ready, or null if no switch is needed
+     * @return a Pair containing the new lookup table and its temp path if ready, or null if no
+     *     switch is needed
      */
     @Nullable
-    public LookupTable checkPartitionRefreshCompletion(List<BinaryRow> newPartitions)
+    public Pair<LookupTable, File> getNewLookupTable(List<BinaryRow> newPartitions)
             throws Exception {
         if (!partitionRefreshAsync) {
             return null;
@@ -215,9 +192,10 @@ public class PartitionRefresher implements Closeable {
             return null;
         }
 
-        this.scanPartitions = newPartitions;
+        this.currentPartitions = newPartitions;
+        File tempPath = ((FullCacheLookupTable) newTable).context.tempPath;
         LOG.info("Switched to new lookup table for table {} with new partitions.", tableName);
-        return newTable;
+        return Pair.of(newTable, tempPath);
     }
 
     /** Close partition refresh resources. */

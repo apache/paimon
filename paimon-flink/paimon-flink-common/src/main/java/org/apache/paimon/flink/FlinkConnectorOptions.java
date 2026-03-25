@@ -282,6 +282,7 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "Whether to refresh dynamic partition lookup table asynchronously. "
+                                    + "This option only works for full cache dimension table. "
                                     + "When enabled, partition changes will be loaded in a background thread "
                                     + "while the old partition data continues serving queries. "
                                     + "When disabled (default), partition refresh is synchronous and blocks queries "

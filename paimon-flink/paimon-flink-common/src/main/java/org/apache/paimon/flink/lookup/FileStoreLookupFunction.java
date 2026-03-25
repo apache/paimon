@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -244,8 +245,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 // Initialize partition refresher
                 this.partitionRefresher =
                         new PartitionRefresher(
-                                options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC), table.name());
-                this.partitionRefresher.init(partitionLoader.partitions());
+                                options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC)
+                                        && lookupTable instanceof FullCacheLookupTable,
+                                table.name(),partitionLoader.partitions());
             }
         }
 
@@ -284,7 +286,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
             List<BinaryRow> partitions =
                     partitionRefresher != null
-                            ? partitionRefresher.getScanPartitions()
+                            ? partitionRefresher.currentPartitions()
                             : partitionLoader.partitions();
             if (partitions.isEmpty()) {
                 return Collections.emptyList();
@@ -340,13 +342,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         // 2. check if async partition refresh has completed, and switch if so
         if (partitionRefresher != null && partitionRefresher.isPartitionRefreshAsync()) {
-            LookupTable switchedTable =
-                    partitionRefresher.checkPartitionRefreshCompletion(
-                            partitionLoader.partitions());
-            if (switchedTable != null) {
+            Pair<LookupTable, File> result =
+                    partitionRefresher.getNewLookupTable(partitionLoader.partitions());
+            if (result != null) {
                 lookupTable.close();
-                lookupTable = switchedTable;
-                path = ((FullCacheLookupTable) switchedTable).context.tempPath;
+                lookupTable = result.getLeft();
+                path = result.getRight();
             }
         }
 
@@ -360,7 +361,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
 
             if (partitionChanged) {
-                partitionRefresher.startPartitionRefresh(
+                partitionRefresher.startRefresh(
                         partitions,
                         partitionLoader.createSpecificPartFilter(),
                         lookupTable,
