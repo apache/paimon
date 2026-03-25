@@ -45,7 +45,7 @@ public class PathToDescriptorFunction implements ScalarFunction<byte[]>, Seriali
             return null;
         }
 
-        BlobDescriptor descriptor = new BlobDescriptor(path.toString(), 0, Long.MAX_VALUE);
+        BlobDescriptor descriptor = new BlobDescriptor(path.toString(), 0, -1);
         return descriptor.serialize();
     }
 
