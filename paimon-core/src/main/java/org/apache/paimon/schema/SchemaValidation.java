@@ -282,6 +282,8 @@ public class SchemaValidation {
         validateChainTable(schema, options);
 
         validateChangelogReadSequenceNumber(schema, options);
+
+        validatePkClusteringOverride(options);
     }
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
@@ -793,6 +795,44 @@ public class SchemaValidation {
                     "Cannot enable '%s' for non-primary-key table. "
                             + "Sequence number is only available for primary key tables.",
                     CoreOptions.TABLE_READ_SEQUENCE_NUMBER_ENABLED.key());
+        }
+    }
+
+    public static void validatePkClusteringOverride(CoreOptions options) {
+        if (options.pkClusteringOverride()) {
+            if (options.clusteringColumns().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Cannot support 'pk-clustering-override' mode without 'clustering.columns'.");
+            }
+            if (!options.deletionVectorsEnabled()) {
+                throw new UnsupportedOperationException(
+                        "Cannot support deletion-vectors disabled in 'pk-clustering-override' mode.");
+            }
+            if (options.recordLevelExpireTime() != null) {
+                throw new UnsupportedOperationException(
+                        "Cannot support record level expire time enabled in 'pk-clustering-override' mode.");
+            }
+            if (options.mergeEngine() != CoreOptions.MergeEngine.DEDUPLICATE
+                    && options.mergeEngine() != CoreOptions.MergeEngine.FIRST_ROW) {
+                throw new UnsupportedOperationException(
+                        "Cannot support merge engine: "
+                                + options.mergeEngine()
+                                + " in 'pk-clustering-override' mode.");
+            }
+            if (!options.sequenceField().isEmpty()) {
+                throw new UnsupportedOperationException(
+                        "Cannot support sequence field: "
+                                + options.sequenceField()
+                                + " in 'pk-clustering-override' mode.");
+            }
+            ChangelogProducer changelogProducer = options.changelogProducer();
+            if (changelogProducer != ChangelogProducer.NONE
+                    && changelogProducer != ChangelogProducer.INPUT) {
+                throw new UnsupportedOperationException(
+                        "Cannot support changelog producer: "
+                                + changelogProducer
+                                + " in 'pk-clustering-override' mode.");
+            }
         }
     }
 }
