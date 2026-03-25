@@ -782,6 +782,29 @@ public class SchemaValidation {
             Preconditions.checkArgument(
                     options.partitionTimestampFormatter() != null,
                     "Partition timestamp formatter is required for chain table.");
+
+            // validate chain-table.chain-partition-keys
+            List<String> chainPartKeys = options.chainTableChainPartitionKeys();
+            if (chainPartKeys != null) {
+                List<String> partitionKeys = schema.partitionKeys();
+
+                Preconditions.checkArgument(
+                        !chainPartKeys.isEmpty(),
+                        "chain-table.chain-partition-keys must not be empty.");
+
+                // chain partition keys should be in the tails of partition keys.
+                int chainStart = partitionKeys.size() - chainPartKeys.size();
+                Preconditions.checkArgument(
+                        chainStart >= 0
+                                && partitionKeys
+                                        .subList(chainStart, partitionKeys.size())
+                                        .equals(chainPartKeys),
+                        "chain-table.chain-partition-keys must be a contiguous suffix "
+                                + "of the table's partition keys. "
+                                + "Partition keys: %s, chain partition keys: %s.",
+                        partitionKeys,
+                        chainPartKeys);
+            }
         }
     }
 

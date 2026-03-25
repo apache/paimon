@@ -225,4 +225,136 @@ public class ChainTableUtils {
         }
         return table;
     }
+
+    public static List<String> chainPartitionKeys(
+            CoreOptions options, List<String> allPartitionKeys) {
+        List<String> chainPartitionKeys = options.chainTableChainPartitionKeys();
+        if (chainPartitionKeys == null) {
+            return allPartitionKeys;
+        }
+        return chainPartitionKeys;
+    }
+
+    /**
+     * Within the same group, find the nearest smaller partition in the target list for each source
+     * partition, comparing only on the chain dimension.
+     *
+     * @param sortedSourcePartitions full partitions (sorted by chain dimension)
+     * @param sortedTargetPartitions full partitions (sorted by chain dimension, same group)
+     * @param chainComparator compares chain dimension only
+     * @param projector partition projector
+     * @return source → target mapping, target may be null
+     */
+    public static Map<BinaryRow, BinaryRow> findFirstLatestPartitionsWithProjector(
+            List<BinaryRow> sortedSourcePartitions,
+            List<BinaryRow> sortedTargetPartitions,
+            RecordComparator chainComparator,
+            ChainPartitionProjector projector) {
+
+        Map<BinaryRow, BinaryRow> partitionMapping = new HashMap<>();
+        int targetIndex = 0;
+
+        for (BinaryRow sourceRow : sortedSourcePartitions) {
+            BinaryRow sourceChain = projector.extractChainPartition(sourceRow);
+            while (targetIndex < sortedTargetPartitions.size()) {
+                BinaryRow targetChain =
+                        projector.extractChainPartition(sortedTargetPartitions.get(targetIndex));
+                if (chainComparator.compare(targetChain, sourceChain) < 0) {
+                    targetIndex++;
+                } else {
+                    break;
+                }
+            }
+            BinaryRow firstSmaller =
+                    (targetIndex > 0) ? sortedTargetPartitions.get(targetIndex - 1) : null;
+            partitionMapping.put(sourceRow, firstSmaller);
+        }
+        return partitionMapping;
+    }
+
+    /**
+     * Generates the list of delta partitions in the range (beginPartition, endPartition].
+     * Enumerates time range only on the chain dimension; the group dimension stays unchanged.
+     */
+    public static List<BinaryRow> getDeltaPartitionsWithProjector(
+            BinaryRow beginPartition,
+            BinaryRow endPartition,
+            CoreOptions options,
+            RecordComparator chainPartitionComparator,
+            ChainPartitionProjector projector) {
+
+        // Extract the chain parts from begin/end
+        BinaryRow beginChain = projector.extractChainPartition(beginPartition);
+        BinaryRow endChain = projector.extractChainPartition(endPartition);
+
+        // Build chain-dimension RowType, column names, PartitionComputer
+        RowType chainPartType = projector.chainPartitionType();
+        List<String> chainPartitionColumns = chainPartType.getFieldNames();
+        InternalRowPartitionComputer chainPartitionComputer =
+                new InternalRowPartitionComputer(
+                        options.partitionDefaultName(),
+                        chainPartType,
+                        chainPartitionColumns.toArray(new String[0]),
+                        options.legacyPartitionName());
+
+        // Reuse existing getDeltaPartitions to enumerate on chain dimension
+        List<BinaryRow> chainOnlyDeltas =
+                getDeltaPartitions(
+                        beginChain,
+                        endChain,
+                        chainPartitionColumns,
+                        chainPartType,
+                        options,
+                        chainPartitionComparator,
+                        chainPartitionComputer);
+
+        // Combine each chain-only BinaryRow with the group part into a full partition
+        BinaryRow groupPart = projector.extractGroupPartition(beginPartition);
+        List<BinaryRow> fullDeltas = new ArrayList<>(chainOnlyDeltas.size());
+        for (BinaryRow chainDelta : chainOnlyDeltas) {
+            fullDeltas.add(projector.combinePartition(groupPart, chainDelta));
+        }
+        return fullDeltas;
+    }
+
+    /**
+     * Builds a compound predicate: group fields exact match AND chain fields triangular range.
+     *
+     * @param fullPartition full partition row
+     * @param converter converter for the full partition
+     * @param groupFieldCount number of group fields
+     * @param innerFunc equality function (field_index, value) → Predicate
+     * @param outerFunc range function (field_index, value) → Predicate
+     */
+    public static Predicate createGroupChainPredicate(
+            BinaryRow fullPartition,
+            RowDataToObjectArrayConverter converter,
+            int groupFieldCount,
+            BiFunction<Integer, Object, Predicate> innerFunc,
+            BiFunction<Integer, Object, Predicate> outerFunc) {
+
+        Object[] allValues = converter.convert(fullPartition);
+        List<Predicate> conditions = new ArrayList<>();
+
+        for (int i = 0; i < groupFieldCount; i++) {
+            conditions.add(innerFunc.apply(i, allValues[i]));
+        }
+
+        List<Predicate> chainFieldPredicates = new ArrayList<>();
+        int totalFields = converter.getArity();
+        for (int i = groupFieldCount; i < totalFields; i++) {
+            List<Predicate> andConditions = new ArrayList<>();
+            for (int j = groupFieldCount; j < i; j++) {
+                andConditions.add(innerFunc.apply(j, allValues[j]));
+            }
+            andConditions.add(outerFunc.apply(i, allValues[i]));
+            chainFieldPredicates.add(PredicateBuilder.and(andConditions));
+        }
+
+        if (!chainFieldPredicates.isEmpty()) {
+            conditions.add(PredicateBuilder.or(chainFieldPredicates));
+        }
+
+        return PredicateBuilder.and(conditions);
+    }
 }

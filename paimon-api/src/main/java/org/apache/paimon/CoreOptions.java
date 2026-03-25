@@ -273,6 +273,15 @@ public class CoreOptions implements Serializable {
                             "When a batch job queries from a chain table, if a partition does not exist in either main or snapshot branch, "
                                     + "the reader will try to get this partition from chain snapshot and delta branch together.");
 
+    public static final ConfigOption<String> CHAIN_TABLE_CHAIN_PARTITION_KEYS =
+            key("chain-table.chain-partition-keys")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Partition keys that participate in chain logic. Must be a contiguous "
+                                    + "suffix of the table's partition keys. Comma-separated. "
+                                    + "If not set, all partition keys participate in chain.");
+
     public static final String FILE_FORMAT_ORC = "orc";
     public static final String FILE_FORMAT_AVRO = "avro";
     public static final String FILE_FORMAT_PARQUET = "parquet";
@@ -3680,6 +3689,14 @@ public class CoreOptions implements Serializable {
 
     public String scanFallbackDeltaBranch() {
         return options.get(SCAN_FALLBACK_DELTA_BRANCH);
+    }
+
+    public List<String> chainTableChainPartitionKeys() {
+        String value = options.get(CHAIN_TABLE_CHAIN_PARTITION_KEYS);
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        return Arrays.stream(value.split(",")).map(String::trim).collect(Collectors.toList());
     }
 
     public boolean formatTableImplementationIsPaimon() {
