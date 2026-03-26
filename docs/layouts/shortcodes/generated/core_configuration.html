@@ -129,6 +129,12 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>chain-table.chain-partition-keys</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Partition keys that participate in chain logic. Must be a contiguous suffix of the table's partition keys. Comma-separated. If not set, all partition keys participate in chain.</td>
+        </tr>
+        <tr>
             <td><h5>chain-table.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -373,6 +379,12 @@ under the License.
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
             <td>Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) size is 1% smaller than the next sorted run's size, then include next sorted run into this candidate set.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.skip-expired-partitions</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, the compaction job will skip partitions that are already expired according to 'partition.expiration-time' with 'values-time' strategy. Only effective when 'partition.expiration-time' is set and 'partition.expiration-strategy' is 'values-time'.</td>
         </tr>
         <tr>
             <td><h5>compaction.total-size-threshold</h5></td>
@@ -1186,12 +1198,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>When a batch job queries from a chain table, if a partition does not exist in the main branch, the reader will try to get this partition from chain snapshot branch.</td>
-        </tr>
-        <tr>
-            <td><h5>chain-table.chain-partition-keys</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Partition keys that participate in chain logic. Must be a contiguous suffix of the table's partition keys. Comma-separated. If not set, all partition keys participate in chain.</td>
         </tr>
         <tr>
             <td><h5>scan.file-creation-time-millis</h5></td>
