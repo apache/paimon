@@ -247,6 +247,12 @@ public abstract class DelegateCatalog implements Catalog {
     }
 
     @Override
+    public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException {
+        wrapped.renameBranch(identifier, fromBranch, toBranch);
+    }
+
+    @Override
     public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
         wrapped.fastForward(identifier, branch);
     }
