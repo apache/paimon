@@ -662,7 +662,7 @@ public class SparkCatalog extends SparkBaseCatalog
             } else if (table instanceof LanceTable) {
                 return new SparkLanceTable(table);
             } else if (table instanceof ObjectTable) {
-                return new SparkObjectTable(table);
+                return new SparkObjectTable((ObjectTable) table);
             } else {
                 return new SparkTable(table);
             }
