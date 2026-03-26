@@ -63,6 +63,7 @@ import static org.apache.paimon.CoreOptions.METASTORE_TAG_TO_PARTITION;
 import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
