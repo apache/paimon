@@ -316,4 +316,111 @@ class V2WriteMergeSchemaTest extends PaimonSparkTestBase {
     }
   }
 
+  test("Write merge schema: nested struct with new fields by sql") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, info STRUCT<key1 STRUCT<key2 STRING, key3 STRING>>)")
+      sql("INSERT INTO t VALUES (1, struct(struct('v2a', 'v3a')))")
+      sql("INSERT INTO t VALUES (2, struct(struct('v2b', 'v3b')))")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, Row(Row("v2a", "v3a"))), Row(2, Row(Row("v2b", "v3b"))))
+      )
+
+      sql("INSERT INTO t BY NAME " +
+        "SELECT 3 AS id, " +
+        "named_struct('key1', named_struct('key2', 'v2c', 'key4', 'v4c', 'key3', 'v3c')) AS info")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(
+          Row(1, Row(Row("v2a", "v3a", null))),
+          Row(2, Row(Row("v2b", "v3b", null))),
+          Row(3, Row(Row("v2c", "v3c", "v4c"))))
+      )
+    }
+  }
+
+  test("Write merge schema: deeply nested struct with new fields") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, data STRUCT<a STRUCT<b STRUCT<c1 STRING, c2 STRING>>>)")
+      sql("INSERT INTO t VALUES (1, struct(struct(struct('c1v', 'c2v'))))")
+
+      sql(
+        "INSERT INTO t BY NAME " +
+          "SELECT 2 AS id, " +
+          "named_struct('a', named_struct('b', named_struct('c1', 'c1v2', 'c3', 'c3v2', 'c2', 'c2v2'))) AS data")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(
+          Row(1, Row(Row(Row("c1v", "c2v", null)))),
+          Row(2, Row(Row(Row("c1v2", "c2v2", "c3v2")))))
+      )
+    }
+  }
+
+  test("Write merge schema: nested struct new fields and top-level new column together") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, info STRUCT<f1 STRING, f2 STRING>)")
+      sql("INSERT INTO t VALUES (1, struct('a', 'b'))")
+
+      sql(
+        "INSERT INTO t BY NAME " +
+          "SELECT 2 AS id, " +
+          "named_struct('f1', 'c', 'f3', 'd', 'f2', 'e') AS info, " +
+          "'top' AS extra")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, Row("a", "b", null), null), Row(2, Row("c", "e", "d"), "top"))
+      )
+    }
+  }
+
+  test("Write merge schema: nested struct with missing fields") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, info STRUCT<f1 STRING, f2 STRING, f3 STRING>)")
+      sql("INSERT INTO t VALUES (1, struct('a', 'b', 'c'))")
+
+      sql(
+        "INSERT INTO t BY NAME " +
+          "SELECT 2 AS id, " +
+          "named_struct('f2', 'y', 'f3', 'z') AS info")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, Row("a", "b", "c")), Row(2, Row(null, "y", "z")))
+      )
+
+      sql(
+        "INSERT INTO t BY NAME " +
+          "SELECT 3 AS id, " +
+          "named_struct('f1', 'x', 'f4', 'w', 'f3', 'z') AS info")
+
+      sql(
+        "INSERT INTO t BY NAME " +
+          "SELECT 4 AS id, " +
+          "named_struct('f2', 'p', 'f3', 'q', 'f4', 'r') AS info")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(
+          Row(1, Row("a", "b", "c", null)),
+          Row(2, Row(null, "y", "z", null)),
+          Row(3, Row("x", null, "z", "w")),
+          Row(4, Row(null, "p", "q", "r")))
+      )
+    }
+  }
+
+  test("Write merge schema: nested struct with type evolution") {
+    withTable("t") {
+      sql("CREATE TABLE t (id INT, info STRUCT<f1 INT, f2 STRING>)")
+      sql("INSERT INTO t VALUES (1, struct(10, 'a'))")
+
+      sql(
+        "INSERT INTO t BY NAME " +
+          "SELECT 2 AS id, " +
+          "named_struct('f1', cast(20 as bigint), 'f3', 'new', 'f2', 'b') AS info")
+      checkAnswer(
+        sql("SELECT * FROM t ORDER BY id"),
+        Seq(Row(1, Row(10L, "a", null)), Row(2, Row(20L, "b", "new")))
+      )
+    }
+  }
 }
