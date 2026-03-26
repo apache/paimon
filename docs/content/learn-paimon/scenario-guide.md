@@ -83,8 +83,10 @@ CREATE TABLE orders (
   This mode gives you the best balance of write and read performance. Compared to the default MOR mode, MOW
   avoids merging at read time, which greatly improves OLAP query performance.
 - **`changelog-producer = lookup`**: Generates a complete [changelog]({{< ref "primary-key-table/changelog-producer#lookup" >}})
-  for downstream streaming consumers. If no downstream streaming read is needed, you can omit this to save
-  compaction resources.
+  for downstream streaming consumers. If your CDC source is directly connected to a database (e.g., MySQL CDC, Postgres CDC),
+  you can use `changelog-producer = input` instead, since the database CDC stream already provides a complete changelog.
+  However, if your CDC source comes from Kafka (or other message queues), `input` may not be reliable — use `lookup` to
+  ensure changelog correctness. If no downstream streaming read is needed, you can omit this to save compaction resources.
 - **`sequence.field = update_time`**: Guarantees correct update ordering even when data arrives out of order.
 - **Bucketing**: Use the default Dynamic Bucket (`bucket = -1`). The system automatically adjusts bucket count based
   on data volume. If you are sensitive to data visibility latency, set a fixed bucket number (e.g. `'bucket' = '5'`)
