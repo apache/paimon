@@ -114,6 +114,15 @@ public class CatalogEnvironment implements Serializable {
     }
 
     @Nullable
+    public SchemaModification schemaModification() {
+        if (catalogLoader == null) {
+            return null;
+        }
+        Catalog catalog = catalogLoader.load();
+        return SchemaModification.create(catalog, identifier);
+    }
+
+    @Nullable
     public SnapshotCommit snapshotCommit(SnapshotManager snapshotManager) {
         SnapshotCommit snapshotCommit;
         if (catalogLoader != null && supportsVersionManagement) {

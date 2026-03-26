@@ -29,6 +29,7 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -232,5 +233,58 @@ public class SchemaMergingUtils {
                 dataType,
                 field.description(),
                 field.defaultValue());
+    }
+
+    /**
+     * Generate a list of {@link SchemaChange} by comparing the old and new {@link TableSchema}.
+     * This supports detecting added columns and type changes (including nested structs).
+     */
+    public static List<SchemaChange> diffSchemaChanges(
+            TableSchema oldSchema, TableSchema newSchema) {
+        List<SchemaChange> changes = new ArrayList<>();
+        diffFields(
+                oldSchema.logicalRowType().getFields(),
+                newSchema.logicalRowType().getFields(),
+                new String[0],
+                changes);
+        return changes;
+    }
+
+    private static void diffFields(
+            List<DataField> oldFields,
+            List<DataField> newFields,
+            String[] parentNames,
+            List<SchemaChange> changes) {
+        Map<String, DataField> oldFieldMap =
+                oldFields.stream().collect(Collectors.toMap(DataField::name, Function.identity()));
+
+        for (DataField newField : newFields) {
+            String[] fieldNames = appendFieldName(parentNames, newField.name());
+            DataField oldField = oldFieldMap.get(newField.name());
+            if (oldField == null) {
+                // new column added
+                changes.add(
+                        SchemaChange.addColumn(
+                                fieldNames, newField.type(), newField.description(), null));
+            } else if (!oldField.type().equals(newField.type())) {
+                // type changed — check if it's a nested struct change
+                if (oldField.type() instanceof RowType && newField.type() instanceof RowType) {
+                    diffFields(
+                            ((RowType) oldField.type()).getFields(),
+                            ((RowType) newField.type()).getFields(),
+                            fieldNames,
+                            changes);
+                } else {
+                    changes.add(SchemaChange.updateColumnType(fieldNames, newField.type(), true));
+                }
+            }
+        }
+    }
+
+    private static String[] appendFieldName(String[] parentNames, String fieldName) {
+        String[] result = new String[parentNames.length + 1];
+        System.arraycopy(parentNames, 0, result, 0, parentNames.length);
+        result[parentNames.length] = fieldName;
+        return result;
     }
 }
