@@ -180,6 +180,9 @@ public class ClusteringCompactManager extends CompactFutureManager {
 
     @Override
     public void triggerCompaction(boolean fullCompaction) {
+        if (taskFuture != null) {
+            return;
+        }
         taskFuture =
                 executor.submit(
                         new CompactTask(metricsReporter) {
