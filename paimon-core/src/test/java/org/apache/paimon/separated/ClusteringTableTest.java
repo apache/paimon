@@ -74,7 +74,7 @@ class ClusteringTableTest {
                         .column("b", DataTypes.INT())
                         .primaryKey("a")
                         .option(DELETION_VECTORS_ENABLED.key(), "true")
-                        .option(BUCKET.key(), "1")
+                        .option(BUCKET.key(), "2")
                         .option(CLUSTERING_COLUMNS.key(), "b")
                         .option(PK_CLUSTERING_OVERRIDE.key(), "true")
                         .build();

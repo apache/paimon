@@ -95,7 +95,7 @@ public class IOManagerImpl implements IOManager {
     }
 
     @Override
-    public String pickRandomTempDir() {
+    public String pickTempDir() {
         return pickRandomly(Arrays.asList(tempDirs()));
     }
 

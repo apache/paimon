@@ -119,7 +119,7 @@ public class ClusteringCompactManager extends CompactFutureManager {
                         valueType.getFieldTypes(), clusteringColumnIndexes, true);
 
         SimpleLsmKvDb kvDb =
-                SimpleLsmKvDb.builder(new File(ioManager.pickRandomTempDir()))
+                SimpleLsmKvDb.builder(new File(ioManager.pickTempDir()))
                         .cacheManager(cacheManager)
                         .keyComparator(new RowCompactedSerializer(keyType).createSliceComparator())
                         .build();
