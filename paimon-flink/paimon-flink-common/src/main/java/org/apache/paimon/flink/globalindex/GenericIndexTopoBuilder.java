@@ -28,7 +28,6 @@ import org.apache.paimon.flink.sink.NoopCommittableStateManager;
 import org.apache.paimon.flink.sink.StoreCommitter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
-import org.apache.paimon.globalindex.GlobalIndexBuilderUtils;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.index.IndexFileMeta;
@@ -158,12 +157,6 @@ public class GenericIndexTopoBuilder {
         checkArgument(
                 rowsPerShard > 0,
                 "Option 'global-index.row-count-per-shard' must be greater than 0.");
-
-        int maxShard = mergedOptions.get(CoreOptions.GLOBAL_INDEX_BUILD_MAX_SHARD);
-        checkArgument(
-                maxShard > 0, "Option 'global-index.build.max-shard' must be greater than 0.");
-        rowsPerShard =
-                GlobalIndexBuilderUtils.adjustRowsPerShard(rowsPerShard, totalRowCount, maxShard);
 
         // Compute shard tasks at file level from the provided entries
         List<ShardTask> shardTasks = computeShardTasks(table, entries, rowsPerShard);
