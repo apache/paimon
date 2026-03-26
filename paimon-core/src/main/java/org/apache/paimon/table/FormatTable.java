@@ -411,6 +411,11 @@ public interface FormatTable extends Table {
     }
 
     @Override
+    default void renameBranch(String fromBranch, String toBranch) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     default void fastForward(String branchName) {
         throw new UnsupportedOperationException();
     }

@@ -286,6 +286,11 @@ public abstract class DelegatedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void renameBranch(String fromBranch, String toBranch) {
+        wrapped.renameBranch(fromBranch, toBranch);
+    }
+
+    @Override
     public void fastForward(String branchName) {
         wrapped.fastForward(branchName);
     }

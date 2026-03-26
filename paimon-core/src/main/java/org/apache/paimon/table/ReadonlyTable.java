@@ -266,6 +266,14 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default void renameBranch(String fromBranch, String toBranch) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support renameBranch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default void fastForward(String branchName) {
         throw new UnsupportedOperationException(
                 String.format(

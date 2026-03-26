@@ -201,6 +201,10 @@ public interface Table extends Serializable {
         }
     }
 
+    /** Rename a branch. */
+    @Experimental
+    void renameBranch(String fromBranch, String toBranch);
+
     /** Merge a branch to main branch. */
     @Experimental
     void fastForward(String branchName);
