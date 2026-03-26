@@ -34,6 +34,8 @@ import java.util.stream.Collectors;
  */
 public class PartitionUpdateTimeExpireStrategy extends PartitionExpireStrategy {
 
+    private static final long serialVersionUID = 1L;
+
     public PartitionUpdateTimeExpireStrategy(CoreOptions options, RowType partitionType) {
         super(partitionType, options.partitionDefaultName());
     }

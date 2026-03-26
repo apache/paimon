@@ -20,6 +20,7 @@ package org.apache.paimon.partition;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -43,7 +44,9 @@ import static java.time.temporal.ChronoField.SECOND_OF_MINUTE;
 import static java.time.temporal.ChronoField.YEAR;
 
 /** Time extractor to extract time from partition values. */
-public class PartitionTimeExtractor {
+public class PartitionTimeExtractor implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private static final DateTimeFormatter TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
