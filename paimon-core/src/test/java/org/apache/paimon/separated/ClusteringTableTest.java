@@ -745,7 +745,8 @@ class ClusteringTableTest {
     @Test
     public void testStreamWriteFrequentCompact() throws Exception {
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-        try (StreamTableWrite write = writeBuilder.newWrite().withIOManager(ioManager);
+        try (StreamTableWrite write =
+                        (StreamTableWrite) writeBuilder.newWrite().withIOManager(ioManager);
                 StreamTableCommit commit = writeBuilder.newCommit()) {
             long commitId = 0;
             for (int round = 0; round < 20; round++) {
@@ -777,7 +778,8 @@ class ClusteringTableTest {
     @Test
     public void testStreamWriteFrequentCompactWithOverlappingKeys() throws Exception {
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
-        try (StreamTableWrite write = writeBuilder.newWrite().withIOManager(ioManager);
+        try (StreamTableWrite write =
+                        (StreamTableWrite) writeBuilder.newWrite().withIOManager(ioManager);
                 StreamTableCommit commit = writeBuilder.newCommit()) {
             long commitId = 0;
             for (int round = 0; round < 20; round++) {
