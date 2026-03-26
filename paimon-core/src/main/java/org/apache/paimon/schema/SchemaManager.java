@@ -37,6 +37,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.SchemaModification;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -706,7 +707,10 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
+    public boolean mergeSchema(
+            RowType rowType,
+            boolean allowExplicitCast,
+            @Nullable SchemaModification schemaModification) {
         TableSchema current =
                 latest().orElseThrow(
                                 () ->
@@ -715,12 +719,17 @@ public class SchemaManager implements Serializable {
         TableSchema update = SchemaMergingUtils.mergeSchemas(current, rowType, allowExplicitCast);
         if (current.equals(update)) {
             return false;
-        } else {
-            try {
+        }
+        try {
+            if (schemaModification != null) {
+                List<SchemaChange> changes = SchemaMergingUtils.diffSchemaChanges(current, update);
+                schemaModification.alterSchema(changes);
+                return true;
+            } else {
                 return commit(update);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to commit the schema.", e);
             }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to commit the schema.", e);
         }
     }
 
