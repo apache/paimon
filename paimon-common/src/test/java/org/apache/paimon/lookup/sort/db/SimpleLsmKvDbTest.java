@@ -1431,6 +1431,57 @@ public class SimpleLsmKvDbTest {
     }
 
     @Test
+    public void testTwoInstancesSameDirectoryNoFileCollision() throws IOException {
+        // Two SimpleLsmKvDb instances sharing the same dataDirectory should not interfere
+        // with each other because SST file names contain a unique UUID.
+        File sharedDir = new File(tempDir.toFile(), "shared-dir-db");
+
+        try (SimpleLsmKvDb db1 =
+                        SimpleLsmKvDb.builder(sharedDir)
+                                .memTableFlushThreshold(1024)
+                                .blockSize(256)
+                                .level0FileNumCompactTrigger(4)
+                                .compressOptions(new CompressOptions("none", 1))
+                                .build();
+                SimpleLsmKvDb db2 =
+                        SimpleLsmKvDb.builder(sharedDir)
+                                .memTableFlushThreshold(1024)
+                                .blockSize(256)
+                                .level0FileNumCompactTrigger(4)
+                                .compressOptions(new CompressOptions("none", 1))
+                                .build()) {
+
+            // Write different data to each instance
+            putString(db1, "key-a", "from-db1");
+            putString(db1, "key-b", "from-db1");
+            db1.flush();
+
+            putString(db2, "key-a", "from-db2");
+            putString(db2, "key-c", "from-db2");
+            db2.flush();
+
+            // Each instance should see only its own data
+            Assertions.assertEquals("from-db1", getString(db1, "key-a"));
+            Assertions.assertEquals("from-db1", getString(db1, "key-b"));
+            Assertions.assertNull(getString(db1, "key-c"));
+
+            Assertions.assertEquals("from-db2", getString(db2, "key-a"));
+            Assertions.assertNull(getString(db2, "key-b"));
+            Assertions.assertEquals("from-db2", getString(db2, "key-c"));
+
+            // Write more data and flush again to ensure no cross-contamination
+            putString(db1, "key-a", "updated-db1");
+            db1.flush();
+
+            putString(db2, "key-a", "updated-db2");
+            db2.flush();
+
+            Assertions.assertEquals("updated-db1", getString(db1, "key-a"));
+            Assertions.assertEquals("updated-db2", getString(db2, "key-a"));
+        }
+    }
+
+    @Test
     public void testBulkLoadFailsOnNonEmptyDb() throws IOException {
         try (SimpleLsmKvDb db = createDb()) {
             putString(db, "existing", "data");

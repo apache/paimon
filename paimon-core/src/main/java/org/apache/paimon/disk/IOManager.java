@@ -38,7 +38,7 @@ public interface IOManager extends AutoCloseable {
 
     String[] tempDirs();
 
-    String pickRandomTempDir();
+    String pickTempDir();
 
     Enumerator createChannelEnumerator();
 
