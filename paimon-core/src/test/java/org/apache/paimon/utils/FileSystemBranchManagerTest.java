@@ -19,10 +19,10 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +49,7 @@ class FileSystemBranchManagerTest {
     @BeforeEach
     void before() throws Exception {
         tablePath = new Path(tempDir.toUri().toString());
-        fileIO = FileIO.get(tablePath, new org.apache.paimon.fs.FileIOContext());
+        fileIO = FileIOFinder.find(tablePath);
 
         // Create schema
         Schema schema =
@@ -62,10 +62,10 @@ class FileSystemBranchManagerTest {
 
         // Create schema manager and initialize schema
         schemaManager = new SchemaManager(fileIO, tablePath);
-        TableSchema tableSchema = schemaManager.createTable(schema);
+        schemaManager.createTable(schema);
 
         // Create snapshot, tag, and branch managers
-        snapshotManager = new SnapshotManager(fileIO, tablePath);
+        snapshotManager = new SnapshotManager(fileIO, tablePath, null, null, null);
         tagManager = new TagManager(fileIO, tablePath);
         branchManager =
                 new FileSystemBranchManager(
