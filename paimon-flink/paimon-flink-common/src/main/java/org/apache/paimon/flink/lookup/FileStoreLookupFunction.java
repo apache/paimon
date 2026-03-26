@@ -94,6 +94,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
     private transient File path;
+    private transient String tmpDirectory;
     private transient LookupTable lookupTable;
 
     // partition refresh
@@ -165,7 +166,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public void open(FunctionContext context) throws Exception {
         this.functionContext = context;
-        String tmpDirectory = getTmpDirectory(context);
+        this.tmpDirectory = getTmpDirectory(context);
         open(tmpDirectory);
     }
 
@@ -247,6 +248,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                                 options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC)
                                         && lookupTable instanceof FullCacheLookupTable,
                                 table.name(),
+                                this.tmpDirectory,
                                 partitionLoader.partitions());
             }
         }
@@ -365,7 +367,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         partitions,
                         partitionLoader.createSpecificPartFilter(),
                         lookupTable,
-                        getTmpDirectory(functionContext),
                         cacheRowFilter);
                 nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
                 return;

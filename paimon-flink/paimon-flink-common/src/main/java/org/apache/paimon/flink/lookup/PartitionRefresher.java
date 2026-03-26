@@ -51,7 +51,8 @@ public class PartitionRefresher implements Closeable {
 
     private final boolean partitionRefreshAsync;
     private final String tableName;
-    private File path;
+    private final String tmpDirectory;
+    private volatile File path;
     private ExecutorService partitionRefreshExecutor;
     private AtomicReference<LookupTable> pendingLookupTable;
     private AtomicReference<Exception> partitionRefreshException;
@@ -60,9 +61,13 @@ public class PartitionRefresher implements Closeable {
     private List<BinaryRow> currentPartitions;
 
     public PartitionRefresher(
-            boolean partitionRefreshAsync, String tableName, List<BinaryRow> initialPartitions) {
+            boolean partitionRefreshAsync,
+            String tableName,
+            String tmpDirectory,
+            List<BinaryRow> initialPartitions) {
         this.partitionRefreshAsync = partitionRefreshAsync;
         this.tableName = tableName;
+        this.tmpDirectory = tmpDirectory;
         this.currentPartitions = initialPartitions;
         if (!partitionRefreshAsync) {
             return;
@@ -94,7 +99,6 @@ public class PartitionRefresher implements Closeable {
             List<BinaryRow> newPartitions,
             @Nullable Predicate partitionFilter,
             LookupTable lookupTable,
-            String tempDirectory,
             @Nullable Filter<InternalRow> cacheRowFilter)
             throws Exception {
         if (partitionRefreshAsync) {
@@ -102,7 +106,6 @@ public class PartitionRefresher implements Closeable {
                     newPartitions,
                     partitionFilter,
                     ((FullCacheLookupTable) lookupTable).context,
-                    tempDirectory,
                     cacheRowFilter);
         } else {
             syncPartitionRefresh(newPartitions, partitionFilter, lookupTable);
@@ -128,7 +131,6 @@ public class PartitionRefresher implements Closeable {
             List<BinaryRow> newPartitions,
             @Nullable Predicate partitionFilter,
             FullCacheLookupTable.Context context,
-            String tempDirectory,
             @Nullable Filter<InternalRow> cacheRowFilter) {
 
         LOG.info(
@@ -137,13 +139,12 @@ public class PartitionRefresher implements Closeable {
 
         partitionRefreshExecutor.submit(
                 () -> {
-                    File newPath = null;
                     try {
-                        newPath = new File(tempDirectory, "lookup-" + UUID.randomUUID());
-                        if (!newPath.mkdirs()) {
-                            throw new RuntimeException("Failed to create dir: " + newPath);
+                        this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
+                        if (!path.mkdirs()) {
+                            throw new RuntimeException("Failed to create dir: " + path);
                         }
-                        FullCacheLookupTable.Context newContext = context.copy(newPath);
+                        FullCacheLookupTable.Context newContext = context.copy(path);
                         Options options = Options.fromMap(context.table.options());
                         FullCacheLookupTable newTable =
                                 FullCacheLookupTable.create(
@@ -159,8 +160,8 @@ public class PartitionRefresher implements Closeable {
                     } catch (Exception e) {
                         LOG.error("Async partition refresh failed for table {}.", tableName, e);
                         partitionRefreshException.set(e);
-                        if (newPath != null) {
-                            FileIOUtils.deleteDirectoryQuietly(newPath);
+                        if (path != null) {
+                            FileIOUtils.deleteDirectoryQuietly(path);
                         }
                     }
                 });
@@ -194,7 +195,6 @@ public class PartitionRefresher implements Closeable {
         }
 
         this.currentPartitions = newPartitions;
-        this.path = ((FullCacheLookupTable) newTable).context.tempPath;
         LOG.info("Switched to new lookup table for table {} with new partitions.", tableName);
         return newTable;
     }
