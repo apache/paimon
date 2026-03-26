@@ -663,6 +663,7 @@ public interface Catalog extends AutoCloseable {
      *   <li>{@link #rollbackTo(Identifier, Instant)}.
      *   <li>{@link #createBranch(Identifier, String, String)}.
      *   <li>{@link #dropBranch(Identifier, String)}.
+     *   <li>{@link #renameBranch(Identifier, String, String)}.
      *   <li>{@link #listBranches(Identifier)}.
      *   <li>{@link #getTag(Identifier, String)}.
      *   <li>{@link #createTag(Identifier, String, Long, String, boolean)}.
@@ -874,6 +875,20 @@ public interface Catalog extends AutoCloseable {
      *     #supportsVersionManagement()}
      */
     void dropBranch(Identifier identifier, String branch) throws BranchNotExistException;
+
+    /**
+     * Rename a branch for this table.
+     *
+     * @param identifier path of the table, cannot be system or branch name.
+     * @param fromBranch the source branch name
+     * @param toBranch the target branch name
+     * @throws BranchNotExistException if the source branch doesn't exist
+     * @throws BranchAlreadyExistException if the target branch already exists
+     * @throws UnsupportedOperationException if the catalog does not {@link
+     *     #supportsVersionManagement()}
+     */
+    void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException;
 
     /**
      * Fast-forward a branch to main branch.

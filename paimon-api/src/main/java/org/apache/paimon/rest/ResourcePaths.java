@@ -262,6 +262,19 @@ public class ResourcePaths {
                 "forward");
     }
 
+    public String renameBranch(String databaseName, String tableName, String branch) {
+        return SLASH.join(
+                V1,
+                prefix,
+                DATABASES,
+                encodeString(databaseName),
+                TABLES,
+                encodeString(tableName),
+                BRANCHES,
+                encodeString(branch),
+                "rename");
+    }
+
     public String tags(String databaseName, String objectName) {
         return SLASH.join(
                 V1,
