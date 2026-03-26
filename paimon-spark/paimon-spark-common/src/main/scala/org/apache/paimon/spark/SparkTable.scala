@@ -20,8 +20,8 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.spark.read.ObjectTableScanBuilder
 import org.apache.paimon.spark.rowops.PaimonSparkCopyOnWriteOperation
-import org.apache.paimon.table.{FileStoreTable, Table}
 import org.apache.paimon.table.`object`.ObjectTable
+import org.apache.paimon.table.{FileStoreTable, Table}
 
 import org.apache.spark.sql.connector.catalog.{SupportsRead, SupportsRowLevelOperations, TableCapability}
 import org.apache.spark.sql.connector.read.ScanBuilder
@@ -52,9 +52,7 @@ case class SparkIcebergTable(table: Table) extends BaseTable
 
 case class SparkLanceTable(table: Table) extends BaseTable
 
-case class SparkObjectTable(override val table: ObjectTable)
-  extends BaseTable
-  with SupportsRead {
+case class SparkObjectTable(override val table: ObjectTable) extends BaseTable with SupportsRead {
 
   override def capabilities(): JSet[TableCapability] = {
     JEnumSet.of(TableCapability.BATCH_READ)
