@@ -292,11 +292,9 @@ public class SparkInternalRowWrapper implements InternalRow, Serializable {
         }
         StructType nestedTableSchema = (StructType) tableSchema.fields()[pos].dataType();
         if (dataSchema != null) {
-            StructType nestedDataSchema =
-                    (StructType) dataSchema.fields()[actualPos].dataType();
+            StructType nestedDataSchema = (StructType) dataSchema.fields()[actualPos].dataType();
             int dataNumFields = nestedDataSchema.size();
-            return new SparkInternalRowWrapper(
-                            nestedTableSchema, numFields, nestedDataSchema, null)
+            return new SparkInternalRowWrapper(nestedTableSchema, numFields, nestedDataSchema, null)
                     .replace(internalRow.getStruct(actualPos, dataNumFields));
         }
         return new SparkInternalRowWrapper(nestedTableSchema, numFields)

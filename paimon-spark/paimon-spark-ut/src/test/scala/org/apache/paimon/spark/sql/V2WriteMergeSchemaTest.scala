@@ -326,9 +326,10 @@ class V2WriteMergeSchemaTest extends PaimonSparkTestBase {
         Seq(Row(1, Row(Row("v2a", "v3a"))), Row(2, Row(Row("v2b", "v3b"))))
       )
 
-      sql("INSERT INTO t BY NAME " +
-        "SELECT 3 AS id, " +
-        "named_struct('key1', named_struct('key2', 'v2c', 'key4', 'v4c', 'key3', 'v3c')) AS info")
+      sql(
+        "INSERT INTO t BY NAME " +
+          "SELECT 3 AS id, " +
+          "named_struct('key1', named_struct('key2', 'v2c', 'key4', 'v4c', 'key3', 'v3c')) AS info")
       checkAnswer(
         sql("SELECT * FROM t ORDER BY id"),
         Seq(
