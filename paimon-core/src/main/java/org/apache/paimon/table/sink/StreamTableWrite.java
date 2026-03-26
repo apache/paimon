@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.disk.IOManager;
 
 import java.util.List;
 
@@ -30,6 +31,9 @@ import java.util.List;
  */
 @Public
 public interface StreamTableWrite extends TableWrite {
+
+    @Override
+    StreamTableWrite withIOManager(IOManager ioManager);
 
     /**
      * Prepare commit for {@link TableCommit}. Collect incremental files for this write.
