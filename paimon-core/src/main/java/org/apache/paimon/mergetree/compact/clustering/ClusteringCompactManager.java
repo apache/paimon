@@ -228,6 +228,10 @@ public class ClusteringCompactManager extends CompactFutureManager {
                 for (DataFileMeta newFile : mergedFiles) {
                     keyIndex.rebuildIndex(newFile);
                 }
+                // Remove stale deletion vectors for merged-away files
+                for (DataFileMeta file : mergeGroup) {
+                    dvMaintainer.removeDeletionVectorOf(file.fileName());
+                }
                 result.before().addAll(mergeGroup);
                 result.after().addAll(mergedFiles);
             }
