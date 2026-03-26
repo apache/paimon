@@ -27,10 +27,12 @@ import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -145,7 +147,8 @@ public class PartitionRefresher implements Closeable {
                         FullCacheLookupTable.Context newContext = context.copy(newPath);
                         Options options = Options.fromMap(context.table.options());
                         FullCacheLookupTable newTable =
-                                FullCacheLookupTable.create(newContext, options.get(LOOKUP_CACHE_ROWS));
+                                FullCacheLookupTable.create(
+                                        newContext, options.get(LOOKUP_CACHE_ROWS));
                         if (cacheRowFilter != null) {
                             newTable.specifyCacheRowFilter(cacheRowFilter);
                         }
