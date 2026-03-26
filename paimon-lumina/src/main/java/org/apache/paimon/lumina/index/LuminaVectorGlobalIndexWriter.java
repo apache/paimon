@@ -196,23 +196,48 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
 
     private ResultEntry buildIndex() throws IOException {
         configureExecutorThreadCount();
+        LOG.info(
+                "Lumina index build started: {} vectors, dim={}, type={}, metric={}",
+                count,
+                dim,
+                options.indexType(),
+                options.metric());
+        long buildStart = System.currentTimeMillis();
+
         try (LuminaIndex index =
                 LuminaIndex.createForBuild(
                         options.indexType(), dim, options.metric(), options.toLuminaOptions())) {
 
             // Pretrain and insert via streaming file-backed Dataset API
-            try (FileBackedDataset ds = new FileBackedDataset(tempVectorFile, dim, count)) {
+            long phaseStart = System.currentTimeMillis();
+            LOG.info("Lumina pretrain phase started");
+            try (FileBackedDataset ds =
+                    new FileBackedDataset(tempVectorFile, dim, count, "pretrain")) {
                 index.pretrainFrom(ds);
             }
-            try (FileBackedDataset ds = new FileBackedDataset(tempVectorFile, dim, count)) {
+            LOG.info(
+                    "Lumina pretrain phase done in {} ms", System.currentTimeMillis() - phaseStart);
+
+            phaseStart = System.currentTimeMillis();
+            LOG.info("Lumina insert phase started");
+            try (FileBackedDataset ds =
+                    new FileBackedDataset(tempVectorFile, dim, count, "insert")) {
                 index.insertFrom(ds);
             }
+            LOG.info("Lumina insert phase done in {} ms", System.currentTimeMillis() - phaseStart);
 
+            phaseStart = System.currentTimeMillis();
+            LOG.info("Lumina dump phase started");
             String fileName = fileWriter.newFileName(FILE_NAME_PREFIX);
             try (PositionOutputStream out = fileWriter.newOutputStream(fileName)) {
                 index.dump(new OutputStreamFileOutput(out));
                 out.flush();
             }
+            LOG.info("Lumina dump phase done in {} ms", System.currentTimeMillis() - phaseStart);
+
+            LOG.info(
+                    "Lumina index build completed in {} ms",
+                    System.currentTimeMillis() - buildStart);
 
             LuminaIndexMeta meta = new LuminaIndexMeta(options.toLuminaOptions());
             return new ResultEntry(fileName, count, meta.serialize());
@@ -308,8 +333,10 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
         private final int totalCount;
         private int cursor;
         private final ByteBuffer readBuf;
+        private final String phase;
+        private int lastLoggedPercent;
 
-        FileBackedDataset(File file, int dim, int totalCount) throws IOException {
+        FileBackedDataset(File file, int dim, int totalCount, String phase) throws IOException {
             this.raf = new RandomAccessFile(file, "r");
             this.channel = raf.getChannel();
             this.dim = dim;
@@ -318,6 +345,8 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             this.readBuf = ByteBuffer.allocateDirect(IO_BUFFER_SIZE);
             this.readBuf.order(ByteOrder.nativeOrder());
             this.readBuf.limit(0); // empty initially
+            this.phase = phase;
+            this.lastLoggedPercent = -1;
         }
 
         @Override
@@ -370,6 +399,15 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
                 idBuf[i] = cursor + i;
             }
             cursor += batchSize;
+
+            int percent = (int) ((long) cursor * 100 / totalCount);
+            if (percent / 10 > lastLoggedPercent / 10) {
+                LOG.info(
+                        "Lumina {} progress: {}/{} vectors ({}%)",
+                        phase, cursor, totalCount, percent);
+                lastLoggedPercent = percent;
+            }
+
             return batchSize;
         }
 
