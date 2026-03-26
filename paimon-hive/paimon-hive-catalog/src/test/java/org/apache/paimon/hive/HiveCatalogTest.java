@@ -553,6 +553,92 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         Collections.singletonList(partition)));
     }
 
+    @Test
+    public void testDropTableWithMissingSchemaFiles() throws Exception {
+        // This test verifies that dropTable succeeds when the table exists in the
+        // Hive Metastore but its schema files are missing from the filesystem.
+        // This scenario occurs when schema files are manually deleted or corrupted,
+        // and previously caused DROP DATABASE CASCADE to fail with
+        // ClassNotFoundException for PaimonSerDe/PaimonStorageHandler.
+        String databaseName = "test_db";
+        catalog.createDatabase(databaseName, false);
+
+        Identifier identifier = Identifier.create(databaseName, "orphan_meta_table");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        // Verify the table exists
+        assertThat(catalog.listTables(databaseName)).contains("orphan_meta_table");
+
+        // Delete the schema directory on the filesystem to simulate missing schema files
+        org.apache.paimon.fs.Path tablePath =
+                new org.apache.paimon.fs.Path(
+                        warehouse + "/" + databaseName + ".db" + "/" + "orphan_meta_table");
+        org.apache.paimon.fs.Path schemaPath = new org.apache.paimon.fs.Path(tablePath, "schema");
+        fileIO.deleteDirectoryQuietly(schemaPath);
+
+        // Verify that getTable now fails (schema files are gone)
+        assertThatThrownBy(() -> catalog.getTable(identifier))
+                .isInstanceOf(Catalog.TableNotExistException.class);
+
+        // dropTable should still succeed by cleaning up the HMS metadata
+        assertThatCode(() -> catalog.dropTable(identifier, false)).doesNotThrowAnyException();
+
+        // Verify the table is no longer listed
+        assertThat(catalog.listTables(databaseName)).doesNotContain("orphan_meta_table");
+    }
+
+    @Test
+    public void testDropTableWithMissingSchemaFilesIgnoreIfNotExists() throws Exception {
+        // Same as above but with ignoreIfNotExists=true
+        String databaseName = "test_db";
+        catalog.createDatabase(databaseName, false);
+
+        Identifier identifier = Identifier.create(databaseName, "orphan_meta_table2");
+        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+
+        // Delete the schema directory
+        org.apache.paimon.fs.Path tablePath =
+                new org.apache.paimon.fs.Path(
+                        warehouse + "/" + databaseName + ".db" + "/" + "orphan_meta_table2");
+        org.apache.paimon.fs.Path schemaPath = new org.apache.paimon.fs.Path(tablePath, "schema");
+        fileIO.deleteDirectoryQuietly(schemaPath);
+
+        // dropTable with ignoreIfNotExists=true should also succeed
+        assertThatCode(() -> catalog.dropTable(identifier, true)).doesNotThrowAnyException();
+
+        // Verify the table is no longer listed
+        assertThat(catalog.listTables(databaseName)).doesNotContain("orphan_meta_table2");
+    }
+
+    @Test
+    public void testDropDatabaseCascadeWithMissingSchemaFiles() throws Exception {
+        // This test verifies the full DROP DATABASE CASCADE scenario that triggered
+        // the original bug: when a database contains tables whose schema files are
+        // missing, dropping the database with cascade should still succeed.
+        String databaseName = "cascade_drop_db";
+        catalog.createDatabase(databaseName, false);
+
+        // Create two tables
+        Identifier table1 = Identifier.create(databaseName, "good_table");
+        Identifier table2 = Identifier.create(databaseName, "broken_table");
+        catalog.createTable(table1, DEFAULT_TABLE_SCHEMA, false);
+        catalog.createTable(table2, DEFAULT_TABLE_SCHEMA, false);
+
+        // Delete schema files for broken_table only
+        org.apache.paimon.fs.Path tablePath =
+                new org.apache.paimon.fs.Path(
+                        warehouse + "/" + databaseName + ".db" + "/" + "broken_table");
+        org.apache.paimon.fs.Path schemaPath = new org.apache.paimon.fs.Path(tablePath, "schema");
+        fileIO.deleteDirectoryQuietly(schemaPath);
+
+        // DROP DATABASE CASCADE should succeed despite broken_table's missing schema
+        assertThatCode(() -> catalog.dropDatabase(databaseName, true, true))
+                .doesNotThrowAnyException();
+
+        // Verify the database no longer exists
+        assertThat(catalog.listDatabases()).doesNotContain(databaseName);
+    }
+
     @Override
     protected boolean supportsAlterDatabase() {
         return true;

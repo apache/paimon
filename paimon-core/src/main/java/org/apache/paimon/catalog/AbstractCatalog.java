@@ -373,10 +373,20 @@ public abstract class AbstractCatalog implements Catalog {
                 }
             }
         } catch (TableNotExistException e) {
-            if (ignoreIfNotExists) {
+            // Table data/schema may not exist on the filesystem, but the table metadata
+            // may still exist in the metastore (e.g. Hive/DLF). This can happen when schema
+            // files are deleted or corrupted while the metastore entry remains.
+            // Try to clean up the metastore entry via dropTableImpl.
+            try {
+                dropTableImpl(identifier, Collections.emptyList());
                 return;
+            } catch (Exception suppressed) {
+                // dropTableImpl also failed, the table truly doesn't exist anywhere
+                if (ignoreIfNotExists) {
+                    return;
+                }
+                throw new TableNotExistException(identifier);
             }
-            throw new TableNotExistException(identifier);
         }
 
         dropTableImpl(identifier, new ArrayList<>(externalPaths));
