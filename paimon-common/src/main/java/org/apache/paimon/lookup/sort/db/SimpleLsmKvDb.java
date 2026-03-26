@@ -42,6 +42,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 
 /**
  * A simple LSM-Tree based KV database built on top of {@link SortLookupStoreFactory}.
@@ -92,6 +93,7 @@ public class SimpleLsmKvDb implements Closeable {
     static final long PER_ENTRY_OVERHEAD = 160;
 
     private final File dataDirectory;
+    private final String uuid;
     private final SortLookupStoreFactory storeFactory;
     private final Comparator<MemorySlice> keyComparator;
     private final long memTableFlushThreshold;
@@ -126,6 +128,7 @@ public class SimpleLsmKvDb implements Closeable {
             int level0FileNumCompactTrigger,
             int sizeRatio) {
         this.dataDirectory = dataDirectory;
+        this.uuid = UUID.randomUUID().toString();
         this.storeFactory = storeFactory;
         this.keyComparator = keyComparator;
         this.memTableFlushThreshold = memTableFlushThreshold;
@@ -540,7 +543,7 @@ public class SimpleLsmKvDb implements Closeable {
 
     private File newSstFile() {
         long sequence = fileSequence++;
-        return new File(dataDirectory, String.format("sst-%06d.db", sequence));
+        return new File(dataDirectory, String.format("sst-%s-%06d.db", uuid, sequence));
     }
 
     private void ensureOpen() {
