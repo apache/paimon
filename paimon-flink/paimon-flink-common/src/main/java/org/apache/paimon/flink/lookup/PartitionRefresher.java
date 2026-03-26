@@ -26,7 +26,6 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Pair;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +51,7 @@ public class PartitionRefresher implements Closeable {
 
     private final boolean partitionRefreshAsync;
     private final String tableName;
-
+    private File path;
     private ExecutorService partitionRefreshExecutor;
     private AtomicReference<LookupTable> pendingLookupTable;
     private AtomicReference<Exception> partitionRefreshException;
@@ -95,6 +94,7 @@ public class PartitionRefresher implements Closeable {
             List<BinaryRow> newPartitions,
             @Nullable Predicate partitionFilter,
             LookupTable lookupTable,
+            String tempDirectory,
             @Nullable Filter<InternalRow> cacheRowFilter)
             throws Exception {
         if (partitionRefreshAsync) {
@@ -102,6 +102,7 @@ public class PartitionRefresher implements Closeable {
                     newPartitions,
                     partitionFilter,
                     ((FullCacheLookupTable) lookupTable).context,
+                    tempDirectory,
                     cacheRowFilter);
         } else {
             syncPartitionRefresh(newPartitions, partitionFilter, lookupTable);
@@ -127,6 +128,7 @@ public class PartitionRefresher implements Closeable {
             List<BinaryRow> newPartitions,
             @Nullable Predicate partitionFilter,
             FullCacheLookupTable.Context context,
+            String tempDirectory,
             @Nullable Filter<InternalRow> cacheRowFilter) {
 
         LOG.info(
@@ -137,10 +139,7 @@ public class PartitionRefresher implements Closeable {
                 () -> {
                     File newPath = null;
                     try {
-                        newPath =
-                                new File(
-                                        context.tempPath.getParent(),
-                                        "lookup-" + UUID.randomUUID());
+                        newPath = new File(tempDirectory, "lookup-" + UUID.randomUUID());
                         if (!newPath.mkdirs()) {
                             throw new RuntimeException("Failed to create dir: " + newPath);
                         }
@@ -175,8 +174,7 @@ public class PartitionRefresher implements Closeable {
      *     switch is needed
      */
     @Nullable
-    public Pair<LookupTable, File> getNewLookupTable(List<BinaryRow> newPartitions)
-            throws Exception {
+    public LookupTable getNewLookupTable(List<BinaryRow> newPartitions) throws Exception {
         if (!partitionRefreshAsync) {
             return null;
         }
@@ -196,9 +194,9 @@ public class PartitionRefresher implements Closeable {
         }
 
         this.currentPartitions = newPartitions;
-        File tempPath = ((FullCacheLookupTable) newTable).context.tempPath;
+        this.path = ((FullCacheLookupTable) newTable).context.tempPath;
         LOG.info("Switched to new lookup table for table {} with new partitions.", tableName);
-        return Pair.of(newTable, tempPath);
+        return newTable;
     }
 
     /** Close partition refresh resources. */
@@ -217,5 +215,9 @@ public class PartitionRefresher implements Closeable {
 
     public boolean isPartitionRefreshAsync() {
         return partitionRefreshAsync;
+    }
+
+    public File path() {
+        return path;
     }
 }

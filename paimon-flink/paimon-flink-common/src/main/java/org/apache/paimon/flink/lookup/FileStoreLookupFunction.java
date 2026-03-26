@@ -35,7 +35,6 @@ import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -343,12 +342,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         // 2. check if async partition refresh has completed, and switch if so
         if (partitionRefresher != null && partitionRefresher.isPartitionRefreshAsync()) {
-            Pair<LookupTable, File> result =
+            LookupTable newLookupTable =
                     partitionRefresher.getNewLookupTable(partitionLoader.partitions());
-            if (result != null) {
+            if (newLookupTable != null) {
                 lookupTable.close();
-                lookupTable = result.getLeft();
-                path = result.getRight();
+                lookupTable = newLookupTable;
+                path = partitionRefresher.path();
             }
         }
 
@@ -366,6 +365,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         partitions,
                         partitionLoader.createSpecificPartFilter(),
                         lookupTable,
+                        getTmpDirectory(functionContext),
                         cacheRowFilter);
                 nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
                 return;
