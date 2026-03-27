@@ -68,6 +68,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_FULL_LOAD_THRESHOLD;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_REFRESH_TIME_PERIODS_BLACKLIST;
 import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
@@ -93,7 +94,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private final List<InternalRow.FieldGetter> projectFieldsGetters;
 
     private transient File path;
+    private transient String tmpDirectory;
     private transient LookupTable lookupTable;
+
+    // partition refresh
+    @Nullable private transient PartitionRefresher partitionRefresher;
 
     // interval of refreshing lookup table
     private transient Duration refreshInterval;
@@ -161,7 +166,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public void open(FunctionContext context) throws Exception {
         this.functionContext = context;
-        String tmpDirectory = getTmpDirectory(context);
+        this.tmpDirectory = getTmpDirectory(context);
         open(tmpDirectory);
     }
 
@@ -236,6 +241,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 lookupTable.specifyPartitions(
                         partitions, partitionLoader.createSpecificPartFilter());
             }
+            if (partitionLoader instanceof DynamicPartitionLoader) {
+                // Initialize partition refresher
+                this.partitionRefresher =
+                        new PartitionRefresher(
+                                options.get(LOOKUP_DYNAMIC_PARTITION_REFRESH_ASYNC)
+                                        && lookupTable instanceof FullCacheLookupTable,
+                                table.name(),
+                                this.tmpDirectory,
+                                partitionLoader.partitions());
+            }
         }
 
         if (cacheRowFilter != null) {
@@ -271,13 +286,16 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             if (partitionLoader == null) {
                 return lookupInternal(key);
             }
-
-            if (partitionLoader.partitions().isEmpty()) {
+            List<BinaryRow> partitions =
+                    partitionRefresher != null
+                            ? partitionRefresher.currentPartitions()
+                            : partitionLoader.partitions();
+            if (partitions.isEmpty()) {
                 return Collections.emptyList();
             }
 
             List<RowData> rows = new ArrayList<>();
-            for (BinaryRow partition : partitionLoader.partitions()) {
+            for (BinaryRow partition : partitions) {
                 rows.addAll(lookupInternal(JoinedRow.join(key, partition)));
             }
             return rows;
@@ -324,7 +342,18 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             return;
         }
 
-        // 2. refresh dynamic partition
+        // 2. check if async partition refresh has completed, and switch if so
+        if (partitionRefresher != null && partitionRefresher.isPartitionRefreshAsync()) {
+            LookupTable newLookupTable =
+                    partitionRefresher.getNewLookupTable(partitionLoader.partitions());
+            if (newLookupTable != null) {
+                lookupTable.close();
+                lookupTable = newLookupTable;
+                path = partitionRefresher.path();
+            }
+        }
+
+        // 3. refresh dynamic partition
         if (partitionLoader != null) {
             boolean partitionChanged = partitionLoader.checkRefresh();
             List<BinaryRow> partitions = partitionLoader.partitions();
@@ -334,18 +363,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             }
 
             if (partitionChanged) {
-                // reopen with latest partition
-                lookupTable.specifyPartitions(
-                        partitionLoader.partitions(), partitionLoader.createSpecificPartFilter());
-                lookupTable.close();
-                lookupTable.open();
+                partitionRefresher.startRefresh(
+                        partitions,
+                        partitionLoader.createSpecificPartFilter(),
+                        lookupTable,
+                        cacheRowFilter);
                 nextRefreshTime = System.currentTimeMillis() + refreshInterval.toMillis();
-                // no need to refresh the lookup table because it is reopened
                 return;
             }
         }
 
-        // 3. refresh lookup table
+        // 4. refresh lookup table
         if (shouldRefreshLookupTable()) {
             // Check if we should do full load (close and reopen table) instead of incremental
             // refresh
@@ -415,6 +443,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     @Override
     public void close() throws IOException {
+        if (partitionRefresher != null) {
+            partitionRefresher.close();
+        }
+
         if (lookupTable != null) {
             lookupTable.close();
             lookupTable = null;

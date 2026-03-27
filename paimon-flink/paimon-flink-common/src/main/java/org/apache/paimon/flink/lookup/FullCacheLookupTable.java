@@ -414,5 +414,16 @@ public abstract class FullCacheLookupTable implements LookupTable {
                     joinKey,
                     requiredCachedBucketIds);
         }
+
+        public Context copy(File newTempPath) {
+            return new Context(
+                    table.wrapped(),
+                    projection,
+                    tablePredicate,
+                    projectedPredicate,
+                    newTempPath,
+                    joinKey,
+                    requiredCachedBucketIds);
+        }
     }
 }
