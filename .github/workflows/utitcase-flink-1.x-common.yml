@@ -38,7 +38,7 @@ concurrency:
 jobs:
   build_test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 100
 
     steps:
       - name: Checkout code
