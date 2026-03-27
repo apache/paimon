@@ -206,7 +206,8 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
 
       // rename branch
       checkAnswer(
-        sql("CALL sys.rename_branch(table => 'test.T', from_branch => 'old_branch', to_branch => 'new_branch')"),
+        sql(
+          "CALL sys.rename_branch(table => 'test.T', from_branch => 'old_branch', to_branch => 'new_branch')"),
         Row(true) :: Nil)
 
       // verify old branch no longer exists and new branch exists
