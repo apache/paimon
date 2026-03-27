@@ -597,6 +597,7 @@ class DataEvolutionSplitRead(SplitRead):
         # Initialize offsets
         row_offsets = [-1] * len(all_read_fields)
         field_offsets = [-1] * len(all_read_fields)
+        schema_pos = {f.id: p for p, f in enumerate(self.table.fields)}
 
         for i, bunch in enumerate(fields_files):
             first_file = bunch.files()[0]
@@ -623,7 +624,6 @@ class DataEvolutionSplitRead(SplitRead):
             if not read_fields:
                 file_record_readers[i] = None
             else:
-                schema_pos = {f.id: p for p, f in enumerate(self.table.fields)}
                 read_fields.sort(key=lambda f: schema_pos.get(f.id, float('inf')))
                 id_to_pos = {f.id: p for p, f in enumerate(read_fields)}
                 for j in range(len(read_field_index)):
