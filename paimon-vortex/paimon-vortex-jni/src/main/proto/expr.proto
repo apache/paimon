@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright the Vortex contributors
+
+syntax = "proto3";
+
+package vortex.expr;
+
+import "scalar.proto";
+import "dtype.proto";
+
+option java_package = "dev.vortex.proto";
+option java_outer_classname = "ExprProtos";
+
+message Expr {
+  string id = 1;
+  repeated Expr children = 2;
+  optional bytes metadata = 3;
+}
+
+message AggregateFn {
+  string id = 1;
+  optional bytes metadata = 2;
+}
+
+message LiteralOpts {
+  vortex.scalar.Scalar value = 1;
+}
+
+message PackOpts {
+  repeated string paths = 1;
+  bool nullable = 2;
+}
+
+message GetItemOpts {
+  string path = 1;
+}
+
+message BinaryOpts {
+  BinaryOp op = 1;
+
+  enum BinaryOp {
+    Eq = 0;
+    NotEq = 1;
+    Gt = 2;
+    Gte = 3;
+    Lt = 4;
+    Lte = 5;
+    And = 6;
+    Or = 7;
+    Add = 8;
+    Sub = 9;
+    Mul = 10;
+    Div = 11;
+  }
+}
+
+message BetweenOpts {
+  bool lower_strict = 1;
+  bool upper_strict = 2;
+}
+
+message LikeOpts {
+  bool negated = 1;
+  bool case_insensitive = 2;
+}
+
+message CastOpts {
+  vortex.dtype.DType target = 1;
+}
+
+message FieldNames {
+  repeated string names = 1;
+}
+
+message SelectOpts {
+  oneof opts {
+    FieldNames include = 1;
+    FieldNames exclude = 2;
+  }
+}
+
+message CaseWhenOpts {
+  uint32 num_children = 1;
+}

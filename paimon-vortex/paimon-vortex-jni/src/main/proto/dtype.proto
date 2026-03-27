@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: Copyright the Vortex contributors
+
+syntax = "proto3";
+
+package vortex.dtype;
+
+option java_package = "dev.vortex.proto";
+option java_outer_classname = "DTypeProtos";
+
+enum PType {
+  U8 = 0;
+  U16 = 1;
+  U32 = 2;
+  U64 = 3;
+  I8 = 4;
+  I16 = 5;
+  I32 = 6;
+  I64 = 7;
+  F16 = 8;
+  F32 = 9;
+  F64 = 10;
+}
+
+message Null {}
+
+message Bool {
+  bool nullable = 1;
+}
+
+message Primitive {
+  PType type = 1;
+  bool nullable = 2;
+}
+
+message Decimal {
+  uint32 precision = 1;
+  int32 scale = 2;
+  bool nullable = 3;
+}
+
+message Utf8 {
+  bool nullable = 1;
+}
+
+message Binary {
+  bool nullable = 1;
+}
+
+message Struct {
+  repeated string names = 1;
+  repeated DType dtypes = 2;
+  bool nullable = 3;
+}
+
+message List {
+  DType element_type = 1;
+  bool nullable = 2;
+}
+
+message FixedSizeList {
+  DType element_type = 1;
+  uint32 size = 2;
+  bool nullable = 3;
+}
+
+message Extension {
+  string id = 1;
+  DType storage_dtype = 2;
+  optional bytes metadata = 3;
+}
+
+message Variant {
+  bool nullable = 1;
+}
+
+message DType {
+  oneof dtype_type {
+    Null null = 1;
+    Bool bool = 2;
+    Primitive primitive = 3;
+    Decimal decimal = 4;
+    Utf8 utf8 = 5;
+    Binary binary = 6;
+    Struct struct = 7;
+    List list = 8;
+    Extension extension = 9;
+    FixedSizeList fixed_size_list = 10;
+    Variant variant = 11;
+  }
+}
+
+message Field {
+  oneof field_type {
+    string name = 1;
+  }
+}
+
+message FieldPath {
+  repeated Field path = 1;
+}

@@ -1,0 +1,72 @@
+################################################################################
+#  Licensed to the Apache Software Foundation (ASF) under one
+#  or more contributor license agreements.  See the NOTICE file
+#  distributed with this work for additional information
+#  regarding copyright ownership.  The ASF licenses this file
+#  to you under the Apache License, Version 2.0 (the
+#  "License"); you may not use this file except in compliance
+#  with the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+name: UTCase Vortex
+
+on:
+  push:
+    paths:
+      - 'paimon-vortex/**'
+  pull_request:
+    paths:
+      - 'paimon-vortex/**'
+
+env:
+  JDK_VERSION: 8
+  MAVEN_OPTS: -Dmaven.wagon.httpconnectionManager.ttlSeconds=30 -Dmaven.wagon.http.retryHandler.requestSentEnabled=true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  vortex_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Clone and build Vortex native library
+        run: |
+          git clone --depth 1 https://github.com/spiraldb/vortex.git ${RUNNER_TEMP}/vortex
+          cd ${RUNNER_TEMP}/vortex
+          cargo build --package vortex-jni --release
+
+      - name: Copy native library to resources
+        run: |
+          RESOURCE_DIR=paimon-vortex/paimon-vortex-jni/src/main/resources/native/linux-amd64
+          mkdir -p ${RESOURCE_DIR}
+          cp ${RUNNER_TEMP}/vortex/target/release/libvortex_jni.so ${RESOURCE_DIR}/
+
+      - name: Build and test Vortex modules
+        timeout-minutes: 30
+        run: |
+          mvn -T 2C -B -ntp clean install -DskipTests
+          mvn -B -ntp verify -pl paimon-vortex/paimon-vortex-jni,paimon-vortex/paimon-vortex-format -Dcheckstyle.skip=true -Dspotless.check.skip=true
+        env:
+          MAVEN_OPTS: -Xmx4096m
