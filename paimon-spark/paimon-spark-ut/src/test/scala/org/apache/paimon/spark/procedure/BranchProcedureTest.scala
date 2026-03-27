@@ -184,45 +184,47 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
 
   test("Paimon Procedure: rename branch") {
     withTable("T") {
-      sql("""
-            |CREATE TABLE T (a INT, b STRING)
-            |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-            |""".stripMargin)
+      sql("CREATE TABLE T (a INT, b STRING) TBLPROPERTIES ('primary-key'='a', 'bucket'='3')")
 
-      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b')")
 
-      // create a branch
-      sql("CALL sys.create_branch(table => 'test.T', branch => 'old_branch')")
+      // create tag
+      sql("CALL sys.create_tag(table => 'test.T', tag => 'tag1', snapshot => 1)")
+
+      // create branch from tag
+      sql("CALL sys.create_branch(table => 'test.T', branch => 'branch1', tag => 'tag1')")
+
+      // verify branch exists
       val table = loadTable("T")
-      val branchManager = table.branchManager()
-      assert(branchManager.branchExists("old_branch"))
-      assert(!branchManager.branchExists("new_branch"))
-
-      // query from branch
-      checkAnswer(
-        sql("SELECT * FROM `T$branch_old_branch` ORDER BY a"),
-        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil
-      )
+      assert(table.branchManager().branchExists("branch1"))
 
       // rename branch
       checkAnswer(
-        sql(
-          "CALL sys.rename_branch(table => 'test.T', from_branch => 'old_branch', to_branch => 'new_branch')"),
-        Row(true) :: Nil)
-
-      // verify old branch no longer exists and new branch exists
-      assert(!branchManager.branchExists("old_branch"))
-      assert(branchManager.branchExists("new_branch"))
-
-      // query from renamed branch
-      checkAnswer(
-        sql("SELECT * FROM `T$branch_new_branch` ORDER BY a"),
-        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil
+        sql("CALL sys.rename_branch(table => 'test.T', from_branch => 'branch1', to_branch => 'branch2')"),
+        Row(true) :: Nil
       )
 
-      // old branch should not be accessible
+      // verify old branch does not exist
+      assert(!table.branchManager().branchExists("branch1"))
+
+      // verify new branch exists
+      assert(table.branchManager().branchExists("branch2"))
+
+      // verify data in renamed branch
+      checkAnswer(
+        sql("SELECT * FROM `T$branch_branch2` ORDER BY a"),
+        Row(1, "a") :: Row(2, "b") :: Nil
+      )
+
+      // rename non-existent branch should fail
       intercept[Exception] {
-        sql("SELECT * FROM `T$branch_old_branch` ORDER BY a")
+        sql("CALL sys.rename_branch(table => 'test.T', from_branch => 'nonexistent', to_branch => 'new_branch')")
+      }
+
+      // rename to existing branch should fail
+      sql("CALL sys.create_branch(table => 'test.T', branch => 'branch3')")
+      intercept[Exception] {
+        sql("CALL sys.rename_branch(table => 'test.T', from_branch => 'branch2', to_branch => 'branch3')")
       }
     }
   }

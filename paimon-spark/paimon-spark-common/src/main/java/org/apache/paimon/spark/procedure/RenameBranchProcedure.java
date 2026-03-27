@@ -18,8 +18,6 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.spark.catalog.WithPaimonCatalog;
-
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -73,11 +71,6 @@ public class RenameBranchProcedure extends BaseProcedure {
                             InternalRow outputRow = newInternalRow(true);
                             return new InternalRow[] {outputRow};
                         });
-        ((WithPaimonCatalog) tableCatalog())
-                .paimonCatalog()
-                .invalidateTable(
-                        new org.apache.paimon.catalog.Identifier(
-                                tableIdent.namespace()[0], tableIdent.name(), toBranch));
         return result;
     }
 
