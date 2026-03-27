@@ -558,6 +558,14 @@ class DataEvolutionTest(unittest.TestCase):
         }, schema=simple_pa_schema)
         self.assertEqual(actual, expect)
 
+        read_builder2 = table.new_read_builder()
+        read_builder2.with_projection(['f2', 'f0', 'f1'])
+        actual2 = read_builder2.new_read().to_arrow(
+            read_builder2.new_scan().plan().splits())
+        self.assertEqual(actual2.column('f0').to_pylist(), [2] * num_rows)
+        self.assertEqual(actual2.column('f1').to_pylist(), ['x'] * num_rows)
+        self.assertEqual(actual2.column('f2').to_pylist(), ['y'] * num_rows)
+
     def test_only_some_columns(self):
         simple_pa_schema = pa.schema([
             ('f0', pa.int32()),
