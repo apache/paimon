@@ -617,13 +617,19 @@ class DataEvolutionSplitRead(SplitRead):
                     if read_field_id == field_id:
                         if row_offsets[j] == -1:
                             row_offsets[j] = i
-                            field_offsets[j] = len(read_fields)
                             read_fields.append(all_read_fields[j])
                         break
 
             if not read_fields:
                 file_record_readers[i] = None
             else:
+                schema_pos = {f.id: p for p, f in enumerate(self.table.fields)}
+                read_fields.sort(key=lambda f: schema_pos.get(f.id, float('inf')))
+                id_to_pos = {f.id: p for p, f in enumerate(read_fields)}
+                for j in range(len(read_field_index)):
+                    if row_offsets[j] == i:
+                        field_offsets[j] = id_to_pos[read_field_index[j]]
+
                 read_field_names = self._remove_partition_fields(read_fields)
                 table_fields = self.read_fields
                 self.read_fields = read_fields  # create reader based on read_fields
