@@ -474,6 +474,6 @@ class FuseLocalFileIO(LocalFileIO):
         return super()._to_file(self._translate(path))
 
     def _translate(self, path: str) -> str:
-        if path.startswith(self.path):
+        if path == self.path or path.startswith(self.path + "/"):
             return self.fuse_path + path[len(self.path):]
         return path

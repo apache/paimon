@@ -276,6 +276,55 @@ class TestFuseLocalPath(unittest.TestCase):
         _ = catalog.file_io_for_data("oss://catalog/db1/table1", identifier)
         catalog.file_io_from_options.assert_called_once()
 
+    # ========== Invalid Mode Tests ==========
+
+    def test_resolve_invalid_mode_raises(self):
+        """Test that an invalid mode raises ValueError."""
+        catalog = self._create_catalog_with_fuse(mode="invalid")
+
+        with self.assertRaises(ValueError) as context:
+            catalog._resolve_fuse_local_path("oss://catalog/db1/table1")
+
+        self.assertIn("Invalid fuse.local-path.mode", str(context.exception))
+        self.assertIn("invalid", str(context.exception))
+
+    # ========== Raw Mode Validation Tests ==========
+
+    def test_validation_raw_mode_strict_raises_on_failure(self):
+        """Test strict validation in raw mode raises exception on failure."""
+        catalog = self._create_catalog_with_fuse(validation_mode="strict", mode="raw")
+
+        mock_db = MagicMock()
+        mock_db.location = "oss://catalog/default"
+        catalog.rest_api.get_database.return_value = mock_db
+
+        with patch('pypaimon.catalog.rest.rest_catalog.LocalFileIO') as mock_local_io:
+            mock_instance = MagicMock()
+            mock_instance.exists.return_value = False
+            mock_local_io.return_value = mock_instance
+
+            with self.assertRaises(ValueError) as context:
+                catalog._validate_fuse_path()
+
+            self.assertIn("FUSE local path validation failed", str(context.exception))
+
+    def test_validation_raw_mode_passes_when_local_exists(self):
+        """Test validation passes in raw mode when local path exists."""
+        catalog = self._create_catalog_with_fuse(validation_mode="strict", mode="raw")
+
+        mock_db = MagicMock()
+        mock_db.location = "oss://catalog/default"
+        catalog.rest_api.get_database.return_value = mock_db
+
+        with patch('pypaimon.catalog.rest.rest_catalog.LocalFileIO') as mock_local_io:
+            mock_instance = MagicMock()
+            mock_instance.exists.return_value = True
+            mock_local_io.return_value = mock_instance
+
+            catalog._validate_fuse_path()
+
+            self.assertTrue(catalog._fuse_validation_state)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -461,16 +461,22 @@ class RESTCatalog(Catalog):
             if obj:
                 return f"{root}/{db}/{obj}"
             return f"{root}/{db}"
-
-        # raw mode: use URI path segments directly
-        uri = urlparse(original_path)
-        path_part = uri.path.lstrip('/')
-        if not uri.scheme:
-            # No scheme: path is "catalog/db/table", skip first segment (catalog)
-            segments = path_part.split('/')
-            if len(segments) > 1:
-                path_part = '/'.join(segments[1:])
-        return f"{root}/{path_part}"
+        elif self.fuse_local_path_mode == "raw":
+            # raw mode: use URI path segments directly
+            uri = urlparse(original_path)
+            path_part = uri.path.lstrip('/')
+            if not uri.scheme:
+                # No scheme means path like "catalog/db/table",
+                # skip the first segment (catalog name) to align with scheme-based paths
+                segments = path_part.split('/')
+                if len(segments) > 1:
+                    path_part = '/'.join(segments[1:])
+            return f"{root}/{path_part}"
+        else:
+            raise ValueError(
+                f"Invalid fuse.local-path.mode: '{self.fuse_local_path_mode}'. "
+                f"Supported modes are 'pvfs' and 'raw'."
+            )
 
     def _validate_fuse_path(self) -> None:
         """
@@ -491,7 +497,7 @@ class RESTCatalog(Catalog):
             self._fuse_validation_state = True
             return
 
-        expected_local = self._resolve_fuse_local_path(remote_location, Identifier.create("default", ""))
+        expected_local = self._resolve_fuse_local_path(remote_location, Identifier.create("default", None))
         local_file_io = LocalFileIO(expected_local, self.context.options)
 
         # Only validate if local path exists, handle based on validation mode
