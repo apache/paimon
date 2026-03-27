@@ -181,4 +181,48 @@ class BranchProcedureTest extends PaimonSparkTestBase with StreamTest {
         Seq(Row("20240725", "apple", 5), Row("20240725", "banana", 7)))
     }
   }
+
+  test("Paimon Procedure: rename branch") {
+    withTable("T") {
+      sql("""
+            |CREATE TABLE T (a INT, b STRING)
+            |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+            |""".stripMargin)
+
+      sql("INSERT INTO T VALUES (1, 'a'), (2, 'b'), (3, 'c')")
+
+      // create a branch
+      sql("CALL sys.create_branch(table => 'test.T', branch => 'old_branch')")
+      val table = loadTable("T")
+      val branchManager = table.branchManager()
+      assert(branchManager.branchExists("old_branch"))
+      assert(!branchManager.branchExists("new_branch"))
+
+      // query from branch
+      checkAnswer(
+        sql("SELECT * FROM `T$branch_old_branch` ORDER BY a"),
+        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil
+      )
+
+      // rename branch
+      checkAnswer(
+        sql("CALL sys.rename_branch(table => 'test.T', from_branch => 'old_branch', to_branch => 'new_branch')"),
+        Row(true) :: Nil)
+
+      // verify old branch no longer exists and new branch exists
+      assert(!branchManager.branchExists("old_branch"))
+      assert(branchManager.branchExists("new_branch"))
+
+      // query from renamed branch
+      checkAnswer(
+        sql("SELECT * FROM `T$branch_new_branch` ORDER BY a"),
+        Row(1, "a") :: Row(2, "b") :: Row(3, "c") :: Nil
+      )
+
+      // old branch should not be accessible
+      intercept[Exception] {
+        sql("SELECT * FROM `T$branch_old_branch` ORDER BY a")
+      }
+    }
+  }
 }
