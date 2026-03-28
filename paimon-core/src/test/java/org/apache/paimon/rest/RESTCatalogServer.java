@@ -1836,43 +1836,45 @@ public class RESTCatalogServer {
                     response = new ListBranchesResponse(branches.isEmpty() ? null : branches);
                     return mockResponse(response, 200);
                 case "POST":
-                    if (resources.length == 10
-                            && "rename".equals(RESTUtil.decodeString(resources[9]))) {
-                        // Rename branch: /branches/{branch}/rename
-                        RenameBranchRequest requestBody =
-                                RESTApi.fromJson(data, RenameBranchRequest.class);
-                        String fromBranch = requestBody.fromBranch();
-                        String toBranch = requestBody.toBranch();
-                        table.renameBranch(fromBranch, toBranch);
-                        // Update store for renamed branch
-                        Identifier fromBranchIdentifier =
-                                new Identifier(
-                                        identifier.getDatabaseName(),
-                                        identifier.getTableName(),
-                                        fromBranch);
-                        Identifier toBranchIdentifier =
-                                new Identifier(
-                                        identifier.getDatabaseName(),
-                                        identifier.getTableName(),
-                                        toBranch);
-                        tableLatestSnapshotStore.put(
-                                toBranchIdentifier.getFullName(),
-                                tableLatestSnapshotStore.get(fromBranchIdentifier.getFullName()));
-                        tableMetadataStore.put(
-                                toBranchIdentifier.getFullName(),
-                                tableMetadataStore.get(fromBranchIdentifier.getFullName()));
-                        return new MockResponse().setResponseCode(200);
-                    } else if (resources.length == 6) {
+                    if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
-                        branchManager.fastForward(branch);
-                        branchIdentifier =
-                                new Identifier(
-                                        identifier.getDatabaseName(),
-                                        identifier.getTableName(),
-                                        branch);
-                        tableLatestSnapshotStore.put(
-                                identifier.getFullName(),
-                                tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        if ("rename".equals(resources[5])) {
+                            // Rename branch: /branches/{branch}/rename
+                            RenameBranchRequest requestBody =
+                                    RESTApi.fromJson(data, RenameBranchRequest.class);
+                            String fromBranch = requestBody.fromBranch();
+                            String toBranch = requestBody.toBranch();
+                            table.renameBranch(fromBranch, toBranch);
+                            // Update store for renamed branch
+                            Identifier fromBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            fromBranch);
+                            Identifier toBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            toBranch);
+                            tableLatestSnapshotStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableLatestSnapshotStore.get(
+                                            fromBranchIdentifier.getFullName()));
+                            tableMetadataStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableMetadataStore.get(fromBranchIdentifier.getFullName()));
+                        } else if ("forward".equals(resources[5])) {
+                            // Fast forward branch
+                            branchManager.fastForward(branch);
+                            branchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branch);
+                            tableLatestSnapshotStore.put(
+                                    identifier.getFullName(),
+                                    tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        }
                     } else {
                         CreateBranchRequest requestBody =
                                 RESTApi.fromJson(data, CreateBranchRequest.class);
