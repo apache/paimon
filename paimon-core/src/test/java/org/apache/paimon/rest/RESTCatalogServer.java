@@ -1836,8 +1836,8 @@ public class RESTCatalogServer {
                     response = new ListBranchesResponse(branches.isEmpty() ? null : branches);
                     return mockResponse(response, 200);
                 case "POST":
-                    if (resources.length == 7
-                            && "rename".equals(RESTUtil.decodeString(resources[6]))) {
+                    if (resources.length == 10
+                            && "rename".equals(RESTUtil.decodeString(resources[9]))) {
                         // Rename branch: /branches/{branch}/rename
                         RenameBranchRequest requestBody =
                                 RESTApi.fromJson(data, RenameBranchRequest.class);
