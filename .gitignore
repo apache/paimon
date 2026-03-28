@@ -43,3 +43,7 @@ paimon-python/dev/log
 ### Misc ###
 *.swp
 .cache
+
+### Vortex lib ###
+
+*libvortex_jni*
