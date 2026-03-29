@@ -65,11 +65,20 @@ public interface ClientPool<C, E extends Exception> {
                     continue;
                 }
                 try {
+                    client = ensureActiveClient(client);
                     return action.run(client);
                 } finally {
                     clients.addFirst(client);
                 }
             }
+        }
+
+        /**
+         * Validates that the client is still active before use. Subclasses should override this
+         * method to provide protocol-specific validation and reconnection logic.
+         */
+        protected C ensureActiveClient(C client) {
+            return client;
         }
 
         @Override
