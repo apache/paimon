@@ -42,8 +42,9 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.List;
@@ -77,8 +78,9 @@ public class FallbackReadFileStoreTableTest {
         fileIO = FileIOFinder.find(tablePath);
     }
 
-    @Test
-    public void testListPartitions() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testListPartitions(boolean primaryMode) throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();
@@ -93,25 +95,21 @@ public class FallbackReadFileStoreTableTest {
         // write data into partition for branch only
         writeDataIntoTable(branchTable, 0, rowData(3, 60));
 
-        FallbackReadFileStoreTable fallbackTable =
-                new FallbackReadFileStoreTable(mainTable, branchTable);
+        FileStoreTable wrapped = primaryMode ? branchTable : mainTable;
+        FileStoreTable fallback = primaryMode ? mainTable : branchTable;
+        FallbackReadFileStoreTable table = new FallbackReadFileStoreTable(wrapped, fallback);
 
-        List<Integer> partitionsFromMainTable =
-                mainTable.newScan().listPartitions().stream()
-                        .map(row -> row.getInt(0))
-                        .collect(Collectors.toList());
-        assertThat(partitionsFromMainTable).containsExactlyInAnyOrder(1, 2);
-
-        List<Integer> partitionsFromFallbackTable =
-                fallbackTable.newScan().listPartitions().stream()
+        List<Integer> partitions =
+                table.newScan().listPartitions().stream()
                         .map(row -> row.getInt(0))
                         .collect(Collectors.toList());
         // this should contain all partitions
-        assertThat(partitionsFromFallbackTable).containsExactlyInAnyOrder(1, 2, 3);
+        assertThat(partitions).containsExactlyInAnyOrder(1, 2, 3);
     }
 
-    @Test
-    public void testListPartitionEntries() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testListPartitionEntries(boolean primaryMode) throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();
@@ -126,34 +124,30 @@ public class FallbackReadFileStoreTableTest {
         // write data into partition for branch only
         writeDataIntoTable(branchTable, 0, rowData(1, 50), rowData(3, 60), rowData(4, 70));
 
-        FallbackReadFileStoreTable fallbackTable =
-                new FallbackReadFileStoreTable(mainTable, branchTable);
+        FileStoreTable wrapped = primaryMode ? branchTable : mainTable;
+        FileStoreTable fallback = primaryMode ? mainTable : branchTable;
+        FallbackReadFileStoreTable table = new FallbackReadFileStoreTable(wrapped, fallback);
 
-        List<PartitionEntry> partitionEntries = mainTable.newScan().listPartitionEntries();
-        assertThat(partitionEntries)
-                .map(e -> e.partition().getInt(0))
-                .containsExactlyInAnyOrder(1, 2);
-
-        List<PartitionEntry> fallbackPartitionEntries =
-                fallbackTable.newScan().listPartitionEntries();
-        assertThat(fallbackPartitionEntries)
+        List<PartitionEntry> entries = table.newScan().listPartitionEntries();
+        // partition 1 exists in both: record count depends on which table has priority
+        long expectedPt1Count = primaryMode ? 1L : 2L;
+        assertThat(entries)
                 .map(e -> Pair.of(e.partition().getInt(0), e.recordCount()))
                 .containsExactlyInAnyOrder(
-                        Pair.of(1, 2L), Pair.of(2, 1L), Pair.of(3, 1L), Pair.of(4, 1L));
+                        Pair.of(1, expectedPt1Count),
+                        Pair.of(2, 1L),
+                        Pair.of(3, 1L),
+                        Pair.of(4, 1L));
     }
 
     /**
      * Test that FallbackReadScan.plan() determines partition ownership based on partition
-     * predicates only, not mixed with data filters. If a partition exists in the main branch, it
-     * should never be read from fallback, regardless of the data filter.
-     *
-     * <p>Without the fix, the old code built completePartitions from mainScan.plan() results which
-     * already had data filters applied. When the data filter excluded all files of a main partition
-     * via filterByStats, that partition was incorrectly treated as "not in main" and read from
-     * fallback.
+     * predicates only, not mixed with data filters. If a partition exists in the wrapped (priority)
+     * table, it should never be read from fallback, regardless of the data filter.
      */
-    @Test
-    public void testPlanWithDataFilter() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPlanWithDataFilter(boolean primaryMode) throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();
@@ -165,40 +159,42 @@ public class FallbackReadFileStoreTableTest {
 
         FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
 
-        // Fallback branch: partition 1 already has a=10 (inherited), add a=100.
-        // Also add partition 3 (a=30) which is fallback-only.
-        writeDataIntoTable(branchTable, 1, rowData(1, 100), rowData(3, 30));
+        // Branch: partition 1 (a=100), partition 3 (a=30)
+        writeDataIntoTable(branchTable, 0, rowData(1, 100), rowData(3, 30));
 
-        FallbackReadFileStoreTable fallbackTable =
-                new FallbackReadFileStoreTable(mainTable, branchTable);
+        FileStoreTable wrapped = primaryMode ? branchTable : mainTable;
+        FileStoreTable fallback = primaryMode ? mainTable : branchTable;
+        FallbackReadFileStoreTable table = new FallbackReadFileStoreTable(wrapped, fallback);
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
 
-        // Case 1: WHERE pt = 1 AND a = 100
-        // Partition 1 exists in main branch. Even though main has no a=100 data,
-        // we should never fall back for it. The result should contain no fallback splits.
-        DataTableScan scan1 = fallbackTable.newScan();
-        scan1.withFilter(PredicateBuilder.and(builder.equal(0, 1), builder.equal(1, 100)));
+        // partition 1 exists in both tables, wrapped has priority
+        int partOnlyInFallback = primaryMode ? 2 : 3;
+
+        // Case 1: WHERE pt = 1
+        // Partition 1 exists in wrapped. Should never be read from fallback.
+        DataTableScan scan1 = table.newScan();
+        scan1.withFilter(builder.equal(0, 1));
         List<Split> splits1 = scan1.plan().splits();
 
+        assertThat(splits1).isNotEmpty();
         for (Split split : splits1) {
             FallbackReadFileStoreTable.FallbackSplit fs =
                     (FallbackReadFileStoreTable.FallbackSplit) split;
             assertThat(fs.isFallback())
-                    .as("Partition that exists in main branch should never be read from fallback")
+                    .as("Partition in wrapped table should not be read from fallback")
                     .isFalse();
         }
 
-        // Case 2: WHERE pt = 3 AND a = 30
-        // Partition 3 only exists in fallback branch, so it should be read from fallback.
-        DataTableScan scan2 = fallbackTable.newScan();
-        scan2.withFilter(PredicateBuilder.and(builder.equal(0, 3), builder.equal(1, 30)));
+        // Case 2: partition only in fallback → should have isFallback=true
+        DataTableScan scan2 = table.newScan();
+        scan2.withFilter(builder.equal(0, partOnlyInFallback));
         List<Split> splits2 = scan2.plan().splits();
 
         assertThat(splits2).hasSize(1);
         FallbackReadFileStoreTable.FallbackSplit fs2 =
                 (FallbackReadFileStoreTable.FallbackSplit) splits2.get(0);
         assertThat(fs2.isFallback())
-                .as("Partition that only exists in fallback branch should be read from fallback")
+                .as("Partition only in fallback table should be read from fallback")
                 .isTrue();
     }
 

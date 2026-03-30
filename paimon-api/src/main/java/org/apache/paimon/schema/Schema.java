@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
@@ -186,11 +187,11 @@ public class Schema {
 
     private List<String> normalizePrimaryKeys(List<String> primaryKeys) {
         if (options.containsKey(CoreOptions.PRIMARY_KEY.key())) {
-            if (!primaryKeys.isEmpty()) {
+            String pk = options.get(CoreOptions.PRIMARY_KEY.key());
+            if (!primaryKeys.isEmpty() && !StringUtils.isEmpty(pk)) {
                 throw new RuntimeException(
                         "Cannot define primary key on DDL and table options at the same time.");
             }
-            String pk = options.get(CoreOptions.PRIMARY_KEY.key());
             primaryKeys =
                     Arrays.stream(pk.split(","))
                             .map(String::trim)

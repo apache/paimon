@@ -715,6 +715,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                             branchName, fallbackBranch));
         }
 
+        String primaryBranch = coreOptions().toConfiguration().get(CoreOptions.SCAN_PRIMARY_BRANCH);
+        if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)
+                && branchName.equals(primaryBranch)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "can not delete the primary branch. "
+                                    + "branchName to be deleted is %s. you have set 'scan.primary-branch' = '%s'. "
+                                    + "you should reset 'scan.primary-branch' before deleting this branch.",
+                            branchName, primaryBranch));
+        }
+
         branchManager().dropBranch(branchName);
     }
 

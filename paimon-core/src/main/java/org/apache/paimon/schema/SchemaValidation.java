@@ -288,13 +288,33 @@ public class SchemaValidation {
 
     public static void validateFallbackBranch(SchemaManager schemaManager, TableSchema schema) {
         String fallbackBranch = schema.options().get(CoreOptions.SCAN_FALLBACK_BRANCH.key());
+        String primaryBranch = schema.options().get(CoreOptions.SCAN_PRIMARY_BRANCH.key());
+
+        if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)
+                && !StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Cannot set both '%s' and '%s' at the same time.",
+                            CoreOptions.SCAN_FALLBACK_BRANCH.key(),
+                            CoreOptions.SCAN_PRIMARY_BRANCH.key()));
+        }
+
         if (!StringUtils.isNullOrWhitespaceOnly(fallbackBranch)) {
             checkArgument(
                     schemaManager.copyWithBranch(fallbackBranch).latest().isPresent(),
-                    "Cannot set '%s' = '%s' because the branch '%s' isn't existed.",
+                    "Cannot set '%s' = '%s' because the branch '%s' does not exist.",
                     CoreOptions.SCAN_FALLBACK_BRANCH.key(),
                     fallbackBranch,
                     fallbackBranch);
+        }
+
+        if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
+            checkArgument(
+                    schemaManager.copyWithBranch(primaryBranch).latest().isPresent(),
+                    "Cannot set '%s' = '%s' because the branch '%s' isn't existed.",
+                    CoreOptions.SCAN_PRIMARY_BRANCH.key(),
+                    primaryBranch,
+                    primaryBranch);
         }
     }
 
