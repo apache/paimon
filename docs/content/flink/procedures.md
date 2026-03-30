@@ -933,5 +933,39 @@ All available procedures are listed below.
          CALL sys.drop_function(`function` => 'function_identifier')<br/>
       </td>
    </tr>
+   <tr>
+      <td>vector_search</td>
+      <td>
+         CALL [catalog.]sys.vector_search(<br/>
+            `table` => 'identifier',<br/>
+            vector_column => 'columnName',<br/>
+            query_vector => 'v1,v2,...',<br/>
+            top_k => topK,<br/>
+            projection => 'col1,col2',<br/>
+            options => 'key1=value1;key2=value2')<br/>
+      </td>
+      <td>
+         To perform vector similarity search on a table with a global vector index. Returns JSON-serialized rows. Arguments:
+            <li>table(required): the target table identifier.</li>
+            <li>vector_column(required): the name of the vector column to search.</li>
+            <li>query_vector(required): comma-separated float values representing the query vector, e.g. '1.0,2.0,3.0'.</li>
+            <li>top_k(required): the number of nearest neighbors to return.</li>
+            <li>projection(optional): comma-separated column names to include in the result. If omitted, all columns are returned.</li>
+            <li>options(optional): additional dynamic options of the table.</li>
+      </td>
+      <td>
+         CALL sys.vector_search(<br/>
+            `table` => 'default.T',<br/>
+            vector_column => 'embedding',<br/>
+            query_vector => '1.0,2.0,3.0',<br/>
+            top_k => 5)<br/><br/>
+         CALL sys.vector_search(<br/>
+            `table` => 'default.T',<br/>
+            vector_column => 'embedding',<br/>
+            query_vector => '1.0,2.0,3.0',<br/>
+            top_k => 5,<br/>
+            projection => 'id,name')
+      </td>
+   </tr>
    </tbody>
 </table>
