@@ -979,7 +979,7 @@ public class RESTApi {
      *     this table
      */
     public void renameBranch(Identifier identifier, String fromBranch, String toBranch) {
-        RenameBranchRequest request = new RenameBranchRequest(fromBranch, toBranch);
+        RenameBranchRequest request = new RenameBranchRequest(toBranch);
         client.post(
                 resourcePaths.renameBranch(
                         identifier.getDatabaseName(), identifier.getObjectName(), fromBranch),

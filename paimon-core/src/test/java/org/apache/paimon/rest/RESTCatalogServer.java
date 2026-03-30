@@ -1842,15 +1842,14 @@ public class RESTCatalogServer {
                             // Rename branch: /branches/{branch}/rename
                             RenameBranchRequest requestBody =
                                     RESTApi.fromJson(data, RenameBranchRequest.class);
-                            String fromBranch = requestBody.fromBranch();
                             String toBranch = requestBody.toBranch();
-                            table.renameBranch(fromBranch, toBranch);
+                            table.renameBranch(branch, toBranch);
                             // Update store for renamed branch
                             Identifier fromBranchIdentifier =
                                     new Identifier(
                                             identifier.getDatabaseName(),
                                             identifier.getTableName(),
-                                            fromBranch);
+                                            branch);
                             Identifier toBranchIdentifier =
                                     new Identifier(
                                             identifier.getDatabaseName(),

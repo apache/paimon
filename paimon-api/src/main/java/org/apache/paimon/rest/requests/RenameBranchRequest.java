@@ -29,26 +29,14 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class RenameBranchRequest implements RESTRequest {
 
-    private static final String FIELD_FROM_BRANCH = "fromBranch";
     private static final String FIELD_TO_BRANCH = "toBranch";
-
-    @JsonProperty(FIELD_FROM_BRANCH)
-    private final String fromBranch;
 
     @JsonProperty(FIELD_TO_BRANCH)
     private final String toBranch;
 
     @JsonCreator
-    public RenameBranchRequest(
-            @JsonProperty(FIELD_FROM_BRANCH) String fromBranch,
-            @JsonProperty(FIELD_TO_BRANCH) String toBranch) {
-        this.fromBranch = fromBranch;
+    public RenameBranchRequest(@JsonProperty(FIELD_TO_BRANCH) String toBranch) {
         this.toBranch = toBranch;
-    }
-
-    @JsonGetter(FIELD_FROM_BRANCH)
-    public String fromBranch() {
-        return fromBranch;
     }
 
     @JsonGetter(FIELD_TO_BRANCH)
