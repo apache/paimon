@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.expire;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 
 import java.io.Serializable;
@@ -56,6 +57,7 @@ public class DeletionReport implements Serializable {
         return report;
     }
 
+    @VisibleForTesting
     public long snapshotId() {
         return snapshotId;
     }

@@ -179,10 +179,12 @@ public class SnapshotExpireSink implements Sink<DeletionReport> {
                 task.execute(context);
             }
 
-            try {
-                context.snapshotManager().commitEarliestHint(endExclusiveId);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
+            if (endExclusiveId > 0) {
+                try {
+                    context.snapshotManager().commitEarliestHint(endExclusiveId);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             }
         }
 

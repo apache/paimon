@@ -32,6 +32,8 @@ import org.apache.paimon.options.ExpireConfig;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.ProcedureUtils;
 
+import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.slf4j.Logger;
@@ -49,10 +51,10 @@ import java.util.Map;
  * <p>This action supports both local and parallel execution modes:
  *
  * <ul>
- *   <li>Local mode: when {@code forceStartFlinkJob} is false and {@code parallelism <= 1}, executes
- *       locally via {@link #executeLocally()}
- *   <li>Parallel mode: when {@code forceStartFlinkJob} is true or {@code parallelism > 1}, uses
- *       Flink distributed execution for deletion
+ *   <li>Local mode: when {@code forceStartFlinkJob} is false, executes locally via {@link
+ *       #executeLocally()}
+ *   <li>Flink mode: when {@code forceStartFlinkJob} is true, uses Flink distributed execution for
+ *       deletion.
  * </ul>
  *
  * <p>In parallel mode:
@@ -108,12 +110,10 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
 
     @Override
     public void run() throws Exception {
-        if (forceStartFlinkJob || parallelism > 1) {
-            // Parallel mode: build custom multi-parallelism Flink pipeline
+        if (forceStartFlinkJob) {
+            // Flink mode: always build and submit a Flink job
             build();
-            if (!env.getTransformations().isEmpty()) {
-                execute(this.getClass().getSimpleName());
-            }
+            execute(this.getClass().getSimpleName());
         } else {
             // Default: ActionBase handles LocalAction → executeLocally()
             super.run();
@@ -151,15 +151,14 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
         // Plan the expiration
         ExpireSnapshotsPlan plan = planner.plan(expireConfig);
         if (plan.isEmpty()) {
-            LOG.info("No snapshots to expire, skipping Flink job submission.");
-            return;
+            LOG.info("No snapshots to expire.");
+        } else {
+            LOG.info(
+                    "Planning to expire {} snapshots, range=[{}, {})",
+                    plan.endExclusiveId() - plan.beginInclusiveId(),
+                    plan.beginInclusiveId(),
+                    plan.endExclusiveId());
         }
-
-        LOG.info(
-                "Planning to expire {} snapshots, range=[{}, {})",
-                plan.endExclusiveId() - plan.beginInclusiveId(),
-                plan.beginInclusiveId(),
-                plan.endExclusiveId());
 
         // Build worker phase
         DataStream<DeletionReport> reports = buildWorkerPhase(plan, identifier, expireConfig);
@@ -188,7 +187,10 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
                 plan.partitionTasksBySnapshotRange(parallelism);
 
         DataStreamSource<List<SnapshotExpireTask>> source =
-                env.fromCollection(partitionedGroups).setParallelism(1);
+                env.fromCollection(
+                                partitionedGroups,
+                                TypeInformation.of(new TypeHint<List<SnapshotExpireTask>>() {}))
+                        .setParallelism(1);
 
         return source.rebalance()
                 .flatMap(
@@ -200,7 +202,6 @@ public class ExpireSnapshotsAction extends ActionBase implements LocalAction {
                                 expireConfig.isChangelogDecoupled()))
                 // Use JavaTypeInfo to ensure proper Java serialization of DeletionReport,
                 // avoiding Kryo's FieldSerializer which cannot handle BinaryRow correctly.
-                // This approach is compatible with both Flink 1.x and 2.x.
                 .returns(new JavaTypeInfo<>(DeletionReport.class))
                 .setParallelism(parallelism)
                 .name("RangePartitionedExpire");

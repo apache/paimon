@@ -37,6 +37,8 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.runtime.testutils.MiniClusterResourceConfiguration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -99,10 +101,6 @@ public class ParallelExpireSnapshotsActionITCase extends ExpireSnapshotsTest {
                         store.newTagManager());
         ExpireSnapshotsPlan plan = planner.plan(config);
 
-        if (plan.isEmpty()) {
-            return 0;
-        }
-
         List<Snapshot> taggedSnapshots = plan.protectionSet().taggedSnapshots();
         Map<Long, Snapshot> snapshotCache = plan.snapshotCache();
         contextSupplier =
@@ -126,7 +124,10 @@ public class ParallelExpireSnapshotsActionITCase extends ExpireSnapshotsTest {
                     plan.partitionTasksBySnapshotRange(TEST_PARALLELISM);
 
             DataStreamSource<List<SnapshotExpireTask>> source =
-                    env.fromCollection(partitionedGroups).setParallelism(1);
+                    env.fromCollection(
+                                    partitionedGroups,
+                                    TypeInformation.of(new TypeHint<List<SnapshotExpireTask>>() {}))
+                            .setParallelism(1);
 
             DataStream<DeletionReport> reports =
                     source.rebalance()
@@ -283,6 +284,36 @@ public class ParallelExpireSnapshotsActionITCase extends ExpireSnapshotsTest {
         }
         assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
+    /**
+     * Tests that when there are no snapshots to expire, the Flink job still starts and completes
+     * successfully with an empty plan.
+     */
+    @Test
+    public void testEmptyPlanFlinkJobCompletes() throws Exception {
+        // Create a table with snapshots, but configure retention to keep all of them
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(3, allData, snapshotPositions);
+
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+
+        // Configure to retain more snapshots than exist → empty plan
+        ExpireConfig config =
+                ExpireConfig.builder()
+                        .snapshotRetainMin(latestSnapshotId + 1)
+                        .snapshotRetainMax(latestSnapshotId + 1)
+                        .build();
+
+        // Should complete without error even with empty plan
+        int expired = doExpire(config);
+        assertThat(expired).isEqualTo(0);
+
+        // All snapshots should still exist
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+        }
     }
 
     // ==================== Disabled Tests ====================

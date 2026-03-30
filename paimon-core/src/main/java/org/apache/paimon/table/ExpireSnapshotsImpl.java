@@ -91,64 +91,14 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     @Override
     public int expire() {
         snapshotDeletion.setChangelogDecoupled(expireConfig.isChangelogDecoupled());
-        int retainMax = expireConfig.getSnapshotRetainMax();
-        int retainMin = expireConfig.getSnapshotRetainMin();
-        int maxDeletes = expireConfig.getSnapshotMaxDeletes();
-        long olderThanMills =
-                System.currentTimeMillis() - expireConfig.getSnapshotTimeRetain().toMillis();
 
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        if (latestSnapshotId == null) {
-            // no snapshot, nothing to expire
+        ExpireRange range =
+                computeSnapshotExpireRange(expireConfig, snapshotManager, consumerManager);
+        if (range.isEmpty()) {
             return 0;
         }
 
-        Long earliest = snapshotManager.earliestSnapshotId();
-        if (earliest == null) {
-            return 0;
-        }
-
-        Preconditions.checkArgument(
-                retainMax >= retainMin,
-                String.format(
-                        "retainMax (%s) must not be less than retainMin (%s).",
-                        retainMax, retainMin));
-
-        // the min snapshot to retain from 'snapshot.num-retained.max'
-        // (the maximum number of snapshots to retain)
-        long min = Math.max(latestSnapshotId - retainMax + 1, earliest);
-
-        // the max exclusive snapshot to expire until
-        // protected by 'snapshot.num-retained.min'
-        // (the minimum number of completed snapshots to retain)
-        long maxExclusive = latestSnapshotId - retainMin + 1;
-
-        // the snapshot being read by the consumer cannot be deleted
-        if (!expireConfig.isConsumerChangelogOnly()) {
-            maxExclusive =
-                    Math.min(
-                            maxExclusive, consumerManager.minNextSnapshot().orElse(Long.MAX_VALUE));
-        }
-
-        // protected by 'snapshot.expire.limit'
-        // (the maximum number of snapshots allowed to expire at a time)
-        maxExclusive = Math.min(maxExclusive, earliest + maxDeletes);
-
-        for (long id = min; id < maxExclusive; id++) {
-            // Early exit the loop for 'snapshot.time-retained'
-            // (the maximum time of snapshots to retain)
-            try {
-                Snapshot snapshot = snapshotManager.tryGetSnapshot(id);
-                if (olderThanMills <= snapshot.timeMillis()) {
-                    return expireUntil(earliest, id);
-                }
-            } catch (FileNotFoundException e) {
-                // ignore
-                // snapshot may have been deleted by another process
-            }
-        }
-
-        return expireUntil(earliest, maxExclusive);
+        return expireUntil(range.earliestId, range.maxExclusive);
     }
 
     @VisibleForTesting
@@ -321,6 +271,95 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     @VisibleForTesting
     public SnapshotDeletion snapshotDeletion() {
         return snapshotDeletion;
+    }
+
+    /** Range boundaries for snapshot expiration. */
+    public static class ExpireRange {
+        private static final ExpireRange EMPTY = new ExpireRange(0, 0);
+
+        public final long earliestId;
+        public final long maxExclusive;
+
+        public ExpireRange(long earliestId, long maxExclusive) {
+            this.earliestId = earliestId;
+            this.maxExclusive = maxExclusive;
+        }
+
+        public static ExpireRange empty() {
+            return EMPTY;
+        }
+
+        public boolean isEmpty() {
+            return maxExclusive <= earliestId;
+        }
+    }
+
+    /** Compute the snapshot expire range, or {@link ExpireRange#empty()} if nothing to expire. */
+    public static ExpireRange computeSnapshotExpireRange(
+            ExpireConfig expireConfig,
+            SnapshotManager snapshotManager,
+            ConsumerManager consumerManager) {
+        int retainMax = expireConfig.getSnapshotRetainMax();
+        int retainMin = expireConfig.getSnapshotRetainMin();
+        int maxDeletes = expireConfig.getSnapshotMaxDeletes();
+        long olderThanMills =
+                System.currentTimeMillis() - expireConfig.getSnapshotTimeRetain().toMillis();
+
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        if (latestSnapshotId == null) {
+            // no snapshot, nothing to expire
+            return ExpireRange.empty();
+        }
+
+        Long earliest = snapshotManager.earliestSnapshotId();
+
+        if (earliest == null) {
+            return ExpireRange.empty();
+        }
+
+        Preconditions.checkArgument(
+                retainMax >= retainMin,
+                String.format(
+                        "retainMax (%s) must not be less than retainMin (%s).",
+                        retainMax, retainMin));
+
+        // the min snapshot to retain from 'snapshot.num-retained.max'
+        // (the maximum number of snapshots to retain)
+        long min = Math.max(latestSnapshotId - retainMax + 1, earliest);
+
+        // the max exclusive snapshot to expire until
+        // protected by 'snapshot.num-retained.min'
+        // (the minimum number of completed snapshots to retain)
+        long maxExclusive = latestSnapshotId - retainMin + 1;
+
+        // the snapshot being read by the consumer cannot be deleted
+        if (!expireConfig.isConsumerChangelogOnly()) {
+            maxExclusive =
+                    Math.min(
+                            maxExclusive, consumerManager.minNextSnapshot().orElse(Long.MAX_VALUE));
+        }
+
+        // protected by 'snapshot.expire.limit'
+        // (the maximum number of snapshots allowed to expire at a time)
+        maxExclusive = Math.min(maxExclusive, earliest + maxDeletes);
+
+        for (long id = min; id < maxExclusive; id++) {
+            // Early exit the loop for 'snapshot.time-retained'
+            // (the maximum time of snapshots to retain)
+            try {
+                Snapshot snapshot = snapshotManager.tryGetSnapshot(id);
+                if (olderThanMills <= snapshot.timeMillis()) {
+                    maxExclusive = id;
+                    break;
+                }
+            } catch (FileNotFoundException e) {
+                // ignore
+                // snapshot may have been deleted by another process
+            }
+        }
+
+        return new ExpireRange(earliest, maxExclusive);
     }
 
     /** Find the skipping tags in sortedTags for range of [beginInclusive, endExclusive). */

@@ -33,8 +33,8 @@ import java.util.Map;
  * <p>The plan organizes tasks into four groups for correct deletion order:
  *
  * <ul>
- *   <li>{@link #dataFileTasks()}: Phase 1a - Delete data files (can be parallelized)
- *   <li>{@link #changelogFileTasks()}: Phase 1b - Delete changelog files (can be parallelized)
+ *   <li>Phase 1a - Delete data files (can be parallelized)
+ *   <li>Phase 1b - Delete changelog files (can be parallelized)
  *   <li>{@link #manifestTasks()}: Phase 2a - Delete manifest files (serial)
  *   <li>{@link #snapshotFileTasks()}: Phase 2b - Delete snapshot metadata files (serial)
  * </ul>
@@ -49,7 +49,7 @@ public class ExpireSnapshotsPlan implements Serializable {
                     Collections.emptyList(),
                     Collections.emptyList(),
                     Collections.emptyList(),
-                    null,
+                    new ProtectionSet(Collections.emptyList(), null),
                     0,
                     0,
                     Collections.emptyMap());
@@ -93,16 +93,6 @@ public class ExpireSnapshotsPlan implements Serializable {
                 && changelogFileTasks.isEmpty()
                 && manifestTasks.isEmpty()
                 && snapshotFileTasks.isEmpty();
-    }
-
-    /** Get data file deletion tasks (Phase 1a). These can be executed in parallel. */
-    public List<SnapshotExpireTask> dataFileTasks() {
-        return dataFileTasks;
-    }
-
-    /** Get changelog file deletion tasks (Phase 1b). These can be executed in parallel. */
-    public List<SnapshotExpireTask> changelogFileTasks() {
-        return changelogFileTasks;
     }
 
     /** Get manifest deletion tasks (Phase 2a). These should be executed serially. */

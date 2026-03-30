@@ -19,12 +19,11 @@
 package org.apache.paimon.flink.expire;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.options.ExpireConfig;
+import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -44,8 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 
-import static org.apache.paimon.utils.SnapshotManager.findPreviousOrEqualSnapshot;
-import static org.apache.paimon.utils.SnapshotManager.findPreviousSnapshot;
+import static org.apache.paimon.table.ExpireSnapshotsImpl.findSkippingTags;
 
 /**
  * Planner for snapshot expiration. This class computes the expiration plan including:
@@ -100,78 +98,18 @@ public class ExpireSnapshotsPlanner {
      */
     public ExpireSnapshotsPlan plan(ExpireConfig config) {
         snapshotDeletion.setChangelogDecoupled(config.isChangelogDecoupled());
-        int retainMax = config.getSnapshotRetainMax();
-        int retainMin = config.getSnapshotRetainMin();
-        int maxDeletes = config.getSnapshotMaxDeletes();
-        long olderThanMills =
-                System.currentTimeMillis() - config.getSnapshotTimeRetain().toMillis();
 
-        // 1. Get snapshot range
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        if (latestSnapshotId == null) {
-            // no snapshot, nothing to expire
+        ExpireSnapshotsImpl.ExpireRange range =
+                ExpireSnapshotsImpl.computeSnapshotExpireRange(
+                        config, snapshotManager, consumerManager);
+        if (range.isEmpty()) {
             return ExpireSnapshotsPlan.empty();
         }
-
-        Long earliestId = snapshotManager.earliestSnapshotId();
-        if (earliestId == null) {
-            return ExpireSnapshotsPlan.empty();
-        }
-
-        Preconditions.checkArgument(
-                retainMax >= retainMin,
-                String.format(
-                        "retainMax (%s) must not be less than retainMin (%s).",
-                        retainMax, retainMin));
-
-        // the min snapshot to retain from 'snapshot.num-retained.max'
-        // (the maximum number of snapshots to retain)
-        long min = Math.max(latestSnapshotId - retainMax + 1, earliestId);
-
-        // the max exclusive snapshot to expire until
-        // protected by 'snapshot.num-retained.min'
-        // (the minimum number of completed snapshots to retain)
-        long endExclusiveId = latestSnapshotId - retainMin + 1;
-
-        // the snapshot being read by the consumer cannot be deleted
-        long consumerProtection = consumerManager.minNextSnapshot().orElse(Long.MAX_VALUE);
-        endExclusiveId = Math.min(endExclusiveId, consumerProtection);
-
-        // protected by 'snapshot.expire.limit'
-        // (the maximum number of snapshots allowed to expire at a time)
-        endExclusiveId = Math.min(endExclusiveId, earliestId + maxDeletes);
-
-        // collect all snapshots concurrently
-        Map<Long, Snapshot> snapshots = collectSnapshots(earliestId, endExclusiveId);
-
-        for (long id = min; id < endExclusiveId; id++) {
-            // Early exit the loop for 'snapshot.time-retained'
-            // (the maximum time of snapshots to retain)
-            Snapshot snapshot = snapshots.get(id);
-            if (snapshot != null && olderThanMills <= snapshot.timeMillis()) {
-                endExclusiveId = id;
-                break;
-            }
-        }
-
-        return plan(earliestId, endExclusiveId, config.isChangelogDecoupled(), snapshots);
-    }
-
-    @VisibleForTesting
-    public ExpireSnapshotsPlan plan(
-            long earliestId, long endExclusiveId, boolean changelogDecoupled) {
-        return plan(
-                earliestId,
-                endExclusiveId,
-                changelogDecoupled,
-                collectSnapshots(earliestId, endExclusiveId));
+        return plan(range.earliestId, range.maxExclusive, config.isChangelogDecoupled());
     }
 
     private ExpireSnapshotsPlan plan(
-            long earliestId,
-            long endExclusiveId,
-            boolean changelogDecoupled,
-            Map<Long, Snapshot> snapshots) {
+            long earliestId, long endExclusiveId, boolean changelogDecoupled) {
         // Boundary check
         if (endExclusiveId <= earliestId) {
             // No expire happens:
@@ -188,6 +126,7 @@ public class ExpireSnapshotsPlanner {
         }
 
         // find first snapshot to expire
+        Map<Long, Snapshot> snapshots = collectSnapshots(earliestId, endExclusiveId);
         long beginInclusiveId = earliestId;
         for (long id = endExclusiveId - 1; id >= earliestId; id--) {
             if (!snapshots.containsKey(id)) {
@@ -282,20 +221,6 @@ public class ExpireSnapshotsPlanner {
         }
 
         return new ProtectionSet(taggedSnapshots, manifestSkippingSet);
-    }
-
-    /** Find the skipping tags in sortedTags for range of [beginInclusive, endExclusive). */
-    public static List<Snapshot> findSkippingTags(
-            List<Snapshot> sortedTags, long beginInclusive, long endExclusive) {
-        List<Snapshot> overlappedSnapshots = new ArrayList<>();
-        int right = findPreviousSnapshot(sortedTags, endExclusive);
-        if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualSnapshot(sortedTags, beginInclusive), 0);
-            for (int i = left; i <= right; i++) {
-                overlappedSnapshots.add(sortedTags.get(i));
-            }
-        }
-        return overlappedSnapshots;
     }
 
     /** Concurrently collect all snapshots in range [earliestId, endExclusiveId]. */
