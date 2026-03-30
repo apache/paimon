@@ -1536,7 +1536,8 @@ class DataEvolutionTest(unittest.TestCase):
         self.assertEqual(full.num_rows, 10)
 
         # Filter by _ROW_ID using predicate — triggers row_ranges pushdown in Vortex
-        pb = rb.new_predicate_builder()
+        rb_with_rowid = table.new_read_builder().with_projection(['f0', 'f1', '_ROW_ID'])
+        pb = rb_with_rowid.new_predicate_builder()
         rb_filtered = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 3))
         filtered = rb_filtered.new_read().to_arrow(rb_filtered.new_scan().plan().splits())
         self.assertEqual(filtered.num_rows, 1)

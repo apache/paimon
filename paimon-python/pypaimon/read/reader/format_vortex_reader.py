@@ -23,6 +23,8 @@ from pyarrow import RecordBatch
 
 from pypaimon.common.file_io import FileIO
 from pypaimon.read.reader.iface.record_batch_reader import RecordBatchReader
+from pypaimon.schema.data_types import DataField, PyarrowFieldParser
+from pypaimon.table.special_fields import SpecialFields
 
 
 class FormatVortexReader(RecordBatchReader):
@@ -31,7 +33,7 @@ class FormatVortexReader(RecordBatchReader):
     and filters it based on the provided predicate and projection.
     """
 
-    def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
+    def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
                  row_indices: Optional[Any] = None):
         import vortex
@@ -46,7 +48,15 @@ class FormatVortexReader(RecordBatchReader):
         else:
             vortex_file = vortex.open(file_path_for_vortex)
 
-        columns_for_vortex = read_fields if read_fields else None
+        self.read_fields = read_fields
+        self._read_field_names = [f.name for f in read_fields]
+
+        # Identify which fields exist in the file and which are missing
+        file_schema_names = set(vortex_file.dtype.to_arrow_schema().names)
+        self.existing_fields = [f.name for f in read_fields if f.name in file_schema_names]
+        self.missing_fields = [f.name for f in read_fields if f.name not in file_schema_names]
+
+        columns_for_vortex = self.existing_fields if self.existing_fields else None
 
         # Try to convert Arrow predicate to Vortex expr for native push-down
         vortex_expr = None
@@ -65,9 +75,68 @@ class FormatVortexReader(RecordBatchReader):
         self.record_batch_reader = vortex_file.scan(
             columns_for_vortex, expr=vortex_expr, indices=indices, batch_size=batch_size).to_arrow()
 
+        self._output_schema = (
+            PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
+        )
+
+    @staticmethod
+    def _cast_view_types(batch: RecordBatch) -> RecordBatch:
+        """Cast string_view/binary_view columns to string/binary for PyArrow compatibility."""
+        columns = []
+        fields = []
+        changed = False
+        for i in range(batch.num_columns):
+            col = batch.column(i)
+            field = batch.schema.field(i)
+            if pa.types.is_large_string(col.type) or col.type == pa.string_view():
+                col = col.cast(pa.utf8())
+                field = field.with_type(pa.utf8())
+                changed = True
+            elif pa.types.is_large_binary(col.type) or col.type == pa.binary_view():
+                col = col.cast(pa.binary())
+                field = field.with_type(pa.binary())
+                changed = True
+            columns.append(col)
+            fields.append(field)
+        if changed:
+            return pa.RecordBatch.from_arrays(columns, schema=pa.schema(fields))
+        return batch
+
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
-            return next(self.record_batch_reader)
+            batch = self._cast_view_types(next(self.record_batch_reader))
+
+            if not self.missing_fields:
+                return batch
+
+            def _type_for_missing(name: str) -> pa.DataType:
+                if self._output_schema is not None:
+                    idx = self._output_schema.get_field_index(name)
+                    if idx >= 0:
+                        return self._output_schema.field(idx).type
+                return pa.null()
+
+            missing_columns = [
+                pa.nulls(batch.num_rows, type=_type_for_missing(name))
+                for name in self.missing_fields
+            ]
+
+            # Reconstruct the batch with all fields in the correct order
+            all_columns = []
+            out_fields = []
+            for field_name in self._read_field_names:
+                if field_name in self.existing_fields:
+                    column_idx = self.existing_fields.index(field_name)
+                    all_columns.append(batch.column(column_idx))
+                    out_fields.append(batch.schema.field(column_idx))
+                else:
+                    column_idx = self.missing_fields.index(field_name)
+                    col_type = _type_for_missing(field_name)
+                    all_columns.append(missing_columns[column_idx])
+                    nullable = not SpecialFields.is_system_field(field_name)
+                    out_fields.append(pa.field(field_name, col_type, nullable=nullable))
+            return pa.RecordBatch.from_arrays(all_columns, schema=pa.schema(out_fields))
+
         except StopIteration:
             return None
 
