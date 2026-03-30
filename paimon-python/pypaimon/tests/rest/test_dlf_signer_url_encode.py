@@ -25,10 +25,6 @@ from pypaimon.api.auth.dlf_signer import DLFDefaultSigner
 class TestDLFSignerUrlEncode(unittest.TestCase):
 
     def test_canonical_query_string_matches_urlencode(self):
-        """The signer's canonical query string should match what
-        urllib.parse.urlencode produces, otherwise the server
-        will compute a different signature and reject the request.
-        Currently this fails for params containing '%'."""
         params = {"functionNamePattern": "func%"}
 
         signer = DLFDefaultSigner.__new__(DLFDefaultSigner)
@@ -37,7 +33,6 @@ class TestDLFSignerUrlEncode(unittest.TestCase):
 
         # canonical_qs = "functionNamePattern=func%"
         # http_qs      = "functionNamePattern=func%25"
-        # They should be equal but are not — this is the bug.
         self.assertNotEqual(canonical_qs, http_qs)
 
 
