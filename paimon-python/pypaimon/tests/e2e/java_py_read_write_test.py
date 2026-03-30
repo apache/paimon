@@ -322,6 +322,48 @@ class JavaPyReadWriteTest(unittest.TestCase):
         }, schema=pa_schema)
         self.assertEqual(expected, actual)
 
+    def test_pk_dv_read_multi_batch_with_value_filter(self):
+        """Test that DV-enabled PK table filters files by value stats during scan."""
+        pa_schema = pa.schema([
+            pa.field('pt', pa.int32(), nullable=False),
+            pa.field('a', pa.int32(), nullable=False),
+            ('b', pa.int64())
+        ])
+        schema = Schema.from_pyarrow_schema(pa_schema,
+                                            partition_keys=['pt'],
+                                            primary_keys=['pt', 'a'],
+                                            options={'bucket': '1'})
+        self.catalog.create_table('default.test_pk_dv_multi_batch', schema, True)
+        table = self.catalog.get_table('default.test_pk_dv_multi_batch')
+
+        # Unfiltered scan: count total files
+        rb_all = table.new_read_builder()
+        all_splits = rb_all.new_scan().plan().splits()
+        all_files_count = sum(len(s.files) for s in all_splits)
+
+        # Filtered scan: b < 500 should only match a few rows (b in {100,200,300,400})
+        # and prune files whose value stats don't overlap
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        pred = predicate_builder.less_than('b', 500)
+        rb_filtered = table.new_read_builder().with_filter(pred)
+        filtered_splits = rb_filtered.new_scan().plan().splits()
+        filtered_files_count = sum(len(s.files) for s in filtered_splits)
+        filtered_result = table_sort_by(
+            rb_filtered.new_read().to_arrow(filtered_splits), 'a')
+
+        # Verify correctness: rows with b < 500 are a=10,b=100 / a=20,b=200 / a=30,b=300 / a=40,b=400
+        expected = pa.Table.from_pydict({
+            'pt': [1, 1, 1, 1],
+            'a': [10, 20, 30, 40],
+            'b': [100, 200, 300, 400]
+        }, schema=pa_schema)
+        self.assertEqual(expected, filtered_result)
+
+        # Verify file pruning: filtered scan should read fewer files
+        self.assertLess(
+            filtered_files_count, all_files_count,
+            f"DV value filter should prune files: filtered={filtered_files_count}, all={all_files_count}")
+
     def test_pk_dv_read_multi_batch_raw_convertable(self):
         pa_schema = pa.schema([
             pa.field('pt', pa.int32(), nullable=False),
