@@ -1357,18 +1357,7 @@ class DataEvolutionTest(unittest.TestCase):
         self.assertTrue(rebuilt.schema.field('_ROW_ID').nullable)
         self.assertTrue(rebuilt.schema.field('_SEQUENCE_NUMBER').nullable)
 
-    def test_read_after_schema_evolution_without_write_cols(self):
-        """Reproduce: reading a data-evolution table fails with IndexError when
-        a data file has no write_cols metadata (written with all columns of the
-        old schema before schema evolution) and sorts first in the union reader,
-        causing it to wrongly claim fields from new columns it doesn't have.
-
-        This simulates the real-world scenario where:
-        1. Data is written with the original schema (write_cols=None)
-        2. Schema evolution adds new columns
-        3. New column data is written as separate files with the same first_row_id
-        4. The original file sorts first (higher max_seq) and _create_union_reader
-           assumes it contains ALL current table fields, leading to IndexError."""
+    def test_read_full_schema_on_write_before_evolution(self):
         from pypaimon.schema.schema_change import SchemaChange
         from pypaimon.schema.data_types import AtomicType
 
@@ -1425,20 +1414,11 @@ class DataEvolutionTest(unittest.TestCase):
         table_commit.close()
 
         # Step 5: Read all columns
-        # The two files have the same first_row_id=0, so they are merged.
-        # In _split_by_row_id they go into the same group, sorted by -max_seq.
-        # Normally the f2 file (higher max_seq) sorts first, so the bug
-        # doesn't trigger. But in real scenarios (e.g. blob files, or files
-        # written by Java Paimon), the old file can be Bunch 0.
-        # We force this by boosting the old file's max_sequence_number.
         read_builder = table.new_read_builder()
         table_scan = read_builder.new_scan()
         table_read = read_builder.new_read()
         splits = table_scan.plan().splits()
 
-        # Manipulate: set higher max_seq on the no-write_cols file so it
-        # sorts first — reproducing the real scenario where the original
-        # data file is processed as Bunch 0 in _split_field_bunches.
         for split in splits:
             for f in split.files:
                 if f.write_cols is None:
