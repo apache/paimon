@@ -453,3 +453,27 @@ class LocalFileIO(FileIO):
         except Exception as e:
             self.delete_quietly(path)
             raise RuntimeError(f"Failed to write blob file {path}: {e}") from e
+
+
+class FuseLocalFileIO(LocalFileIO):
+    """LocalFileIO that translates remote OSS paths to FUSE-mounted local paths.
+
+    All file operations receive paths like:
+        oss://clg-paimon-xxx/db-xxx/tbl-xxx/manifest/manifest-xxx
+    This class replaces the path prefix with fuse_path so the actual
+    I/O goes through the FUSE mount point.
+    """
+
+    def __init__(self, path: str, fuse_path: str,
+                 catalog_options: Optional[Options] = None):
+        super().__init__(path=fuse_path, catalog_options=catalog_options)
+        self.path = path
+        self.fuse_path = fuse_path
+
+    def _to_file(self, path: str) -> Path:
+        return super()._to_file(self._translate(path))
+
+    def _translate(self, path: str) -> str:
+        if path == self.path or path.startswith(self.path + "/"):
+            return self.fuse_path + path[len(self.path):]
+        return path
