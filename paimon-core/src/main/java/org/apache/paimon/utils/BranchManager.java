@@ -59,6 +59,8 @@ public interface BranchManager {
 
     void fastForward(String branchName);
 
+    void renameBranch(String fromBranch, String toBranch);
+
     List<String> branches();
 
     default boolean branchExists(String branchName) {

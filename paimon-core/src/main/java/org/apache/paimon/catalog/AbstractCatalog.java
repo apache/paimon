@@ -517,6 +517,12 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
+    public void renameBranch(Identifier identifier, String fromBranch, String toBranch)
+            throws BranchNotExistException, BranchAlreadyExistException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public void fastForward(Identifier identifier, String branch) throws BranchNotExistException {
         throw new UnsupportedOperationException();
     }

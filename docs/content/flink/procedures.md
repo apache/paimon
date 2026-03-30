@@ -794,6 +794,24 @@ All available procedures are listed below.
       </td>
    </tr>
    <tr>
+      <td>rename_branch</td>
+      <td>
+         -- Use named argument<br/>
+         CALL [catalog.]sys.rename_branch(`table` => 'identifier', from_branch => 'branchName', to_branch => 'newBranchName')<br/><br/>
+         -- Use indexed argument<br/>
+         CALL [catalog.]sys.rename_branch('identifier', 'branchName', 'newBranchName')
+      </td>
+      <td>
+         To rename a branch. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>from_branch: name of the branch to be renamed.</li>
+            <li>to_branch: new name of the branch.</li>
+      </td>
+      <td>
+         CALL sys.rename_branch(`table` => 'default.T', from_branch => 'branch1', to_branch => 'branch2')
+      </td>
+   </tr>
+   <tr>
       <td>fast_forward</td>
       <td>
          -- Use named argument<br/>

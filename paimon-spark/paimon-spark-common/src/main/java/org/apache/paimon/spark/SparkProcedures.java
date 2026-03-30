@@ -46,6 +46,7 @@ import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.PurgeFilesProcedure;
 import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RemoveUnexistingFilesProcedure;
+import org.apache.paimon.spark.procedure.RenameBranchProcedure;
 import org.apache.paimon.spark.procedure.RenameTagProcedure;
 import org.apache.paimon.spark.procedure.RepairProcedure;
 import org.apache.paimon.spark.procedure.ReplaceTagProcedure;
@@ -98,6 +99,7 @@ public class SparkProcedures {
         procedureBuilders.put("create_global_index", CreateGlobalIndexProcedure::builder);
         procedureBuilders.put("drop_global_index", DropGlobalIndexProcedure::builder);
         procedureBuilders.put("delete_branch", DeleteBranchProcedure::builder);
+        procedureBuilders.put("rename_branch", RenameBranchProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
         procedureBuilders.put("compact_database", CompactDatabaseProcedure::builder);
         procedureBuilders.put("rescale", RescaleProcedure::builder);

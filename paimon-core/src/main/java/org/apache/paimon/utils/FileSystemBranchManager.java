@@ -221,6 +221,25 @@ public class FileSystemBranchManager implements BranchManager {
     }
 
     @Override
+    public void renameBranch(String fromBranch, String toBranch) {
+        checkArgument(!BranchManager.isMainBranch(fromBranch), "Cannot rename the main branch.");
+        checkArgument(branchExists(fromBranch), "Branch name '%s' doesn't exist.", fromBranch);
+        checkArgument(!branchExists(toBranch), "Branch name '%s' already exists.", toBranch);
+        BranchManager.validateBranch(toBranch);
+
+        try {
+            // Use rename for atomic operation and better performance
+            fileIO.rename(branchPath(fromBranch), branchPath(toBranch));
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when rename branch from '%s' to '%s'.",
+                            fromBranch, toBranch),
+                    e);
+        }
+    }
+
+    @Override
     public List<String> branches() {
         try {
             return listVersionedDirectories(fileIO, branchDirectory(), BRANCH_PREFIX)

@@ -61,6 +61,7 @@ import org.apache.paimon.rest.requests.CreateTagRequest;
 import org.apache.paimon.rest.requests.CreateViewRequest;
 import org.apache.paimon.rest.requests.ListPartitionsByNamesRequest;
 import org.apache.paimon.rest.requests.MarkDonePartitionsRequest;
+import org.apache.paimon.rest.requests.RenameBranchRequest;
 import org.apache.paimon.rest.requests.RenameTableRequest;
 import org.apache.paimon.rest.requests.ResetConsumerRequest;
 import org.apache.paimon.rest.requests.RollbackSchemaRequest;
@@ -1837,15 +1838,42 @@ public class RESTCatalogServer {
                 case "POST":
                     if (resources.length == 6) {
                         branch = RESTUtil.decodeString(resources[4]);
-                        branchManager.fastForward(branch);
-                        branchIdentifier =
-                                new Identifier(
-                                        identifier.getDatabaseName(),
-                                        identifier.getTableName(),
-                                        branch);
-                        tableLatestSnapshotStore.put(
-                                identifier.getFullName(),
-                                tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        if ("rename".equals(resources[5])) {
+                            // Rename branch: /branches/{branch}/rename
+                            RenameBranchRequest requestBody =
+                                    RESTApi.fromJson(data, RenameBranchRequest.class);
+                            String toBranch = requestBody.toBranch();
+                            table.renameBranch(branch, toBranch);
+                            // Update store for renamed branch
+                            Identifier fromBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branch);
+                            Identifier toBranchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            toBranch);
+                            tableLatestSnapshotStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableLatestSnapshotStore.get(
+                                            fromBranchIdentifier.getFullName()));
+                            tableMetadataStore.put(
+                                    toBranchIdentifier.getFullName(),
+                                    tableMetadataStore.get(fromBranchIdentifier.getFullName()));
+                        } else if ("forward".equals(resources[5])) {
+                            // Fast forward branch
+                            branchManager.fastForward(branch);
+                            branchIdentifier =
+                                    new Identifier(
+                                            identifier.getDatabaseName(),
+                                            identifier.getTableName(),
+                                            branch);
+                            tableLatestSnapshotStore.put(
+                                    identifier.getFullName(),
+                                    tableLatestSnapshotStore.get(branchIdentifier.getFullName()));
+                        }
                     } else {
                         CreateBranchRequest requestBody =
                                 RESTApi.fromJson(data, CreateBranchRequest.class);

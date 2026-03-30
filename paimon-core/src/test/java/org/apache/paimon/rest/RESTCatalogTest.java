@@ -2132,7 +2132,26 @@ public abstract class RESTCatalogTest extends CatalogTestBase {
                 Catalog.BranchAlreadyExistException.class,
                 () -> restCatalog.createBranch(identifier, "my_branch", null));
         assertThat(restCatalog.listBranches(identifier)).containsOnly("my_branch");
-        restCatalog.dropBranch(identifier, "my_branch");
+
+        // Test rename branch
+        restCatalog.renameBranch(identifier, "my_branch", "renamed_branch");
+        assertThat(restCatalog.listBranches(identifier)).containsOnly("renamed_branch");
+        assertThat(restCatalog.getTable(new Identifier(databaseName, "table", "renamed_branch")))
+                .isNotNull();
+
+        // Test rename to existing branch should fail
+        restCatalog.createBranch(identifier, "another_branch", null);
+        assertThrows(
+                Catalog.BranchAlreadyExistException.class,
+                () -> restCatalog.renameBranch(identifier, "renamed_branch", "another_branch"));
+
+        // Test rename non-existent branch should fail
+        assertThrows(
+                Catalog.BranchNotExistException.class,
+                () -> restCatalog.renameBranch(identifier, "non_existent_branch", "new_branch"));
+
+        restCatalog.dropBranch(identifier, "renamed_branch");
+        restCatalog.dropBranch(identifier, "another_branch");
 
         assertThrows(
                 Catalog.BranchNotExistException.class,

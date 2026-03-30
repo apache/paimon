@@ -719,6 +719,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void renameBranch(String fromBranch, String toBranch) {
+        branchManager().renameBranch(fromBranch, toBranch);
+    }
+
+    @Override
     public void fastForward(String branchName) {
         branchManager().fastForward(branchName);
     }
