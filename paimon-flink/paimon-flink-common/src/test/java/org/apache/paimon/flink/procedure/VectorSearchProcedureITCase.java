@@ -79,8 +79,6 @@ public class VectorSearchProcedureITCase extends CatalogITCaseBase {
                                 + "query_vector => '1.0 ,0.0', "
                                 + "top_k => 3)");
 
-        System.out.println(result);
-
         assertThat(result).isNotEmpty();
         assertThat(result.size()).isLessThanOrEqualTo(3);
 
