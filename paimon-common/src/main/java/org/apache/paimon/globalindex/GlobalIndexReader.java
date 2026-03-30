@@ -18,6 +18,7 @@
 
 package org.apache.paimon.globalindex;
 
+import org.apache.paimon.predicate.FullTextSearch;
 import org.apache.paimon.predicate.FunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.VectorSearch;
@@ -45,6 +46,10 @@ public interface GlobalIndexReader extends FunctionVisitor<Optional<GlobalIndexR
     }
 
     default Optional<ScoredGlobalIndexResult> visitVectorSearch(VectorSearch vectorSearch) {
+        throw new UnsupportedOperationException();
+    }
+
+    default Optional<ScoredGlobalIndexResult> visitFullTextSearch(FullTextSearch fullTextSearch) {
         throw new UnsupportedOperationException();
     }
 }
