@@ -123,7 +123,7 @@ class JindoOutputFile:
 class JindoFileSystemHandler(FileSystemHandler):
     def __init__(self, root_path: str, catalog_options: Options):
         if not JINDO_AVAILABLE:
-            raise ImportError("pyjindo is not available. Please install pyjindo.")
+            raise ImportError("Module pyjindo is not available. Please install pyjindosdk.")
 
         self.logger = logging.getLogger(__name__)
         self.root_path = root_path
