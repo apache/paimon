@@ -281,7 +281,7 @@ def run_benchmark(data: pa.Table, warehouse_dir: str):
         print(f"  On-disk size: {disk_mb:.1f} MB  (ratio: {ratio:.2f}x)")
 
         # Full read
-        print(f"  Reading back ...")
+        print("  Reading back ...")
         read_metrics = read_paimon_table(catalog, table_name)
         print(f"  Read time: {read_metrics['read_time']:.2f}s")
         print(f"  Rows read: {read_metrics['num_rows']:,}")
@@ -315,22 +315,24 @@ def run_benchmark(data: pa.Table, warehouse_dir: str):
 def print_summary(results: dict, in_memory_mb: float, num_rows: int):
     """Print a summary comparison table."""
     print(f"\n{'='*80}")
-    print(f"  CLICKBENCH COMPRESSION BENCHMARK SUMMARY")
+    print("  CLICKBENCH COMPRESSION BENCHMARK SUMMARY")
     print(f"  Rows: {num_rows:,}  |  In-memory: {in_memory_mb:.1f} MB")
     print(f"{'='*80}")
-    print(f"  {'Format':<10} {'Disk (MB)':>10} {'Ratio':>8} {'Write (s)':>10} {'Read (s)':>10} {'Lookup (s)':>11} {'Pred (s)':>10}")
+    print(f"  {'Format':<10} {'Disk (MB)':>10} {'Ratio':>8} {'Write (s)':>10} "
+          f"{'Read (s)':>10} {'Lookup (s)':>11} {'Pred (s)':>10}")
     print(f"  {'-'*69}")
 
     for fmt in FORMATS:
         if fmt in results:
             r = results[fmt]
-            print(f"  {fmt:<10} {r['disk_mb']:>10.1f} {r['ratio']:>7.2f}x {r['write_time']:>10.2f} {r['read_time']:>10.2f} {r['lookup_time']:>11.2f} {r['pred_lookup_time']:>10.2f}")
+            print(f"  {fmt:<10} {r['disk_mb']:>10.1f} {r['ratio']:>7.2f}x {r['write_time']:>10.2f} "
+                  f"{r['read_time']:>10.2f} {r['lookup_time']:>11.2f} {r['pred_lookup_time']:>10.2f}")
 
     # Vortex vs Parquet comparison
     if 'vortex' in results and 'parquet' in results:
         v = results['vortex']
         p = results['parquet']
-        print(f"\n  Vortex vs Parquet:")
+        print("\n  Vortex vs Parquet:")
         print(f"    Size:   {v['disk_mb'] / p['disk_mb'] * 100:.1f}% of Parquet")
         print(f"    Write:  {v['write_time'] / p['write_time']:.2f}x")
         print(f"    Read:   {v['read_time'] / p['read_time']:.2f}x")

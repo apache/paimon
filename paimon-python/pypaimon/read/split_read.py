@@ -168,9 +168,11 @@ class SplitRead(ABC):
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            predicate_fields = _get_all_fields(self.push_down_predicate) if self.push_down_predicate else set()
             format_reader = FormatVortexReader(self.table.file_io, file_path, ordered_read_fields,
                                                read_arrow_predicate, batch_size=batch_size,
-                                               row_indices=row_indices)
+                                               row_indices=row_indices,
+                                               predicate_fields=predicate_fields)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]

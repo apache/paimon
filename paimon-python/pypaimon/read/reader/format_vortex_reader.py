@@ -16,7 +16,7 @@
 # limitations under the License.
 ################################################################################
 
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Set
 
 import pyarrow as pa
 from pyarrow import RecordBatch
@@ -35,7 +35,8 @@ class FormatVortexReader(RecordBatchReader):
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[DataField],
                  push_down_predicate: Any, batch_size: int = 1024,
-                 row_indices: Optional[Any] = None):
+                 row_indices: Optional[Any] = None,
+                 predicate_fields: Optional[Set[str]] = None):
         import vortex
 
         from pypaimon.read.reader.vortex_utils import to_vortex_specified
@@ -79,23 +80,29 @@ class FormatVortexReader(RecordBatchReader):
             PyarrowFieldParser.from_paimon_schema(read_fields) if read_fields else None
         )
 
+        # Collect predicate-referenced fields for targeted view type casting
+        self._cast_fields = predicate_fields if predicate_fields and vortex_expr is not None else set()
+
     @staticmethod
-    def _cast_view_types(batch: RecordBatch) -> RecordBatch:
-        """Cast string_view/binary_view columns to string/binary for PyArrow compatibility."""
+    def _cast_view_types(batch: RecordBatch, target_fields: Set[str]) -> RecordBatch:
+        """Cast string_view/binary_view columns to string/binary, only for target fields."""
+        if not target_fields:
+            return batch
         columns = []
         fields = []
         changed = False
         for i in range(batch.num_columns):
             col = batch.column(i)
             field = batch.schema.field(i)
-            if pa.types.is_large_string(col.type) or col.type == pa.string_view():
-                col = col.cast(pa.utf8())
-                field = field.with_type(pa.utf8())
-                changed = True
-            elif pa.types.is_large_binary(col.type) or col.type == pa.binary_view():
-                col = col.cast(pa.binary())
-                field = field.with_type(pa.binary())
-                changed = True
+            if field.name in target_fields:
+                if col.type == pa.string_view():
+                    col = col.cast(pa.utf8())
+                    field = field.with_type(pa.utf8())
+                    changed = True
+                elif col.type == pa.binary_view():
+                    col = col.cast(pa.binary())
+                    field = field.with_type(pa.binary())
+                    changed = True
             columns.append(col)
             fields.append(field)
         if changed:
@@ -104,7 +111,8 @@ class FormatVortexReader(RecordBatchReader):
 
     def read_arrow_batch(self) -> Optional[RecordBatch]:
         try:
-            batch = self._cast_view_types(next(self.record_batch_reader))
+            batch = next(self.record_batch_reader)
+            batch = self._cast_view_types(batch, self._cast_fields)
 
             if not self.missing_fields:
                 return batch
