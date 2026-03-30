@@ -38,6 +38,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 
 import dev.vortex.api.Expression;
 import dev.vortex.api.expressions.Binary;
@@ -177,16 +179,33 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
                         decimal.toBigDecimal(), decimal.precision(), decimal.scale());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 Timestamp ts = (Timestamp) value;
-                return Literal.timestampMicros(
-                        ts.getMillisecond() * 1000 + ts.getNanoOfMillisecond() / 1000,
-                        Optional.empty());
+                return toTimestampLiteral(
+                        ts, ((TimestampType) type).getPrecision(), Optional.empty());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 Timestamp lzTs = (Timestamp) value;
-                return Literal.timestampMicros(
-                        lzTs.getMillisecond() * 1000 + lzTs.getNanoOfMillisecond() / 1000,
-                        Optional.of("UTC"));
+                return toTimestampLiteral(
+                        lzTs, ((LocalZonedTimestampType) type).getPrecision(), Optional.of("UTC"));
             default:
                 return null;
+        }
+    }
+
+    private static Literal<Long> toTimestampLiteral(
+            Timestamp ts, int precision, Optional<String> timeZone) {
+        if (precision <= 0) {
+            // seconds
+            return Literal.timestampMillis(ts.getMillisecond(), timeZone);
+        } else if (precision <= 3) {
+            // millis
+            return Literal.timestampMillis(ts.getMillisecond(), timeZone);
+        } else if (precision <= 6) {
+            // micros
+            return Literal.timestampMicros(
+                    ts.getMillisecond() * 1000 + ts.getNanoOfMillisecond() / 1000, timeZone);
+        } else {
+            // nanos
+            return Literal.timestampNanos(
+                    ts.getMillisecond() * 1_000_000 + ts.getNanoOfMillisecond(), timeZone);
         }
     }
 }

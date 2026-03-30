@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.vortex;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataTypes;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -174,5 +176,69 @@ public class VortexPredicateConverterTest {
         Expression result =
                 VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
         assertEquals(Binary.eq(field("f_string"), Literal.string("hello")), result);
+    }
+
+    @Test
+    public void testTimestampMillisPrecision() {
+        // TIMESTAMP(3) should produce timestampMillis
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(3)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        Timestamp ts = Timestamp.fromEpochMillis(123456789L);
+        Predicate predicate = tsBuilder.equal(0, ts);
+        Expression result =
+                VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
+        assertEquals(
+                Binary.eq(field("f_ts"), Literal.timestampMillis(123456789L, Optional.empty())),
+                result);
+    }
+
+    @Test
+    public void testTimestampMicrosPrecision() {
+        // TIMESTAMP(6) should produce timestampMicros
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(6)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        // 123456789 millis + 123000 nanos = 123456789_123 micros
+        Timestamp ts = Timestamp.fromMicros(123456789123L);
+        Predicate predicate = tsBuilder.equal(0, ts);
+        Expression result =
+                VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
+        assertEquals(
+                Binary.eq(field("f_ts"), Literal.timestampMicros(123456789123L, Optional.empty())),
+                result);
+    }
+
+    @Test
+    public void testTimestampNanosPrecision() {
+        // TIMESTAMP(9) should produce timestampNanos
+        RowType tsRowType = RowType.builder().field("f_ts", DataTypes.TIMESTAMP(9)).build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        Timestamp ts = Timestamp.fromEpochMillis(123456L, 789012);
+        Predicate predicate = tsBuilder.equal(0, ts);
+        Expression result =
+                VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
+        // 123456 ms * 1_000_000 + 789012 nanos = 123456000789012 nanos
+        assertEquals(
+                Binary.eq(
+                        field("f_ts"),
+                        Literal.timestampNanos(123456L * 1_000_000 + 789012, Optional.empty())),
+                result);
+    }
+
+    @Test
+    public void testTimestampWithLocalTimeZone() {
+        // TIMESTAMP_LTZ(3) should produce timestampMillis with UTC
+        RowType tsRowType =
+                RowType.builder()
+                        .field("f_ts_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
+                        .build();
+        PredicateBuilder tsBuilder = new PredicateBuilder(tsRowType);
+        Timestamp ts = Timestamp.fromEpochMillis(123456789L);
+        Predicate predicate = tsBuilder.equal(0, ts);
+        Expression result =
+                VortexPredicateConverter.toVortexExpression(Collections.singletonList(predicate));
+        assertEquals(
+                Binary.eq(
+                        field("f_ts_ltz"), Literal.timestampMillis(123456789L, Optional.of("UTC"))),
+                result);
     }
 }

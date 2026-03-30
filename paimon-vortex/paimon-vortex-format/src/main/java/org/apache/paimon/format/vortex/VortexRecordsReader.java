@@ -24,6 +24,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.FileRecordReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.LongIterator;
 
 import dev.vortex.api.Array;
 import dev.vortex.api.ArrayIterator;
@@ -49,9 +50,10 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
     private final BufferAllocator allocator;
     private final ArrayIterator arrayIterator;
     private final File vortexFile;
+    private final LongIterator positionIterator;
     private VectorSchemaRoot reuse;
     private Array currentArray;
-    private long currentPosition = -1;
+    private long returnedPosition = -1;
 
     public VortexRecordsReader(
             Path path,
@@ -84,6 +86,10 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
             throw e;
         }
         this.arrowBatchReader = new ArrowBatchReader(projectedRowType, true);
+        this.positionIterator =
+                rowIndices != null
+                        ? LongIterator.fromArray(rowIndices)
+                        : LongIterator.fromRange(0, vortexFile.rowCount());
     }
 
     @Nullable
@@ -103,7 +109,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
         return new FileRecordIterator<InternalRow>() {
             @Override
             public long returnedPosition() {
-                return currentPosition;
+                return returnedPosition;
             }
 
             @Override
@@ -117,7 +123,7 @@ public class VortexRecordsReader implements FileRecordReader<InternalRow> {
                 if (!rows.hasNext()) {
                     return null;
                 }
-                currentPosition++;
+                returnedPosition = positionIterator.next();
                 return rows.next();
             }
 

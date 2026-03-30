@@ -33,6 +33,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.types.DataTypes;
@@ -264,6 +265,102 @@ public class VortexReaderWriterTest {
             assertEquals(BinaryString.fromString("row3"), actualRows.get(0).getString(1));
             assertEquals(4, actualRows.get(1).getInt(0));
             assertEquals(BinaryString.fromString("row4"), actualRows.get(1).getString(1));
+        }
+    }
+
+    @Test
+    public void testReturnedPositionWithRowIndices(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        Options options = new Options();
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile = new Path(new Path(tempDir.toUri()), "test_position_" + UUID.randomUUID());
+
+        // Write 10 rows: (0, "row0"), ..., (9, "row9")
+        try (FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                        .create(fileIO, testFile, "")) {
+            for (int i = 0; i < 10; i++) {
+                writer.addElement(GenericRow.of(i, BinaryString.fromString("row" + i)));
+            }
+        }
+
+        // Read with selection: rows at indices 2, 5, 8
+        RoaringBitmap32 selection = RoaringBitmap32.bitmapOf(2, 5, 8);
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
+        try (RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(
+                                fileIO, testFile, fileIO.getFileSize(testFile), selection))) {
+
+            long[] expectedPositions = new long[] {2, 5, 8};
+            int idx = 0;
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                FileRecordIterator<InternalRow> fileIter = (FileRecordIterator<InternalRow>) batch;
+                InternalRow row;
+                while ((row = fileIter.next()) != null) {
+                    assertEquals(
+                            expectedPositions[idx],
+                            fileIter.returnedPosition(),
+                            "returnedPosition mismatch at index " + idx);
+                    assertEquals((int) expectedPositions[idx], row.getInt(0));
+                    idx++;
+                }
+                batch.releaseBatch();
+            }
+            assertEquals(3, idx, "Should have read exactly 3 rows");
+        }
+    }
+
+    @Test
+    public void testReturnedPositionSequential(@TempDir java.nio.file.Path tempDir)
+            throws Exception {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        Options options = new Options();
+        VortexFileFormat format =
+                new VortexFileFormatFactory()
+                        .create(new FileFormatFactory.FormatContext(options, 1024, 1024));
+
+        FileIO fileIO = new LocalFileIO();
+        Path testFile = new Path(new Path(tempDir.toUri()), "test_seq_pos_" + UUID.randomUUID());
+
+        // Write 5 rows
+        try (FormatWriter writer =
+                ((SupportsDirectWrite) format.createWriterFactory(rowType))
+                        .create(fileIO, testFile, "")) {
+            for (int i = 0; i < 5; i++) {
+                writer.addElement(GenericRow.of(i, BinaryString.fromString("row" + i)));
+            }
+        }
+
+        // Read without selection — positions should be 0, 1, 2, 3, 4
+        FormatReaderFactory readerFactory = format.createReaderFactory(rowType, rowType, null);
+        try (RecordReader<InternalRow> reader =
+                readerFactory.createReader(
+                        new FormatReaderContext(
+                                fileIO, testFile, fileIO.getFileSize(testFile), null))) {
+
+            long expectedPos = 0;
+            RecordReader.RecordIterator<InternalRow> batch;
+            while ((batch = reader.readBatch()) != null) {
+                FileRecordIterator<InternalRow> fileIter = (FileRecordIterator<InternalRow>) batch;
+                InternalRow row;
+                while ((row = fileIter.next()) != null) {
+                    assertEquals(
+                            expectedPos,
+                            fileIter.returnedPosition(),
+                            "Sequential position mismatch");
+                    assertEquals((int) expectedPos, row.getInt(0));
+                    expectedPos++;
+                }
+                batch.releaseBatch();
+            }
+            assertEquals(5, expectedPos, "Should have read exactly 5 rows");
         }
     }
 }
