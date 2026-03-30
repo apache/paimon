@@ -110,6 +110,10 @@ public class TantivyFullTextGlobalIndexWriter implements GlobalIndexSingletonWri
         } catch (IOException e) {
             throw new RuntimeException("Failed to write Tantivy full-text global index", e);
         } finally {
+            if (writer != null) {
+                writer.close();
+                writer = null;
+            }
             closed = true;
             deleteTempDir();
         }
