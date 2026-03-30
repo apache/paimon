@@ -34,6 +34,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
+from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
@@ -56,9 +57,13 @@ class PyArrowFileIO(FileIO):
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._oss_bucket = None
+        self._oss_impl = self.properties.get(OssOptions.OSS_IMPL)
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
-            self.filesystem = self._initialize_oss_fs(path)
+            if self._oss_impl == "jindo":
+                self.filesystem = self._initialize_jindo_fs(path)
+            else:
+                self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
             self.filesystem = self._initialize_s3_fs()
         elif scheme in {"hdfs", "viewfs"}:
@@ -115,6 +120,13 @@ class PyArrowFileIO(FileIO):
         if not bucket:
             raise ValueError("Invalid OSS URI without bucket: {}".format(location))
         return bucket
+
+    def _initialize_jindo_fs(self, path) -> FileSystem:
+        """Initialize JindoFileSystem for OSS access."""
+        self.logger.info(f"Initializing JindoFileSystem for OSS access: {path}")
+        root_path = f"oss://{self._oss_bucket}/"
+        fs_handler = JindoFileSystemHandler(root_path, self.properties)
+        return pafs.PyFileSystem(fs_handler)
 
     def _initialize_oss_fs(self, path) -> FileSystem:
         if self.properties.get(OssOptions.OSS_ACCESS_KEY_ID):
@@ -198,7 +210,9 @@ class PyArrowFileIO(FileIO):
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
 
-        if self._is_oss and not self._pyarrow_gte_7:
+        if self._oss_impl == "jindo":
+            pass
+        elif self._is_oss and not self._pyarrow_gte_7:
             # For PyArrow 6.x + OSS, path_str is already just the key part
             if '/' in path_str:
                 parent_dir = '/'.join(path_str.split('/')[:-1])
@@ -577,6 +591,11 @@ class PyArrowFileIO(FileIO):
             drive_letter = parsed.netloc.rstrip(':')
             path_part = normalized_path.lstrip('/')
             return f"{drive_letter}:/{path_part}" if path_part else f"{drive_letter}:"
+
+        if self._oss_impl == "jindo":
+            # For JindoFileSystem, pass key only
+            path_part = normalized_path.lstrip('/')
+            return path_part if path_part else '.'
 
         if isinstance(self.filesystem, S3FileSystem):
             if parsed.scheme:
