@@ -1183,6 +1183,49 @@ paths:
           $ref: '#/components/responses/BranchNotExistErrorResponse'
         "500":
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/rename:
+    post:
+      tags:
+        - branch
+      summary: rename branch
+      operationId: renameBranch
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: table
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameBranchRequest'
+      responses:
+        "200":
+          description: Success, no content
+        "401":
+          $ref: '#/components/responses/UnauthorizedErrorResponse'
+        "404":
+          $ref: '#/components/responses/BranchNotExistErrorResponse'
+        "409":
+          description: Branch already exists
+        "500":
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/{prefix}/databases/{database}/tables/{table}/branches/{branch}/forward:
     post:
       tags:
@@ -3250,6 +3293,11 @@ components:
           type: string
         fromTag:
           nullable: true
+          type: string
+    RenameBranchRequest:
+      type: object
+      properties:
+        toBranch:
           type: string
     ForwardBranchRequest:
       type: object

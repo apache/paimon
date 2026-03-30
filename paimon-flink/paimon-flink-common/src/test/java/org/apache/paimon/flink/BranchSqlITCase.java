@@ -869,6 +869,60 @@ public class BranchSqlITCase extends CatalogITCaseBase {
                 .isEmpty();
     }
 
+    @Test
+    public void testRenameBranch() throws Exception {
+        sql(
+                "CREATE TABLE T ("
+                        + " pt INT"
+                        + ", k INT"
+                        + ", v STRING"
+                        + ", PRIMARY KEY (pt, k) NOT ENFORCED"
+                        + " ) PARTITIONED BY (pt) WITH ("
+                        + " 'bucket' = '2'"
+                        + " )");
+
+        // snapshot 1.
+        sql("INSERT INTO T VALUES (1, 10, 'apple'), (1, 20, 'banana')");
+        // snapshot 2.
+        sql("INSERT INTO T VALUES (2, 10, 'cat'), (2, 20, 'dog')");
+
+        // create tag
+        sql("CALL sys.create_tag('default.T', 'tag1', 1)");
+
+        // create branch from tag
+        sql("CALL sys.create_branch('default.T', 'branch1', 'tag1')");
+
+        // verify branch exists
+        FileStoreTable table = paimonTable("T");
+        assertThat(table.branchManager().branchExists("branch1")).isTrue();
+
+        // rename branch
+        sql("CALL sys.rename_branch('default.T', 'branch1', 'branch2')");
+
+        // verify old branch does not exist
+        table = paimonTable("T");
+        assertThat(table.branchManager().branchExists("branch1")).isFalse();
+
+        // verify new branch exists
+        assertThat(table.branchManager().branchExists("branch2")).isTrue();
+
+        // verify data in renamed branch
+        assertThat(collectResult("SELECT * FROM T$branch_branch2"))
+                .containsExactlyInAnyOrder("+I[1, 10, apple]", "+I[1, 20, banana]");
+
+        // rename non-existent branch should fail
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CALL sys.rename_branch('default.T', 'nonexistent', 'new_branch')"))
+                .hasMessageContaining("Branch");
+
+        // rename to existing branch should fail
+        sql("CALL sys.create_branch('default.T', 'branch3')");
+        assertThatThrownBy(() -> sql("CALL sys.rename_branch('default.T', 'branch2', 'branch3')"))
+                .hasMessageContaining("Branch");
+    }
+
     private List<String> collectResult(String sql) throws Exception {
         List<String> result = new ArrayList<>();
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
