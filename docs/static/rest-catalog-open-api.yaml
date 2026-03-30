@@ -1214,8 +1214,7 @@ paths:
         content:
           application/json:
             schema:
-              type: string
-            example: "new_branch_name"
+              $ref: '#/components/schemas/RenameBranchRequest'
       responses:
         "200":
           description: Success, no content
@@ -3294,6 +3293,11 @@ components:
           type: string
         fromTag:
           nullable: true
+          type: string
+    RenameBranchRequest:
+      type: object
+      properties:
+        toBranch:
           type: string
     ForwardBranchRequest:
       type: object
