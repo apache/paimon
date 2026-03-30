@@ -23,7 +23,7 @@ use jni::JNIEnv;
 use std::ptr;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
-use tantivy::schema::{Field, NumericOptions, Schema, Value, TEXT};
+use tantivy::schema::{Field, NumericOptions, Schema, TEXT};
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy};
 
 use crate::jni_directory::JniDirectory;
@@ -49,7 +49,6 @@ struct TantivyIndex {
 
 struct TantivySearcherHandle {
     reader: IndexReader,
-    row_id_field: Field,
     text_field: Field,
 }
 
@@ -57,7 +56,10 @@ fn build_schema() -> (Schema, Field, Field) {
     let mut builder = Schema::builder();
     let row_id_field = builder.add_u64_field(
         "row_id",
-        NumericOptions::default().set_stored().set_indexed(),
+        NumericOptions::default()
+            .set_stored()
+            .set_indexed()
+            .set_fast(),
     );
     let text_field = builder.add_text_field("text", TEXT);
     (builder.build(), row_id_field, text_field)
@@ -168,7 +170,6 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openIndex(
     };
     let schema = index.schema();
 
-    let row_id_field = schema.get_field("row_id").unwrap();
     let text_field = schema.get_field("text").unwrap();
 
     let reader = match index
@@ -182,7 +183,6 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openIndex(
 
     let handle = Box::new(TantivySearcherHandle {
         reader,
-        row_id_field,
         text_field,
     });
     Box::into_raw(handle) as jlong
@@ -248,7 +248,6 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openFromSt
     };
     let schema = index.schema();
 
-    let row_id_field = schema.get_field("row_id").unwrap();
     let text_field = schema.get_field("text").unwrap();
 
     let reader = match index
@@ -262,7 +261,6 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_openFromSt
 
     let handle = Box::new(TantivySearcherHandle {
         reader,
-        row_id_field,
         text_field,
     });
     Box::into_raw(handle) as jlong
@@ -309,15 +307,14 @@ pub extern "system" fn Java_org_apache_paimon_tantivy_TantivySearcher_searchInde
     let mut row_ids: Vec<jlong> = Vec::with_capacity(count);
     let mut scores: Vec<jfloat> = Vec::with_capacity(count);
 
+    // Use fast field reader for efficient row_id retrieval
     for (score, doc_address) in &top_docs {
-        let doc: tantivy::TantivyDocument = match searcher.doc(*doc_address) {
-            Ok(d) => d,
-            Err(e) => return throw_and_return_null(&mut env, &format!("Failed to retrieve doc: {}", e)),
+        let segment_reader = searcher.segment_reader(doc_address.segment_ord);
+        let fast_fields = match segment_reader.fast_fields().u64("row_id") {
+            Ok(f) => f,
+            Err(e) => return throw_and_return_null(&mut env, &format!("Failed to get fast field: {}", e)),
         };
-        let row_id = doc
-            .get_first(handle.row_id_field)
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as jlong;
+        let row_id = fast_fields.first(doc_address.doc_id).unwrap_or(0) as jlong;
         row_ids.push(row_id);
         scores.push(*score as jfloat);
     }

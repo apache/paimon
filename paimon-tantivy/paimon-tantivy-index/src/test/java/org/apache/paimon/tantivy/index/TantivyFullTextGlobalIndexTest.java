@@ -98,8 +98,8 @@ public class TantivyFullTextGlobalIndexTest {
         };
     }
 
-    private GlobalIndexFileReader createFileReader(Path path) {
-        return meta -> fileIO.newInputStream(new Path(path, meta.filePath()));
+    private GlobalIndexFileReader createFileReader() {
+        return meta -> fileIO.newInputStream(meta.filePath());
     }
 
     private List<GlobalIndexIOMeta> toIOMetas(List<ResultEntry> results, Path path)
@@ -125,7 +125,7 @@ public class TantivyFullTextGlobalIndexTest {
         assertThat(results.get(0).rowCount()).isEqualTo(3);
 
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
                 new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
@@ -158,7 +158,7 @@ public class TantivyFullTextGlobalIndexTest {
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
                 new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
@@ -184,7 +184,7 @@ public class TantivyFullTextGlobalIndexTest {
         assertThat(results.get(0).rowCount()).isEqualTo(3);
 
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
                 new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
@@ -229,7 +229,7 @@ public class TantivyFullTextGlobalIndexTest {
         assertThat(results.get(0).rowCount()).isEqualTo(numDocs);
 
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
                 new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
@@ -259,7 +259,7 @@ public class TantivyFullTextGlobalIndexTest {
 
         List<ResultEntry> results = writer.finish();
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
                 new TantivyFullTextGlobalIndexReader(fileReader, metas)) {
@@ -286,7 +286,7 @@ public class TantivyFullTextGlobalIndexTest {
         assertThat(results).hasSize(1);
 
         List<GlobalIndexIOMeta> metas = toIOMetas(results, indexPath);
-        GlobalIndexFileReader fileReader = createFileReader(indexPath);
+        GlobalIndexFileReader fileReader = createFileReader();
 
         try (TantivyFullTextGlobalIndexReader reader =
                 (TantivyFullTextGlobalIndexReader) indexer.createReader(fileReader, metas)) {
