@@ -45,7 +45,7 @@ abstract class PaimonBaseScan(table: InnerTable)
   protected def getInputSplits: Array[Split] = {
     readBuilder
       .newScan()
-      .withGlobalIndexResult(evalVectorSearch())
+      .withGlobalIndexResult(evalGlobalIndexSearch())
       .asInstanceOf[InnerTableScan]
       .withMetricRegistry(paimonMetricsRegistry)
       .plan()
@@ -54,11 +54,21 @@ abstract class PaimonBaseScan(table: InnerTable)
       .toArray
   }
 
-  private def evalVectorSearch(): GlobalIndexResult = {
-    if (pushedVectorSearch.isEmpty) {
-      return null
+  private def evalGlobalIndexSearch(): GlobalIndexResult = {
+    if (pushedVectorSearch.isDefined && pushedFullTextSearch.isDefined) {
+      throw new UnsupportedOperationException(
+        "Cannot push down both vector search and full-text search simultaneously.")
     }
+    if (pushedVectorSearch.isDefined) {
+      return evalVectorSearch()
+    }
+    if (pushedFullTextSearch.isDefined) {
+      return evalFullTextSearch()
+    }
+    null
+  }
 
+  private def evalVectorSearch(): GlobalIndexResult = {
     val vectorSearch = pushedVectorSearch.get
     val vectorBuilder = table
       .newVectorSearchBuilder()
@@ -72,6 +82,16 @@ abstract class PaimonBaseScan(table: InnerTable)
       vectorBuilder.withFilter(PredicateBuilder.and(pushedDataFilters.asJava))
     }
     vectorBuilder.newVectorRead().read(vectorBuilder.newVectorScan().scan())
+  }
+
+  private def evalFullTextSearch(): GlobalIndexResult = {
+    val fullTextSearch = pushedFullTextSearch.get
+    val ftBuilder = table
+      .newFullTextSearchBuilder()
+      .withQueryText(fullTextSearch.queryText())
+      .withTextColumn(fullTextSearch.fieldName())
+      .withLimit(fullTextSearch.limit())
+    ftBuilder.newFullTextRead().read(ftBuilder.newFullTextScan().scan())
   }
 
   override def toBatch: Batch = {

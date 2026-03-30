@@ -16,22 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.table.source;
 
-import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
-import org.apache.paimon.table.InnerTable
+import java.util.List;
 
-import org.apache.spark.sql.types.StructType
+/** Full-text scan to scan index files. */
+public interface FullTextScan {
 
-case class PaimonScan(
-    table: InnerTable,
-    requiredSchema: StructType,
-    pushedPartitionFilters: Seq[PartitionPredicate],
-    pushedDataFilters: Seq[Predicate],
-    override val pushedLimit: Option[Int] = None,
-    override val pushedTopN: Option[TopN] = None,
-    override val pushedVectorSearch: Option[VectorSearch] = None,
-    override val pushedFullTextSearch: Option[FullTextSearch] = None,
-    bucketedScanDisabled: Boolean = true)
-  extends PaimonBaseScan(table) {}
+    Plan scan();
+
+    /** Plan of full-text scan. */
+    interface Plan {
+        List<FullTextSearchSplit> splits();
+    }
+}
