@@ -111,6 +111,32 @@ SELECT * FROM vector_search('my_table', 'embedding', array(1.0f, 2.0f, 3.0f), 5)
 ```
 {{< /tab >}}
 
+{{< tab "Flink SQL (Procedure)" >}}
+
+Unlike Spark's table-valued function, Flink uses a `CALL` procedure to perform vector search.
+The procedure returns JSON-serialized rows as strings.
+
+```sql
+-- Search for top-5 nearest neighbors
+CALL sys.vector_search(
+    `table` => 'db.my_table',
+    vector_column => 'embedding',
+    query_vector => '1.0,2.0,3.0',
+    top_k => 5
+);
+
+-- With projection (only return specific columns)
+CALL sys.vector_search(
+    `table` => 'db.my_table',
+    vector_column => 'embedding',
+    query_vector => '1.0,2.0,3.0',
+    top_k => 5,
+    projection => 'id,name'
+);
+```
+
+{{< /tab >}}
+
 {{< tab "Java API" >}}
 ```java
 Table table = catalog.getTable(identifier);
