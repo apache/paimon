@@ -17,8 +17,6 @@ limitations under the License.
 """
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
-from urllib.parse import urlparse
-
 from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
@@ -38,7 +36,6 @@ from pypaimon.common.options.config import CatalogOptions, FuseOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
-from pypaimon.filesystem.local_file_io import LocalFileIO, FuseLocalFileIO
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.schema.table_schema import TableSchema
@@ -64,16 +61,12 @@ class RESTCatalog(Catalog):
                                              context.prefer_io_loader, context.fallback_io_loader)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
 
-        # FUSE local path configuration
-        self.fuse_local_path_enabled = self.context.options.get(
-            FuseOptions.FUSE_LOCAL_PATH_ENABLED, False)
-        self.fuse_local_path_root = self.context.options.get(
-            FuseOptions.FUSE_LOCAL_PATH_ROOT)
-        self.fuse_validation_mode = self.context.options.get(
-            FuseOptions.FUSE_LOCAL_PATH_VALIDATION_MODE, "strict")
-        self.fuse_local_path_mode = self.context.options.get(
-            FuseOptions.FUSE_LOCAL_PATH_MODE, "pvfs")
-        self._fuse_validation_state = None  # None=not validated, True=passed, False=failed
+        # FUSE support (lazy import only when enabled)
+        self.fuse_enabled = self.context.options.get(FuseOptions.FUSE_ENABLED, False)
+        self._fuse_resolver = None
+        if self.fuse_enabled:
+            from pypaimon.catalog.rest.fuse_support import FusePathResolver
+            self._fuse_resolver = FusePathResolver(self.context.options, self.rest_api)
 
     def catalog_loader(self):
         """
@@ -404,121 +397,17 @@ class RESTCatalog(Catalog):
         """
         Get FileIO for data access, supporting FUSE local path mapping.
         """
-        # Try to use FUSE local path
-        if self.fuse_local_path_enabled:
-            # Configuration error raises exception directly
-            local_path = self._resolve_fuse_local_path(table_path, identifier)
-
-            # Perform validation (only once)
-            if self._fuse_validation_state is None:
-                self._validate_fuse_path()
-
-            # Validation passed, return FUSE-aware local FileIO
-            if self._fuse_validation_state:
-                return FuseLocalFileIO(
-                    path=table_path.rstrip('/'),
-                    fuse_path=local_path.rstrip('/'),
-                    catalog_options=self.context.options,
-                )
-
-            # warn mode validation failed, fallback to default FileIO
-            return RESTTokenFileIO(identifier, table_path, self.context.options) \
-                if self.data_token_enabled else self.file_io_from_options(table_path)
+        if self._fuse_resolver is not None:
+            return self._fuse_resolver.get_file_io(
+                table_path, identifier, self.data_token_enabled,
+                rest_token_file_io_factory=lambda: RESTTokenFileIO(
+                    identifier, table_path, self.context.options),
+                default_file_io_factory=lambda: self.file_io_from_options(table_path),
+            )
 
         # Fallback to original logic
         return RESTTokenFileIO(identifier, table_path, self.context.options) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
-
-    def _resolve_fuse_local_path(self, original_path: str, identifier: Optional[Identifier] = None) -> str:
-        """
-        Resolve FUSE local path.
-
-        In 'pvfs' mode, use database/table logical names from identifier to build the path.
-        If identifier has no object name, returns database-level path (used for validation).
-        In 'raw' mode, use URI path segments directly.
-
-        Returns:
-            Local path
-
-        Raises:
-            ValueError: If fuse.local-path.root is not configured or pvfs mode missing identifier
-        """
-        if not self.fuse_local_path_root:
-            raise ValueError(
-                "FUSE local path is enabled but fuse.local-path.root is not configured"
-            )
-
-        root = self.fuse_local_path_root.rstrip('/')
-
-        if self.fuse_local_path_mode == "pvfs":
-            if identifier is None:
-                raise ValueError(
-                    "FUSE path mode 'pvfs' requires an Identifier to resolve "
-                    "the local path, but identifier is None."
-                )
-            db = identifier.get_database_name()
-            obj = identifier.get_object_name()
-            if obj:
-                return f"{root}/{db}/{obj}"
-            return f"{root}/{db}"
-        elif self.fuse_local_path_mode == "raw":
-            # raw mode: use URI path segments directly
-            uri = urlparse(original_path)
-            path_part = uri.path.lstrip('/')
-            if not uri.scheme:
-                # No scheme means path like "catalog/db/table",
-                # skip the first segment (catalog name) to align with scheme-based paths
-                segments = path_part.split('/')
-                if len(segments) > 1:
-                    path_part = '/'.join(segments[1:])
-            return f"{root}/{path_part}"
-        else:
-            raise ValueError(
-                f"Invalid fuse.local-path.mode: '{self.fuse_local_path_mode}'. "
-                f"Supported modes are 'pvfs' and 'raw'."
-            )
-
-    def _validate_fuse_path(self) -> None:
-        """
-        Validate FUSE local path is correctly mounted.
-
-        Get default database's location, convert to local path and check if it exists.
-        """
-        if self.fuse_validation_mode == "none":
-            self._fuse_validation_state = True
-            return
-
-        # Get default database details, API call failure raises exception directly
-        db = self.rest_api.get_database("default")
-        remote_location = db.location
-
-        if not remote_location:
-            logger.info("Default database has no location, skipping FUSE validation")
-            self._fuse_validation_state = True
-            return
-
-        expected_local = self._resolve_fuse_local_path(remote_location, Identifier.create("default", None))
-        local_file_io = LocalFileIO(expected_local, self.context.options)
-
-        # Only validate if local path exists, handle based on validation mode
-        if not local_file_io.exists(expected_local):
-            error_msg = (
-                f"FUSE local path validation failed: "
-                f"local path '{expected_local}' does not exist "
-                f"for default database location '{remote_location}'"
-            )
-            self._handle_validation_error(error_msg)
-        else:
-            self._fuse_validation_state = True
-            logger.info("FUSE local path validation passed")
-
-    def _handle_validation_error(self, error_msg: str) -> None:
-        """Handle validation error based on validation mode."""
-        if self.fuse_validation_mode == "strict":
-            raise ValueError(error_msg)
-        elif self.fuse_validation_mode == "warn":
-            logger.warning(f"{error_msg}. Falling back to default FileIO.")
-            self._fuse_validation_state = False  # Mark validation failed, fallback to default FileIO
 
     def load_table(self,
                    identifier: Identifier,

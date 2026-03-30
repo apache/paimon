@@ -86,31 +86,31 @@ class CatalogOptions:
 
 
 class FuseOptions:
-    """FUSE local path configuration options."""
+    """FUSE configuration options."""
 
-    FUSE_LOCAL_PATH_ENABLED = (
-        ConfigOptions.key("fuse.local-path.enabled")
+    FUSE_ENABLED = (
+        ConfigOptions.key("fuse.enabled")
         .boolean_type()
         .default_value(False)
         .with_description("Whether to enable FUSE local path mapping")
     )
 
-    FUSE_LOCAL_PATH_ROOT = (
-        ConfigOptions.key("fuse.local-path.root")
+    FUSE_ROOT = (
+        ConfigOptions.key("fuse.root")
         .string_type()
         .no_default_value()
         .with_description("FUSE mounted local root path, e.g., /mnt/fuse/warehouse")
     )
 
-    FUSE_LOCAL_PATH_VALIDATION_MODE = (
-        ConfigOptions.key("fuse.local-path.validation-mode")
+    FUSE_VALIDATION_MODE = (
+        ConfigOptions.key("fuse.validation-mode")
         .string_type()
         .default_value("strict")
         .with_description("Validation mode: strict, warn, or none")
     )
 
-    FUSE_LOCAL_PATH_MODE = (
-        ConfigOptions.key("fuse.local-path.mode")
+    FUSE_MODE = (
+        ConfigOptions.key("fuse.mode")
         .string_type()
         .default_value("pvfs")
         .with_description(
