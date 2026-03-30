@@ -107,7 +107,7 @@ public class FileStoreTableFactory {
                     createOtherBranchTable(
                             fileIO, tablePath, fallbackBranch, dynamicOptions, catalogEnvironment);
             if (otherTable != null) {
-                table = new FallbackReadFileStoreTable(table, otherTable);
+                table = new FallbackReadFileStoreTable(table, otherTable, true);
             } else {
                 LOG.error("Fallback branch {} not found for table {}", fallbackBranch, tablePath);
             }
@@ -116,7 +116,7 @@ public class FileStoreTableFactory {
                     createOtherBranchTable(
                             fileIO, tablePath, primaryBranch, dynamicOptions, catalogEnvironment);
             if (otherTable != null) {
-                table = new FallbackReadFileStoreTable(otherTable, table);
+                table = new FallbackReadFileStoreTable(table, otherTable, false);
             } else {
                 LOG.error("Primary branch {} not found for table {}", primaryBranch, tablePath);
             }
@@ -181,7 +181,7 @@ public class FileStoreTableFactory {
                                 catalogEnvironment);
         FileStoreTable chainGroupFileStoreTable =
                 new ChainGroupReadTable(snapshotTable, deltaTable);
-        return new FallbackReadFileStoreTable(table, chainGroupFileStoreTable);
+        return new FallbackReadFileStoreTable(table, chainGroupFileStoreTable, true);
     }
 
     private static FileStoreTable createOtherBranchTable(

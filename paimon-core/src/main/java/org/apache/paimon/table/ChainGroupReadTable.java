@@ -67,7 +67,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
     public ChainGroupReadTable(FileStoreTable snapshotStoreTable, FileStoreTable deltaStoreTable) {
-        super(snapshotStoreTable, deltaStoreTable);
+        super(snapshotStoreTable, deltaStoreTable, true);
         checkArgument(snapshotStoreTable instanceof PrimaryKeyFileStoreTable);
         checkArgument(deltaStoreTable instanceof PrimaryKeyFileStoreTable);
     }
@@ -77,7 +77,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         super.validateSchema();
         return new ChainTableBatchScan(
                 wrapped.newScan(),
-                fallback().newScan(),
+                other().newScan(),
                 ((AbstractFileStoreTable) wrapped).tableSchema,
                 this);
     }
@@ -87,42 +87,38 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
     }
 
     private DataTableScan newDeltaScan() {
-        return fallback().newScan();
+        return other().newScan();
     }
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         return new ChainGroupReadTable(
-                wrapped.copy(dynamicOptions),
-                fallback().copy(rewriteFallbackOptions(dynamicOptions)));
+                wrapped.copy(dynamicOptions), other().copy(rewriteOtherOptions(dynamicOptions)));
     }
 
     @Override
     public FileStoreTable copy(TableSchema newTableSchema) {
         return new ChainGroupReadTable(
                 wrapped.copy(newTableSchema),
-                fallback()
-                        .copy(
-                                newTableSchema.copy(
-                                        rewriteFallbackOptions(newTableSchema.options()))));
+                other().copy(newTableSchema.copy(rewriteOtherOptions(newTableSchema.options()))));
     }
 
     @Override
     public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
         return new ChainGroupReadTable(
                 wrapped.copyWithoutTimeTravel(dynamicOptions),
-                fallback().copyWithoutTimeTravel(rewriteFallbackOptions(dynamicOptions)));
+                other().copyWithoutTimeTravel(rewriteOtherOptions(dynamicOptions)));
     }
 
     @Override
     public FileStoreTable copyWithLatestSchema() {
         return new ChainGroupReadTable(
-                wrapped.copyWithLatestSchema(), fallback().copyWithLatestSchema());
+                wrapped.copyWithLatestSchema(), other().copyWithLatestSchema());
     }
 
     @Override
     public FileStoreTable switchToBranch(String branchName) {
-        return new ChainGroupReadTable(switchWrappedToBranch(branchName), fallback());
+        return new ChainGroupReadTable(switchWrappedToBranch(branchName), other());
     }
 
     /** Scan implementation for {@link ChainGroupReadTable}. */
@@ -146,7 +142,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                     mainScan,
                     fallbackScan,
                     chainGroupReadTable.wrapped,
-                    chainGroupReadTable.fallback(),
+                    chainGroupReadTable.other(),
                     tableSchema);
             this.options = CoreOptions.fromMap(tableSchema.options());
             this.chainGroupReadTable = chainGroupReadTable;
@@ -500,7 +496,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
 
         private Read() {
             this.mainRead = wrapped.newRead();
-            this.fallbackRead = fallback().newRead();
+            this.fallbackRead = other().newRead();
         }
 
         @Override
