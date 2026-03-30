@@ -179,6 +179,8 @@ class DataWriter(ABC):
             self.file_io.write_blob(file_path, data)
         elif self.file_format == CoreOptions.FILE_FORMAT_LANCE:
             self.file_io.write_lance(file_path, data)
+        elif self.file_format == CoreOptions.FILE_FORMAT_VORTEX:
+            self.file_io.write_vortex(file_path, data)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
 

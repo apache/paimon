@@ -18,6 +18,7 @@
 
 import os
 import shutil
+import sys
 import tempfile
 import time
 import unittest
@@ -101,6 +102,51 @@ class AoReaderTest(unittest.TestCase):
         read_builder = table.new_read_builder()
         actual = self._read_test_table(read_builder).sort_by('user_id')
         self.assertEqual(actual, self.expected)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_ao_reader(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'vortex'})
+        self.catalog.create_table('default.test_append_only_vortex', schema, False)
+        table = self.catalog.get_table('default.test_append_only_vortex')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder()
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        self.assertEqual(actual, self.expected)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_ao_reader_with_filter(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'vortex'})
+        self.catalog.create_table('default.test_append_only_vortex_filter', schema, False)
+        table = self.catalog.get_table('default.test_append_only_vortex_filter')
+        self._write_test_table(table)
+
+        predicate_builder = table.new_read_builder().new_predicate_builder()
+        p1 = predicate_builder.less_than('user_id', 7)
+        p2 = predicate_builder.greater_or_equal('user_id', 2)
+        p3 = predicate_builder.between('user_id', 0, 6)  # [2/b, 3/c, 4/d, 5/e, 6/f] left
+        p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])  # [3/c, 4/d, 6/f] left
+        p5 = predicate_builder.is_in('dt', ['p1'])  # exclude 3/c
+        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d
+        g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
+        read_builder = table.new_read_builder().with_filter(g1)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            self.expected.slice(5, 1)  # 6/f
+        ])
+        self.assertEqual(actual.sort_by('user_id'), expected)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_ao_reader_with_projection(self):
+        schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'vortex'})
+        self.catalog.create_table('default.test_vortex_append_only_projection', schema, False)
+        table = self.catalog.get_table('default.test_vortex_append_only_projection')
+        self._write_test_table(table)
+
+        read_builder = table.new_read_builder().with_projection(['dt', 'user_id'])
+        actual = self._read_test_table(read_builder).sort_by('user_id')
+        expected = self.expected.select(['dt', 'user_id'])
+        self.assertEqual(actual, expected)
 
     def test_lance_ao_reader_with_filter(self):
         schema = Schema.from_pyarrow_schema(self.pa_schema, partition_keys=['dt'], options={'file.format': 'lance'})
