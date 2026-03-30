@@ -33,7 +33,8 @@ class FormatVortexReader(RecordBatchReader):
     """
 
     def __init__(self, file_io: FileIO, file_path: str, read_fields: List[str],
-                 push_down_predicate: Any, batch_size: int = 1024):
+                 push_down_predicate: Any, batch_size: int = 1024,
+                 row_indices: Optional[Any] = None):
         import vortex
 
         from pypaimon.read.reader.vortex_utils import to_vortex_specified
@@ -47,17 +48,31 @@ class FormatVortexReader(RecordBatchReader):
             vortex_file = vortex.open(file_path_for_vortex)
 
         columns_for_vortex = read_fields if read_fields else None
-        pa_table = vortex_file.to_arrow(columns_for_vortex).read_all()
 
-        # Vortex exports string_view which some PyArrow kernels don't support yet.
-        pa_table = self._cast_string_view_columns(pa_table)
-
-        if push_down_predicate is not None:
-            in_memory_dataset = ds.InMemoryDataset(pa_table)
-            scanner = in_memory_dataset.scanner(filter=push_down_predicate, batch_size=batch_size)
-            self.reader = scanner.to_reader()
+        if row_indices is not None:
+            # Use scan with indices for efficient row-level pushdown
+            vortex_indices = vortex.array(row_indices)
+            scan_iter = vortex_file.scan(
+                columns_for_vortex, indices=vortex_indices, batch_size=batch_size)
+            pa_table = scan_iter.read_all().to_arrow_table()
+            pa_table = self._cast_string_view_columns(pa_table)
+            if push_down_predicate is not None:
+                in_memory_dataset = ds.InMemoryDataset(pa_table)
+                scanner = in_memory_dataset.scanner(filter=push_down_predicate, batch_size=batch_size)
+                self.reader = scanner.to_reader()
+            else:
+                self.reader = iter(pa_table.to_batches(max_chunksize=batch_size))
         else:
-            self.reader = iter(pa_table.to_batches(max_chunksize=batch_size))
+            pa_table = vortex_file.to_arrow(columns_for_vortex).read_all()
+            # Vortex exports string_view which some PyArrow kernels don't support yet.
+            pa_table = self._cast_string_view_columns(pa_table)
+
+            if push_down_predicate is not None:
+                in_memory_dataset = ds.InMemoryDataset(pa_table)
+                scanner = in_memory_dataset.scanner(filter=push_down_predicate, batch_size=batch_size)
+                self.reader = scanner.to_reader()
+            else:
+                self.reader = iter(pa_table.to_batches(max_chunksize=batch_size))
 
     @staticmethod
     def _cast_string_view_columns(table: pa.Table) -> pa.Table:

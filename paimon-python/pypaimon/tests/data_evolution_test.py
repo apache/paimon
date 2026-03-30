@@ -17,6 +17,7 @@ limitations under the License.
 """
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -1437,3 +1438,157 @@ class DataEvolutionTest(unittest.TestCase):
         ]))
         self.assertEqual(actual.num_rows, 2)
         self.assertEqual(actual, expect)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_basic(self):
+        """Test basic data evolution read/write with Vortex format."""
+        pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string()),
+            ('f2', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'file.format': 'vortex',
+            }
+        )
+        self.catalog.create_table('default.test_vortex_basic', schema, False)
+        table = self.catalog.get_table('default.test_vortex_basic')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Commit 1: write f0, f1
+        w0 = write_builder.new_write().with_write_type(['f0', 'f1'])
+        w1 = write_builder.new_write().with_write_type(['f2'])
+        c = write_builder.new_commit()
+        d0 = pa.Table.from_pydict(
+            {'f0': [1, 2, 3], 'f1': ['a', 'b', 'c']},
+            schema=pa.schema([('f0', pa.int32()), ('f1', pa.string())]))
+        d1 = pa.Table.from_pydict(
+            {'f2': ['x', 'y', 'z']},
+            schema=pa.schema([('f2', pa.string())]))
+        w0.write_arrow(d0)
+        w1.write_arrow(d1)
+        cmts = w0.prepare_commit() + w1.prepare_commit()
+        for msg in cmts:
+            for nf in msg.new_files:
+                nf.first_row_id = 0
+        c.commit(cmts)
+        w0.close()
+        w1.close()
+        c.close()
+
+        read_builder = table.new_read_builder()
+        actual = read_builder.new_read().to_arrow(read_builder.new_scan().plan().splits())
+        expected = pa.Table.from_pydict({
+            'f0': [1, 2, 3],
+            'f1': ['a', 'b', 'c'],
+            'f2': ['x', 'y', 'z'],
+        }, schema=pa_schema)
+        self.assertEqual(actual, expected)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_row_id_filter(self):
+        """Test that Vortex row_indices pushdown works via file_reader_supplier row_ranges."""
+        pa_schema = pa.schema([
+            ('f0', pa.int32()),
+            ('f1', pa.string()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'file.format': 'vortex',
+            }
+        )
+        self.catalog.create_table('default.test_vortex_row_id_filter', schema, False)
+        table = self.catalog.get_table('default.test_vortex_row_id_filter')
+
+        write_builder = table.new_batch_write_builder()
+
+        # Commit 1: rows 0-4
+        w = write_builder.new_write()
+        c = write_builder.new_commit()
+        w.write_arrow(pa.Table.from_pydict(
+            {'f0': list(range(5)), 'f1': [f'v{i}' for i in range(5)]},
+            schema=pa_schema))
+        c.commit(w.prepare_commit())
+        w.close()
+        c.close()
+
+        # Commit 2: rows 5-9
+        w = write_builder.new_write()
+        c = write_builder.new_commit()
+        w.write_arrow(pa.Table.from_pydict(
+            {'f0': list(range(5, 10)), 'f1': [f'v{i}' for i in range(5, 10)]},
+            schema=pa_schema))
+        c.commit(w.prepare_commit())
+        w.close()
+        c.close()
+
+        # Full read
+        rb = table.new_read_builder()
+        full = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(full.num_rows, 10)
+
+        # Filter by _ROW_ID using predicate — triggers row_ranges pushdown in Vortex
+        pb = rb.new_predicate_builder()
+        rb_filtered = table.new_read_builder().with_filter(pb.equal('_ROW_ID', 3))
+        filtered = rb_filtered.new_read().to_arrow(rb_filtered.new_scan().plan().splits())
+        self.assertEqual(filtered.num_rows, 1)
+        self.assertEqual(filtered.column('f0')[0].as_py(), 3)
+        self.assertEqual(filtered.column('f1')[0].as_py(), 'v3')
+
+        # Filter by _ROW_ID range spanning two files
+        rb_range = table.new_read_builder().with_filter(pb.between('_ROW_ID', 3, 6))
+        range_result = rb_range.new_read().to_arrow(rb_range.new_scan().plan().splits())
+        self.assertEqual(range_result.num_rows, 4)
+        self.assertEqual(sorted(range_result.column('f0').to_pylist()), [3, 4, 5, 6])
+
+    @unittest.skipIf(sys.version_info < (3, 11), "vortex-data requires Python >= 3.11")
+    def test_vortex_with_slice(self):
+        """Test with_slice on Vortex data evolution table."""
+        pa_schema = pa.schema([
+            ('id', pa.int64()),
+            ('val', pa.int32()),
+        ])
+        schema = Schema.from_pyarrow_schema(
+            pa_schema,
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'file.format': 'vortex',
+                'source.split.target-size': '512m',
+            }
+        )
+        self.catalog.create_table('default.test_vortex_with_slice', schema, False)
+        table = self.catalog.get_table('default.test_vortex_with_slice')
+
+        for batch in [
+            {'id': [1, 2], 'val': [10, 20]},
+            {'id': [3, 4], 'val': [30, 40]},
+            {'id': [5, 6], 'val': [50, 60]},
+        ]:
+            wb = table.new_batch_write_builder()
+            tw = wb.new_write()
+            tc = wb.new_commit()
+            tw.write_arrow(pa.Table.from_pydict(batch, schema=pa_schema))
+            tc.commit(tw.prepare_commit())
+            tw.close()
+            tc.close()
+
+        rb = table.new_read_builder()
+
+        # Full read
+        full = rb.new_read().to_arrow(rb.new_scan().plan().splits())
+        self.assertEqual(full.num_rows, 6)
+
+        # with_slice(1, 4) -> rows at index 1,2,3 -> id in (2,3,4)
+        scan = rb.new_scan().with_slice(1, 4)
+        sliced = rb.new_read().to_arrow(scan.plan().splits())
+        self.assertEqual(sliced.num_rows, 3)
+        self.assertEqual(sorted(sliced.column('id').to_pylist()), [2, 3, 4])
