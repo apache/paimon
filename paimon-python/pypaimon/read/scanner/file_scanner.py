@@ -381,12 +381,30 @@ class FileScanner:
         if self.table.is_primary_key_table:
             if self.deletion_vectors_enabled and entry.file.level == 0:  # do not read level 0 file
                 return False
-            if not self.primary_key_predicate:
-                return True
-            return self.primary_key_predicate.test_by_simple_stats(
-                entry.file.key_stats,
-                entry.file.row_count
-            )
+            if self.primary_key_predicate:
+                if not self.primary_key_predicate.test_by_simple_stats(
+                    entry.file.key_stats,
+                    entry.file.row_count
+                ):
+                    return False
+            # In DV mode, files within a bucket don't overlap (level 0 excluded above),
+            # so we can safely filter by value stats per file.
+            if self.deletion_vectors_enabled and self.predicate_for_stats:
+                if entry.file.value_stats_cols is None and entry.file.write_cols is not None:
+                    stats_fields = entry.file.write_cols
+                else:
+                    stats_fields = entry.file.value_stats_cols
+                evolved_stats = evolution.evolution(
+                    entry.file.value_stats,
+                    entry.file.row_count,
+                    stats_fields
+                )
+                if not self.predicate_for_stats.test_by_simple_stats(
+                    evolved_stats,
+                    entry.file.row_count
+                ):
+                    return False
+            return True
         else:
             if not self.predicate:
                 return True
