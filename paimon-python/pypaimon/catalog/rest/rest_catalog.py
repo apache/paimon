@@ -15,8 +15,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+import logging
 from typing import Any, Callable, Dict, List, Optional, Union
-
 from pypaimon.api.api_response import GetTableResponse, PagedList, ErrorResponse
 from pypaimon.api.rest_api import RESTApi
 from pypaimon.api.rest_exception import NoSuchResourceException, AlreadyExistsException, ForbiddenException
@@ -32,7 +32,7 @@ from pypaimon.catalog.database import Database
 from pypaimon.catalog.rest.property_change import PropertyChange
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
 from pypaimon.catalog.rest.table_metadata import TableMetadata
-from pypaimon.common.options.config import CatalogOptions
+from pypaimon.common.options.config import CatalogOptions, FuseOptions
 from pypaimon.common.options.core_options import CoreOptions
 from pypaimon.common.file_io import FileIO
 from pypaimon.common.identifier import Identifier
@@ -46,6 +46,8 @@ from pypaimon.table.format.format_table import FormatTable, Format
 from pypaimon.table.iceberg.iceberg_table import IcebergTable
 from pypaimon.table.object.object_table import ObjectTable
 
+logger = logging.getLogger(__name__)
+
 FORMAT_TABLE_TYPE = "format-table"
 ICEBERG_TABLE_TYPE = "iceberg-table"
 OBJECT_TABLE_TYPE = "object-table"
@@ -58,6 +60,13 @@ class RESTCatalog(Catalog):
         self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
                                              context.prefer_io_loader, context.fallback_io_loader)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
+
+        # FUSE support (lazy import only when enabled)
+        self.fuse_enabled = self.context.options.get(FuseOptions.FUSE_ENABLED, False)
+        self._fuse_resolver = None
+        if self.fuse_enabled:
+            from pypaimon.catalog.rest.fuse_support import FusePathResolver
+            self._fuse_resolver = FusePathResolver(self.context.options, self.rest_api)
 
     def catalog_loader(self):
         """
@@ -385,6 +394,18 @@ class RESTCatalog(Catalog):
         return FileIO.get(table_path, self.context.options)
 
     def file_io_for_data(self, table_path: str, identifier: Identifier):
+        """
+        Get FileIO for data access, supporting FUSE local path mapping.
+        """
+        if self._fuse_resolver is not None:
+            return self._fuse_resolver.get_file_io(
+                table_path, identifier, self.data_token_enabled,
+                rest_token_file_io_factory=lambda: RESTTokenFileIO(
+                    identifier, table_path, self.context.options),
+                default_file_io_factory=lambda: self.file_io_from_options(table_path),
+            )
+
+        # Fallback to original logic
         return RESTTokenFileIO(identifier, table_path, self.context.options) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
 
