@@ -83,10 +83,8 @@ public class FileSystemBranchManager implements BranchManager {
         }
         validateBranch(branchName);
         try {
-            if (schemaManager.latest().isPresent()) {
-                TableSchema latestSchema = schemaManager.latest().get();
-                copySchemasToBranch(branchName, latestSchema.id());
-            }
+            TableSchema latestSchema = schemaManager.latest().get();
+            copySchemasToBranch(branchName, latestSchema.id());
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
