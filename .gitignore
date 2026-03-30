@@ -44,6 +44,9 @@ paimon-python/dev/log
 *.swp
 .cache
 
+### Rust ###
+Cargo.lock
 ### Vortex lib ###
-
 *libvortex_jni*
+### Tantivy lib ###
+*libtantivy_jni*

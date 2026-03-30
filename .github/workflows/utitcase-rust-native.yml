@@ -16,15 +16,17 @@
 # limitations under the License.
 ################################################################################
 
-name: UTCase Vortex
+name: UTCase Rust Native
 
 on:
   push:
     paths:
       - 'paimon-vortex/**'
+      - 'paimon-tantivy/**'
   pull_request:
     paths:
       - 'paimon-vortex/**'
+      - 'paimon-tantivy/**'
 
 env:
   JDK_VERSION: 8
@@ -68,5 +70,40 @@ jobs:
         run: |
           mvn -T 2C -B -ntp clean install -DskipTests
           mvn -B -ntp verify -pl paimon-vortex/paimon-vortex-jni,paimon-vortex/paimon-vortex-format -Dcheckstyle.skip=true -Dspotless.check.skip=true
+        env:
+          MAVEN_OPTS: -Xmx4096m
+
+  tantivy_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up JDK ${{ env.JDK_VERSION }}
+        uses: actions/setup-java@v5
+        with:
+          java-version: ${{ env.JDK_VERSION }}
+          distribution: 'temurin'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Tantivy native library
+        run: |
+          cd paimon-tantivy/paimon-tantivy-jni/rust
+          cargo build --release
+
+      - name: Copy native library to resources
+        run: |
+          RESOURCE_DIR=paimon-tantivy/paimon-tantivy-jni/src/main/resources/native/linux-amd64
+          mkdir -p ${RESOURCE_DIR}
+          cp paimon-tantivy/paimon-tantivy-jni/rust/target/release/libtantivy_jni.so ${RESOURCE_DIR}/
+
+      - name: Build and test Tantivy modules
+        timeout-minutes: 30
+        run: |
+          mvn -T 2C -B -ntp clean install -DskipTests
+          mvn -B -ntp verify -pl paimon-tantivy/paimon-tantivy-jni,paimon-tantivy/paimon-tantivy-index -Dcheckstyle.skip=true -Dspotless.check.skip=true
         env:
           MAVEN_OPTS: -Xmx4096m
