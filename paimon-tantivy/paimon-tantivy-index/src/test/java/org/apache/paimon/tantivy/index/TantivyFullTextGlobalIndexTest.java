@@ -29,9 +29,11 @@ import org.apache.paimon.globalindex.ScoredGlobalIndexResult;
 import org.apache.paimon.globalindex.io.GlobalIndexFileReader;
 import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.predicate.FullTextSearch;
+import org.apache.paimon.tantivy.NativeLoader;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,11 +45,26 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Test for {@link TantivyFullTextGlobalIndexWriter} and {@link TantivyFullTextGlobalIndexReader}.
  */
 public class TantivyFullTextGlobalIndexTest {
+
+    @BeforeAll
+    static void checkNativeLibrary() {
+        assumeTrue(isNativeAvailable(), "Tantivy native library not available, skipping tests");
+    }
+
+    private static boolean isNativeAvailable() {
+        try {
+            NativeLoader.loadJni();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     @TempDir java.nio.file.Path tempDir;
 

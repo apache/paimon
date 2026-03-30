@@ -18,6 +18,7 @@
 
 package org.apache.paimon.tantivy;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,9 +32,24 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** Test for stream-based TantivySearcher via JNI Directory callback. */
 class TantivyStreamSearchTest {
+
+    @BeforeAll
+    static void checkNativeLibrary() {
+        assumeTrue(isNativeAvailable(), "Tantivy native library not available, skipping tests");
+    }
+
+    private static boolean isNativeAvailable() {
+        try {
+            NativeLoader.loadJni();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     @Test
     void testStreamBasedSearch(@TempDir Path tempDir) throws IOException {
