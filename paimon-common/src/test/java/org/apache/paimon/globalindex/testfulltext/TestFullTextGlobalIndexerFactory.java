@@ -16,22 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark
+package org.apache.paimon.globalindex.testfulltext;
 
-import org.apache.paimon.partition.PartitionPredicate
-import org.apache.paimon.predicate.{FullTextSearch, Predicate, TopN, VectorSearch}
-import org.apache.paimon.table.InnerTable
+import org.apache.paimon.globalindex.GlobalIndexer;
+import org.apache.paimon.globalindex.GlobalIndexerFactory;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataField;
 
-import org.apache.spark.sql.types.StructType
+/**
+ * A test-only {@link GlobalIndexerFactory} for full-text search. Uses brute-force in-memory
+ * inverted index, no native dependencies required.
+ */
+public class TestFullTextGlobalIndexerFactory implements GlobalIndexerFactory {
 
-case class PaimonScan(
-    table: InnerTable,
-    requiredSchema: StructType,
-    pushedPartitionFilters: Seq[PartitionPredicate],
-    pushedDataFilters: Seq[Predicate],
-    override val pushedLimit: Option[Int] = None,
-    override val pushedTopN: Option[TopN] = None,
-    override val pushedVectorSearch: Option[VectorSearch] = None,
-    override val pushedFullTextSearch: Option[FullTextSearch] = None,
-    bucketedScanDisabled: Boolean = true)
-  extends PaimonBaseScan(table) {}
+    public static final String IDENTIFIER = "test-fulltext";
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
+    }
+
+    @Override
+    public GlobalIndexer create(DataField field, Options options) {
+        return new TestFullTextGlobalIndexer(field.type(), options);
+    }
+}

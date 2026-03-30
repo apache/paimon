@@ -128,7 +128,7 @@ class PaimonScanBuilder(val table: InnerTable)
     localScan match {
       case Some(scan) => scan
       case None =>
-        val (actualTable, vectorSearch) = table match {
+        val (actualTable, vectorSearch, fullTextSearch) = table match {
           case vst: org.apache.paimon.table.VectorSearchTable =>
             val tableVectorSearch = Option(vst.vectorSearch())
             val vs = (tableVectorSearch, pushedVectorSearch) match {
@@ -136,8 +136,10 @@ class PaimonScanBuilder(val table: InnerTable)
               case (None, Some(_)) => pushedVectorSearch
               case (None, None) => None
             }
-            (vst.origin(), vs)
-          case _ => (table, pushedVectorSearch)
+            (vst.origin(), vs, None)
+          case ftst: org.apache.paimon.table.FullTextSearchTable =>
+            (ftst.origin(), None, Option(ftst.fullTextSearch()))
+          case _ => (table, pushedVectorSearch, pushedFullTextSearch)
         }
 
         PaimonScan(
@@ -147,7 +149,8 @@ class PaimonScanBuilder(val table: InnerTable)
           pushedDataFilters,
           pushedLimit,
           pushedTopN,
-          vectorSearch)
+          vectorSearch,
+          fullTextSearch)
     }
   }
 }
