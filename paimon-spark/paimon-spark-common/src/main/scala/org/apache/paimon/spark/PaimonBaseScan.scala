@@ -55,6 +55,10 @@ abstract class PaimonBaseScan(table: InnerTable)
   }
 
   private def evalGlobalIndexSearch(): GlobalIndexResult = {
+    if (pushedVectorSearch.isDefined && pushedFullTextSearch.isDefined) {
+      throw new UnsupportedOperationException(
+        "Cannot push down both vector search and full-text search simultaneously.")
+    }
     if (pushedVectorSearch.isDefined) {
       return evalVectorSearch()
     }

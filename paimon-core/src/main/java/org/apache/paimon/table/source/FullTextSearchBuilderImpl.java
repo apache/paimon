@@ -22,6 +22,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.DataField;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /** Implementation for {@link FullTextSearchBuilder}. */
 public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
@@ -57,11 +60,15 @@ public class FullTextSearchBuilderImpl implements FullTextSearchBuilder {
 
     @Override
     public FullTextScan newFullTextScan() {
+        checkNotNull(textColumn, "Text column must be set via withTextColumn()");
         return new FullTextScanImpl(table, textColumn);
     }
 
     @Override
     public FullTextRead newFullTextRead() {
+        checkArgument(limit > 0, "Limit must be positive, set via withLimit()");
+        checkNotNull(textColumn, "Text column must be set via withTextColumn()");
+        checkNotNull(queryText, "Query text must be set via withQueryText()");
         return new FullTextReadImpl(table, limit, textColumn, queryText);
     }
 }
