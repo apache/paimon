@@ -33,6 +33,7 @@ without full-table scans. Paimon supports multiple global index types:
 
 - **BTree Index**: A B-tree based index for scalar column lookups. Supports equality, IN, range predicates, and can be combined across multiple columns with AND/OR logic.
 - **Vector Index**: An approximate nearest neighbor (ANN) index powered by DiskANN for vector similarity search.
+- **Full-Text Index**: A full-text search index powered by Tantivy for text retrieval. Supports term matching and relevance scoring.
 
 Global indexes work on top of Data Evolution tables. To use global indexes, your table **must** have:
 
@@ -48,7 +49,8 @@ Create a table with the required properties:
 CREATE TABLE my_table (
     id INT,
     name STRING,
-    embedding ARRAY<FLOAT>
+    embedding ARRAY<FLOAT>,
+    content STRING
 ) TBLPROPERTIES (
     'bucket' = '-1',
     'row-tracking.enabled' = 'true',
@@ -127,6 +129,57 @@ TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan()
 try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
     reader.forEachRemaining(row -> {
         System.out.println("id=" + row.getInt(0) + ", name=" + row.getString(1));
+    });
+}
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## Full-Text Index
+
+Full-Text Index provides text search capabilities powered by Tantivy. It is suitable for text retrieval scenarios
+such as document search, log analysis, and content-based filtering.
+
+**Build Full-Text Index**
+
+```sql
+-- Create full-text index on 'content' column
+CALL sys.create_global_index(
+    table => 'db.my_table',
+    index_column => 'content',
+    index_type => 'tantivy-fulltext'
+);
+```
+
+**Full-Text Search**
+
+{{< tabs "fulltext-search" >}}
+
+{{< tab "Spark SQL" >}}
+```sql
+-- Search for top-10 documents matching the query
+SELECT * FROM full_text_search('my_table', 'content', 'paimon lake format', 10);
+```
+{{< /tab >}}
+
+{{< tab "Java API" >}}
+```java
+Table table = catalog.getTable(identifier);
+
+// Step 1: Build full-text search
+GlobalIndexResult result = table.newFullTextSearchBuilder()
+        .withQueryText("paimon lake format")
+        .withLimit(10)
+        .withTextColumn("content")
+        .executeLocal();
+
+// Step 2: Read matching rows using the search result
+ReadBuilder readBuilder = table.newReadBuilder();
+TableScan.Plan plan = readBuilder.newScan().withGlobalIndexResult(result).plan();
+try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
+    reader.forEachRemaining(row -> {
+        System.out.println("id=" + row.getInt(0) + ", content=" + row.getString(1));
     });
 }
 ```
