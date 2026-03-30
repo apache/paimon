@@ -53,26 +53,6 @@ CREATE TABLE my_table (
 After this, data files within each bucket will be physically sorted by `city` instead of `id`. Queries like
 `SELECT * FROM my_table WHERE city = 'Beijing'` can skip irrelevant data files by checking their min/max statistics
 on the clustering column.
-s
-## How It Works
-
-PK Clustering Override replaces the default LSM compaction with a two-phase clustering compaction:
-
-**Phase 1 — Sort by Clustering Columns**: Newly flushed (level 0) files are read, sorted by the configured clustering
-columns, and rewritten as sorted (level 1) files. A key index tracks each primary key's file and row position to
-maintain uniqueness.
-
-**Phase 2 — Merge Overlapping Sections**: Sorted files are grouped into sections based on clustering column range
-overlap. Overlapping sections are merged together. Adjacent small sections are also consolidated to reduce file count
-and IO amplification. Non-overlapping large files are left untouched.
-
-During both phases, deduplication is handled via deletion vectors:
-
-- **Deduplicate mode**: When a key already exists in an older file, the old row is marked as deleted.
-- **First-row mode**: When a key already exists, the new row is marked as deleted, keeping the first-seen value.
-
-When the number of files to merge exceeds `sort-spill-threshold`, smaller files are first spilled to row-based
-temporary files to reduce memory consumption, preventing OOM during multi-way merge.
 
 ## Requirements
 
@@ -89,11 +69,15 @@ PK Clustering Override is beneficial when:
 
 - Analytical queries frequently filter or aggregate on non-primary-key columns (e.g., `WHERE city = 'Beijing'`).
 - The table uses `deduplicate` or `first-row` merge engine.
-- You want data files physically co-located by a business dimension rather than the primary key.
 
-It is **not** suitable when:
+{{< hint info >}}
+Although data files are no longer sorted by the primary key, filtering on bucket-key fields (which default to the
+primary key) still benefits from bucket pruning. The query engine can skip entire buckets that do not contain matching
+values, so queries like `WHERE id = 12345` remain efficient.
+{{< /hint >}}
 
-- Point lookups by primary key are the dominant access pattern (default LSM sort is already optimal).
-- You need `partial-update` or `aggregation` merge engine.
-- `sequence.fields` or `record-level.expire-time` is required.
-- Changelog producer`lookup` or `full-compaction` is required.
+**Unsupported modes**:
+
+- Merge engine: `partial-update` or `aggregation`.
+- Changelog producer: `lookup` or `full-compaction`.
+- Configue: `sequence.fields` or `record-level.expire-time`.
