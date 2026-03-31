@@ -132,6 +132,21 @@ class FileStoreTable(Table):
         from pypaimon.changelog.changelog_manager import ChangelogManager
         return ChangelogManager(self.file_io, self.table_path, self.current_branch())
 
+    def rename_branch(self, from_branch: str, to_branch: str) -> None:
+        """
+        Rename a branch.
+
+        Args:
+            from_branch: Current name of the branch
+            to_branch: New name for the branch
+
+        Raises:
+            ValueError: If from_branch or to_branch is blank, from_branch doesn't exist,
+                       or to_branch already exists
+        """
+        branch_mgr = self.branch_manager()
+        branch_mgr.rename_branch(from_branch, to_branch)
+
     def create_tag(
             self,
             tag_name: str,

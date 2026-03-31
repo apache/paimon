@@ -339,6 +339,52 @@ class FileStoreTableTest(unittest.TestCase):
         self.assertEqual(copied_table.identifier, self.table.identifier)
         self.assertEqual(copied_table.table_path, self.table.table_path)
 
+    def test_rename_branch_basic(self):
+        """Test rename_branch method."""
+        # Get branch_manager
+        branch_manager = self.table.branch_manager()
+
+        # Create a branch first
+        branch_manager.create_branch("old-branch")
+        self.assertTrue(branch_manager.branch_exists("old-branch"))
+
+        # Rename the branch using table's rename_branch method
+        self.table.rename_branch("old-branch", "new-branch")
+
+        # Verify old branch doesn't exist
+        self.assertFalse(branch_manager.branch_exists("old-branch"))
+
+        # Verify new branch exists
+        self.assertTrue(branch_manager.branch_exists("new-branch"))
+
+    def test_rename_branch_from_nonexistent(self):
+        """Test renaming from non-existent branch raises error."""
+        with self.assertRaises(ValueError) as context:
+            self.table.rename_branch("nonexistent-branch", "new-branch")
+
+        self.assertIn("doesn't exist", str(context.exception))
+
+    def test_rename_branch_to_existing(self):
+        """Test renaming to existing branch raises error."""
+        # Get branch_manager
+        branch_manager = self.table.branch_manager()
+
+        # Create two branches
+        branch_manager.create_branch("branch1")
+        branch_manager.create_branch("branch2")
+
+        with self.assertRaises(ValueError) as context:
+            self.table.rename_branch("branch1", "branch2")
+
+        self.assertIn("already exists", str(context.exception))
+
+    def test_rename_main_branch_fails(self):
+        """Test renaming main branch raises error."""
+        with self.assertRaises(ValueError) as context:
+            self.table.rename_branch("main", "new-branch")
+
+        self.assertIn("main branch", str(context.exception))
+
     def test_comment_none(self):
         """Test that comment() returns None when table has no comment."""
         # Default table created without comment should return None
