@@ -845,7 +845,7 @@ class ClusteringTableTest {
                 }
                 write.compact(BinaryRow.EMPTY_ROW, 0, false);
                 write.compact(BinaryRow.EMPTY_ROW, 1, false);
-                commit.commit(commitId, write.prepareCommit(false, commitId));
+                commit.commit(commitId, write.prepareCommit(true, commitId));
                 commitId++;
             }
 
