@@ -19,6 +19,8 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.globalindex.btree.BTreeGlobalIndexerFactory;
+import org.apache.paimon.globalindex.btree.BTreeWithFileMetaBuilder;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.table.FileStoreTable;
@@ -133,6 +135,55 @@ public class BTreeGlobalIndexITCase extends CatalogITCaseBase {
                             .collect(Collectors.joining(","));
             sql("INSERT INTO %s VALUES %s", tableName, values);
         }
+    }
+
+    @Test
+    public void testBTreeIndexWithFileMeta() throws Catalog.TableNotExistException {
+        sql(
+                "CREATE TABLE T_FM (id INT, name STRING) WITH ("
+                        + "'global-index.enabled' = 'true', "
+                        + "'row-tracking.enabled' = 'true', "
+                        + "'data-evolution.enabled' = 'true'"
+                        + ")");
+        String values =
+                IntStream.range(0, 1_000)
+                        .mapToObj(i -> String.format("(%s, %s)", i, "'name_" + i + "'"))
+                        .collect(Collectors.joining(","));
+        sql("INSERT INTO T_FM VALUES " + values);
+        sql(
+                "CALL sys.create_global_index(`table` => 'default.T_FM', index_column => 'name',"
+                        + " index_type => 'btree', options => 'index.with-file-meta=true')");
+
+        FileStoreTable table = paimonTable("T_FM");
+        List<IndexManifestEntry> allEntries = table.store().newIndexFileHandler().scanEntries();
+
+        // assert key-index (btree) entries exist
+        List<IndexFileMeta> keyIndexEntries =
+                allEntries.stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(f -> BTreeGlobalIndexerFactory.IDENTIFIER.equals(f.indexType()))
+                        .collect(Collectors.toList());
+        assertThat(keyIndexEntries).isNotEmpty();
+
+        // assert file-meta index (btree_file_meta) entries exist
+        List<IndexFileMeta> fileMetaEntries =
+                allEntries.stream()
+                        .map(IndexManifestEntry::indexFile)
+                        .filter(
+                                f ->
+                                        BTreeWithFileMetaBuilder.INDEX_TYPE_FILE_META.equals(
+                                                f.indexType()))
+                        .collect(Collectors.toList());
+        assertThat(fileMetaEntries).isNotEmpty();
+
+        long totalRowCount = keyIndexEntries.stream().mapToLong(IndexFileMeta::rowCount).sum();
+        assertThat(totalRowCount).isEqualTo(1000L);
+
+        // assert query returns correct results via manifest-free read path
+        assertThat(sql("SELECT * FROM T_FM WHERE name = 'name_100'"))
+                .containsOnly(Row.of(100, "name_100"));
+        assertThat(sql("SELECT * FROM T_FM WHERE name = 'name_999'"))
+                .containsOnly(Row.of(999, "name_999"));
     }
 
     private void buildBTreeIndexForTable(String tableName, String indexColumn) {

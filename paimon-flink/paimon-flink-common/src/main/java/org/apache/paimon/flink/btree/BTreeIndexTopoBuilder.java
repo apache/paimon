@@ -35,19 +35,26 @@ import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.utils.BoundedOneInputOperator;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.globalindex.GlobalIndexParallelWriter;
+import org.apache.paimon.globalindex.IndexedSplit;
+import org.apache.paimon.globalindex.ResultEntry;
 import org.apache.paimon.globalindex.btree.BTreeGlobalIndexBuilder;
 import org.apache.paimon.globalindex.btree.BTreeIndexOptions;
+import org.apache.paimon.globalindex.btree.BTreeWithFileMetaBuilder;
+import org.apache.paimon.globalindex.btree.BinaryFileMetaWriter;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.SpecialFields;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -60,6 +67,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperatorFactory;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -84,6 +93,7 @@ public class BTreeIndexTopoBuilder {
             PartitionPredicate partitionPredicate,
             Options userOptions)
             throws Exception {
+        boolean withFileMeta = userOptions.get(BTreeIndexOptions.BTREE_WITH_FILE_META);
         DataStream<Committable> allCommitMessages = null;
         for (String indexColumn : indexColumns) {
             BTreeGlobalIndexBuilder indexBuilder =
@@ -118,6 +128,7 @@ public class BTreeIndexTopoBuilder {
             int indexFieldPos = readType.getFieldIndex(indexColumn);
             int rowIdPos = readType.getFieldIndex(SpecialFields.ROW_ID.name());
             DataType indexFieldType = readType.getTypeAt(indexFieldPos);
+            DataField indexDataField = table.rowType().getField(indexColumn);
 
             // 3. Calculate maximum parallelism bound
             long recordsPerRange = userOptions.get(BTreeIndexOptions.BTREE_INDEX_RECORDS_PER_RANGE);
@@ -131,6 +142,9 @@ public class BTreeIndexTopoBuilder {
             sortColumns.add(indexColumn);
             int partitionFieldSize = table.partitionKeys().size();
             BinaryRowSerializer binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
+            ManifestEntrySerializer manifestSerializer =
+                    withFileMeta ? new ManifestEntrySerializer() : null;
+
             for (Map.Entry<BinaryRow, Map<Range, List<Split>>> partitionEntry :
                     partitionRangeSplits.entrySet()) {
                 BinaryRow partition = partitionEntry.getKey();
@@ -141,6 +155,34 @@ public class BTreeIndexTopoBuilder {
                         continue;
                     }
 
+                    // Pre-serialize ManifestEntries for file-meta index (if withFileMeta is
+                    // enabled)
+                    List<byte[]> manifestEntryBytesList = null;
+                    if (withFileMeta && manifestSerializer != null) {
+                        manifestEntryBytesList = new ArrayList<>();
+                        for (Split split : rangeSplits) {
+                            DataSplit dataSplit =
+                                    split instanceof IndexedSplit
+                                            ? ((IndexedSplit) split).dataSplit()
+                                            : (split instanceof DataSplit
+                                                    ? (DataSplit) split
+                                                    : null);
+                            if (dataSplit == null) {
+                                continue;
+                            }
+                            for (org.apache.paimon.io.DataFileMeta file : dataSplit.dataFiles()) {
+                                ManifestEntry me =
+                                        ManifestEntry.create(
+                                                FileKind.ADD,
+                                                partition,
+                                                dataSplit.bucket(),
+                                                dataSplit.totalBuckets(),
+                                                file);
+                                manifestEntryBytesList.add(manifestSerializer.serializeToBytes(me));
+                            }
+                        }
+                    }
+
                     DataStream<Committable> commitMessages =
                             executeForPartitionRange(
                                     env,
@@ -148,6 +190,9 @@ public class BTreeIndexTopoBuilder {
                                     rangeSplits,
                                     readBuilder,
                                     indexBuilder,
+                                    withFileMeta
+                                            ? new BTreeWithFileMetaBuilder(table, indexDataField)
+                                            : null,
                                     partitionFieldSize,
                                     binaryRowSerializer.serializeToBytes(partition),
                                     indexFieldPos,
@@ -157,7 +202,8 @@ public class BTreeIndexTopoBuilder {
                                     coreOptions,
                                     readType,
                                     recordsPerRange,
-                                    maxParallelism);
+                                    maxParallelism,
+                                    manifestEntryBytesList);
 
                     allCommitMessages =
                             allCommitMessages == null
@@ -197,6 +243,7 @@ public class BTreeIndexTopoBuilder {
             List<Split> rangeSplits,
             ReadBuilder readBuilder,
             BTreeGlobalIndexBuilder indexBuilder,
+            @Nullable BTreeWithFileMetaBuilder fileMetaBuilder,
             int partitionFieldSize,
             byte[] partition,
             int indexFieldPos,
@@ -206,7 +253,8 @@ public class BTreeIndexTopoBuilder {
             CoreOptions coreOptions,
             RowType readType,
             long recordsPerRange,
-            int maxParallelism) {
+            int maxParallelism,
+            @Nullable List<byte[]> manifestEntryBytesList) {
         int parallelism = Math.max((int) (range.count() / recordsPerRange), 1);
         parallelism = Math.min(parallelism, maxParallelism);
 
@@ -246,9 +294,11 @@ public class BTreeIndexTopoBuilder {
                                 partitionFieldSize,
                                 partition,
                                 indexBuilder,
+                                fileMetaBuilder,
                                 indexFieldPos,
                                 rowIdPos,
-                                indexFieldType))
+                                indexFieldType,
+                                manifestEntryBytesList))
                 .setParallelism(parallelism);
     }
 
@@ -306,13 +356,20 @@ public class BTreeIndexTopoBuilder {
         private final byte[] partition;
         private final int partitionFieldSize;
         private final BTreeGlobalIndexBuilder builder;
+        @Nullable private final BTreeWithFileMetaBuilder fileMetaBuilder;
         private final int indexFieldPos;
         private final int rowIdPos;
         private final DataType indexFieldType;
+        /**
+         * Pre-serialized ManifestEntry bytes for file-meta index (null when withFileMeta=false).
+         */
+        @Nullable private final List<byte[]> manifestEntryBytesList;
 
         private transient long counter;
         private transient GlobalIndexParallelWriter currentWriter;
-        private transient List<CommitMessage> commitMessages;
+        /** Accumulated key index result batches; flushed as CommitMessages in endInput(). */
+        private transient List<List<ResultEntry>> pendingKeyIndexBatches;
+
         private transient InternalRow.FieldGetter indexFieldGetter;
         private transient BinaryRowSerializer binaryRowSerializer;
 
@@ -321,22 +378,26 @@ public class BTreeIndexTopoBuilder {
                 int partitionFieldSize,
                 byte[] partition,
                 BTreeGlobalIndexBuilder builder,
+                @Nullable BTreeWithFileMetaBuilder fileMetaBuilder,
                 int indexFieldPos,
                 int rowIdPos,
-                DataType indexFieldType) {
+                DataType indexFieldType,
+                @Nullable List<byte[]> manifestEntryBytesList) {
             this.rowRange = rowRange;
             this.partitionFieldSize = partitionFieldSize;
             this.partition = partition;
             this.builder = builder;
+            this.fileMetaBuilder = fileMetaBuilder;
             this.indexFieldPos = indexFieldPos;
             this.rowIdPos = rowIdPos;
             this.indexFieldType = indexFieldType;
+            this.manifestEntryBytesList = manifestEntryBytesList;
         }
 
         @Override
         public void open() throws Exception {
             super.open();
-            commitMessages = new ArrayList<>();
+            pendingKeyIndexBatches = new ArrayList<>();
             indexFieldGetter = InternalRow.createFieldGetter(indexFieldType, indexFieldPos);
             this.binaryRowSerializer = new BinaryRowSerializer(partitionFieldSize);
         }
@@ -345,11 +406,7 @@ public class BTreeIndexTopoBuilder {
         public void processElement(StreamRecord<RowData> element) throws IOException {
             InternalRow row = new FlinkRowWrapper(element.getValue());
             if (currentWriter != null && counter >= builder.recordsPerRange()) {
-                commitMessages.add(
-                        builder.flushIndex(
-                                rowRange,
-                                currentWriter.finish(),
-                                binaryRowSerializer.deserializeFromBytes(partition)));
+                pendingKeyIndexBatches.add(currentWriter.finish());
                 currentWriter = null;
                 counter = 0;
             }
@@ -366,19 +423,59 @@ public class BTreeIndexTopoBuilder {
 
         @Override
         public void endInput() throws IOException {
-            if (counter > 0) {
-                commitMessages.add(
-                        builder.flushIndex(
-                                rowRange,
-                                currentWriter.finish(),
-                                binaryRowSerializer.deserializeFromBytes(partition)));
+            if (counter > 0 && currentWriter != null) {
+                pendingKeyIndexBatches.add(currentWriter.finish());
             }
-            for (CommitMessage message : commitMessages) {
-                output.collect(
-                        new StreamRecord<>(
-                                new Committable(BatchWriteBuilder.COMMIT_IDENTIFIER, message)));
+
+            if (!pendingKeyIndexBatches.isEmpty()) {
+                BinaryRow partitionRow = binaryRowSerializer.deserializeFromBytes(partition);
+                if (fileMetaBuilder != null) {
+                    // Build file-meta index exactly once for the entire range handled by this
+                    // instance. Only the first key index batch carries file-meta entries;
+                    // subsequent batches carry none (avoiding duplicate file-meta references in
+                    // the index manifest).
+                    List<ResultEntry> binaryFileMetaEntries = buildBinaryFileMetaEntries();
+                    for (int i = 0; i < pendingKeyIndexBatches.size(); i++) {
+                        List<ResultEntry> keyIndexEntries = pendingKeyIndexBatches.get(i);
+                        List<ResultEntry> binaryFileMetaForThisBatch =
+                                i == 0 ? binaryFileMetaEntries : new ArrayList<>();
+                        output.collect(
+                                new StreamRecord<>(
+                                        new Committable(
+                                                BatchWriteBuilder.COMMIT_IDENTIFIER,
+                                                fileMetaBuilder.flushIndex(
+                                                        rowRange,
+                                                        keyIndexEntries,
+                                                        binaryFileMetaForThisBatch,
+                                                        partitionRow))));
+                    }
+                } else {
+                    for (List<ResultEntry> keyIndexEntries : pendingKeyIndexBatches) {
+                        output.collect(
+                                new StreamRecord<>(
+                                        new Committable(
+                                                BatchWriteBuilder.COMMIT_IDENTIFIER,
+                                                builder.flushIndex(
+                                                        rowRange, keyIndexEntries, partitionRow))));
+                    }
+                }
             }
-            commitMessages.clear();
+
+            pendingKeyIndexBatches.clear();
+        }
+
+        private List<ResultEntry> buildBinaryFileMetaEntries() throws IOException {
+            if (manifestEntryBytesList == null || manifestEntryBytesList.isEmpty()) {
+                return new ArrayList<>();
+            }
+            ManifestEntrySerializer serializer = new ManifestEntrySerializer();
+            BinaryFileMetaWriter binaryFileMetaWriter =
+                    fileMetaBuilder.createBinaryFileMetaWriter();
+            for (byte[] entryBytes : manifestEntryBytesList) {
+                ManifestEntry entry = serializer.deserializeFromBytes(entryBytes);
+                binaryFileMetaWriter.write(entry.file().fileName(), entry);
+            }
+            return binaryFileMetaWriter.finish();
         }
     }
 }
