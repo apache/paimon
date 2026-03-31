@@ -75,11 +75,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
     @Override
     public DataTableScan newScan() {
         super.validateSchema();
-        return new ChainTableBatchScan(
-                wrapped.newScan(),
-                other().newScan(),
-                ((AbstractFileStoreTable) wrapped).tableSchema,
-                this);
+        return new ChainTableBatchScan(((AbstractFileStoreTable) wrapped).tableSchema, this);
     }
 
     private DataTableScan newSnapshotScan() {
@@ -134,16 +130,12 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
         private Filter<Integer> bucketFilter;
 
         public ChainTableBatchScan(
-                DataTableScan mainScan,
-                DataTableScan fallbackScan,
-                TableSchema tableSchema,
-                ChainGroupReadTable chainGroupReadTable) {
+                TableSchema tableSchema, ChainGroupReadTable chainGroupReadTable) {
             super(
-                    mainScan,
-                    fallbackScan,
                     chainGroupReadTable.wrapped,
                     chainGroupReadTable.other(),
-                    tableSchema);
+                    tableSchema,
+                    FileStoreTable::newScan);
             this.options = CoreOptions.fromMap(tableSchema.options());
             this.chainGroupReadTable = chainGroupReadTable;
             this.partitionConverter =

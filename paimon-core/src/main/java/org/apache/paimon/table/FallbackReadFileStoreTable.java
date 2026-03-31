@@ -205,12 +205,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
         validateSchema();
         FileStoreTable first = wrappedFirst ? wrapped : other;
         FileStoreTable second = wrappedFirst ? other : wrapped;
-        return new FallbackReadScan(
-                scanCreator.apply(first),
-                scanCreator.apply(second),
-                first,
-                second,
-                wrapped.schema());
+        return new FallbackReadScan(first, second, wrapped.schema(), scanCreator);
     }
 
     protected void validateSchema() {
@@ -375,24 +370,25 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
     /** Scan implementation for {@link FallbackReadFileStoreTable}. */
     public static class FallbackReadScan implements DataTableScan {
 
-        protected final DataTableScan mainScan;
-        protected final DataTableScan fallbackScan;
         protected final FileStoreTable wrappedTable;
         protected final FileStoreTable fallbackTable;
         protected final TableSchema tableSchema;
+        protected final Function<FileStoreTable, DataTableScan> scanCreator;
+        protected final DataTableScan mainScan;
+        protected final DataTableScan fallbackScan;
         private PartitionPredicate partitionPredicate;
 
         public FallbackReadScan(
-                DataTableScan mainScan,
-                DataTableScan fallbackScan,
                 FileStoreTable wrappedTable,
                 FileStoreTable fallbackTable,
-                TableSchema tableSchema) {
-            this.mainScan = mainScan;
-            this.fallbackScan = fallbackScan;
+                TableSchema tableSchema,
+                Function<FileStoreTable, DataTableScan> scanCreator) {
             this.wrappedTable = wrappedTable;
             this.fallbackTable = fallbackTable;
             this.tableSchema = tableSchema;
+            this.scanCreator = scanCreator;
+            this.mainScan = scanCreator.apply(wrappedTable);
+            this.fallbackScan = scanCreator.apply(fallbackTable);
         }
 
         @Override
@@ -580,7 +576,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
 
         private DataTableScan newPartitionListingScan(
                 boolean isMain, PartitionPredicate scanPartitionPredicate) {
-            DataTableScan scan = isMain ? wrappedTable.newScan() : fallbackTable.newScan();
+            DataTableScan scan = scanCreator.apply(isMain ? wrappedTable : fallbackTable);
             if (scanPartitionPredicate != null) {
                 scan.withPartitionFilter(scanPartitionPredicate);
             }
