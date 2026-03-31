@@ -966,7 +966,8 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         // branch1 is fallback branch, can not be deleted
         assertThatCode(() -> bEnv.executeSql("CALL sys.delete_branch('default.t', 'branch1')"))
                 .rootCause()
-                .hasMessageContaining("can not delete the fallback branch.");
+                .hasMessageContaining(
+                        "Cannot delete branch 'branch1' because it is configured as 'scan.fallback-branch'.");
 
         // reset scan.fallback-branch
         bEnv.executeSql("ALTER TABLE t RESET ('scan.fallback-branch')");

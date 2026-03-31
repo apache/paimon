@@ -129,6 +129,12 @@ under the License.
             <td>Memory page size for caching.</td>
         </tr>
         <tr>
+            <td><h5>chain-table.chain-partition-keys</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Partition keys that participate in chain logic. Must be a contiguous suffix of the table's partition keys. Comma-separated. If not set, all partition keys participate in chain.</td>
+        </tr>
+        <tr>
             <td><h5>chain-table.enabled</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
@@ -1188,12 +1194,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>When a batch job queries from a chain table, if a partition does not exist in the main branch, the reader will try to get this partition from chain snapshot branch.</td>
         </tr>
         <tr>
-            <td><h5>chain-table.chain-partition-keys</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Partition keys that participate in chain logic. Must be a contiguous suffix of the table's partition keys. Comma-separated. If not set, all partition keys participate in chain.</td>
-        </tr>
-        <tr>
             <td><h5>scan.file-creation-time-millis</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
@@ -1234,6 +1234,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to sort plan files by partition fields, this allows you to read according to the partition order, even if your partition writes are out of order.<br />It is recommended that you use this for streaming read of the 'append-only' table. By default, streaming read will read the full snapshot first. In order to avoid the disorder reading for partitions, you can open this option.</td>
+        </tr>
+        <tr>
+            <td><h5>scan.primary-branch</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>When a batch job queries from a table, if a partition exists in the primary branch, the reader will read this partition from the primary branch. Otherwise, the reader will read this partition from the current branch.</td>
         </tr>
         <tr>
             <td><h5>scan.snapshot-id</h5></td>

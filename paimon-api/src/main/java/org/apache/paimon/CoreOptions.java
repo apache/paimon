@@ -1961,6 +1961,15 @@ public class CoreOptions implements Serializable {
                             "When a batch job queries from a table, if a partition does not exist in the current branch, "
                                     + "the reader will try to get this partition from this fallback branch.");
 
+    public static final ConfigOption<String> SCAN_PRIMARY_BRANCH =
+            key("scan.primary-branch")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "When a batch job queries from a table, if a partition exists in the primary branch, "
+                                    + "the reader will read this partition from the primary branch. "
+                                    + "Otherwise, the reader will read this partition from the current branch.");
+
     public static final ConfigOption<Boolean> ASYNC_FILE_WRITE =
             key("async-file-write")
                     .booleanType()
