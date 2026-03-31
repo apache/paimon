@@ -107,3 +107,6 @@ class IcebergTable(Table):
         raise NotImplementedError(
             "IcebergTable does not support stream write operation in paimon-python yet."
         )
+
+    def new_full_text_search_builder(self):
+        raise NotImplementedError("IcebergTable does not support full text search.")

@@ -199,6 +199,7 @@ class FileScanner:
         self.only_read_real_buckets = options.bucket() == BucketMode.POSTPONE_BUCKET.value
         self.data_evolution = options.data_evolution_enabled()
         self.deletion_vectors_enabled = options.deletion_vectors_enabled()
+        self._global_index_result = None
 
         def schema_fields_func(schema_id: int):
             return self.table.schema_manager.get_schema(schema_id).fields
@@ -262,7 +263,8 @@ class FileScanner:
     def _create_data_evolution_split_generator(self):
         row_ranges = None
         score_getter = None
-        global_index_result = self._eval_global_index()
+        global_index_result = self._global_index_result if self._global_index_result is not None \
+            else self._eval_global_index()
         if global_index_result is not None:
             row_ranges = global_index_result.results().to_range_list()
             if isinstance(global_index_result, ScoredGlobalIndexResult):
@@ -345,6 +347,10 @@ class FileScanner:
             raise Exception("with_slice and with_shard cannot be used simultaneously")
         self.start_pos_of_this_subtask = start_pos
         self.end_pos_of_this_subtask = end_pos
+        return self
+
+    def with_global_index_result(self, result) -> 'FileScanner':
+        self._global_index_result = result
         return self
 
     def _apply_push_down_limit(self, splits: List[DataSplit]) -> List[DataSplit]:

@@ -362,6 +362,48 @@ Table 'mydb.old_name' renamed to 'mydb.new_name' successfully.
 
 **Note:** Both filesystem and REST catalogs support table rename. For filesystem catalogs, the rename is performed by renaming the underlying table directory.
 
+### Table Full-Text Search
+
+Perform full-text search on a Paimon table with a Tantivy full-text index and display matching rows.
+
+```shell
+paimon table full-text-search mydb.articles --column content --query "paimon lake"
+```
+
+**Options:**
+
+- `--column, -c`: Text column to search on - **Required**
+- `--query, -q`: Query text to search for - **Required**
+- `--limit, -l`: Maximum number of results to return (default: 10)
+- `--select, -s`: Select specific columns to display (comma-separated)
+- `--format, -f`: Output format: `table` (default) or `json`
+
+**Examples:**
+
+```shell
+# Basic full-text search
+paimon table full-text-search mydb.articles -c content -q "paimon lake"
+
+# Search with limit
+paimon table full-text-search mydb.articles -c content -q "streaming data" -l 20
+
+# Search with column projection
+paimon table full-text-search mydb.articles -c content -q "paimon" -s "id,title,content"
+
+# Output as JSON
+paimon table full-text-search mydb.articles -c content -q "paimon" -f json
+```
+
+Output:
+```
+ id                                            content
+  0  Apache Paimon is a streaming data lake platform
+  2  Paimon supports real-time data ingestion and...
+  4  Data lake platforms like Paimon handle large-...
+```
+
+**Note:** The table must have a Tantivy full-text index built on the target column. See [Global Index]({{< ref "append-table/global-index" >}}) for how to create full-text indexes.
+
 ### Table Drop
 
 Drop a table from the catalog. This will permanently delete the table and all its data.

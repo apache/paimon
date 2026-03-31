@@ -496,3 +496,71 @@ class JavaPyReadWriteTest(unittest.TestCase):
             table_read.to_arrow(splits)
         self.assertIn(file_format, str(ctx.exception))
         self.assertIn("not yet supported", str(ctx.exception))
+
+    def test_read_tantivy_full_text_index(self):
+        """Test reading a Tantivy full-text index built by Java."""
+        table = self.catalog.get_table('default.test_tantivy_fulltext')
+
+        # Use FullTextSearchBuilder to search
+        builder = table.new_full_text_search_builder()
+        builder.with_text_column('content')
+        builder.with_query_text('paimon')
+        builder.with_limit(10)
+
+        result = builder.execute_local()
+        # Row 0, 2, 4 mention "paimon"
+        row_ids = sorted(list(result.results()))
+        print(f"Tantivy full-text search for 'paimon': row_ids={row_ids}")
+        self.assertEqual(row_ids, [0, 2, 4])
+
+        # Read matching rows using withGlobalIndexResult
+        read_builder = table.new_read_builder()
+        scan = read_builder.new_scan().with_global_index_result(result)
+        plan = scan.plan()
+        table_read = read_builder.new_read()
+        pa_table = table_read.to_arrow(plan.splits())
+        pa_table = table_sort_by(pa_table, 'id')
+        self.assertEqual(pa_table.num_rows, 3)
+        ids = pa_table.column('id').to_pylist()
+        self.assertEqual(ids, [0, 2, 4])
+
+        # Search for "tantivy" - only row 1
+        builder2 = table.new_full_text_search_builder()
+        builder2.with_text_column('content')
+        builder2.with_query_text('tantivy')
+        builder2.with_limit(10)
+
+        result2 = builder2.execute_local()
+        row_ids2 = sorted(list(result2.results()))
+        print(f"Tantivy full-text search for 'tantivy': row_ids={row_ids2}")
+        self.assertEqual(row_ids2, [1])
+
+        # Read matching rows
+        read_builder2 = table.new_read_builder()
+        scan2 = read_builder2.new_scan().with_global_index_result(result2)
+        plan2 = scan2.plan()
+        pa_table2 = read_builder2.new_read().to_arrow(plan2.splits())
+        self.assertEqual(pa_table2.num_rows, 1)
+        self.assertEqual(pa_table2.column('id').to_pylist(), [1])
+
+        # Search for "full-text search" - rows 1, 3
+        builder3 = table.new_full_text_search_builder()
+        builder3.with_text_column('content')
+        builder3.with_query_text('full-text search')
+        builder3.with_limit(10)
+
+        result3 = builder3.execute_local()
+        row_ids3 = sorted(list(result3.results()))
+        print(f"Tantivy full-text search for 'full-text search': row_ids={row_ids3}")
+        self.assertIn(1, row_ids3)
+        self.assertIn(3, row_ids3)
+
+        # Read matching rows
+        read_builder3 = table.new_read_builder()
+        scan3 = read_builder3.new_scan().with_global_index_result(result3)
+        plan3 = scan3.plan()
+        pa_table3 = read_builder3.new_read().to_arrow(plan3.splits())
+        pa_table3 = table_sort_by(pa_table3, 'id')
+        ids3 = pa_table3.column('id').to_pylist()
+        self.assertIn(1, ids3)
+        self.assertIn(3, ids3)

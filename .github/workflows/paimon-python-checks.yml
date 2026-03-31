@@ -79,6 +79,20 @@ jobs:
           java -version
           mvn -version
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Tantivy native library
+        run: |
+          cd paimon-tantivy/paimon-tantivy-jni/rust
+          cargo build --release
+
+      - name: Copy Tantivy native library to resources
+        run: |
+          RESOURCE_DIR=paimon-tantivy/paimon-tantivy-jni/src/main/resources/native/linux-amd64
+          mkdir -p ${RESOURCE_DIR}
+          cp paimon-tantivy/paimon-tantivy-jni/rust/target/release/libtantivy_jni.so ${RESOURCE_DIR}/
+
       - name: Verify Python version
         run: python --version
 
@@ -118,6 +132,17 @@ jobs:
             fi
           fi
           df -h
+
+      - name: Build and install tantivy-py from source
+        if: matrix.python-version != '3.6.15'
+        shell: bash
+        run: |
+          pip install maturin
+          git clone -b support_directory https://github.com/JingsongLi/tantivy-py.git /tmp/tantivy-py
+          cd /tmp/tantivy-py
+          maturin build --release
+          pip install target/wheels/tantivy-*.whl
+
       - name: Run lint-python.sh
         shell: bash
         run: |
