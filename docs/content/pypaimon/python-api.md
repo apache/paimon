@@ -915,6 +915,19 @@ Delete an existing branch:
 table.branch_manager().drop_branch('feature_branch')
 ```
 
+### Rename Branch
+
+Rename an existing branch to a new name:
+
+```python
+# Rename a branch
+table.branch_manager().rename_branch('old_branch_name', 'new_branch_name')
+```
+
+{{< hint warning >}}
+The source branch must exist and cannot be the main branch. The target branch name must be valid and not already exist.
+{{< /hint >}}
+
 ### Fast Forward
 
 Fast forward the main branch to a specific branch:

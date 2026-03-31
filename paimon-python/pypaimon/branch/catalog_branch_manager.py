@@ -121,6 +121,22 @@ class CatalogBranchManager(BranchManager):
 
         self._execute_post(_drop)
 
+    def rename_branch(self, from_branch: str, to_branch: str) -> None:
+        """
+        Rename a branch.
+
+        Args:
+            from_branch: Current name of the branch
+            to_branch: New name for the branch
+
+        Raises:
+            ValueError: If from_branch or to_branch is invalid
+        """
+        def _rename(catalog: Catalog):
+            catalog.rename_branch(self.identifier, from_branch, to_branch)
+
+        self._execute_post(_rename)
+
     def fast_forward(self, branch_name: str) -> None:
         """
         Fast forward the current branch to the specified branch.
