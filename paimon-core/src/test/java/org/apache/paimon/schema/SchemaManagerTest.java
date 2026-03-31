@@ -461,20 +461,20 @@ public class SchemaManagerTest {
     }
 
     @Test
-    public void testDropPrimaryKeysOnEmptyTable() throws Exception {
+    public void testDropPrimaryKeyOnEmptyTable() throws Exception {
         Path tableRoot = new Path(tempDir.toString(), "table");
         SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
         manager.createTable(schema);
 
         // drop primary keys on empty table should succeed
-        manager.commitChanges(SchemaChange.dropPrimaryKeys());
+        manager.commitChanges(SchemaChange.dropPrimaryKey());
 
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
         assertThat(table.schema().primaryKeys()).isEmpty();
     }
 
     @Test
-    public void testDropPrimaryKeysOnNonEmptyTable() throws Exception {
+    public void testDropPrimaryKeyOnNonEmptyTable() throws Exception {
         Map<String, String> tableOptions = new HashMap<>(options);
         tableOptions.put("bucket", "1");
         Schema pkSchema =
@@ -500,7 +500,7 @@ public class SchemaManagerTest {
         commit.close();
 
         // drop primary keys on non-empty table should fail
-        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropPrimaryKeys()))
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropPrimaryKey()))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Cannot drop primary keys on a non-empty table.");
     }

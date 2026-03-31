@@ -636,7 +636,7 @@ public class FlinkCatalog extends AbstractCatalog {
                 throw new UnsupportedOperationException(
                         "Only dropping primary key constraint is supported.");
             }
-            schemaChanges.add(SchemaChange.dropPrimaryKeys());
+            schemaChanges.add(SchemaChange.dropPrimaryKey());
             return schemaChanges;
         }
         throw new UnsupportedOperationException("Change is not supported: " + change.getClass());

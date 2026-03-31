@@ -551,7 +551,7 @@ public class SchemaManager implements Serializable {
                                     update.newDefaultValue());
                         },
                         lazyIdentifier);
-            } else if (change instanceof SchemaChange.DropPrimaryKeys) {
+            } else if (change instanceof SchemaChange.DropPrimaryKey) {
                 if (hasSnapshots.get()) {
                     throw new UnsupportedOperationException(
                             "Cannot drop primary keys on a non-empty table.");
