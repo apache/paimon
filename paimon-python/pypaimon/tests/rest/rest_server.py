@@ -29,7 +29,8 @@ from urllib.parse import urlparse
 if TYPE_CHECKING:
     from pypaimon.catalog.rest.rest_token import RESTToken
 
-from pypaimon.api.api_request import (AlterTableRequest, CreateDatabaseRequest,
+from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
+                                      CreateDatabaseRequest,
                                       CreateTableRequest, RenameTableRequest)
 from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        GetTableResponse, ListDatabasesResponse,
@@ -526,6 +527,18 @@ class RESTCatalogServer:
         if method == "GET":
             response = database
             return self._mock_response(response, 200)
+
+        elif method == "POST":
+            request_body = JSON.from_json(data, AlterDatabaseRequest)
+            removals = request_body.removals or []
+            updates = request_body.updates or {}
+            options = dict(database.options) if database.options else {}
+            options.update(updates)
+            for key in removals:
+                options.pop(key, None)
+            self.database_store[database_name] = self.mock_database(
+                database_name, options)
+            return self._mock_response("", 200)
 
         elif method == "DELETE":
             del self.database_store[database_name]

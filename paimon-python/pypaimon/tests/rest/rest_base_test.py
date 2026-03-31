@@ -339,6 +339,29 @@ class RESTBaseTest(unittest.TestCase):
         )
         self.assertEqual(len(result.elements), 3)
 
+    def test_alter_database(self):
+        """Test alter_database sets and removes properties."""
+        from pypaimon.catalog.rest.property_change import PropertyChange
+        db_name = "alter_db_test"
+        self.rest_catalog.create_database(db_name, True)
+
+        # set property
+        self.rest_catalog.alter_database(
+            db_name,
+            [PropertyChange.set_property("key1", "value1"),
+             PropertyChange.set_property("key2", "value2")])
+        db = self.rest_catalog.get_database(db_name)
+        self.assertEqual(db.options.get("key1"), "value1")
+        self.assertEqual(db.options.get("key2"), "value2")
+
+        # remove property
+        self.rest_catalog.alter_database(
+            db_name,
+            [PropertyChange.remove_property("key1")])
+        db = self.rest_catalog.get_database(db_name)
+        self.assertNotIn("key1", db.options)
+        self.assertEqual(db.options.get("key2"), "value2")
+
     def test_list_partitions_paged_empty(self):
         """Test list_partitions_paged returns empty when no partitions."""
         identifier = Identifier.from_string('default.test_reader_iterator')
