@@ -397,14 +397,16 @@ class RESTTokenFileIOTest(unittest.TestCase):
         called_identifier = mock_api.load_table_token.call_args[0][0]
         self.assertEqual(called_identifier.get_object_name(), "my_table")
 
-    def test_different_instances_do_not_share_token(self):
-        """Two instances with same identifier get independent tokens (no class-level cache)."""
+    def test_different_user_identities_do_not_share_token(self):
+        """Two instances with different user_identity get independent tokens."""
         same_identifier = Identifier.from_string("db.shared_table")
 
         file_io_a = RESTTokenFileIO(
-            same_identifier, self.warehouse_path, self.catalog_options)
+            same_identifier, self.warehouse_path, self.catalog_options,
+            user_identity="user_a")
         file_io_b = RESTTokenFileIO(
-            same_identifier, self.warehouse_path, self.catalog_options)
+            same_identifier, self.warehouse_path, self.catalog_options,
+            user_identity="user_b")
 
         token_a = RESTToken({'ak': 'ak-A'}, int(time.time() * 1000) + 7200_000)
         token_b = RESTToken({'ak': 'ak-B'}, int(time.time() * 1000) + 7200_000)
@@ -425,11 +427,14 @@ class RESTTokenFileIOTest(unittest.TestCase):
         mock_api_b.load_table_token.return_value = mock_response_b
         file_io_b.api_instance = mock_api_b
 
+        # Clear cache to ensure clean state
+        RESTTokenFileIO._get_token_cache().clear()
+
         # Refresh both
         file_io_a.try_to_refresh_token()
         file_io_b.try_to_refresh_token()
 
-        # Each instance should hold its own token
+        # Each instance should hold its own token (different user_identity = different cache key)
         self.assertEqual(file_io_a.token.token['ak'], 'ak-A')
         self.assertEqual(file_io_b.token.token['ak'], 'ak-B')
         self.assertIsNot(file_io_a.token, file_io_b.token)

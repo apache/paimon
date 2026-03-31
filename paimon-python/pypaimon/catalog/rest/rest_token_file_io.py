@@ -45,8 +45,21 @@ class RESTTokenFileIO(FileIO):
     _FILE_IO_CACHE_LOCK = threading.Lock()
 
     # Token cache: (path, user_identity) -> RESTToken
-    _TOKEN_CACHE: dict = {}
+    # Intentionally shared across all instances for cross-instance token reuse.
+    _TOKEN_CACHE_MAXSIZE = 1000
+    _TOKEN_CACHE: TTLCache = None
     _TOKEN_CACHE_LOCK = threading.Lock()
+
+    @classmethod
+    def _get_token_cache(cls) -> TTLCache:
+        if cls._TOKEN_CACHE is None:
+            with cls._TOKEN_CACHE_LOCK:
+                if cls._TOKEN_CACHE is None:
+                    cls._TOKEN_CACHE = TTLCache(
+                        maxsize=cls._TOKEN_CACHE_MAXSIZE,
+                        ttl=cls._FILE_IO_CACHE_TTL
+                    )
+        return cls._TOKEN_CACHE
 
     @classmethod
     def _get_file_io_cache(cls) -> TTLCache:
@@ -214,50 +227,31 @@ class RESTTokenFileIO(FileIO):
         Uses (path, user_identity) as cache key to ensure proper isolation
         between different users accessing the same table location.
         """
-        # Build cache key from path and user identity
         cache_key = (self.path, self.user_identity)
 
-        # Fast path: check if we have a valid token without locking
+        # Fast path: no locking needed
         if self.token is not None and not self._should_refresh():
             return
 
-        cached_token = self._get_cached_token(cache_key)
-        if cached_token and not self._should_refresh_token(cached_token):
-            self.token = cached_token
-            return
-
-        # Slow path: acquire lock and refresh
+        # Slow path: acquire lock, then do all cache operations directly
         with self._TOKEN_CACHE_LOCK:
-            # Double-check after acquiring lock
-            cached_token = self._get_cached_token(cache_key)
-            if cached_token and not self._should_refresh_token(cached_token):
+            # Double-check: another thread may have refreshed while we waited
+            cache = self._get_token_cache()
+            cached_token = cache.get(cache_key)
+            if cached_token and not self._should_refresh(cached_token):
                 self.token = cached_token
                 return
 
-            # Actually refresh the token
             self.refresh_token()
-            self._set_cached_token(cache_key, self.token)
+            cache[cache_key] = self.token
 
-    def _should_refresh_token(self, token: RESTToken) -> bool:
-        """Check if a specific token should be refreshed."""
-        current_time = int(time.time() * 1000)
-        return (token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
-
-    def _get_cached_token(self, cache_key: tuple) -> Optional[RESTToken]:
-        """Get cached token by (path, user_identity) key."""
-        with self._TOKEN_CACHE_LOCK:
-            return self._TOKEN_CACHE.get(cache_key)
-
-    def _set_cached_token(self, cache_key: tuple, token: RESTToken) -> None:
-        """Set cached token by (path, user_identity) key."""
-        with self._TOKEN_CACHE_LOCK:
-            self._TOKEN_CACHE[cache_key] = token
-
-    def _should_refresh(self):
-        if self.token is None:
+    def _should_refresh(self, token: Optional[RESTToken] = None) -> bool:
+        """Check if a token should be refreshed. Uses self.token if no token is provided."""
+        target = token if token is not None else self.token
+        if target is None:
             return True
         current_time = int(time.time() * 1000)
-        return (self.token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+        return (target.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
 
     def refresh_token(self):
         self.log.info(f"begin refresh data token for identifier [{self.identifier}]")

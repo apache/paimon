@@ -33,16 +33,16 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
         self.catalog_options = Options({})
         
         # Clear token cache before each test
-        RESTTokenFileIO._TOKEN_CACHE.clear()
+        RESTTokenFileIO._get_token_cache().clear()
     
     def tearDown(self):
         # Clean up token cache after tests
-        RESTTokenFileIO._TOKEN_CACHE.clear()
+        RESTTokenFileIO._get_token_cache().clear()
     
     def test_different_users_have_separate_token_cache(self):
         """Test that different users accessing same path have separate tokens."""
         # Clear cache first
-        RESTTokenFileIO._TOKEN_CACHE.clear()
+        RESTTokenFileIO._get_token_cache().clear()
         
         # User A creates FileIO
         file_io_a = RESTTokenFileIO(
@@ -68,15 +68,16 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
         cache_key_a = (self.path, "user_a")
         cache_key_b = (self.path, "user_b")
         
-        file_io_a._set_cached_token(cache_key_a, token_a)
-        file_io_b._set_cached_token(cache_key_b, token_b)
+        cache = RESTTokenFileIO._get_token_cache()
+        cache[cache_key_a] = token_a
+        cache[cache_key_b] = token_b
         
         # Verify the global cache has 2 entries
-        self.assertEqual(len(RESTTokenFileIO._TOKEN_CACHE), 2)
+        self.assertEqual(len(cache), 2)
         
         # Verify both tokens are cached with correct keys
-        cached_token_a = RESTTokenFileIO._TOKEN_CACHE.get(cache_key_a)
-        cached_token_b = RESTTokenFileIO._TOKEN_CACHE.get(cache_key_b)
+        cached_token_a = cache.get(cache_key_a)
+        cached_token_b = cache.get(cache_key_b)
         
         self.assertIsNotNone(cached_token_a)
         self.assertIsNotNone(cached_token_b)
@@ -88,8 +89,8 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
         
         # Each FileIO instance can access both tokens via direct cache access
         # But they use DIFFERENT keys, so isolation is maintained
-        wrong_token_for_a = RESTTokenFileIO._TOKEN_CACHE.get(cache_key_b)
-        wrong_token_for_b = RESTTokenFileIO._TOKEN_CACHE.get(cache_key_a)
+        wrong_token_for_a = cache.get(cache_key_b)
+        wrong_token_for_b = cache.get(cache_key_a)
         
         # Both exist in cache but with different keys
         self.assertIsNotNone(wrong_token_for_a)
@@ -113,14 +114,15 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
             user_identity="same_user"
         )
         
-        # Set token for first FileIO
+        # Set token in cache
         token = RESTToken({"fs.oss.accessKeyId": "ak_shared"}, 9999999999999)
         file_io_1.token = token
-        file_io_1._set_cached_token((self.path, "same_user"), token)
+        cache = RESTTokenFileIO._get_token_cache()
+        cache[(self.path, "same_user")] = token
         
         # Second FileIO should get cached token
         cache_key = (self.path, "same_user")
-        cached_token = file_io_2._get_cached_token(cache_key)
+        cached_token = cache.get(cache_key)
         
         self.assertIsNotNone(cached_token)
         self.assertEqual(cached_token.token["fs.oss.accessKeyId"], "ak_shared")
@@ -136,10 +138,10 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
             user_identity="user_1"
         )
         
-        # Set token for old table
+        # Set token in cache for old table
         token = RESTToken({"fs.oss.accessKeyId": "ak_1"}, 9999999999999)
         file_io_old.token = token
-        file_io_old._set_cached_token((self.path, "user_1"), token)
+        RESTTokenFileIO._get_token_cache()[(self.path, "user_1")] = token
         
         # Renamed table (same path, different identifier)
         identifier_new = Identifier.create("db", "new_table")
@@ -152,7 +154,7 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
         
         # Should reuse cached token because path + user_identity is the same
         cache_key = (self.path, "user_1")
-        cached_token = file_io_new._get_cached_token(cache_key)
+        cached_token = RESTTokenFileIO._get_token_cache().get(cache_key)
         
         self.assertIsNotNone(cached_token)
         self.assertEqual(cached_token.token["fs.oss.accessKeyId"], "ak_1")
@@ -176,10 +178,11 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
         # Both should use the same cache key (path, "")
         token = RESTToken({"fs.oss.accessKeyId": "ak_empty"}, 9999999999999)
         file_io_empty.token = token
-        file_io_empty._set_cached_token((self.path, ""), token)
+        cache = RESTTokenFileIO._get_token_cache()
+        cache[(self.path, "")] = token
         
         cache_key = (self.path, "")
-        cached_token = file_io_none._get_cached_token(cache_key)
+        cached_token = cache.get(cache_key)
         
         self.assertIsNotNone(cached_token)
         self.assertEqual(cached_token.token["fs.oss.accessKeyId"], "ak_empty")
@@ -200,18 +203,16 @@ class TestRESTTokenFileIOWithUserIdentity(unittest.TestCase):
         expired_token = RESTToken({"fs.oss.accessKeyId": "ak_expired"}, expired_time)
         
         cache_key = (self.path, "user_test")
-        file_io._set_cached_token(cache_key, expired_token)
+        RESTTokenFileIO._get_token_cache()[cache_key] = expired_token
         
         # Expired token should not be considered valid
-        should_refresh = file_io._should_refresh_token(expired_token)
-        self.assertTrue(should_refresh)
+        self.assertTrue(file_io._should_refresh(expired_token))
         
         # Valid token (far future expiry)
         valid_time = int(time.time() * 1000) + 7200000  # 2 hours in future
         valid_token = RESTToken({"fs.oss.accessKeyId": "ak_valid"}, valid_time)
         
-        should_refresh_valid = file_io._should_refresh_token(valid_token)
-        self.assertFalse(should_refresh_valid)
+        self.assertFalse(file_io._should_refresh(valid_token))
 
 
 if __name__ == '__main__':

@@ -78,6 +78,10 @@ class RESTCatalog(Catalog):
         This is used as part of the token cache key to ensure proper isolation
         between different users accessing the same table location.
 
+        Note: For DLF auth types, this calls get_token() which may trigger
+        a token load (e.g., HTTP request to ECS metadata service). This is
+        intentional — we need the actual access_key_id for cache isolation.
+
         Returns:
             User identity string:
             - For Bear Token: "bear:{token}"
@@ -88,25 +92,17 @@ class RESTCatalog(Catalog):
         # Bear Token authentication
         from pypaimon.api.auth import BearTokenAuthProvider
         if isinstance(auth_provider, BearTokenAuthProvider):
-            return f"bear:{auth_provider.token}"
+            import hashlib
+            token_hash = hashlib.sha256(auth_provider.token.encode()).hexdigest()[:16]
+            return f"bear:{token_hash}"
 
         # DLF authentication (includes AccessKey, ECS Role, STS File)
         from pypaimon.api.auth import DLFAuthProvider
         if isinstance(auth_provider, DLFAuthProvider):
-            # Get actual token to extract access_key_id
-            try:
-                token = auth_provider.get_token()
-                if token and token.access_key_id:
-                    # Use actual access_key_id for all DLF auth types
-                    # ECS Role returns STS.xxx, STS File also returns STS.xxx
-                    return f"dlf:{token.access_key_id}"
-            except Exception:
-                # If getting token fails, use a fallback identifier
-                pass
-
-            # Fallback: use loader type as identifier (should rarely happen)
-            if auth_provider.token_loader:
-                return f"loader:{type(auth_provider.token_loader).__name__}"
+            token = auth_provider.get_token()
+            if token and token.access_key_id:
+                return f"dlf:{token.access_key_id}"
+            raise ValueError("Failed to extract user identity: DLF token or access_key_id is None")
 
         # Default/fallback
         return "anonymous"
