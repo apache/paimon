@@ -60,6 +60,9 @@ class RESTCatalog(Catalog):
         self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
                                              context.prefer_io_loader, context.fallback_io_loader)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
+        
+        # Extract user identity from auth provider for token cache isolation
+        self.user_identity = self._extract_user_identity()
 
         # FUSE support (lazy import only when enabled)
         self.fuse_enabled = self.context.options.get(FuseOptions.FUSE_ENABLED, False)
@@ -67,6 +70,52 @@ class RESTCatalog(Catalog):
         if self.fuse_enabled:
             from pypaimon.catalog.rest.fuse_support import FusePathResolver
             self._fuse_resolver = FusePathResolver(self.context.options, self.rest_api)
+    
+    def _extract_user_identity(self) -> str:
+        """
+        Extract user identity from the authentication provider.
+        
+        This is used as part of the token cache key to ensure proper isolation
+        between different users accessing the same table location.
+        
+        Returns:
+            User identity string:
+            - For Bear Token: "bear:{token}"
+            - For DLF AccessKey: "dlf:{access_key_id}"
+            - For ECS Role: "ecs:{role_name}"
+            - For STS File: "file:{token_path}"
+        """
+        auth_provider = self.rest_api.auth_provider
+        
+        # Bear Token authentication
+        from pypaimon.api.auth import BearTokenAuthProvider
+        if isinstance(auth_provider, BearTokenAuthProvider):
+            return f"bear:{auth_provider.token}"
+        
+        # DLF authentication
+        from pypaimon.api.auth import DLFAuthProvider
+        if isinstance(auth_provider, DLFAuthProvider):
+            # Try to get access key id from the token
+            try:
+                token = auth_provider.get_token()
+                if token and token.access_key_id:
+                    return f"dlf:{token.access_key_id}"
+            except Exception:
+                # If getting token fails, fall back to role/loader identifier
+                pass
+            
+            # Check for ECS role
+            if auth_provider.token_loader:
+                from pypaimon.api.token_loader import DLFECSTokenLoader
+                if isinstance(auth_provider.token_loader, DLFECSTokenLoader):
+                    role_name = auth_provider.token_loader.role_name or "auto"
+                    return f"ecs:{role_name}"
+                
+                # Other token loaders (e.g., file-based)
+                return f"loader:{type(auth_provider.token_loader).__name__}"
+        
+        # Default/fallback
+        return "anonymous"
 
     def catalog_loader(self):
         """
@@ -401,12 +450,14 @@ class RESTCatalog(Catalog):
             return self._fuse_resolver.get_file_io(
                 table_path, identifier, self.data_token_enabled,
                 rest_token_file_io_factory=lambda: RESTTokenFileIO(
-                    identifier, table_path, self.context.options),
+                    identifier, table_path, self.context.options,
+                    user_identity=self.user_identity),
                 default_file_io_factory=lambda: self.file_io_from_options(table_path),
             )
 
         # Fallback to original logic
-        return RESTTokenFileIO(identifier, table_path, self.context.options) \
+        return RESTTokenFileIO(identifier, table_path, self.context.options,
+                               user_identity=self.user_identity) \
             if self.data_token_enabled else self.file_io_from_options(table_path)
 
     def load_table(self,
