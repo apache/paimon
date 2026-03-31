@@ -204,4 +204,42 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
       }
     }
   }
+
+  test("Paimon View: create view with CTE") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("test_db") {
+          sql("CREATE DATABASE test_db")
+          sql("USE test_db")
+          withView("v1") {
+            sql("""
+                  |CREATE VIEW v1 AS
+                  |    WITH t(a, b, c, d) AS (SELECT 1, 2, 3, 4)
+                  |    SELECT * FROM t
+                  |""".stripMargin)
+            checkAnswer(sql("SELECT * FROM v1"), Seq(Row(1, 2, 3, 4)))
+          }
+        }
+    }
+  }
+
+  test("Paimon View: create view with ORDER BY ordinal") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("test_db") {
+          sql("CREATE DATABASE test_db")
+          sql("USE test_db")
+          withTable("t") {
+            withView("v_ord") {
+              sql("CREATE TABLE t (id INT, name STRING) USING paimon")
+              sql("INSERT INTO t VALUES (2, 'b'), (1, 'a')")
+              sql("CREATE VIEW v_ord AS SELECT * FROM t ORDER BY 1")
+              checkAnswer(sql("SELECT * FROM v_ord"), Seq(Row(1, "a"), Row(2, "b")))
+            }
+          }
+        }
+    }
+  }
 }
