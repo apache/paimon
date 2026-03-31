@@ -81,9 +81,7 @@ class RESTCatalog(Catalog):
         Returns:
             User identity string:
             - For Bear Token: "bear:{token}"
-            - For DLF AccessKey: "dlf:{access_key_id}"
-            - For ECS Role: "ecs:{role_name}"
-            - For STS File: "file:{token_path}"
+            - For DLF AccessKey/ECS/STS: "dlf:{access_key_id}" (actual AK from token)
         """
         auth_provider = self.rest_api.auth_provider
         
@@ -92,26 +90,22 @@ class RESTCatalog(Catalog):
         if isinstance(auth_provider, BearTokenAuthProvider):
             return f"bear:{auth_provider.token}"
         
-        # DLF authentication
+        # DLF authentication (includes AccessKey, ECS Role, STS File)
         from pypaimon.api.auth import DLFAuthProvider
         if isinstance(auth_provider, DLFAuthProvider):
-            # Try to get access key id from the token
+            # Get actual token to extract access_key_id
             try:
                 token = auth_provider.get_token()
                 if token and token.access_key_id:
+                    # Use actual access_key_id for all DLF auth types
+                    # ECS Role returns STS.xxx, STS File also returns STS.xxx
                     return f"dlf:{token.access_key_id}"
             except Exception:
-                # If getting token fails, fall back to role/loader identifier
+                # If getting token fails, use a fallback identifier
                 pass
             
-            # Check for ECS role
+            # Fallback: use loader type as identifier (should rarely happen)
             if auth_provider.token_loader:
-                from pypaimon.api.token_loader import DLFECSTokenLoader
-                if isinstance(auth_provider.token_loader, DLFECSTokenLoader):
-                    role_name = auth_provider.token_loader.role_name or "auto"
-                    return f"ecs:{role_name}"
-                
-                # Other token loaders (e.g., file-based)
                 return f"loader:{type(auth_provider.token_loader).__name__}"
         
         # Default/fallback
