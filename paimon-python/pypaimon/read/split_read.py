@@ -129,7 +129,8 @@ class SplitRead(ABC):
         """Create a record reader for the given split."""
 
     def file_reader_supplier(self, file: DataFileMeta, for_merge_read: bool,
-                             read_fields: List[str], row_tracking_enabled: bool) -> RecordBatchReader:
+                             read_fields: List[str], row_tracking_enabled: bool,
+                             row_ranges=None) -> RecordBatchReader:
         (read_file_fields, read_arrow_predicate) = self._get_fields_and_predicate(file.schema_id, read_fields)
 
         # Use external_path if available, otherwise use file_path
@@ -137,6 +138,20 @@ class SplitRead(ABC):
         file_format = format_identifier(os.path.basename(file_path))
 
         batch_size = self.table.options.read_batch_size()
+
+        # Compute effective row ranges and Vortex row_indices from row_ranges
+        row_indices = None
+        if row_ranges is not None:
+            effective_row_ranges = Range.and_(row_ranges, [file.row_id_range()])
+            if len(effective_row_ranges) == 0:
+                return EmptyRecordBatchReader()
+            if file_format == CoreOptions.FILE_FORMAT_VORTEX:
+                # Convert global row ranges to local indices for Vortex pushdown
+                row_indices = []
+                for r in effective_row_ranges:
+                    start = r.from_ - file.first_row_id
+                    end = r.to - file.first_row_id
+                    row_indices.extend(range(start, end + 1))
 
         format_reader: RecordBatchReader
         if file_format == CoreOptions.FILE_FORMAT_AVRO:
@@ -151,8 +166,13 @@ class SplitRead(ABC):
             format_reader = FormatLanceReader(self.table.file_io, file_path, read_file_fields,
                                               read_arrow_predicate, batch_size=batch_size)
         elif file_format == CoreOptions.FILE_FORMAT_VORTEX:
-            format_reader = FormatVortexReader(self.table.file_io, file_path, read_file_fields,
-                                               read_arrow_predicate, batch_size=batch_size)
+            name_to_field = {f.name: f for f in self.read_fields}
+            ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
+            predicate_fields = _get_all_fields(self.push_down_predicate) if self.push_down_predicate else set()
+            format_reader = FormatVortexReader(self.table.file_io, file_path, ordered_read_fields,
+                                               read_arrow_predicate, batch_size=batch_size,
+                                               row_indices=row_indices,
+                                               predicate_fields=predicate_fields)
         elif file_format == CoreOptions.FILE_FORMAT_PARQUET or file_format == CoreOptions.FILE_FORMAT_ORC:
             name_to_field = {f.name: f for f in self.read_fields}
             ordered_read_fields = [name_to_field[n] for n in read_file_fields if n in name_to_field]
@@ -177,7 +197,7 @@ class SplitRead(ABC):
             if row_tracking_enabled else self.table.table_schema.fields
         )
         if for_merge_read:
-            return DataFileBatchReader(
+            reader = DataFileBatchReader(
                 format_reader,
                 index_mapping,
                 partition_info,
@@ -191,7 +211,7 @@ class SplitRead(ABC):
                 blob_descriptor_fields=blob_descriptor_fields,
                 file_io=self.table.file_io)
         else:
-            return DataFileBatchReader(
+            reader = DataFileBatchReader(
                 format_reader,
                 index_mapping,
                 partition_info,
@@ -204,6 +224,12 @@ class SplitRead(ABC):
                 blob_as_descriptor=blob_as_descriptor,
                 blob_descriptor_fields=blob_descriptor_fields,
                 file_io=self.table.file_io)
+
+        # For non-Vortex formats, wrap with RowIdFilterRecordBatchReader
+        if row_ranges is not None and row_indices is None:
+            reader = RowIdFilterRecordBatchReader(reader, file.first_row_id, effective_row_ranges)
+
+        return reader
 
     def _get_fields_and_predicate(self, schema_id: int, read_fields):
         key = (schema_id, tuple(read_fields))
@@ -669,18 +695,12 @@ class DataEvolutionSplitRead(SplitRead):
 
     def _create_file_reader(self, file: DataFileMeta, read_fields: [str]) -> Optional[RecordReader]:
         """Create a file reader for a single file."""
-        def create_record_reader():
-            return self.file_reader_supplier(
-                file=file,
-                for_merge_read=False,
-                read_fields=read_fields,
-                row_tracking_enabled=True)
-        if self.row_ranges is None:
-            return create_record_reader()
-        row_ranges = Range.and_(self.row_ranges, [file.row_id_range()])
-        if len(row_ranges) == 0:
-            return EmptyRecordBatchReader()
-        return RowIdFilterRecordBatchReader(create_record_reader(), file.first_row_id, row_ranges)
+        return self.file_reader_supplier(
+            file=file,
+            for_merge_read=False,
+            read_fields=read_fields,
+            row_tracking_enabled=True,
+            row_ranges=self.row_ranges)
 
     def _split_field_bunches(self, need_merge_files: List[DataFileMeta]) -> List[FieldBunch]:
         """Split files into field bunches."""

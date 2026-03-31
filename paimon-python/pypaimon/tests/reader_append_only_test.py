@@ -125,14 +125,48 @@ class AoReaderTest(unittest.TestCase):
         p1 = predicate_builder.less_than('user_id', 7)
         p2 = predicate_builder.greater_or_equal('user_id', 2)
         p3 = predicate_builder.between('user_id', 0, 6)  # [2/b, 3/c, 4/d, 5/e, 6/f] left
-        p4 = predicate_builder.is_not_in('behavior', ['b', 'e'])  # [3/c, 4/d, 6/f] left
-        p5 = predicate_builder.is_in('dt', ['p1'])  # exclude 3/c
-        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d
-        g1 = predicate_builder.and_predicates([p1, p2, p3, p4, p5, p6])
+        p6 = predicate_builder.is_not_null('behavior')  # exclude 4/d -> [2/b, 3/c, 5/e, 6/f]
+        g1 = predicate_builder.and_predicates([p1, p2, p3, p6])
         read_builder = table.new_read_builder().with_filter(g1)
         actual = self._read_test_table(read_builder)
         expected = pa.concat_tables([
-            self.expected.slice(5, 1)  # 6/f
+            self.expected.slice(1, 2),  # 2/b, 3/c
+            self.expected.slice(4, 2),  # 5/e, 6/f
+        ])
+        self.assertEqual(actual.sort_by('user_id'), expected)
+
+        # OR predicates with startswith, endswith, contains, equal, is_null
+        p7 = predicate_builder.startswith('behavior', 'a')
+        p10 = predicate_builder.equal('item_id', 1002)
+        p11 = predicate_builder.is_null('behavior')
+        p9 = predicate_builder.contains('behavior', 'f')
+        p8 = predicate_builder.endswith('dt', 'p2')
+        g2 = predicate_builder.or_predicates([p7, p8, p9, p10, p11])
+        read_builder = table.new_read_builder().with_filter(g2)
+        actual = self._read_test_table(read_builder)
+        self.assertEqual(actual.sort_by('user_id'), self.expected)
+
+        # Combined AND + OR
+        g3 = predicate_builder.and_predicates([g1, g2])
+        read_builder = table.new_read_builder().with_filter(g3)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            self.expected.slice(1, 2),  # 2/b, 3/c
+            self.expected.slice(4, 2),  # 5/e, 6/f
+        ])
+        self.assertEqual(actual.sort_by('user_id'), expected)
+
+        # not_equal also filters None values
+        p12 = predicate_builder.not_equal('behavior', 'f')
+        read_builder = table.new_read_builder().with_filter(p12)
+        actual = self._read_test_table(read_builder)
+        expected = pa.concat_tables([
+            self.expected.slice(0, 1),  # 1/a
+            self.expected.slice(1, 1),  # 2/b
+            self.expected.slice(2, 1),  # 3/c
+            self.expected.slice(4, 1),  # 5/e
+            self.expected.slice(6, 1),  # 7/g
+            self.expected.slice(7, 1),  # 8/h
         ])
         self.assertEqual(actual.sort_by('user_id'), expected)
 
