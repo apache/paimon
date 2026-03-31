@@ -60,7 +60,7 @@ class RESTCatalog(Catalog):
         self.context = CatalogContext.create(self.rest_api.options, context.hadoop_conf,
                                              context.prefer_io_loader, context.fallback_io_loader)
         self.data_token_enabled = self.rest_api.options.get(CatalogOptions.DATA_TOKEN_ENABLED)
-        
+
         # Extract user identity from auth provider for token cache isolation
         self.user_identity = self._extract_user_identity()
 
@@ -70,26 +70,26 @@ class RESTCatalog(Catalog):
         if self.fuse_enabled:
             from pypaimon.catalog.rest.fuse_support import FusePathResolver
             self._fuse_resolver = FusePathResolver(self.context.options, self.rest_api)
-    
+
     def _extract_user_identity(self) -> str:
         """
         Extract user identity from the authentication provider.
-        
+
         This is used as part of the token cache key to ensure proper isolation
         between different users accessing the same table location.
-        
+
         Returns:
             User identity string:
             - For Bear Token: "bear:{token}"
             - For DLF AccessKey/ECS/STS: "dlf:{access_key_id}" (actual AK from token)
         """
         auth_provider = self.rest_api.auth_provider
-        
+
         # Bear Token authentication
         from pypaimon.api.auth import BearTokenAuthProvider
         if isinstance(auth_provider, BearTokenAuthProvider):
             return f"bear:{auth_provider.token}"
-        
+
         # DLF authentication (includes AccessKey, ECS Role, STS File)
         from pypaimon.api.auth import DLFAuthProvider
         if isinstance(auth_provider, DLFAuthProvider):
@@ -103,11 +103,11 @@ class RESTCatalog(Catalog):
             except Exception:
                 # If getting token fails, use a fallback identifier
                 pass
-            
+
             # Fallback: use loader type as identifier (should rarely happen)
             if auth_provider.token_loader:
                 return f"loader:{type(auth_provider.token_loader).__name__}"
-        
+
         # Default/fallback
         return "anonymous"
 
