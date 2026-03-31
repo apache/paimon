@@ -760,7 +760,7 @@ public class BranchSqlITCase extends CatalogITCaseBase {
     @Test
     public void testCannotSetEmptyFallbackBranch() {
         String errMsg =
-                "Cannot set 'scan.fallback-branch' = 'test' because the branch 'test' isn't existed.";
+                "Cannot set 'scan.fallback-branch' = 'test' because the branch 'test' does not exist.";
         assertThatThrownBy(
                         () ->
                                 sql(

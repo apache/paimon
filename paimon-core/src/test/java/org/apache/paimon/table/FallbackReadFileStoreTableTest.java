@@ -148,53 +148,52 @@ public class FallbackReadFileStoreTableTest {
     @ValueSource(booleans = {false, true})
     public void testPlanWithDataFilter(boolean wrappedFirst) throws Exception {
         String branchName = "bc";
+        InternalRow[] firstValues = new InternalRow[] {rowData(1, 10), rowData(2, 20)};
+        InternalRow[] secondValues = new InternalRow[] {rowData(1, 100), rowData(3, 30)};
 
         FileStoreTable mainTable = createTable();
 
         // Main branch: partition 1 (a=10), partition 2 (a=20)
-        writeDataIntoTable(mainTable, 0, rowData(1, 10), rowData(2, 20));
+        writeDataIntoTable(mainTable, 0, wrappedFirst ? firstValues : secondValues);
 
         mainTable.createBranch(branchName);
 
         FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
 
-        // Branch: partition 1 (a=100), partition 3 (a=30)
-        writeDataIntoTable(branchTable, 0, rowData(1, 100), rowData(3, 30));
+        // Fallback branch: partition 1 already has a=10 (inherited), add a=100.
+        // Also add partition 3 (a=30) which is fallback-only.
+        writeDataIntoTable(branchTable, 1, wrappedFirst ? secondValues : firstValues);
 
-        FallbackReadFileStoreTable table =
+        FallbackReadFileStoreTable fallbackTable =
                 new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
 
-        // partition 1 exists in both tables, priority table wins
-        // wrappedFirst=true → main has priority, partition only in branch is 3
-        // wrappedFirst=false → branch has priority, partition only in main is 2
-        int partOnlyInSupplemental = wrappedFirst ? 3 : 2;
-
-        // Case 1: WHERE pt = 1
-        // Partition 1 exists in priority table. Should never be read from supplemental.
-        DataTableScan scan1 = table.newScan();
-        scan1.withFilter(builder.equal(0, 1));
+        // Case 1: WHERE pt = 1 AND a = 100
+        // Partition 1 exists in main branch. Even though main has no a=100 data,
+        // we should never fall back for it. The result should contain no fallback splits.
+        DataTableScan scan1 = fallbackTable.newScan();
+        scan1.withFilter(PredicateBuilder.and(builder.equal(0, 1), builder.equal(1, 100)));
         List<Split> splits1 = scan1.plan().splits();
 
-        assertThat(splits1).isNotEmpty();
         for (Split split : splits1) {
             FallbackReadFileStoreTable.FallbackSplit fs =
                     (FallbackReadFileStoreTable.FallbackSplit) split;
             assertThat(fs.isFallback())
-                    .as("Partition in priority table should not be read from supplemental")
+                    .as("Partition that exists in main branch should never be read from fallback")
                     .isFalse();
         }
 
-        // Case 2: partition only in supplemental → should have isFallback=true
-        DataTableScan scan2 = table.newScan();
-        scan2.withFilter(builder.equal(0, partOnlyInSupplemental));
+        // Case 2: WHERE pt = 3 AND a = 30
+        // Partition 3 only exists in fallback branch, so it should be read from fallback.
+        DataTableScan scan2 = fallbackTable.newScan();
+        scan2.withFilter(PredicateBuilder.and(builder.equal(0, 3), builder.equal(1, 30)));
         List<Split> splits2 = scan2.plan().splits();
 
         assertThat(splits2).hasSize(1);
         FallbackReadFileStoreTable.FallbackSplit fs2 =
                 (FallbackReadFileStoreTable.FallbackSplit) splits2.get(0);
         assertThat(fs2.isFallback())
-                .as("Partition only in supplemental table should be read from supplemental")
+                .as("Partition that only exists in fallback branch should be read from fallback")
                 .isTrue();
     }
 

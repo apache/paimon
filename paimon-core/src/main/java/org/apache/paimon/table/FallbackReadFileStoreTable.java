@@ -649,7 +649,7 @@ public class FallbackReadFileStoreTable extends DelegatedFileStoreTable {
                         return fallbackRead.createReader(fallbackSplit.wrapped());
                     } catch (Exception ignored) {
                         LOG.error(
-                                "Reading from fallback branch has problems: {}",
+                                "Reading from supplemental branch has problems: {}",
                                 fallbackSplit.wrapped());
                     }
                 }

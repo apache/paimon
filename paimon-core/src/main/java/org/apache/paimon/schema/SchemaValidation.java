@@ -311,7 +311,7 @@ public class SchemaValidation {
         if (!StringUtils.isNullOrWhitespaceOnly(primaryBranch)) {
             checkArgument(
                     schemaManager.copyWithBranch(primaryBranch).latest().isPresent(),
-                    "Cannot set '%s' = '%s' because the branch '%s' isn't existed.",
+                    "Cannot set '%s' = '%s' because the branch '%s' does not exist.",
                     CoreOptions.SCAN_PRIMARY_BRANCH.key(),
                     primaryBranch,
                     primaryBranch);

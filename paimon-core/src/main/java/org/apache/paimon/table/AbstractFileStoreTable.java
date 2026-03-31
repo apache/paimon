@@ -709,10 +709,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 && branchName.equals(fallbackBranch)) {
             throw new IllegalArgumentException(
                     String.format(
-                            "can not delete the fallback branch. "
-                                    + "branchName to be deleted is %s. you have set 'scan.fallback-branch' = '%s'. "
-                                    + "you should reset 'scan.fallback-branch' before deleting this branch.",
-                            branchName, fallbackBranch));
+                            "Cannot delete branch '%s' because it is configured as"
+                                    + " 'scan.fallback-branch'. Unset 'scan.fallback-branch' first.",
+                            branchName));
         }
 
         String primaryBranch = coreOptions().toConfiguration().get(CoreOptions.SCAN_PRIMARY_BRANCH);
@@ -720,10 +719,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 && branchName.equals(primaryBranch)) {
             throw new IllegalArgumentException(
                     String.format(
-                            "can not delete the primary branch. "
-                                    + "branchName to be deleted is %s. you have set 'scan.primary-branch' = '%s'. "
-                                    + "you should reset 'scan.primary-branch' before deleting this branch.",
-                            branchName, primaryBranch));
+                            "Cannot delete branch '%s' because it is configured as"
+                                    + " 'scan.primary-branch'. Unset 'scan.primary-branch' first.",
+                            branchName));
         }
 
         branchManager().dropBranch(branchName);
