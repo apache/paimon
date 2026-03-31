@@ -627,6 +627,9 @@ public class FlinkCatalog extends AbstractCatalog {
         } else if (change instanceof MaterializedTableChange
                 && handleMaterializedTableChange(change, schemaChanges)) {
             return schemaChanges;
+        } else if (change instanceof TableChange.DropConstraint) {
+            schemaChanges.add(SchemaChange.dropPrimaryKeys());
+            return schemaChanges;
         }
         throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
     }
@@ -848,10 +851,10 @@ public class FlinkCatalog extends AbstractCatalog {
         if (!table1IsMaterialized) {
             org.apache.flink.table.api.Schema ts1 = ct1.getUnresolvedSchema();
             org.apache.flink.table.api.Schema ts2 = ct2.getUnresolvedSchema();
-            boolean pkEquality = false;
+            boolean allowAlterPk = false;
 
             if (ts1.getPrimaryKey().isPresent() && ts2.getPrimaryKey().isPresent()) {
-                pkEquality =
+                allowAlterPk =
                         Objects.equals(
                                         ts1.getPrimaryKey().get().getConstraintName(),
                                         ts2.getPrimaryKey().get().getConstraintName())
@@ -859,10 +862,14 @@ public class FlinkCatalog extends AbstractCatalog {
                                         ts1.getPrimaryKey().get().getColumnNames(),
                                         ts2.getPrimaryKey().get().getColumnNames());
             } else if (!ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
-                pkEquality = true;
+                allowAlterPk = true;
+            } else if (ts1.getPrimaryKey().isPresent() && !ts2.getPrimaryKey().isPresent()) {
+                // dropping primary key is allowed on empty tables,
+                // SchemaManager will validate this
+                allowAlterPk = true;
             }
 
-            if (!pkEquality) {
+            if (!allowAlterPk) {
                 throw new UnsupportedOperationException(
                         "Altering primary key is not supported yet.");
             }

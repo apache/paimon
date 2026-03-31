@@ -461,6 +461,51 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testDropPrimaryKeysOnEmptyTable() throws Exception {
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(schema);
+
+        // drop primary keys on empty table should succeed
+        manager.commitChanges(SchemaChange.dropPrimaryKeys());
+
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        assertThat(table.schema().primaryKeys()).isEmpty();
+    }
+
+    @Test
+    public void testDropPrimaryKeysOnNonEmptyTable() throws Exception {
+        Map<String, String> tableOptions = new HashMap<>(options);
+        tableOptions.put("bucket", "1");
+        Schema pkSchema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        primaryKeys,
+                        tableOptions,
+                        "");
+        Path tableRoot = new Path(tempDir.toString(), "table");
+        SchemaManager manager = new SchemaManager(LocalFileIO.create(), tableRoot);
+        manager.createTable(pkSchema);
+
+        // write data to create a snapshot
+        FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), tableRoot);
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(IOManager.create(tempDir + "/io"));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        write.write(GenericRow.of(1, 10L, BinaryString.fromString("apple")));
+        commit.commit(1, write.prepareCommit(false, 1));
+        write.close();
+        commit.close();
+
+        // drop primary keys on non-empty table should fail
+        assertThatThrownBy(() -> manager.commitChanges(SchemaChange.dropPrimaryKeys()))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("Cannot drop primary keys on a non-empty table.");
+    }
+
+    @Test
     public void testAddAndDropNestedColumns() throws Exception {
         RowType innerType =
                 RowType.of(

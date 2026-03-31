@@ -78,6 +78,9 @@ import java.util.Objects;
     @JsonSubTypes.Type(
             value = SchemaChange.UpdateColumnPosition.class,
             name = SchemaChange.Actions.UPDATE_COLUMN_POSITION_ACTION),
+    @JsonSubTypes.Type(
+            value = SchemaChange.DropPrimaryKeys.class,
+            name = SchemaChange.Actions.DROP_PRIMARY_KEYS_ACTION),
 })
 public interface SchemaChange extends Serializable {
 
@@ -162,6 +165,10 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange updateColumnPosition(Move move) {
         return new UpdateColumnPosition(move);
+    }
+
+    static SchemaChange dropPrimaryKeys() {
+        return new DropPrimaryKeys();
     }
 
     /** A SchemaChange to set a table option. */
@@ -810,6 +817,25 @@ public interface SchemaChange extends Serializable {
         }
     }
 
+    /** A SchemaChange to drop primary keys. */
+    final class DropPrimaryKeys implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            return o != null && getClass() == o.getClass();
+        }
+
+        @Override
+        public int hashCode() {
+            return 0;
+        }
+    }
+
     /** Actions for schema changes： identify for schema change. */
     class Actions {
         public static final String FIELD_ACTION = "action";
@@ -824,6 +850,7 @@ public interface SchemaChange extends Serializable {
         public static final String UPDATE_COLUMN_COMMENT_ACTION = "updateColumnComment";
         public static final String UPDATE_COLUMN_DEFAULT_VALUE_ACTION = "updateColumnDefaultValue";
         public static final String UPDATE_COLUMN_POSITION_ACTION = "updateColumnPosition";
+        public static final String DROP_PRIMARY_KEYS_ACTION = "dropPrimaryKeys";
 
         private Actions() {}
     }
