@@ -149,4 +149,4 @@ class FormatVortexReader(RecordBatchReader):
             return None
 
     def close(self):
-        self.scan_iter = None
+        self.record_batch_reader = None
