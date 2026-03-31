@@ -65,6 +65,19 @@ class BranchManager:
         """
         raise NotImplementedError("Subclasses must implement drop_branch")
 
+    def rename_branch(self, from_branch: str, to_branch: str) -> None:
+        """
+        Rename a branch.
+        
+        Args:
+            from_branch: Current name of the branch
+            to_branch: New name for the branch
+        
+        Raises:
+            NotImplementedError: Subclasses must implement this method
+        """
+        raise NotImplementedError("Subclasses must implement rename_branch")
+
     def fast_forward(self, branch_name: str) -> None:
         """
         Fast forward the current branch to the specified branch.

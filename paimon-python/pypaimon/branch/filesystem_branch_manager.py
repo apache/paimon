@@ -199,6 +199,60 @@ class FileSystemBranchManager(BranchManager):
             )
             raise RuntimeError(f"Failed to delete branch '{branch_name}'") from e
 
+    def rename_branch(self, from_branch: str, to_branch: str) -> None:
+        """
+        Rename a branch.
+
+        Args:
+            from_branch: Current name of the branch
+            to_branch: New name for the branch
+
+        Raises:
+            ValueError: If from_branch or to_branch is blank, from_branch doesn't exist,
+                       to_branch already exists, or trying to rename the main branch
+            RuntimeError: If the rename operation fails
+        """
+        # Check if from_branch is main branch
+        if self.is_main_branch(from_branch):
+            raise ValueError(f"Cannot rename the main branch '{from_branch}'.")
+
+        # Check if from_branch is blank
+        if not from_branch or from_branch.isspace():
+            raise ValueError("Source branch name shouldn't be blank.")
+
+        # Check if to_branch is blank
+        if not to_branch or to_branch.isspace():
+            raise ValueError("Target branch name shouldn't be blank.")
+
+        # Validate the new branch name
+        try:
+            self.validate_branch(to_branch)
+        except ValueError as e:
+            raise ValueError(f"Invalid target branch name: {e}")
+
+        # Check if from_branch exists
+        if not self.branch_exists(from_branch):
+            raise ValueError(f"Source branch '{from_branch}' doesn't exist.")
+
+        # Check if to_branch already exists
+        if self.branch_exists(to_branch):
+            raise ValueError(f"Target branch '{to_branch}' already exists.")
+
+        try:
+            # Rename the branch directory
+            from_path = self.branch_path(from_branch)
+            to_path = self.branch_path(to_branch)
+            self.file_io.rename(from_path, to_path)
+            logger.info(f"Successfully renamed branch from '{from_branch}' to '{to_branch}'")
+        except Exception as e:
+            logger.warning(
+                f"Renaming branch from '{from_branch}' to '{to_branch}' failed due to an exception. "
+                f"Please try again."
+            )
+            raise RuntimeError(
+                f"Failed to rename branch from '{from_branch}' to '{to_branch}'"
+            ) from e
+
     def fast_forward(self, branch_name: str) -> None:
         """
         Fast forward the current branch to the specified branch.
