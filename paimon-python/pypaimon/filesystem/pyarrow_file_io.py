@@ -34,7 +34,7 @@ from pypaimon.common.file_io import FileIO
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import OssOptions, S3Options
 from pypaimon.common.uri_reader import UriReaderFactory
-from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler
+from pypaimon.filesystem.jindo_file_system_handler import JindoFileSystemHandler, JINDO_AVAILABLE
 from pypaimon.schema.data_types import (AtomicType, DataField,
                                         PyarrowFieldParser)
 from pypaimon.table.row.blob import Blob, BlobData, BlobDescriptor
@@ -57,12 +57,24 @@ class PyArrowFileIO(FileIO):
         self.uri_reader_factory = UriReaderFactory(catalog_options)
         self._is_oss = scheme in {"oss"}
         self._oss_bucket = None
-        self._oss_impl = self.properties.get(OssOptions.OSS_IMPL)
+        _oss_impl = self.properties.get(OssOptions.OSS_IMPL)
+        self._use_jindo = False
+
         if self._is_oss:
             self._oss_bucket = self._extract_oss_bucket(path)
-            if self._oss_impl == "jindo":
+            if _oss_impl not in ("jindo", "legacy"):
+                raise ValueError(
+                    f"Unsupported fs.oss.impl value: '{_oss_impl}'. "
+                    f"Supported values are 'jindo' and 'legacy'.")
+            if _oss_impl == "legacy":
+                self.filesystem = self._initialize_oss_fs(path)
+            elif JINDO_AVAILABLE:
                 self.filesystem = self._initialize_jindo_fs(path)
             else:
+                self.logger.info(
+                    "fs.oss.impl is 'jindo' but pyjindosdk is not installed. "
+                    "Falling back to legacy PyArrow S3FileSystem implementation. "
+                    "Install pyjindosdk for better performance: pip install pyjindosdk")
                 self.filesystem = self._initialize_oss_fs(path)
         elif scheme in {"s3", "s3a", "s3n"}:
             self.filesystem = self._initialize_s3_fs()
@@ -126,6 +138,7 @@ class PyArrowFileIO(FileIO):
         self.logger.info(f"Initializing JindoFileSystem for OSS access: {path}")
         root_path = f"oss://{self._oss_bucket}/"
         fs_handler = JindoFileSystemHandler(root_path, self.properties)
+        self._use_jindo = True
         return pafs.PyFileSystem(fs_handler)
 
     def _initialize_oss_fs(self, path) -> FileSystem:
@@ -210,7 +223,7 @@ class PyArrowFileIO(FileIO):
     def new_output_stream(self, path: str):
         path_str = self.to_filesystem_path(path)
 
-        if self._oss_impl == "jindo":
+        if self._use_jindo:
             pass
         elif self._is_oss and not self._pyarrow_gte_7:
             # For PyArrow 6.x + OSS, path_str is already just the key part
@@ -592,7 +605,7 @@ class PyArrowFileIO(FileIO):
             path_part = normalized_path.lstrip('/')
             return f"{drive_letter}:/{path_part}" if path_part else f"{drive_letter}:"
 
-        if self._oss_impl == "jindo":
+        if self._use_jindo:
             # For JindoFileSystem, pass key only
             path_part = normalized_path.lstrip('/')
             return path_part if path_part else '.'
