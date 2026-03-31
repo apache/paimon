@@ -220,8 +220,7 @@ public class ChainTableUtils {
 
     public static FileStoreTable resolveChainPrimaryTable(FileStoreTable table) {
         if (table.coreOptions().isChainTable() && table instanceof FallbackReadFileStoreTable) {
-            return ((ChainGroupReadTable) ((FallbackReadFileStoreTable) table).fallback())
-                    .wrapped();
+            return ((ChainGroupReadTable) ((FallbackReadFileStoreTable) table).other()).wrapped();
         }
         return table;
     }

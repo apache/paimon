@@ -42,8 +42,9 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Collections;
 import java.util.List;
@@ -77,8 +78,9 @@ public class FallbackReadFileStoreTableTest {
         fileIO = FileIOFinder.find(tablePath);
     }
 
-    @Test
-    public void testListPartitions() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testListPartitions(boolean wrappedFirst) throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();
@@ -93,25 +95,20 @@ public class FallbackReadFileStoreTableTest {
         // write data into partition for branch only
         writeDataIntoTable(branchTable, 0, rowData(3, 60));
 
-        FallbackReadFileStoreTable fallbackTable =
-                new FallbackReadFileStoreTable(mainTable, branchTable);
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
 
-        List<Integer> partitionsFromMainTable =
-                mainTable.newScan().listPartitions().stream()
-                        .map(row -> row.getInt(0))
-                        .collect(Collectors.toList());
-        assertThat(partitionsFromMainTable).containsExactlyInAnyOrder(1, 2);
-
-        List<Integer> partitionsFromFallbackTable =
-                fallbackTable.newScan().listPartitions().stream()
+        List<Integer> partitions =
+                table.newScan().listPartitions().stream()
                         .map(row -> row.getInt(0))
                         .collect(Collectors.toList());
         // this should contain all partitions
-        assertThat(partitionsFromFallbackTable).containsExactlyInAnyOrder(1, 2, 3);
+        assertThat(partitions).containsExactlyInAnyOrder(1, 2, 3);
     }
 
-    @Test
-    public void testListPartitionEntries() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testListPartitionEntries(boolean wrappedFirst) throws Exception {
         String branchName = "bc";
 
         FileStoreTable mainTable = createTable();
@@ -126,40 +123,38 @@ public class FallbackReadFileStoreTableTest {
         // write data into partition for branch only
         writeDataIntoTable(branchTable, 0, rowData(1, 50), rowData(3, 60), rowData(4, 70));
 
-        FallbackReadFileStoreTable fallbackTable =
-                new FallbackReadFileStoreTable(mainTable, branchTable);
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
 
-        List<PartitionEntry> partitionEntries = mainTable.newScan().listPartitionEntries();
-        assertThat(partitionEntries)
-                .map(e -> e.partition().getInt(0))
-                .containsExactlyInAnyOrder(1, 2);
-
-        List<PartitionEntry> fallbackPartitionEntries =
-                fallbackTable.newScan().listPartitionEntries();
-        assertThat(fallbackPartitionEntries)
+        List<PartitionEntry> entries = table.newScan().listPartitionEntries();
+        // partition 1 exists in both: record count depends on which table has priority
+        // wrappedFirst=true → mainTable has priority (2 records), false → branchTable (1 record)
+        long expectedPt1Count = wrappedFirst ? 2L : 1L;
+        assertThat(entries)
                 .map(e -> Pair.of(e.partition().getInt(0), e.recordCount()))
                 .containsExactlyInAnyOrder(
-                        Pair.of(1, 2L), Pair.of(2, 1L), Pair.of(3, 1L), Pair.of(4, 1L));
+                        Pair.of(1, expectedPt1Count),
+                        Pair.of(2, 1L),
+                        Pair.of(3, 1L),
+                        Pair.of(4, 1L));
     }
 
     /**
      * Test that FallbackReadScan.plan() determines partition ownership based on partition
-     * predicates only, not mixed with data filters. If a partition exists in the main branch, it
-     * should never be read from fallback, regardless of the data filter.
-     *
-     * <p>Without the fix, the old code built completePartitions from mainScan.plan() results which
-     * already had data filters applied. When the data filter excluded all files of a main partition
-     * via filterByStats, that partition was incorrectly treated as "not in main" and read from
-     * fallback.
+     * predicates only, not mixed with data filters. If a partition exists in the priority table, it
+     * should never be read from the supplemental table, regardless of the data filter.
      */
-    @Test
-    public void testPlanWithDataFilter() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    public void testPlanWithDataFilter(boolean wrappedFirst) throws Exception {
         String branchName = "bc";
+        InternalRow[] firstValues = new InternalRow[] {rowData(1, 10), rowData(2, 20)};
+        InternalRow[] secondValues = new InternalRow[] {rowData(1, 100), rowData(3, 30)};
 
         FileStoreTable mainTable = createTable();
 
         // Main branch: partition 1 (a=10), partition 2 (a=20)
-        writeDataIntoTable(mainTable, 0, rowData(1, 10), rowData(2, 20));
+        writeDataIntoTable(mainTable, 0, wrappedFirst ? firstValues : secondValues);
 
         mainTable.createBranch(branchName);
 
@@ -167,10 +162,10 @@ public class FallbackReadFileStoreTableTest {
 
         // Fallback branch: partition 1 already has a=10 (inherited), add a=100.
         // Also add partition 3 (a=30) which is fallback-only.
-        writeDataIntoTable(branchTable, 1, rowData(1, 100), rowData(3, 30));
+        writeDataIntoTable(branchTable, 1, wrappedFirst ? secondValues : firstValues);
 
         FallbackReadFileStoreTable fallbackTable =
-                new FallbackReadFileStoreTable(mainTable, branchTable);
+                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
 
         // Case 1: WHERE pt = 1 AND a = 100
@@ -200,6 +195,51 @@ public class FallbackReadFileStoreTableTest {
         assertThat(fs2.isFallback())
                 .as("Partition that only exists in fallback branch should be read from fallback")
                 .isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testWriteGoesToWrapped(boolean wrappedFirst) throws Exception {
+        String branchName = "bc";
+
+        FileStoreTable mainTable = createTable();
+
+        // write data into partition 1 for main
+        writeDataIntoTable(mainTable, 0, rowData(1, 10));
+
+        mainTable.createBranch(branchName);
+
+        FileStoreTable branchTable = createTableFromBranch(mainTable, branchName);
+
+        // write data into partition 2 for branch
+        writeDataIntoTable(branchTable, 0, rowData(2, 20));
+
+        FallbackReadFileStoreTable table =
+                new FallbackReadFileStoreTable(mainTable, branchTable, wrappedFirst);
+
+        // write through the merged table — should go to mainTable (wrapped)
+        writeDataIntoTable(table, 1, rowData(3, 30));
+
+        // verify: main branch should now have partition 1 and 3
+        List<Integer> mainPartitions =
+                mainTable.newScan().listPartitions().stream()
+                        .map(row -> row.getInt(0))
+                        .collect(Collectors.toList());
+        assertThat(mainPartitions).containsExactlyInAnyOrder(1, 3);
+
+        // verify: branch should still only have partition 2
+        List<Integer> branchPartitions =
+                branchTable.newScan().listPartitions().stream()
+                        .map(row -> row.getInt(0))
+                        .collect(Collectors.toList());
+        assertThat(branchPartitions).containsExactlyInAnyOrder(2);
+
+        // verify: merged read should see all three partitions
+        List<Integer> mergedPartitions =
+                table.newScan().listPartitions().stream()
+                        .map(row -> row.getInt(0))
+                        .collect(Collectors.toList());
+        assertThat(mergedPartitions).containsExactlyInAnyOrder(1, 2, 3);
     }
 
     private void writeDataIntoTable(

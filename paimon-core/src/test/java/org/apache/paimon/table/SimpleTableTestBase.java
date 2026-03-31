@@ -1218,9 +1218,8 @@ public abstract class SimpleTableTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "can not delete the fallback branch. "
-                                        + "branchName to be deleted is fallback. you have set 'scan.fallback-branch' = 'fallback'. "
-                                        + "you should reset 'scan.fallback-branch' before deleting this branch."));
+                                "Cannot delete branch 'fallback' because it is configured as"
+                                        + " 'scan.fallback-branch'. Unset 'scan.fallback-branch' first."));
 
         table.deleteBranch("fallback");
     }
