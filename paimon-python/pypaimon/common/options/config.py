@@ -18,8 +18,8 @@ from pypaimon.common.options.config_options import ConfigOptions
 
 
 class OssOptions:
-    OSS_IMPL = ConfigOptions.key("fs.oss.impl").string_type().default_value("default").with_description(
-        "OSS filesystem implementation: default or jindo")
+    OSS_IMPL = ConfigOptions.key("fs.oss.impl").string_type().default_value("jindo").with_description(
+        "OSS filesystem implementation: legacy or jindo")
     OSS_ACCESS_KEY_ID = ConfigOptions.key("fs.oss.accessKeyId").string_type().no_default_value().with_description(
         "OSS access key ID")
     OSS_ACCESS_KEY_SECRET = ConfigOptions.key(
