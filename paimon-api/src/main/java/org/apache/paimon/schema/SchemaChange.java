@@ -832,7 +832,7 @@ public interface SchemaChange extends Serializable {
 
         @Override
         public int hashCode() {
-            return 0;
+            return getClass().hashCode();
         }
     }
 

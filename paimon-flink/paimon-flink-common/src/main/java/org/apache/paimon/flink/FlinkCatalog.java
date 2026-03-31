@@ -510,7 +510,9 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private List<SchemaChange> toSchemaChange(
-            TableChange change, Map<String, Integer> oldTableNonPhysicalColumnIndex) {
+            TableChange change,
+            Map<String, Integer> oldTableNonPhysicalColumnIndex,
+            @Nullable String primaryKeyConstraintName) {
         List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof AddColumn) {
             if (((AddColumn) change).getColumn().isPhysical()) {
@@ -628,6 +630,12 @@ public class FlinkCatalog extends AbstractCatalog {
                 && handleMaterializedTableChange(change, schemaChanges)) {
             return schemaChanges;
         } else if (change instanceof TableChange.DropConstraint) {
+            TableChange.DropConstraint dropConstraint = (TableChange.DropConstraint) change;
+            if (primaryKeyConstraintName == null
+                    || !primaryKeyConstraintName.equals(dropConstraint.getConstraintName())) {
+                throw new UnsupportedOperationException(
+                        "Only dropping primary key constraint is supported.");
+            }
             schemaChanges.add(SchemaChange.dropPrimaryKeys());
             return schemaChanges;
         }
@@ -743,10 +751,17 @@ public class FlinkCatalog extends AbstractCatalog {
         checkArgument(
                 table instanceof FileStoreTable,
                 "Only support alter data table, but is: " + table.getClass());
-        validateAlterTable(toCatalogTable(table), newTable);
+        CatalogBaseTable oldCatalogTable = toCatalogTable(table);
+        validateAlterTable(oldCatalogTable, newTable);
         Map<String, Integer> oldTableNonPhysicalColumnIndex =
                 FlinkCatalogPropertiesUtil.nonPhysicalColumns(
                         table.options(), table.rowType().getFieldNames());
+        String primaryKeyConstraintName =
+                oldCatalogTable
+                        .getUnresolvedSchema()
+                        .getPrimaryKey()
+                        .map(pk -> pk.getConstraintName())
+                        .orElse(null);
 
         List<SchemaChange> changes = new ArrayList<>();
 
@@ -776,7 +791,9 @@ public class FlinkCatalog extends AbstractCatalog {
                             .flatMap(
                                     tableChange ->
                                             toSchemaChange(
-                                                    tableChange, oldTableNonPhysicalColumnIndex)
+                                                    tableChange,
+                                                    oldTableNonPhysicalColumnIndex,
+                                                    primaryKeyConstraintName)
                                                     .stream())
                             .collect(Collectors.toList());
             changes.addAll(schemaChanges);
