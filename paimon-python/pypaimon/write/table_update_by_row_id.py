@@ -293,7 +293,9 @@ class TableUpdateByRowId:
         merged_data = self._merge_update_with_original(original_data, data, column_names, first_row_id)
 
         # Create a file store write for this partition
+        # Disable rolling to ensure one output file per first_row_id group,
         file_store_write = FileStoreWrite(self.table, self.commit_user)
+        file_store_write.disable_rolling()
 
         # Set write columns to only update specific columns
         write_cols = column_names
@@ -313,7 +315,6 @@ class TableUpdateByRowId:
         for msg in commit_messages:
             msg.check_from_snapshot = self.snapshot_id
             for file in msg.new_files:
-                # Assign the same first_row_id as the original file
                 file.first_row_id = first_row_id
                 file.write_cols = write_cols
 
