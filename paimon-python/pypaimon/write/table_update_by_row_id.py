@@ -309,13 +309,14 @@ class TableUpdateByRowId:
         # Prepare commit and assign first_row_id
         commit_messages = file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
-        # Assign first_row_id to the new files
+        # Assign first_row_id to the new files, incrementing by row_count
+        current_row_id = first_row_id
         for msg in commit_messages:
             msg.check_from_snapshot = self.snapshot_id
             for file in msg.new_files:
-                # Assign the same first_row_id as the original file
-                file.first_row_id = first_row_id
+                file.first_row_id = current_row_id
                 file.write_cols = write_cols
+                current_row_id += file.row_count
 
         self.commit_messages.extend(commit_messages)
 

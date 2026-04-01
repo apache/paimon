@@ -1054,6 +1054,9 @@ class TableUpdateTest(unittest.TestCase):
 
 
     def test_update_large_file_split_assigns_incremental_row_ids(self):
+        """When _write_group produces multiple files (data exceeds
+        target-file-size), each file must get an incrementing
+        first_row_id instead of all sharing the same value."""
         import uuid
         import random
         import string
@@ -1071,6 +1074,7 @@ class TableUpdateTest(unittest.TestCase):
             f'default.{table_name}', schema, False)
         table = self.catalog.get_table(f'default.{table_name}')
 
+        # Write 5000 rows into one large file
         N = 5000
         data = pa.table({
             'id': list(range(N)),
@@ -1087,12 +1091,14 @@ class TableUpdateTest(unittest.TestCase):
         tw.close()
         tc.close()
 
+        # Shrink target-file-size to force file split on update
         from pypaimon.schema.schema_change import SetOption
         self.catalog.alter_table(
             f'default.{table_name}',
             [SetOption('target-file-size', '10kb')])
         table = self.catalog.get_table(f'default.{table_name}')
 
+        # Update all rows -> _write_group splits into many files
         updator = table.new_batch_write_builder().new_update()
         updator.with_update_type(['name'])
         update_data = pa.table({
@@ -1105,9 +1111,27 @@ class TableUpdateTest(unittest.TestCase):
         })
         msgs = updator.update_by_arrow_with_row_id(update_data)
 
-        tc = table.new_batch_write_builder().new_commit()
-        tc.commit(msgs)
-        tc.close()
+        all_files = []
+        for msg in msgs:
+            all_files.extend(msg.new_files)
+
+        # Must produce multiple files for the test to be meaningful
+        self.assertGreater(
+            len(all_files), 1,
+            "Update should produce multiple files")
+
+        # Each file must have a unique first_row_id
+        first_ids = [f.first_row_id for f in all_files]
+        self.assertEqual(
+            len(first_ids), len(set(first_ids)),
+            "All files must have unique first_row_id")
+
+        # first_row_ids should increment by row_count
+        expected_id = 0
+        for f in sorted(
+                all_files, key=lambda x: x.first_row_id):
+            self.assertEqual(f.first_row_id, expected_id)
+            expected_id += f.row_count
 
 
 if __name__ == '__main__':
