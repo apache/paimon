@@ -27,6 +27,8 @@ from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.api.auth.bearer import BearTokenAuthProvider
+from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.common.identifier import Identifier, SYSTEM_TABLE_SPLITTER
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
@@ -43,6 +45,10 @@ class RESTTokenFileIO(FileIO):
 
     _FILE_IO_CACHE: TTLCache = None
     _FILE_IO_CACHE_LOCK = threading.Lock()
+
+    _TOKEN_CACHE: dict = {}
+    _TOKEN_LOCKS: dict = {}
+    _TOKEN_LOCKS_LOCK = threading.Lock()
 
     @classmethod
     def _get_file_io_cache(cls) -> TTLCache:
@@ -69,14 +75,12 @@ class RESTTokenFileIO(FileIO):
         self.properties = self.catalog_options or Options({})  # For compatibility with refresh_token()
         self.token: Optional[RESTToken] = None
         self.api_instance: Optional[RESTApi] = None
-        self.lock = threading.Lock()
         self.log = logging.getLogger(__name__)
         self._uri_reader_factory_cache: Optional[UriReaderFactory] = None
 
     def __getstate__(self):
         state = self.__dict__.copy()
         # Remove non-serializable objects
-        state.pop('lock', None)
         state.pop('api_instance', None)
         state.pop('_uri_reader_factory_cache', None)
         # token can be serialized, but we'll refresh it on deserialization
@@ -84,8 +88,6 @@ class RESTTokenFileIO(FileIO):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        # Recreate lock after deserialization
-        self.lock = threading.Lock()
         self._uri_reader_factory_cache = None
         # api_instance will be recreated when needed
         self.api_instance = None
@@ -201,17 +203,69 @@ class RESTTokenFileIO(FileIO):
     def filesystem(self):
         return self.file_io().filesystem
 
-    def try_to_refresh_token(self):
-        if self._should_refresh():
-            with self.lock:
-                if self._should_refresh():
-                    self.refresh_token()
+    def _build_cache_key(self) -> str:
+        """Build cache key with user identity to isolate tokens across different credentials."""
+        return f"{self._get_user_identity()}:{self.identifier}"
 
-    def _should_refresh(self):
-        if self.token is None:
+    def _get_user_identity(self) -> str:
+        """Get user identity for token cache isolation.
+
+        For DLF auth (AK/SK, STS, ECS Role): returns access_key_id via get_token().
+        For Bear Token auth: returns the bearer token string.
+        For unknown auth: returns 'anonymous'.
+        """
+        if self.api_instance is None:
+            self.api_instance = RESTApi(self.properties, False)
+        auth_provider = self.api_instance.rest_auth_function.auth_provider
+        if isinstance(auth_provider, DLFAuthProvider):
+            return auth_provider.get_token().access_key_id or 'anonymous'
+        if isinstance(auth_provider, BearTokenAuthProvider):
+            return auth_provider.token or 'anonymous'
+        return 'anonymous'
+
+    def try_to_refresh_token(self):
+        identifier_str = self._build_cache_key()
+
+        if self.token is not None and not self._is_token_expired(self.token):
+            return
+
+        cached_token = self._get_cached_token(identifier_str)
+        if cached_token and not self._is_token_expired(cached_token):
+            self.token = cached_token
+            return
+
+        global_lock = self._get_global_token_lock(identifier_str)
+
+        with global_lock:
+            cached_token = self._get_cached_token(identifier_str)
+            if cached_token and not self._is_token_expired(cached_token):
+                self.token = cached_token
+                return
+
+            token_to_check = cached_token if cached_token else self.token
+            if token_to_check is None or self._is_token_expired(token_to_check):
+                self.refresh_token()
+                self._set_cached_token(identifier_str, self.token)
+
+    def _get_cached_token(self, identifier_str: str) -> Optional[RESTToken]:
+        with self._TOKEN_LOCKS_LOCK:
+            return self._TOKEN_CACHE.get(identifier_str)
+
+    def _set_cached_token(self, identifier_str: str, token: RESTToken):
+        with self._TOKEN_LOCKS_LOCK:
+            self._TOKEN_CACHE[identifier_str] = token
+
+    def _is_token_expired(self, token: Optional[RESTToken]) -> bool:
+        if token is None:
             return True
         current_time = int(time.time() * 1000)
-        return (self.token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+        return (token.expire_at_millis - current_time) < RESTApi.TOKEN_EXPIRATION_SAFE_TIME_MILLIS
+
+    def _get_global_token_lock(self, identifier_str: str) -> threading.Lock:
+        with self._TOKEN_LOCKS_LOCK:
+            if identifier_str not in self._TOKEN_LOCKS:
+                self._TOKEN_LOCKS[identifier_str] = threading.Lock()
+            return self._TOKEN_LOCKS[identifier_str]
 
     def refresh_token(self):
         self.log.info(f"begin refresh data token for identifier [{self.identifier}]")
