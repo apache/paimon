@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lineage;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -38,8 +39,6 @@ import java.util.stream.Collectors;
  */
 public class LineageUtils {
 
-    private static final String PAIMON_DATASET_PREFIX = "paimon://";
-
     private static final Set<String> PAIMON_OPTION_KEYS =
             CoreOptions.getOptions().stream().map(opt -> opt.key()).collect(Collectors.toSet());
 
@@ -49,6 +48,7 @@ public class LineageUtils {
      */
     private static Map<String, String> buildConfigMap(Table table) {
         Map<String, String> config = new HashMap<>();
+        config.put("type", "paimon");
         config.put("partition-keys", String.join(",", table.partitionKeys()));
         config.put("primary-keys", String.join(",", table.primaryKeys()));
 
@@ -60,12 +60,12 @@ public class LineageUtils {
     }
 
     /**
-     * Returns the lineage namespace for a Paimon table. The namespace uses the {@code paimon://}
-     * scheme followed by the table's physical warehouse path, e.g. {@code
-     * "paimon://s3://my-bucket/warehouse/mydb.db/mytable"}.
+     * Returns the lineage namespace for a Paimon table. The namespace is the warehouse path derived
+     * via {@link CatalogUtils#warehouse(String)}, e.g. {@code "s3://my-bucket/warehouse"} for
+     * object stores or {@code "file:/tmp/warehouse"} for local paths.
      */
     public static String getNamespace(Table table) {
-        return PAIMON_DATASET_PREFIX + CoreOptions.path(table.options());
+        return CatalogUtils.warehouse(CoreOptions.path(table.options()).toString());
     }
 
     /**

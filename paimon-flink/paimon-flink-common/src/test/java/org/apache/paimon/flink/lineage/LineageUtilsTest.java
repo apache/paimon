@@ -54,11 +54,14 @@ class LineageUtilsTest {
 
     @TempDir java.nio.file.Path temp;
 
+    private Path warehouse;
     private Path tablePath;
 
     @BeforeEach
     void setUp() {
-        tablePath = new Path(temp.toUri().toString());
+        // mirror real Paimon layout: <warehouse>/<database>.db/<table>
+        warehouse = new Path(temp.toUri().toString());
+        tablePath = new Path(warehouse, "test_db.db/test_table");
     }
 
     private FileStoreTable createTable(
@@ -85,8 +88,8 @@ class LineageUtilsTest {
 
         String namespace = LineageUtils.getNamespace(table);
 
-        assertThat(namespace).startsWith("paimon://");
-        assertThat(namespace).contains(tablePath.toString());
+        // namespace is the warehouse root (2 levels up from the table path)
+        assertThat(namespace).isEqualTo("file:" + warehouse.toUri().getPath());
     }
 
     @Test
@@ -102,7 +105,7 @@ class LineageUtilsTest {
 
         LineageDataset dataset = vertex.datasets().get(0);
         assertThat(dataset.name()).isEqualTo("paimon.db.src");
-        assertThat(dataset.namespace()).startsWith("paimon://");
+        assertThat(dataset.namespace()).isEqualTo("file:" + warehouse.toUri().getPath());
     }
 
     @Test
@@ -128,7 +131,7 @@ class LineageUtilsTest {
 
         LineageDataset dataset = vertex.datasets().get(0);
         assertThat(dataset.name()).isEqualTo("paimon.db.sink");
-        assertThat(dataset.namespace()).startsWith("paimon://");
+        assertThat(dataset.namespace()).isEqualTo("file:" + warehouse.toUri().getPath());
     }
 
     @Test
@@ -144,6 +147,7 @@ class LineageUtilsTest {
 
         DatasetConfigFacet configFacet = (DatasetConfigFacet) facets.get("config");
         Map<String, String> config = configFacet.config();
+        assertThat(config).containsEntry("type", "paimon");
         assertThat(config).containsEntry("partition-keys", "f2");
         assertThat(config).containsEntry("primary-keys", "f0,f2");
     }
