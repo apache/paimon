@@ -131,6 +131,13 @@ class DLFSignerTest(unittest.TestCase):
         self.assertIn("Content-MD5", header)
         self.assertEqual("UNSIGNED-PAYLOAD", header.get("x-dlf-content-sha256"))
 
+    def test_rest_auth_parameter_encodes_values(self):
+        param = RESTAuthParameter(
+            method="GET", path="/test",
+            data="", parameters={"functionNamePattern": "func%"})
+        self.assertEqual(
+            param.parameters["functionNamePattern"], "func%25")
+
     def test_parse_signing_algo_from_uri(self):
         parse = DLFAuthProviderFactory.parse_signing_algo_from_uri
 
