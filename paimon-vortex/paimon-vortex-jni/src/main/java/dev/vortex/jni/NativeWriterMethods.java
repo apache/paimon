@@ -33,5 +33,8 @@ public final class NativeWriterMethods {
 
     public static native boolean writeBatch(long writerPtr, byte[] arrowData);
 
+    public static native boolean writeBatchFfi(
+            long writerPtr, long arrowArrayAddr, long arrowSchemaAddr);
+
     public static native void close(long writerPtr);
 }

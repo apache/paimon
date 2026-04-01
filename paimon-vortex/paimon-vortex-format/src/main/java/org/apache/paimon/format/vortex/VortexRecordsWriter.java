@@ -19,6 +19,8 @@
 package org.apache.paimon.format.vortex;
 
 import org.apache.paimon.arrow.ArrowBundleRecords;
+import org.apache.paimon.arrow.ArrowUtils;
+import org.apache.paimon.arrow.vector.ArrowCStruct;
 import org.apache.paimon.arrow.vector.ArrowFormatWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.BundleFormatWriter;
@@ -28,14 +30,15 @@ import org.apache.paimon.types.RowType;
 
 import dev.vortex.api.DType;
 import dev.vortex.api.VortexWriter;
+import org.apache.arrow.c.ArrowArray;
+import org.apache.arrow.c.ArrowSchema;
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Map;
-
-import static org.apache.paimon.arrow.ArrowUtils.serializeToIpc;
 
 /** Vortex records writer. */
 public class VortexRecordsWriter implements BundleFormatWriter {
@@ -45,7 +48,9 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     private final ArrowFormatWriter arrowFormatWriter;
     private final VortexWriter nativeWriter;
     private final String path;
-    private long bytesWritten = 0;
+    private final ArrowArray arrowArray;
+    private final ArrowSchema arrowSchema;
+    private final BufferAllocator allocator;
     private long jniCost = 0;
 
     public VortexRecordsWriter(
@@ -56,6 +61,9 @@ public class VortexRecordsWriter implements BundleFormatWriter {
             throws IOException {
         this.arrowFormatWriter = arrowFormatWriter;
         this.path = path.toUri().toString();
+        this.allocator = arrowFormatWriter.getAllocator();
+        this.arrowArray = ArrowArray.allocateNew(allocator);
+        this.arrowSchema = ArrowSchema.allocateNew(allocator);
 
         DType dtype = VortexTypeUtils.toDType(rowType);
         this.nativeWriter = VortexWriter.create(this.path, dtype, storageOptions);
@@ -84,9 +92,9 @@ public class VortexRecordsWriter implements BundleFormatWriter {
 
     @Override
     public boolean reachTargetSize(boolean suggestedCheck, long targetSize) {
-        // Note: bytesWritten tracks Arrow IPC serialized bytes, not the actual Vortex file size
-        // (which may differ due to Vortex's own compression/encoding).
-        return suggestedCheck && (bytesWritten > targetSize);
+        // Vortex applies its own compression/encoding, so in-memory Arrow size is much larger
+        // than the actual file size on disk. Always return false to avoid rolling into small files.
+        return false;
     }
 
     @Override
@@ -95,6 +103,8 @@ public class VortexRecordsWriter implements BundleFormatWriter {
         LOG.info("Jni cost: {}ms for file: {}", jniCost, path);
         long t1 = System.currentTimeMillis();
         nativeWriter.close();
+        arrowArray.close();
+        arrowSchema.close();
         arrowFormatWriter.close();
         long closeCost = (System.currentTimeMillis() - t1);
         LOG.info("Close cost: {}ms for file: {}", closeCost, path);
@@ -109,10 +119,10 @@ public class VortexRecordsWriter implements BundleFormatWriter {
     }
 
     private void writeVsr(VectorSchemaRoot vsr) throws IOException {
-        byte[] arrowData = serializeToIpc(vsr);
-        bytesWritten += arrowData.length;
+        ArrowCStruct cStruct =
+                ArrowUtils.serializeToCStruct(vsr, arrowArray, arrowSchema, allocator);
         long t1 = System.currentTimeMillis();
-        nativeWriter.writeBatch(arrowData);
+        nativeWriter.writeBatchFfi(cStruct.arrayAddress(), cStruct.schemaAddress());
         jniCost += (System.currentTimeMillis() - t1);
     }
 }
