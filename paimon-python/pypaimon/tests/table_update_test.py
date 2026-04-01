@@ -1109,11 +1109,18 @@ class TableUpdateTest(unittest.TestCase):
         for msg in msgs:
             all_files.extend(msg.new_files)
 
-        self.assertEqual(
-            len(all_files), 1,
-            "Update should produce exactly one file per group")
-        self.assertEqual(all_files[0].first_row_id, 0)
-        self.assertEqual(all_files[0].row_count, N)
+        self.assertGreater(len(all_files), 1,
+                           "Update should produce multiple files")
+
+        first_ids = [f.first_row_id for f in all_files]
+        self.assertEqual(len(first_ids), len(set(first_ids)),
+                         "All files must have unique first_row_id")
+
+        expected_id = 0
+        for f in sorted(all_files, key=lambda x: x.first_row_id):
+            self.assertEqual(f.first_row_id, expected_id)
+            expected_id += f.row_count
+        self.assertEqual(expected_id, N)
 
         tc = wb.new_commit()
         tc.commit(msgs)
