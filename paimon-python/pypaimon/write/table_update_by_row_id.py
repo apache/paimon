@@ -293,7 +293,10 @@ class TableUpdateByRowId:
         merged_data = self._merge_update_with_original(original_data, data, column_names, first_row_id)
 
         # Create a file store write for this partition
+        # Disable rolling to ensure one output file per first_row_id group,
+        # matching the original file's row ID range exactly.
         file_store_write = FileStoreWrite(self.table, self.commit_user)
+        file_store_write.disable_rolling()
 
         # Set write columns to only update specific columns
         write_cols = column_names
@@ -309,14 +312,12 @@ class TableUpdateByRowId:
         # Prepare commit and assign first_row_id
         commit_messages = file_store_write.prepare_commit(BATCH_COMMIT_IDENTIFIER)
 
-        # Assign first_row_id to the new files, incrementing by row_count
-        current_row_id = first_row_id
+        # Assign first_row_id to the new files
         for msg in commit_messages:
             msg.check_from_snapshot = self.snapshot_id
             for file in msg.new_files:
-                file.first_row_id = current_row_id
+                file.first_row_id = first_row_id
                 file.write_cols = write_cols
-                current_row_id += file.row_count
 
         self.commit_messages.extend(commit_messages)
 

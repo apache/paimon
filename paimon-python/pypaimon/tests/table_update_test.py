@@ -1053,7 +1053,7 @@ class TableUpdateTest(unittest.TestCase):
         self.assertEqual(45, ages[4], "Row 4 should remain unchanged")
 
 
-    def test_update_large_file_split_assigns_incremental_row_ids(self):
+    def test_update_with_large_file(self):
         """When _write_group produces multiple files (data exceeds
         target-file-size), each file must get an incrementing
         first_row_id instead of all sharing the same value."""
@@ -1115,23 +1115,18 @@ class TableUpdateTest(unittest.TestCase):
         for msg in msgs:
             all_files.extend(msg.new_files)
 
-        # Must produce multiple files for the test to be meaningful
-        self.assertGreater(
-            len(all_files), 1,
-            "Update should produce multiple files")
-
-        # Each file must have a unique first_row_id
-        first_ids = [f.first_row_id for f in all_files]
+        # _write_group should not roll files — one output file
+        # per first_row_id group, matching the original file range
         self.assertEqual(
-            len(first_ids), len(set(first_ids)),
-            "All files must have unique first_row_id")
+            len(all_files), 1,
+            "Update should produce exactly one file per group")
+        self.assertEqual(all_files[0].first_row_id, 0)
+        self.assertEqual(all_files[0].row_count, N)
 
-        # first_row_ids should increment by row_count
-        expected_id = 0
-        for f in sorted(
-                all_files, key=lambda x: x.first_row_id):
-            self.assertEqual(f.first_row_id, expected_id)
-            expected_id += f.row_count
+        # Commit should succeed without conflict
+        tc = table.new_batch_write_builder().new_commit()
+        tc.commit(msgs)
+        tc.close()
 
 
 if __name__ == '__main__':
