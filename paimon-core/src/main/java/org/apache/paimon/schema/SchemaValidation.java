@@ -805,6 +805,14 @@ public class SchemaValidation {
                     options.partitionTimestampFormatter() != null,
                     "Partition timestamp formatter is required for chain table.");
 
+            if (options.partitionExpireTime() != null) {
+                Preconditions.checkArgument(
+                        "values-time".equals(options.partitionExpireStrategy()),
+                        "Chain table only supports 'values-time' partition expiration strategy, "
+                                + "but found '%s'.",
+                        options.partitionExpireStrategy());
+            }
+
             // validate chain-table.chain-partition-keys
             List<String> chainPartKeys = options.chainTableChainPartitionKeys();
             if (chainPartKeys != null) {

@@ -85,7 +85,7 @@ import static org.apache.paimon.CoreOptions.createCommitUser;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link PartitionExpire}. */
+/** Test for {@link NormalPartitionExpire}. */
 public class PartitionExpireTest {
 
     @TempDir java.nio.file.Path tempDir;
@@ -189,7 +189,7 @@ public class PartitionExpireTest {
         write("20230103", "31");
         write("20230103", "32");
         write("20230105", "51");
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         Assertions.assertDoesNotThrow(() -> expire.expire(date(8), Long.MAX_VALUE));
         assertThat(read()).containsExactlyInAnyOrder("abcd:12");
@@ -215,7 +215,7 @@ public class PartitionExpireTest {
         write("20230103", "31");
         write("20230103", "32");
         write("20230105", "51");
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         Assertions.assertDoesNotThrow(() -> expire.expire(date(8), Long.MAX_VALUE));
 
@@ -246,7 +246,7 @@ public class PartitionExpireTest {
         write("20230103", "32");
         write("20230105", "51");
 
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         Assertions.assertDoesNotThrow(() -> expire.expire(date(6), Long.MAX_VALUE));
 
@@ -272,7 +272,7 @@ public class PartitionExpireTest {
         write("20230103", "32");
         write("20230105", "51");
 
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
 
         expire.expire(date(3), Long.MAX_VALUE);
@@ -319,7 +319,7 @@ public class PartitionExpireTest {
         doneAction.markDone("f0=20230103");
         doneAction.markDone("f0=20230108");
 
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         expire.expire(date(8), Long.MAX_VALUE);
 
@@ -423,7 +423,7 @@ public class PartitionExpireTest {
         List<CommitMessage> commitMessages = write("20230101", "11");
         write("20230105", "51");
 
-        PartitionExpire expire = newExpire();
+        NormalPartitionExpire expire = newExpire();
         expire.setLastCheck(date(1));
         expire.expire(date(5), Long.MAX_VALUE);
         assertThat(read()).containsExactlyInAnyOrder("20230105:51");
@@ -471,9 +471,9 @@ public class PartitionExpireTest {
         return commitMessages;
     }
 
-    private PartitionExpire newExpire() {
+    private NormalPartitionExpire newExpire() {
         FileStoreTable table = newExpireTable();
-        return table.store().newPartitionExpire("", table);
+        return (NormalPartitionExpire) table.store().newPartitionExpire("", table);
     }
 
     private FileStoreTable newExpireTable() {

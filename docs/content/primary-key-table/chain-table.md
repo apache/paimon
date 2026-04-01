@@ -206,3 +206,67 @@ partition keys:
 
 This treats `(dt, hour)` as the composite chain dimension and everything before it (e.g., `region`) as
 the group dimension.
+
+## Partition Expiration
+
+Chain tables support automatic partition expiration via the standard `partition.expiration-time` option.
+However, the expiration algorithm differs from normal tables to preserve chain integrity.
+
+### How It Works
+
+In a normal table, every partition older than the cutoff (`now - partition.expiration-time`) is dropped
+independently. Chain tables cannot do this because a delta partition depends on its nearest earlier
+snapshot partition as an anchor for merge-on-read. Dropping the anchor would break the chain.
+
+Chain table expiration works in **segments**. A segment consists of one snapshot partition and all the
+delta partitions whose time falls between that snapshot and the next snapshot in sorted order. The
+segment is the atomic unit of expiration: either the entire segment is expired, or nothing in it is.
+
+The algorithm per group:
+1. List all snapshot branch partitions sorted by chain partition time.
+2. Filter to those before the cutoff (`now - partition.expiration-time`).
+3. If fewer than 2 snapshots are before the cutoff, nothing can be expired — the only one must be kept
+   as the anchor.
+4. The most recent snapshot before the cutoff is the **anchor** (kept). All earlier snapshots and their
+   associated delta partitions form expirable segments.
+5. Delta partitions are dropped before snapshot partitions so that the commit pre-check always passes.
+
+For tables with group partitions, each group is processed independently. A group with many expired
+snapshots can have segments expired while another group with only one snapshot before the cutoff retains
+all of its data.
+
+### Example
+
+```sql
+ALTER TABLE default.t SET TBLPROPERTIES (
+    'partition.expiration-time' = '30 d',
+    'partition.expiration-check-interval' = '1 d'
+);
+ALTER TABLE `default`.`t$branch_snapshot` SET TBLPROPERTIES (
+    'partition.expiration-time' = '30 d',
+    'partition.expiration-check-interval' = '1 d'
+);
+ALTER TABLE `default`.`t$branch_delta` SET TBLPROPERTIES (
+    'partition.expiration-time' = '30 d',
+    'partition.expiration-check-interval' = '1 d'
+);
+```
+
+Suppose the snapshot branch has partitions `S(0101)`, `S(0201)`, `S(0301)` and the delta branch has
+`D(0110)`, `D(0210)`, `D(0315)`. On `2025-03-31` with a 30-day retention the cutoff is `2025-03-01`:
+
+- Snapshots before cutoff: `S(0101)`, `S(0201)`. Anchor = `S(0201)` (kept).
+- Segment 1 expired: `S(0101)` + `D(0110)` (delta between `S(0101)` and `S(0201)`).
+- Remaining: `S(0201)`, `S(0301)`, `D(0210)`, `D(0315)`.
+
+### Important Notes
+
+- **Delta-only groups are not expired.** If a group has delta partitions but no snapshot partition, its
+  deltas are the only copy of that group's data. Partition expiration will not touch them. They will
+  start to be expired once at least two snapshot partitions exist for the group and fall before the
+  cutoff.
+- **Conflict detection is anchor-aware.** When `partition.expiration-strategy` is `values-time`, the
+  conflict detection during writes correctly recognizes that anchor partitions are retained and does not
+  reject writes to them.
+- The `partition.expiration-time` and `partition.expiration-check-interval` options should be set
+  consistently across the main table and both branches.
