@@ -42,6 +42,10 @@ class GlobalIndexReader(ABC):
         """Visit a vector search query."""
         raise NotImplementedError("Vector search not supported by this reader")
 
+    def visit_full_text_search(self, full_text_search: 'FullTextSearch') -> Optional['GlobalIndexResult']:
+        """Visit a full-text search query."""
+        raise NotImplementedError("Full-text search not supported by this reader")
+
     def visit_equal(self, field_ref: FieldRef, literal: object) -> Optional['GlobalIndexResult']:
         """Visit an equality predicate."""
         return None

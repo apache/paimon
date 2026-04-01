@@ -138,9 +138,6 @@ run_java_read_test() {
 
     cd "$PROJECT_ROOT"
 
-    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
-    echo "Detected Python version: $PYTHON_VERSION"
-
     # Run Java test for Parquet/Orc/Avro format in paimon-core
     echo "Running Maven test for JavaPyE2ETest.testReadPkTable (Java Read Parquet/Orc/Avro)..."
     echo "Note: Maven may download dependencies on first run, this may take a while..."
@@ -171,6 +168,7 @@ run_java_read_test() {
         return 1
     fi
 }
+
 run_pk_dv_test() {
     echo -e "${YELLOW}=== Step 5: Running Primary Key & Deletion Vector Test (testPKDeletionVectorWriteRead) ===${NC}"
 
@@ -244,6 +242,30 @@ run_compressed_text_test() {
     fi
 }
 
+# Function to run Tantivy full-text index test (Java write index, Python read and search)
+run_tantivy_fulltext_test() {
+    echo -e "${YELLOW}=== Step 8: Running Tantivy Full-Text Index Test (Java Write, Python Read) ===${NC}"
+
+    cd "$PROJECT_ROOT"
+
+    echo "Running Maven test for JavaPyTantivyE2ETest.testTantivyFullTextIndexWrite..."
+    if mvn test -Dtest=org.apache.paimon.tantivy.index.JavaPyTantivyE2ETest#testTantivyFullTextIndexWrite -pl paimon-tantivy/paimon-tantivy-index -q -Drun.e2e.tests=true; then
+        echo -e "${GREEN}✓ Java test completed successfully${NC}"
+    else
+        echo -e "${RED}✗ Java test failed${NC}"
+        return 1
+    fi
+    cd "$PAIMON_PYTHON_DIR"
+    echo "Running Python test for JavaPyReadWriteTest.test_read_tantivy_full_text_index..."
+    if python -m pytest java_py_read_write_test.py::JavaPyReadWriteTest::test_read_tantivy_full_text_index -v; then
+        echo -e "${GREEN}✓ Python test completed successfully${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Python test failed${NC}"
+        return 1
+    fi
+}
+
 # Main execution
 main() {
     local java_write_result=0
@@ -253,6 +275,12 @@ main() {
     local pk_dv_result=0
     local btree_index_result=0
     local compressed_text_result=0
+    local tantivy_fulltext_result=0
+
+    # Detect Python version
+    PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "unknown")
+    PYTHON_MINOR=$(python -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+    echo "Detected Python version: $PYTHON_VERSION"
 
     echo -e "${YELLOW}Starting mixed language test execution...${NC}"
     echo ""
@@ -311,6 +339,18 @@ main() {
 
     echo ""
 
+    # Run Tantivy full-text index test (requires Python >= 3.10)
+    if [[ "$PYTHON_MINOR" -ge 10 ]]; then
+        if ! run_tantivy_fulltext_test; then
+            tantivy_fulltext_result=1
+        fi
+    else
+        echo -e "${YELLOW}⏭ Skipping Tantivy Full-Text Index Test (requires Python >= 3.10, current: $PYTHON_VERSION)${NC}"
+        tantivy_fulltext_result=0
+    fi
+
+    echo ""
+
     echo -e "${YELLOW}=== Test Results Summary ===${NC}"
 
     if [[ $java_write_result -eq 0 ]]; then
@@ -355,12 +395,18 @@ main() {
         echo -e "${RED}✗ Compressed Text Test (Java Write, Python Read): FAILED${NC}"
     fi
 
+    if [[ $tantivy_fulltext_result -eq 0 ]]; then
+        echo -e "${GREEN}✓ Tantivy Full-Text Index Test (Java Write, Python Read): PASSED${NC}"
+    else
+        echo -e "${RED}✗ Tantivy Full-Text Index Test (Java Write, Python Read): FAILED${NC}"
+    fi
+
     echo ""
 
     # Clean up warehouse directory after all tests
     cleanup_warehouse
 
-    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 ]]; then
+    if [[ $java_write_result -eq 0 && $python_read_result -eq 0 && $python_write_result -eq 0 && $java_read_result -eq 0 && $pk_dv_result -eq 0 && $btree_index_result -eq 0 && $compressed_text_result -eq 0 && $tantivy_fulltext_result -eq 0 ]]; then
         echo -e "${GREEN}🎉 All tests passed! Java-Python interoperability verified.${NC}"
         return 0
     else

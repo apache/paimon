@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 
 from pypaimon.read.read_builder import ReadBuilder
 from pypaimon.read.stream_read_builder import StreamReadBuilder
+from pypaimon.table.source.full_text_search_builder import FullTextSearchBuilder
 from pypaimon.write.write_builder import BatchWriteBuilder, StreamWriteBuilder
 
 
@@ -41,3 +42,7 @@ class Table(ABC):
     @abstractmethod
     def new_stream_write_builder(self) -> StreamWriteBuilder:
         """Returns a builder for building stream table write and table commit."""
+
+    @abstractmethod
+    def new_full_text_search_builder(self) -> FullTextSearchBuilder:
+        """Returns a new full-text search builder."""

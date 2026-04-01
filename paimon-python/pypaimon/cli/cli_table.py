@@ -147,6 +147,83 @@ def cmd_table_read(args):
         print(df.to_string(index=False))
 
 
+def cmd_table_full_text_search(args):
+    """
+    Execute the 'table full-text-search' command.
+
+    Performs full-text search on a Paimon table and displays matching rows.
+
+    Args:
+        args: Parsed command line arguments.
+    """
+    from pypaimon.cli.cli import load_catalog_config, create_catalog
+
+    config_path = args.config
+    config = load_catalog_config(config_path)
+    catalog = create_catalog(config)
+
+    table_identifier = args.table
+    parts = table_identifier.split('.')
+    if len(parts) != 2:
+        print(f"Error: Invalid table identifier '{table_identifier}'. "
+              f"Expected format: 'database.table'", file=sys.stderr)
+        sys.exit(1)
+
+    database_name, table_name = parts
+
+    try:
+        table = catalog.get_table(f"{database_name}.{table_name}")
+    except Exception as e:
+        print(f"Error: Failed to get table '{table_identifier}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Build full-text search
+    text_column = args.column
+    query_text = args.query
+    limit = args.limit
+
+    try:
+        builder = table.new_full_text_search_builder()
+        builder.with_text_column(text_column)
+        builder.with_query_text(query_text)
+        builder.with_limit(limit)
+        result = builder.execute_local()
+    except Exception as e:
+        print(f"Error: Full-text search failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if result.is_empty():
+        print("No matching rows found.")
+        return
+
+    # Read matching rows using global index result
+    read_builder = table.new_read_builder()
+
+    select_columns = args.select
+    if select_columns:
+        projection = [col.strip() for col in select_columns.split(',')]
+        available_fields = set(field.name for field in table.table_schema.fields)
+        invalid_columns = [col for col in projection if col not in available_fields]
+        if invalid_columns:
+            print(f"Error: Column(s) {invalid_columns} do not exist in table '{table_identifier}'.",
+                  file=sys.stderr)
+            sys.exit(1)
+        read_builder = read_builder.with_projection(projection)
+
+    scan = read_builder.new_scan().with_global_index_result(result)
+    plan = scan.plan()
+    splits = plan.splits()
+    read = read_builder.new_read()
+    df = read.to_pandas(splits)
+
+    output_format = getattr(args, 'format', 'table')
+    if output_format == 'json':
+        import json
+        print(json.dumps(df.to_dict(orient='records'), ensure_ascii=False))
+    else:
+        print(df.to_string(index=False))
+
+
 def cmd_table_get(args):
     """
     Execute the 'table get' command.
@@ -773,6 +850,43 @@ def add_table_subcommands(table_parser):
 
     # table rename command
     rename_parser = table_subparsers.add_parser('rename', help='Rename a table')
+
+    # table full-text-search command
+    fts_parser = table_subparsers.add_parser('full-text-search', help='Full-text search on a table')
+    fts_parser.add_argument(
+        'table',
+        help='Table identifier in format: database.table'
+    )
+    fts_parser.add_argument(
+        '--column', '-c',
+        required=True,
+        help='Text column to search on'
+    )
+    fts_parser.add_argument(
+        '--query', '-q',
+        required=True,
+        help='Query text to search for'
+    )
+    fts_parser.add_argument(
+        '--limit', '-l',
+        type=int,
+        default=10,
+        help='Maximum number of results to return (default: 10)'
+    )
+    fts_parser.add_argument(
+        '--select', '-s',
+        type=str,
+        default=None,
+        help='Select specific columns to display (comma-separated, e.g., "id,name,content")'
+    )
+    fts_parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['table', 'json'],
+        default='table',
+        help='Output format: table (default) or json'
+    )
+    fts_parser.set_defaults(func=cmd_table_full_text_search)
     rename_parser.add_argument(
         'table',
         help='Source table identifier in format: database.table'

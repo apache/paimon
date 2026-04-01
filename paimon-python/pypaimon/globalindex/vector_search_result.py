@@ -78,6 +78,37 @@ class ScoredGlobalIndexResult(GlobalIndexResult):
         
         return SimpleScoredGlobalIndexResult(result_or, combined_score_getter)
 
+    def top_k(self, k: int) -> 'ScoredGlobalIndexResult':
+        """Return the top-k results by score."""
+        import heapq
+
+        row_ids = self.results()
+        if row_ids.cardinality() <= k:
+            return self
+
+        score_getter_fn = self.score_getter()
+        # Use a min-heap of size k to find top-k scores in O(n log k)
+        heap = []
+        for row_id in row_ids:
+            score = score_getter_fn(row_id)
+            if score is None:
+                score = 0.0
+            if len(heap) < k:
+                heapq.heappush(heap, (score, row_id))
+            elif score > heap[0][0]:
+                heapq.heapreplace(heap, (score, row_id))
+
+        top_k_bitmap = RoaringBitmap64()
+        for _, row_id in heap:
+            top_k_bitmap.add(row_id)
+
+        return SimpleScoredGlobalIndexResult(top_k_bitmap, score_getter_fn)
+
+    @staticmethod
+    def create_empty() -> 'ScoredGlobalIndexResult':
+        """Returns an empty ScoredGlobalIndexResult."""
+        return SimpleScoredGlobalIndexResult(RoaringBitmap64(), lambda row_id: 0.0)
+
     @staticmethod
     def create(
         supplier: Callable[[], RoaringBitmap64],

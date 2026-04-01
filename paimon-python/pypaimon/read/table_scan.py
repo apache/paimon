@@ -131,3 +131,7 @@ class TableScan:
     def with_slice(self, start_pos, end_pos) -> 'TableScan':
         self.file_scanner.with_slice(start_pos, end_pos)
         return self
+
+    def with_global_index_result(self, result) -> 'TableScan':
+        self.file_scanner.with_global_index_result(result)
+        return self
