@@ -1052,7 +1052,6 @@ class TableUpdateTest(unittest.TestCase):
         self.assertEqual(40, ages[3], "Row 3 should remain unchanged")
         self.assertEqual(45, ages[4], "Row 4 should remain unchanged")
 
-
     def test_update_with_large_file(self):
         import uuid
         import random
