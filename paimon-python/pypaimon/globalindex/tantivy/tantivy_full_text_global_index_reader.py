@@ -109,6 +109,10 @@ class StreamDirectory:
     def sync_directory(self) -> None:
         pass
 
+    def close(self, writer_id: int) -> None:
+        """Called when a writer is dropped (e.g., lock files dropped without terminate)."""
+        self._writers.pop(writer_id, None)
+
     def _read_fully(self, length: int) -> bytes:
         buf = bytearray()
         remaining = length
