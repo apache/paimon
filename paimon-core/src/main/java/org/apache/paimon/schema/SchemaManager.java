@@ -68,6 +68,7 @@ import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -311,6 +312,7 @@ public class SchemaManager implements Serializable {
         List<DataField> newFields = new ArrayList<>(oldTableSchema.fields());
         AtomicInteger highestFieldId = new AtomicInteger(oldTableSchema.highestFieldId());
         String newComment = oldTableSchema.comment();
+        List<String> newPrimaryKeys = oldTableSchema.primaryKeys();
         for (SchemaChange change : changes) {
             if (change instanceof SetOption) {
                 SetOption setOption = (SetOption) change;
@@ -549,6 +551,12 @@ public class SchemaManager implements Serializable {
                                     update.newDefaultValue());
                         },
                         lazyIdentifier);
+            } else if (change instanceof SchemaChange.DropPrimaryKey) {
+                if (hasSnapshots.get()) {
+                    throw new UnsupportedOperationException(
+                            "Cannot drop primary keys on a non-empty table.");
+                }
+                newPrimaryKeys = Collections.emptyList();
             } else {
                 throw new UnsupportedOperationException("Unsupported change: " + change.getClass());
             }
@@ -561,8 +569,7 @@ public class SchemaManager implements Serializable {
                         newFields,
                         oldTableSchema.partitionKeys(),
                         applyNotNestedColumnRename(
-                                oldTableSchema.primaryKeys(),
-                                Iterables.filter(changes, RenameColumn.class)),
+                                newPrimaryKeys, Iterables.filter(changes, RenameColumn.class)),
                         applyRenameColumnsToOptions(newOptions, changes),
                         newComment);
 
