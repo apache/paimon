@@ -15,10 +15,17 @@
 #  specific language governing permissions and limitations
 #  under the License.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, TypeVar
+from urllib.parse import quote
 
 T = TypeVar("T")
+
+
+def _encode_string(value: str) -> str:
+    if value is None:
+        return value
+    return quote(str(value), safe='')
 
 
 @dataclass
@@ -26,4 +33,10 @@ class RESTAuthParameter:
     method: str
     path: str
     data: str
-    parameters: Dict[str, str]
+    parameters: Dict[str, str] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.parameters:
+            self.parameters = {
+                k: _encode_string(v) for k, v in self.parameters.items()
+            }
