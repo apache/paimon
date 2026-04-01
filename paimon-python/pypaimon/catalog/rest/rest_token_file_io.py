@@ -27,6 +27,8 @@ from pypaimon.api.rest_util import RESTUtil
 from pypaimon.catalog.rest.rest_token import RESTToken
 from pypaimon.common.file_io import FileIO
 from pypaimon.filesystem.pyarrow_file_io import PyArrowFileIO
+from pypaimon.api.auth.bearer import BearTokenAuthProvider
+from pypaimon.api.auth.dlf_provider import DLFAuthProvider
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
 from pypaimon.common.options.config import CatalogOptions, OssOptions
@@ -205,8 +207,28 @@ class RESTTokenFileIO(FileIO):
     def filesystem(self):
         return self.file_io().filesystem
 
+    def _build_cache_key(self) -> str:
+        """Build cache key with user identity to isolate tokens across different credentials."""
+        return f"{self._get_user_identity()}:{self.identifier}"
+
+    def _get_user_identity(self) -> str:
+        """Get user identity for token cache isolation.
+
+        For DLF auth (AK/SK, STS, ECS Role): returns access_key_id via get_token().
+        For Bear Token auth: returns the bearer token string.
+        For unknown auth: returns 'anonymous'.
+        """
+        if self.api_instance is None:
+            self.api_instance = RESTApi(self.properties, False)
+        auth_provider = self.api_instance.rest_auth_function.auth_provider
+        if isinstance(auth_provider, DLFAuthProvider):
+            return auth_provider.get_token().access_key_id or 'anonymous'
+        if isinstance(auth_provider, BearTokenAuthProvider):
+            return auth_provider.token or 'anonymous'
+        return 'anonymous'
+
     def try_to_refresh_token(self):
-        identifier_str = str(self.identifier)
+        identifier_str = self._build_cache_key()
         
         if self.token is not None and not self._is_token_expired(self.token):
             return
