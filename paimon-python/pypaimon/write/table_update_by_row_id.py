@@ -294,7 +294,6 @@ class TableUpdateByRowId:
 
         # Create a file store write for this partition
         # Disable rolling to ensure one output file per first_row_id group,
-        # matching the original file's row ID range exactly.
         file_store_write = FileStoreWrite(self.table, self.commit_user)
         file_store_write.disable_rolling()
 
