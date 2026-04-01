@@ -1053,5 +1053,69 @@ class TableUpdateTest(unittest.TestCase):
         self.assertEqual(45, ages[4], "Row 4 should remain unchanged")
 
 
+    def test_update_large_file_split_assigns_incremental_row_ids(self):
+        """When _write_group produces multiple files (data exceeds
+        target-file-size), each file must get an incremented
+        first_row_id instead of all sharing the same value."""
+        import uuid
+        import random
+        import string
+
+        table_name = f'test_row_id_split_{uuid.uuid4().hex[:8]}'
+        schema = Schema.from_pyarrow_schema(
+            pa.schema([('id', pa.int64()), ('name', pa.string())]),
+            options={
+                'row-tracking.enabled': 'true',
+                'data-evolution.enabled': 'true',
+                'write-only': 'true',
+            }
+        )
+        self.catalog.create_table(
+            f'default.{table_name}', schema, False)
+        table = self.catalog.get_table(f'default.{table_name}')
+
+        # Write 5000 rows into one large file
+        N = 5000
+        data = pa.table({
+            'id': list(range(N)),
+            'name': [
+                ''.join(random.choices(
+                    string.ascii_letters, k=200))
+                for _ in range(N)],
+        })
+        wb = table.new_batch_write_builder()
+        tw = wb.new_write()
+        tc = wb.new_commit()
+        tw.write_arrow(data)
+        tc.commit(tw.prepare_commit())
+        tw.close()
+        tc.close()
+
+        # Shrink target-file-size to force split on update
+        from pypaimon.schema.schema_change import SetOption
+        self.catalog.alter_table(
+            f'default.{table_name}',
+            [SetOption('target-file-size', '10kb')])
+        table = self.catalog.get_table(f'default.{table_name}')
+
+        # Update all rows
+        updator = table.new_batch_write_builder().new_update()
+        updator.with_update_type(['name'])
+        update_data = pa.table({
+            '_ROW_ID': pa.array(
+                list(range(N)), type=pa.int64()),
+            'name': [
+                ''.join(random.choices(
+                    string.ascii_letters, k=200))
+                for _ in range(N)],
+        })
+        msgs = updator.update_by_arrow_with_row_id(update_data)
+
+        # Commit should succeed without conflict
+        tc = table.new_batch_write_builder().new_commit()
+        tc.commit(msgs)
+        tc.close()
+
+
 if __name__ == '__main__':
     unittest.main()
