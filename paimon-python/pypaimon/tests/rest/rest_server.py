@@ -295,6 +295,10 @@ class RESTCatalogServer:
             def _authenticate(self, token: str, path: str, params: Dict[str, str],
                               method: str, data: str) -> bool:
                 """Authenticate request by verifying Authorization header."""
+                if server_instance.auth_provider is None:
+                    return True
+                if path.startswith("/ram/security-credential"):
+                    return True
                 if not token:
                     return False
                 rest_auth_parameter = RESTAuthParameter(
