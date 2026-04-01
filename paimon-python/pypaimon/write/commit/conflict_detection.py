@@ -85,10 +85,7 @@ class ConflictDetection:
             return RuntimeError(
                 "File deletion conflicts detected! Give up committing. " + str(e))
 
-        if commit_kind == "COMPACT":
-            conflict = self.check_row_id_range_conflicts(commit_kind, merged_entries)
-        else:
-            conflict = self.check_row_id_range_conflicts(commit_kind, delta_entries)
+        conflict = self.check_row_id_range_conflicts(commit_kind, merged_entries)
         if conflict is not None:
             return conflict
 
