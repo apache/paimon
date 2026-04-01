@@ -15,6 +15,17 @@ Output artifacts in `rust/target/release/`:
 - macOS: `libtantivy_jni.dylib`
 - Linux: `libtantivy_jni.so`
 
+> **Important (Linux glibc compatibility):** The `.so` must be compiled on a system with a
+> glibc version **equal to or older than** the target runtime environment. For example, if
+> your production cluster runs CentOS 7 (glibc 2.17), you must build on CentOS 7 or an
+> equivalent system — building on a newer OS (e.g., Ubuntu 22.04 with glibc 2.35) will
+> produce a `.so` that fails at runtime with:
+> ```
+> /lib64/libm.so.6: version `GLIBC_2.27' not found
+> ```
+> A safe practice is to always build on the oldest supported Linux distribution
+> (e.g., CentOS 7) to maximize compatibility.
+
 ### 2. Copy native library to resources
 
 ```bash
