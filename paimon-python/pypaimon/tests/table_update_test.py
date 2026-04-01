@@ -1092,7 +1092,8 @@ class TableUpdateTest(unittest.TestCase):
             [SetOption('target-file-size', '10kb')])
         table = self.catalog.get_table(f'default.{table_name}')
 
-        updator = table.new_batch_write_builder().new_update()
+        wb = table.new_batch_write_builder()
+        updator = wb.new_update()
         updator.with_update_type(['name'])
         update_data = pa.table({
             '_ROW_ID': pa.array(
@@ -1114,7 +1115,7 @@ class TableUpdateTest(unittest.TestCase):
         self.assertEqual(all_files[0].first_row_id, 0)
         self.assertEqual(all_files[0].row_count, N)
 
-        tc = table.new_batch_write_builder().new_commit()
+        tc = wb.new_commit()
         tc.commit(msgs)
         tc.close()
 
