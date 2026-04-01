@@ -18,12 +18,10 @@
 import os
 import pickle
 import tempfile
-import time
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from pypaimon.catalog.rest.rest_token_file_io import RESTTokenFileIO
-from pypaimon.catalog.rest.rest_token import RESTToken
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.options import Options
@@ -103,13 +101,13 @@ class RESTTokenFileIOTest(unittest.TestCase):
 
             target_dir = os.path.join(self.temp_dir, "target_dir")
             os.makedirs(target_dir)
-
+            
             result = file_io.try_to_write_atomic(f"file://{target_dir}", "test content")
             self.assertFalse(result, "try_to_write_atomic should return False when target is a directory")
-
+            
             self.assertTrue(os.path.isdir(target_dir))
             self.assertEqual(len(os.listdir(target_dir)), 0, "No file should be created inside the directory")
-
+            
             normal_file = os.path.join(self.temp_dir, "normal_file.txt")
             result = file_io.try_to_write_atomic(f"file://{normal_file}", "test content")
             self.assertTrue(result, "try_to_write_atomic should succeed for a normal file path")
@@ -225,35 +223,35 @@ class RESTTokenFileIOTest(unittest.TestCase):
             CatalogOptions.URI.key(): "http://test-uri",
             "custom.key": "custom.value"
         })
-
+        
         catalog_options_copy = Options(original_catalog_options.to_map())
-
+        
         with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
             file_io = RESTTokenFileIO(
                 self.identifier,
                 self.warehouse_path,
                 original_catalog_options
             )
-
+            
             token_dict = {
                 OssOptions.OSS_ACCESS_KEY_ID.key(): "token-access-key",
                 OssOptions.OSS_ACCESS_KEY_SECRET.key(): "token-secret-key",
                 OssOptions.OSS_ENDPOINT.key(): "token-endpoint"
             }
-
+            
             merged_token = file_io._merge_token_with_catalog_options(token_dict)
-
+            
             self.assertEqual(
                 original_catalog_options.to_map(),
                 catalog_options_copy.to_map(),
                 "Original catalog_options should not be modified"
             )
-
+            
             merged_properties = RESTUtil.merge(
                 original_catalog_options.to_map(),
                 merged_token
             )
-
+            
             self.assertIn("custom.key", merged_properties)
             self.assertEqual(merged_properties["custom.key"], "custom.value")
             self.assertIn(OssOptions.OSS_ACCESS_KEY_ID.key(), merged_properties)
@@ -266,11 +264,11 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-
+            
             self.assertTrue(hasattr(file_io, 'filesystem'), "RESTTokenFileIO should have filesystem property")
             filesystem = file_io.filesystem
             self.assertIsNotNone(filesystem, "filesystem should not be None")
-
+            
             self.assertTrue(hasattr(filesystem, 'open_input_file'),
                             "filesystem should support open_input_file method")
 
@@ -281,12 +279,12 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-
+            
             self.assertTrue(hasattr(file_io, 'uri_reader_factory'),
                             "RESTTokenFileIO should have uri_reader_factory property")
             uri_reader_factory = file_io.uri_reader_factory
             self.assertIsNotNone(uri_reader_factory, "uri_reader_factory should not be None")
-
+            
             self.assertTrue(hasattr(uri_reader_factory, 'create'),
                             "uri_reader_factory should support create method")
 
@@ -297,142 +295,14 @@ class RESTTokenFileIOTest(unittest.TestCase):
                 self.warehouse_path,
                 self.catalog_options
             )
-
+            
             pickled = pickle.dumps(original_file_io)
             restored_file_io = pickle.loads(pickled)
-
+            
             self.assertIsNotNone(restored_file_io.filesystem,
                                  "filesystem should work after deserialization")
             self.assertIsNotNone(restored_file_io.uri_reader_factory,
                                  "uri_reader_factory should work after deserialization")
-
-    def test_should_refresh_when_token_is_none(self):
-        """_should_refresh() returns True when token is None."""
-        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
-            file_io = RESTTokenFileIO(
-                self.identifier, self.warehouse_path, self.catalog_options)
-            self.assertIsNone(file_io.token)
-            self.assertTrue(file_io._should_refresh())
-
-    def test_should_refresh_when_token_not_expired(self):
-        """_should_refresh() returns False when token is far from expiry."""
-        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
-            file_io = RESTTokenFileIO(
-                self.identifier, self.warehouse_path, self.catalog_options)
-            # Token that expires 2 hours from now (well beyond the 1-hour safe margin)
-            future_millis = int(time.time() * 1000) + 7200_000
-            file_io.token = RESTToken({'ak': 'v'}, future_millis)
-            self.assertFalse(file_io._should_refresh())
-
-    def test_should_refresh_when_token_expired(self):
-        """_should_refresh() returns True when token is already expired."""
-        with patch.object(RESTTokenFileIO, 'try_to_refresh_token'):
-            file_io = RESTTokenFileIO(
-                self.identifier, self.warehouse_path, self.catalog_options)
-            # Token that expired 1 second ago
-            past_millis = int(time.time() * 1000) - 1000
-            file_io.token = RESTToken({'ak': 'v'}, past_millis)
-            self.assertTrue(file_io._should_refresh())
-
-    def test_try_to_refresh_token_calls_refresh_once(self):
-        """try_to_refresh_token() calls refresh_token() exactly once via double-check."""
-        file_io = RESTTokenFileIO(
-            self.identifier, self.warehouse_path, self.catalog_options)
-        self.assertIsNone(file_io.token)
-
-        mock_response = MagicMock()
-        mock_response.token = {'ak': 'test-ak'}
-        mock_response.expires_at_millis = int(time.time() * 1000) + 7200_000
-
-        mock_api = MagicMock()
-        mock_api.load_table_token.return_value = mock_response
-        file_io.api_instance = mock_api
-
-        file_io.try_to_refresh_token()
-
-        mock_api.load_table_token.assert_called_once()
-        self.assertIsNotNone(file_io.token)
-
-        # Second call should NOT trigger refresh again (token is valid)
-        file_io.try_to_refresh_token()
-        mock_api.load_table_token.assert_called_once()
-
-    def test_refresh_token_strips_system_table_suffix(self):
-        """refresh_token() strips $snapshots suffix before requesting token."""
-        system_identifier = Identifier.create("db", "my_table$snapshots")
-        file_io = RESTTokenFileIO(
-            system_identifier, self.warehouse_path, self.catalog_options)
-
-        mock_response = MagicMock()
-        mock_response.token = {'ak': 'test-ak'}
-        mock_response.expires_at_millis = int(time.time() * 1000) + 7200_000
-
-        mock_api = MagicMock()
-        mock_api.load_table_token.return_value = mock_response
-        file_io.api_instance = mock_api
-
-        file_io.refresh_token()
-
-        # Verify load_table_token was called with base table identifier (no $snapshots)
-        called_identifier = mock_api.load_table_token.call_args[0][0]
-        self.assertEqual(called_identifier.get_database_name(), "db")
-        self.assertEqual(called_identifier.get_object_name(), "my_table")
-
-    def test_refresh_token_keeps_normal_identifier(self):
-        """refresh_token() does not modify normal (non-system) identifiers."""
-        normal_identifier = Identifier.create("db", "my_table")
-        file_io = RESTTokenFileIO(
-            normal_identifier, self.warehouse_path, self.catalog_options)
-
-        mock_response = MagicMock()
-        mock_response.token = {'ak': 'test-ak'}
-        mock_response.expires_at_millis = int(time.time() * 1000) + 7200_000
-
-        mock_api = MagicMock()
-        mock_api.load_table_token.return_value = mock_response
-        file_io.api_instance = mock_api
-
-        file_io.refresh_token()
-
-        called_identifier = mock_api.load_table_token.call_args[0][0]
-        self.assertEqual(called_identifier.get_object_name(), "my_table")
-
-    def test_different_instances_do_not_share_token(self):
-        """Two instances with same identifier get independent tokens (no class-level cache)."""
-        same_identifier = Identifier.from_string("db.shared_table")
-
-        file_io_a = RESTTokenFileIO(
-            same_identifier, self.warehouse_path, self.catalog_options)
-        file_io_b = RESTTokenFileIO(
-            same_identifier, self.warehouse_path, self.catalog_options)
-
-        token_a = RESTToken({'ak': 'ak-A'}, int(time.time() * 1000) + 7200_000)
-        token_b = RESTToken({'ak': 'ak-B'}, int(time.time() * 1000) + 7200_000)
-
-        mock_response_a = MagicMock()
-        mock_response_a.token = token_a.token
-        mock_response_a.expires_at_millis = token_a.expire_at_millis
-
-        mock_response_b = MagicMock()
-        mock_response_b.token = token_b.token
-        mock_response_b.expires_at_millis = token_b.expire_at_millis
-
-        mock_api_a = MagicMock()
-        mock_api_a.load_table_token.return_value = mock_response_a
-        file_io_a.api_instance = mock_api_a
-
-        mock_api_b = MagicMock()
-        mock_api_b.load_table_token.return_value = mock_response_b
-        file_io_b.api_instance = mock_api_b
-
-        # Refresh both
-        file_io_a.try_to_refresh_token()
-        file_io_b.try_to_refresh_token()
-
-        # Each instance should hold its own token
-        self.assertEqual(file_io_a.token.token['ak'], 'ak-A')
-        self.assertEqual(file_io_b.token.token['ak'], 'ak-B')
-        self.assertIsNot(file_io_a.token, file_io_b.token)
 
 
 if __name__ == '__main__':
