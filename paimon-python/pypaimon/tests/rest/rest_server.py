@@ -29,7 +29,8 @@ from urllib.parse import urlparse
 if TYPE_CHECKING:
     from pypaimon.catalog.rest.rest_token import RESTToken
 
-from pypaimon.api.api_request import (AlterTableRequest, CreateDatabaseRequest,
+from pypaimon.api.api_request import (AlterDatabaseRequest, AlterTableRequest,
+                                      CreateDatabaseRequest,
                                       CreateTableRequest, RenameTableRequest)
 from pypaimon.api.api_response import (ConfigResponse, GetDatabaseResponse,
                                        GetTableResponse, ListDatabasesResponse,
@@ -45,6 +46,7 @@ from pypaimon.catalog.catalog_exception import (DatabaseNoPermissionException,
                                                 TableAlreadyExistException)
 from pypaimon.catalog.rest.table_metadata import TableMetadata
 from pypaimon.common.identifier import Identifier
+from pypaimon.api.typedef import RESTAuthParameter
 from pypaimon.common.json_util import JSON
 from pypaimon import Schema
 from pypaimon.schema.schema_change import Actions, SchemaChange
@@ -258,11 +260,11 @@ class RESTCatalogServer:
                     content_length = int(self.headers.get('Content-Length', 0))
                     data = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else ""
 
-                    # Get headers
+                    # Get headers (case-insensitive from HTTPMessage)
+                    auth_token = self.headers.get(AUTHORIZATION_HEADER_KEY)
                     headers = dict(self.headers)
 
                     # Handle authentication
-                    auth_token = headers.get(AUTHORIZATION_HEADER_KEY.lower())
                     if not self._authenticate(auth_token, resource_path, parameters, method, data):
                         self._send_response(401, "Unauthorized")
                         return
@@ -292,9 +294,25 @@ class RESTCatalogServer:
 
             def _authenticate(self, token: str, path: str, params: Dict[str, str],
                               method: str, data: str) -> bool:
-                """Authenticate request"""
-                # Simplified authentication - always return True for mock
-                return True
+                """Authenticate request by verifying Authorization header."""
+                if server_instance.auth_provider is None:
+                    return True
+                if path.startswith("/ram/security-credential"):
+                    return True
+                if not token:
+                    return False
+                rest_auth_parameter = RESTAuthParameter(
+                    method=method,
+                    path=path,
+                    data=data or "",
+                    parameters=params or {},
+                )
+                from pypaimon.api.auth.base import RESTAuthFunction
+                auth_fn = RESTAuthFunction({}, server_instance.auth_provider)
+                expected_headers = auth_fn(rest_auth_parameter)
+                expected_token = expected_headers.get(
+                    AUTHORIZATION_HEADER_KEY, "")
+                return token == expected_token
 
             def _send_response(self, status_code: int, body: str):
                 """Send HTTP response"""
@@ -513,6 +531,18 @@ class RESTCatalogServer:
         if method == "GET":
             response = database
             return self._mock_response(response, 200)
+
+        elif method == "POST":
+            request_body = JSON.from_json(data, AlterDatabaseRequest)
+            removals = request_body.removals or []
+            updates = request_body.updates or {}
+            options = dict(database.options) if database.options else {}
+            options.update(updates)
+            for key in removals:
+                options.pop(key, None)
+            self.database_store[database_name] = self.mock_database(
+                database_name, options)
+            return self._mock_response("", 200)
 
         elif method == "DELETE":
             del self.database_store[database_name]
