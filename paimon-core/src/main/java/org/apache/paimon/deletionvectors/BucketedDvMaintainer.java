@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Maintainer of deletionVectors index. */
 public class BucketedDvMaintainer {
@@ -42,7 +43,8 @@ public class BucketedDvMaintainer {
     private BucketedDvMaintainer(
             DeletionVectorsIndexFile dvIndexFile, Map<String, DeletionVector> deletionVectors) {
         this.dvIndexFile = dvIndexFile;
-        this.deletionVectors = deletionVectors;
+        // Use ConcurrentHashMap to avoid ConcurrentModificationException in concurrent scenarios
+        this.deletionVectors = new ConcurrentHashMap<>(deletionVectors);
         this.bitmap64 = dvIndexFile.bitmap64();
         this.modified = false;
     }
