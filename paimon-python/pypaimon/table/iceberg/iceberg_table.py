@@ -110,3 +110,6 @@ class IcebergTable(Table):
 
     def new_full_text_search_builder(self):
         raise NotImplementedError("IcebergTable does not support full text search.")
+
+    def new_vector_search_builder(self):
+        raise NotImplementedError("IcebergTable does not support vector search.")

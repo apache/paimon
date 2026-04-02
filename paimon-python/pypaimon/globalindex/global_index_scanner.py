@@ -70,8 +70,10 @@ class GlobalIndexScanner:
             )
             index_metas[field_id][index_type][range_key].append(io_meta)
 
+        options = self._options
+
         def readers_function(field: DataField) -> Collection[GlobalIndexReader]:
-            return _create_readers(file_io, index_path, index_metas.get(field.id), field)
+            return _create_readers(file_io, index_path, index_metas.get(field.id), field, options)
 
         return GlobalIndexEvaluator(fields, readers_function)
 
@@ -144,7 +146,7 @@ class GlobalIndexScanner:
         self.close()
 
 
-def _create_readers(file_io, index_path, index_type_metas, field):
+def _create_readers(file_io, index_path, index_type_metas, field, options=None):
     """Create readers for a specific field from the index metadata."""
     if index_type_metas is None:
         return []
@@ -163,4 +165,14 @@ def _create_readers(file_io, index_path, index_type_metas, field):
                         io_meta=metadata
                     )
                     readers.append(reader)
+        elif index_type == 'lumina-vector-ann':
+            from pypaimon.globalindex.lumina import LuminaVectorGlobalIndexReader
+            for range_key, io_metas in range_metas.items():
+                reader = LuminaVectorGlobalIndexReader(
+                    file_io=file_io,
+                    index_path=index_path,
+                    io_metas=io_metas,
+                    options=options,
+                )
+                readers.append(reader)
     return readers
