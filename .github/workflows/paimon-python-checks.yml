@@ -80,7 +80,7 @@ jobs:
           mvn -version
 
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        run: rustup toolchain install stable --profile minimal
 
       - name: Build Tantivy native library
         run: |
