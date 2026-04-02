@@ -20,9 +20,8 @@
 
 from abc import ABC, abstractmethod
 
-from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.table.source.vector_search_read import VectorSearchRead, VectorSearchReadImpl
-from pypaimon.table.source.vector_search_scan import VectorSearchScan, VectorSearchScanImpl
+from pypaimon.table.source.vector_search_read import VectorSearchReadImpl
+from pypaimon.table.source.vector_search_scan import VectorSearchScanImpl
 
 
 class VectorSearchBuilder(ABC):

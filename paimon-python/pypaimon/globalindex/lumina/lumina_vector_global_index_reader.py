@@ -25,15 +25,9 @@ The index file is downloaded to a local temp file for the native searcher.
 
 import os
 import tempfile
-from typing import Dict, List, Optional
 
-from pypaimon.globalindex.global_index_reader import GlobalIndexReader, FieldRef
-from pypaimon.globalindex.global_index_result import GlobalIndexResult
-from pypaimon.globalindex.vector_search_result import (
-    ScoredGlobalIndexResult,
-    DictBasedScoredIndexResult,
-)
-from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
+from pypaimon.globalindex.global_index_reader import GlobalIndexReader
+from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 
 LUMINA_VECTOR_ANN_IDENTIFIER = "lumina-vector-ann"
 

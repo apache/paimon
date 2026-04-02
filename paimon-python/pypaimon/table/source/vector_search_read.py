@@ -19,15 +19,12 @@
 """Vector search read to read index files."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
 
 from pypaimon.globalindex.global_index_meta import GlobalIndexIOMeta
 from pypaimon.globalindex.global_index_result import GlobalIndexResult
 from pypaimon.globalindex.offset_global_index_reader import OffsetGlobalIndexReader
 from pypaimon.globalindex.vector_search import VectorSearch
 from pypaimon.globalindex.vector_search_result import ScoredGlobalIndexResult
-from pypaimon.table.source.vector_search_scan import VectorSearchScanPlan
-from pypaimon.table.source.vector_search_split import VectorSearchSplit
 
 
 class VectorSearchRead(ABC):

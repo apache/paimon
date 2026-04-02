@@ -48,6 +48,7 @@ __all__ = [
     'Range',
 ]
 
+
 # Lazy import for lumina reader (requires lumina-data optional dependency)
 def __getattr__(name):
     if name == 'LuminaVectorGlobalIndexReader':

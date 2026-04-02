@@ -20,7 +20,6 @@
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from typing import List
 
 from pypaimon.table.source.vector_search_split import VectorSearchSplit
 from pypaimon.utils.range import Range
