@@ -496,6 +496,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             RowType targetType = readType != null ? readType : rowType;
             Map<Integer, FieldsComparator> projectedSeqComparators = new HashMap<>();
             Map<Integer, FieldAggregator> projectedAggregators = new HashMap<>();
+            Set<Integer> projectedSequenceGroupPartialDelete = sequenceGroupPartialDelete;
 
             if (readType != null) {
                 // Build index mapping from table schema to read schema
@@ -547,6 +548,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         projectedAggregators.put(newIndex, fieldAggregators.get(oldIndex).get());
                     }
                 }
+
+                projectedSequenceGroupPartialDelete =
+                        sequenceGroupPartialDelete.stream()
+                                .filter(indexMap::containsKey)
+                                .map(indexMap::get)
+                                .collect(Collectors.toSet());
             } else {
                 // Use original mappings
                 this.fieldSeqComparators.forEach(
@@ -563,7 +570,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     projectedAggregators,
                     !fieldSeqComparators.isEmpty(),
                     removeRecordOnDelete,
-                    sequenceGroupPartialDelete,
+                    projectedSequenceGroupPartialDelete,
                     ArrayUtils.toPrimitiveBoolean(
                             fieldTypes.stream().map(DataType::isNullable).toArray(Boolean[]::new)));
         }
