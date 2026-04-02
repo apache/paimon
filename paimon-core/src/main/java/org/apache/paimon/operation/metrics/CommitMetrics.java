@@ -74,6 +74,7 @@ public class CommitMetrics {
 
     public static final String LAST_COMPACTION_INPUT_FILE_SIZE = "lastCompactionInputFileSize";
     public static final String LAST_COMPACTION_OUTPUT_FILE_SIZE = "lastCompactionOutputFileSize";
+    public static final String LAST_COMMITTED_SNAPSHOT_ID = "lastCommittedSnapshotId";
 
     private void registerGenericCommitMetrics() {
         metricGroup.gauge(
@@ -126,6 +127,9 @@ public class CommitMetrics {
         metricGroup.gauge(
                 LAST_COMPACTION_OUTPUT_FILE_SIZE,
                 () -> latestCommit == null ? 0L : latestCommit.getCompactionOutputFileSize());
+        metricGroup.gauge(
+                LAST_COMMITTED_SNAPSHOT_ID,
+                () -> latestCommit == null ? 0L : latestCommit.getLastCommittedSnapshotId());
     }
 
     public void reportCommit(CommitStats commitStats) {

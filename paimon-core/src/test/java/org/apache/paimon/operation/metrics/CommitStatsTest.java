@@ -78,7 +78,8 @@ public class CommitStatsTest {
                         Collections.emptyList(),
                         0,
                         0,
-                        1);
+                        1,
+                        0L);
         assertThat(commitStats.getTableFilesAdded()).isEqualTo(0);
         assertThat(commitStats.getTableFilesDeleted()).isEqualTo(0);
         assertThat(commitStats.getTableFilesAppended()).isEqualTo(0);
@@ -94,6 +95,7 @@ public class CommitStatsTest {
         assertThat(commitStats.getNumBucketsWritten()).isEqualTo(0);
         assertThat(commitStats.getDuration()).isEqualTo(0);
         assertThat(commitStats.getAttempts()).isEqualTo(1);
+        assertThat(commitStats.getLastCommittedSnapshotId()).isEqualTo(0);
     }
 
     @Test
@@ -106,7 +108,8 @@ public class CommitStatsTest {
                         Collections.emptyList(),
                         3000,
                         1,
-                        2);
+                        2,
+                        5L);
         assertThat(commitStats.getTableFilesAdded()).isEqualTo(2);
         assertThat(commitStats.getTableFilesDeleted()).isEqualTo(0);
         assertThat(commitStats.getTableFilesAppended()).isEqualTo(2);
@@ -122,6 +125,7 @@ public class CommitStatsTest {
         assertThat(commitStats.getNumBucketsWritten()).isEqualTo(2);
         assertThat(commitStats.getDuration()).isEqualTo(3000);
         assertThat(commitStats.getAttempts()).isEqualTo(2);
+        assertThat(commitStats.getLastCommittedSnapshotId()).isEqualTo(5);
     }
 
     @Test
@@ -134,7 +138,8 @@ public class CommitStatsTest {
                         compactChangelogFiles,
                         3000,
                         2,
-                        2);
+                        2,
+                        10L);
         assertThat(commitStats.getTableFilesAdded()).isEqualTo(4);
         assertThat(commitStats.getTableFilesDeleted()).isEqualTo(1);
         assertThat(commitStats.getTableFilesAppended()).isEqualTo(2);
@@ -150,5 +155,6 @@ public class CommitStatsTest {
         assertThat(commitStats.getNumBucketsWritten()).isEqualTo(3);
         assertThat(commitStats.getDuration()).isEqualTo(3000);
         assertThat(commitStats.getAttempts()).isEqualTo(2);
+        assertThat(commitStats.getLastCommittedSnapshotId()).isEqualTo(10);
     }
 }
