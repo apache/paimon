@@ -30,6 +30,7 @@ import org.apache.spark.sql.catalyst.parser.ParseException
 import org.apache.spark.sql.catalyst.parser.extensions.{CurrentOrigin, Origin}
 import org.apache.spark.sql.catalyst.plans.logical.{LeafNode, LogicalPlan, Project, SubqueryAlias}
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.catalyst.util.CharVarcharUtils
 import org.apache.spark.sql.connector.catalog.{Identifier, PaimonLookupCatalog}
 
 case class PaimonViewResolver(spark: SparkSession)
@@ -66,7 +67,13 @@ case class PaimonViewResolver(spark: SparkSession)
     val earlyRules = Seq(CTESubstitution, SubstituteUnresolvedOrdinals)
     val rewritten = earlyRules.foldLeft(parsedPlan)((plan, rule) => rule.apply(plan))
 
-    val aliases = SparkTypeUtils.fromPaimonRowType(view.rowType()).fields.zipWithIndex.map {
+    // Spark internally replaces CharType/VarcharType with StringType during V2 table resolution,
+    // so the view's schema must also use StringType to avoid UpCast failures
+    // (e.g., "Cannot up cast from STRING to VARCHAR(50)").
+    val viewSchema = CharVarcharUtils.replaceCharVarcharWithStringInSchema(
+      SparkTypeUtils.fromPaimonRowType(view.rowType()))
+
+    val aliases = viewSchema.fields.zipWithIndex.map {
       case (expected, pos) =>
         val attr = GetColumnByOrdinal(pos, expected.dataType)
         Alias(UpCast(attr, expected.dataType), expected.name)(explicitMetadata =
