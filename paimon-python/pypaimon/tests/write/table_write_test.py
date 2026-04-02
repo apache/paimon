@@ -459,15 +459,15 @@ class TableWriteTest(unittest.TestCase):
             max_seq_number=0, options=options,
         )
 
-        num_chunks = 1500
-        tables = []
-        for i in range(num_chunks):
-            batch = pa.RecordBatch.from_pydict({'name': pa.array([row_value], type=pa.string())})
-            tables.append(pa.Table.from_batches([batch]))
-        writer.pending_data = pa.concat_tables(tables)
+        num_rows = 1500
+        big_batch = pa.RecordBatch.from_pydict(
+            {'name': pa.array([row_value] * num_rows, type=pa.string())}
+        )
+        writer.write(big_batch)
 
-        writer._check_and_roll_if_needed()
-
+        pending_rows = writer.pending_data.num_rows if writer.pending_data is not None else 0
+        committed_rows = sum(f.row_count for f in writer.committed_files)
+        self.assertEqual(committed_rows + pending_rows, num_rows)
         self.assertGreater(len(writer.committed_files), 0)
         if writer.pending_data is not None:
             self.assertLessEqual(writer.pending_data.nbytes, target)
