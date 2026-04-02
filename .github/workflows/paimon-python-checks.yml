@@ -79,20 +79,19 @@ jobs:
           java -version
           mvn -version
 
-      # TODO: re-enable after Rust toolchain issue is fixed
-      # - name: Install Rust toolchain
-      #   uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      # - name: Build Tantivy native library
-      #   run: |
-      #     cd paimon-tantivy/paimon-tantivy-jni/rust
-      #     cargo build --release
+      - name: Build Tantivy native library
+        run: |
+          cd paimon-tantivy/paimon-tantivy-jni/rust
+          cargo build --release
 
-      # - name: Copy Tantivy native library to resources
-      #   run: |
-      #     RESOURCE_DIR=paimon-tantivy/paimon-tantivy-jni/src/main/resources/native/linux-amd64
-      #     mkdir -p ${RESOURCE_DIR}
-      #     cp paimon-tantivy/paimon-tantivy-jni/rust/target/release/libtantivy_jni.so ${RESOURCE_DIR}/
+      - name: Copy Tantivy native library to resources
+        run: |
+          RESOURCE_DIR=paimon-tantivy/paimon-tantivy-jni/src/main/resources/native/linux-amd64
+          mkdir -p ${RESOURCE_DIR}
+          cp paimon-tantivy/paimon-tantivy-jni/rust/target/release/libtantivy_jni.so ${RESOURCE_DIR}/
 
       - name: Verify Python version
         run: python --version
@@ -135,16 +134,15 @@ jobs:
           fi
           df -h
 
-      # TODO: re-enable after Rust toolchain issue is fixed
-      # - name: Build and install tantivy-py from source
-      #   if: matrix.python-version != '3.6.15'
-      #   shell: bash
-      #   run: |
-      #     pip install maturin
-      #     git clone -b support_directory https://github.com/JingsongLi/tantivy-py.git /tmp/tantivy-py
-      #     cd /tmp/tantivy-py
-      #     maturin build --release
-      #     pip install target/wheels/tantivy-*.whl
+      - name: Build and install tantivy-py from source
+        if: matrix.python-version != '3.6.15'
+        shell: bash
+        run: |
+          pip install maturin
+          git clone -b support_directory https://github.com/JingsongLi/tantivy-py.git /tmp/tantivy-py
+          cd /tmp/tantivy-py
+          maturin build --release
+          pip install target/wheels/tantivy-*.whl
 
       - name: Run lint-python.sh
         shell: bash
@@ -179,7 +177,7 @@ jobs:
             python -m pip install --upgrade pip
             pip install torch --index-url https://download.pytorch.org/whl/cpu
             python -m pip install pyroaring readerwriterlock==1.0.9 fsspec==2024.3.1 cachetools==5.3.3 ossfs==2023.12.0 ray==2.48.0 fastavro==1.11.1 pyarrow==16.0.0 zstandard==0.24.0 polars==1.32.0 duckdb==1.3.2 numpy==1.24.3 pandas==2.0.3 pylance==0.39.0 flake8==4.0.1 pytest~=7.0 py4j==0.10.9.9 requests parameterized==0.9.0
-            python -m pip install --pre 'lumina-data>=0.1.0.dev3' -i https://pypi.org/simple/ || true
+            python -m pip install --pre 'lumina-data>=0.1.0.dev3' -i https://pypi.org/simple/
       - name: Run lint-python.sh
         shell: bash
         run: |
