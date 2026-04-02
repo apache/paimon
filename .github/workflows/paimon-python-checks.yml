@@ -80,7 +80,9 @@ jobs:
           mvn -version
 
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Build Tantivy native library
         run: |
