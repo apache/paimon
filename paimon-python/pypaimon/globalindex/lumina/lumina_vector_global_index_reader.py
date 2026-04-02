@@ -20,11 +20,10 @@
 
 Each shard has exactly one Lumina index file. This reader lazy-loads the
 index and performs vector similarity search using the lumina-data SDK.
-The index file is downloaded to a local temp file for the native searcher.
+Uses stream-based open (no temp file), mirroring the Java implementation.
 """
 
 import os
-import tempfile
 
 from pypaimon.globalindex.global_index_reader import GlobalIndexReader
 from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
@@ -48,7 +47,7 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         self._options = options or {}
         self._searcher = None
         self._index_meta = None
-        self._tmp_file = None
+        self._stream = None
 
     def visit_vector_search(self, vector_search):
         # type: (...) -> Optional[ScoredGlobalIndexResult]
@@ -125,38 +124,30 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         if self._searcher is not None:
             return
 
-        from lumina_data import LuminaSearcher, LuminaIndexMeta
-        from lumina_data.options import LuminaIndexOptions
+        from lumina_data import LuminaSearcher
+        from pypaimon.globalindex.lumina.lumina_index_meta import LuminaIndexMeta
+        from pypaimon.globalindex.lumina.lumina_vector_index_options import (
+            LuminaVectorIndexOptions,
+        )
 
         # Deserialize index metadata
         self._index_meta = LuminaIndexMeta.deserialize(self._io_meta.metadata)
 
-        # Download index file to a local temp file
-        file_path = os.path.join(self._index_path, self._io_meta.file_name)
-        stream = self._file_io.new_input_stream(file_path)
-        try:
-            tmp = tempfile.NamedTemporaryFile(suffix=".lmi", delete=False)
-            remaining = self._io_meta.file_size
-            while remaining > 0:
-                chunk_size = min(remaining, 8 * 1024 * 1024)
-                data = stream.read(chunk_size)
-                if not data:
-                    break
-                tmp.write(data)
-                remaining -= len(data)
-            tmp.close()
-            self._tmp_file = tmp.name
-        finally:
-            stream.close()
-
         # Build searcher options from index metadata + table options
         searcher_options = dict(self._index_meta.options)
-        opts = LuminaIndexOptions.from_paimon_options(self._options)
+        opts = LuminaVectorIndexOptions.from_paimon_options(self._options)
         for k, v in opts.to_native_options().items():
             searcher_options.setdefault(k, v)
 
-        self._searcher = LuminaSearcher(searcher_options)
-        self._searcher.open(self._tmp_file)
+        file_path = os.path.join(self._index_path, self._io_meta.file_name)
+        stream = self._file_io.new_input_stream(file_path)
+        try:
+            self._searcher = LuminaSearcher(searcher_options)
+            self._searcher.open_stream(stream, self._io_meta.file_size)
+            self._stream = stream
+        except Exception:
+            stream.close()
+            raise
 
     # =================== unsupported =====================
 
@@ -209,9 +200,6 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         if self._searcher is not None:
             self._searcher.close()
             self._searcher = None
-        if self._tmp_file is not None:
-            try:
-                os.unlink(self._tmp_file)
-            except OSError:
-                pass
-            self._tmp_file = None
+        if self._stream is not None:
+            self._stream.close()
+            self._stream = None
