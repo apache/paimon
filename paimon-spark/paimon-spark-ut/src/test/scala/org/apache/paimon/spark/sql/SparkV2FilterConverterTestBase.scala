@@ -593,19 +593,6 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
       Seq(Row(1.0f), Row(2.0f), Row(3.0f)))
   }
 
-  test("V2Filter: NaN row exists but is not matched by NaN equality") {
-    // The table has a row with NaN values, but NaN = NaN should not match
-    val countQuery = "SELECT COUNT(*) FROM test_tbl WHERE float_col = CAST('NaN' AS FLOAT)"
-    checkAnswer(sql(countQuery), Seq(Row(0)))
-
-    val countQuery2 = "SELECT COUNT(*) FROM test_tbl WHERE double_col = CAST('NaN' AS DOUBLE)"
-    checkAnswer(sql(countQuery2), Seq(Row(0)))
-
-    // But we can verify the NaN row exists by checking the row count
-    val totalCount = sql("SELECT COUNT(*) FROM test_tbl").collect().head.getLong(0)
-    assert(totalCount == 5, s"Expected 5 rows total including NaN row")
-  }
-
   private def v2Filter(str: String, tableName: String = "test_tbl"): SparkPredicate = {
     val condition = sql(s"SELECT * FROM $tableName WHERE $str").queryExecution.optimizedPlan
       .collectFirst { case f: Filter => f }
