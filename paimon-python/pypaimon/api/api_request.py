@@ -22,6 +22,9 @@ from typing import Dict, List, Optional
 
 from pypaimon.common.identifier import Identifier
 from pypaimon.common.json_util import json_field
+from pypaimon.function.function_change import FunctionChange
+from pypaimon.function.function_definition import FunctionDefinition
+from pypaimon.schema.data_types import DataField
 from pypaimon.schema.schema import Schema
 from pypaimon.schema.schema_change import SchemaChange
 from pypaimon.snapshot.snapshot import Snapshot
@@ -94,3 +97,62 @@ class RollbackTableRequest(RESTRequest):
 
     instant: Instant = json_field(FIELD_INSTANT)
     from_snapshot: Optional[int] = json_field(FIELD_FROM_SNAPSHOT)
+
+
+@dataclass
+class CreateFunctionRequest(RESTRequest):
+    FIELD_NAME = "name"
+    FIELD_INPUT_PARAMS = "inputParams"
+    FIELD_RETURN_PARAMS = "returnParams"
+    FIELD_DETERMINISTIC = "deterministic"
+    FIELD_DEFINITIONS = "definitions"
+    FIELD_COMMENT = "comment"
+    FIELD_OPTIONS = "options"
+
+    name: str = json_field(FIELD_NAME)
+    input_params: Optional[List[DataField]] = json_field(FIELD_INPUT_PARAMS, default=None)
+    return_params: Optional[List[DataField]] = json_field(FIELD_RETURN_PARAMS, default=None)
+    deterministic: bool = json_field(FIELD_DETERMINISTIC, default=False)
+    definitions: Optional[Dict[str, FunctionDefinition]] = json_field(FIELD_DEFINITIONS, default=None)
+    comment: Optional[str] = json_field(FIELD_COMMENT, default=None)
+    options: Optional[Dict[str, str]] = json_field(FIELD_OPTIONS, default=None)
+
+    def to_dict(self) -> Dict:
+        result = {
+            self.FIELD_NAME: self.name,
+            self.FIELD_DETERMINISTIC: self.deterministic,
+        }
+        if self.input_params is not None:
+            result[self.FIELD_INPUT_PARAMS] = [
+                p.to_dict() if hasattr(p, 'to_dict') else p for p in self.input_params
+            ]
+        else:
+            result[self.FIELD_INPUT_PARAMS] = None
+        if self.return_params is not None:
+            result[self.FIELD_RETURN_PARAMS] = [
+                p.to_dict() if hasattr(p, 'to_dict') else p for p in self.return_params
+            ]
+        else:
+            result[self.FIELD_RETURN_PARAMS] = None
+        if self.definitions is not None:
+            result[self.FIELD_DEFINITIONS] = {
+                k: v.to_dict() if hasattr(v, 'to_dict') else v
+                for k, v in self.definitions.items()
+            }
+        else:
+            result[self.FIELD_DEFINITIONS] = None
+        result[self.FIELD_COMMENT] = self.comment
+        result[self.FIELD_OPTIONS] = self.options
+        return result
+
+
+@dataclass
+class AlterFunctionRequest(RESTRequest):
+    FIELD_CHANGES = "changes"
+
+    changes: List[FunctionChange] = json_field(FIELD_CHANGES)
+
+    def to_dict(self) -> Dict:
+        return {
+            self.FIELD_CHANGES: [c.to_dict() for c in self.changes]
+        }
