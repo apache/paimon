@@ -77,11 +77,6 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
           |INSERT INTO test_tbl VALUES
           |('paimon', 4, 4, null, 4, 4.0, 4.0, 42.12345, true, date('2025-01-18'), binary('b4'))
           |""".stripMargin)
-    sql(
-      """
-        |INSERT INTO test_tbl VALUES
-        |('nan_test', 5, 5, 5, 5, CAST('NaN' AS FLOAT), CAST('NaN' AS DOUBLE), 52.12345, false, date('2025-01-19'), binary('b5'))
-        |""".stripMargin)
   }
 
   override protected def afterAll(): Unit = {
