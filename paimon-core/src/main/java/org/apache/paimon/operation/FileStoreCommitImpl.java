@@ -157,6 +157,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private boolean ignoreEmptyCommit;
     private CommitMetrics commitMetrics;
     private boolean appendCommitCheckConflict = false;
+    private long lastCommittedSnapshotId = -1L;
 
     public FileStoreCommitImpl(
             SnapshotCommit snapshotCommit,
@@ -367,7 +368,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     tableName,
                     commitDuration);
             if (this.commitMetrics != null) {
-                Long latestSnapshotId = snapshotManager.latestSnapshotId();
                 reportCommit(
                         changes.appendTableFiles,
                         changes.appendChangelog,
@@ -376,7 +376,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         commitDuration,
                         generatedSnapshot,
                         attempts,
-                        latestSnapshotId == null ? 0L : latestSnapshotId);
+                        lastCommittedSnapshotId);
             }
         }
         return generatedSnapshot;
@@ -535,7 +535,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
             LOG.info("Finished overwrite to table {}, duration {} ms", tableName, commitDuration);
             if (this.commitMetrics != null) {
-                Long latestSnapshotId = snapshotManager.latestSnapshotId();
                 reportCommit(
                         changes.appendTableFiles,
                         emptyList(),
@@ -544,7 +543,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         commitDuration,
                         generatedSnapshot,
                         attempts,
-                        latestSnapshotId == null ? 0L : latestSnapshotId);
+                        lastCommittedSnapshotId);
             }
         }
         return generatedSnapshot;
@@ -1108,6 +1107,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (strictModeChecker != null) {
             strictModeChecker.update(newSnapshotId);
         }
+        lastCommittedSnapshotId = newSnapshotId;
         CommitCallback.Context context =
                 new CommitCallback.Context(
                         finalBaseFiles, finalDeltaFiles, indexFiles, newSnapshot, identifier);

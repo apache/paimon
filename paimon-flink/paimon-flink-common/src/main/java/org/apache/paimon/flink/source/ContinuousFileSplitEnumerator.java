@@ -100,8 +100,6 @@ public class ContinuousFileSplitEnumerator
      */
     public static final String SOURCE_PARALLELISM_UPPER_BOUND = "sourceParallelismUpperBound";
 
-    public static final String CURRENT_CONSUMER_ID = "currentConsumerId";
-
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
@@ -156,8 +154,6 @@ public class ContinuousFileSplitEnumerator
         try {
             context.metricGroup()
                     .gauge(SOURCE_PARALLELISM_UPPER_BOUND, () -> sourceParallelismUpperBound);
-            context.metricGroup()
-                    .gauge(CURRENT_CONSUMER_ID, consumerProgressCalculator::getCurrentConsumerId);
         } catch (Exception e) {
             LOG.warn("Failed to register enumerator metrics.", e);
         }

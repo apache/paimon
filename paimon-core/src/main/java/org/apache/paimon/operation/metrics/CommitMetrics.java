@@ -129,7 +129,7 @@ public class CommitMetrics {
                 () -> latestCommit == null ? 0L : latestCommit.getCompactionOutputFileSize());
         metricGroup.gauge(
                 LAST_COMMITTED_SNAPSHOT_ID,
-                () -> latestCommit == null ? 0L : latestCommit.getLastCommittedSnapshotId());
+                () -> latestCommit == null ? -1L : latestCommit.getLastCommittedSnapshotId());
     }
 
     public void reportCommit(CommitStats commitStats) {
