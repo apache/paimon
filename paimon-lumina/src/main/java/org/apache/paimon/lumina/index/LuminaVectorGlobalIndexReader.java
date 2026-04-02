@@ -29,6 +29,7 @@ import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.VectorType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RoaringNavigableMap64;
 
@@ -204,10 +205,16 @@ public class LuminaVectorGlobalIndexReader implements GlobalIndexReader {
             throw new IllegalArgumentException(
                     "Expected float[] vector but got: " + vector.getClass());
         }
-        if (!(fieldType instanceof ArrayType)
-                || !(((ArrayType) fieldType).getElementType() instanceof FloatType)) {
+        boolean validFieldType = false;
+        if (fieldType instanceof VectorType) {
+            validFieldType = ((VectorType) fieldType).getElementType() instanceof FloatType;
+        } else if (fieldType instanceof ArrayType) {
+            validFieldType = ((ArrayType) fieldType).getElementType() instanceof FloatType;
+        }
+        if (!validFieldType) {
             throw new IllegalArgumentException(
-                    "Lumina currently only supports float arrays, but field type is: " + fieldType);
+                    "Lumina requires VectorType<FLOAT> or ArrayType<FLOAT>, but field type is: "
+                            + fieldType);
         }
         int queryDim = ((float[]) vector).length;
         if (queryDim != indexMeta.dim()) {
