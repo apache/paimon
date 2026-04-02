@@ -273,22 +273,18 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
           sql("USE test_db")
           withTable("t") {
             withView("v1") {
-              sql(
-                """CREATE TABLE t (
-                  |  id INT,
-                  |  tags ARRAY<VARCHAR(100)>,
-                  |  props MAP<STRING, VARCHAR(200)>
-                  |) USING paimon""".stripMargin)
-              sql(
-                """INSERT INTO t VALUES
-                  |  (1, ARRAY('a', 'b'), MAP('k1', 'v1')),
-                  |  (2, ARRAY('c'), MAP('k2', 'v2'))""".stripMargin)
+              sql("""CREATE TABLE t (
+                    |  id INT,
+                    |  tags ARRAY<VARCHAR(100)>,
+                    |  props MAP<STRING, VARCHAR(200)>
+                    |) USING paimon""".stripMargin)
+              sql("""INSERT INTO t VALUES
+                    |  (1, ARRAY('a', 'b'), MAP('k1', 'v1')),
+                    |  (2, ARRAY('c'), MAP('k2', 'v2'))""".stripMargin)
               sql("CREATE VIEW v1 AS SELECT * FROM t")
               checkAnswer(
                 sql("SELECT * FROM v1"),
-                Seq(
-                  Row(1, Seq("a", "b"), Map("k1" -> "v1")),
-                  Row(2, Seq("c"), Map("k2" -> "v2"))))
+                Seq(Row(1, Seq("a", "b"), Map("k1" -> "v1")), Row(2, Seq("c"), Map("k2" -> "v2"))))
             }
           }
         }
