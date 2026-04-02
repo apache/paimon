@@ -364,6 +364,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     tableName,
                     commitDuration);
             if (this.commitMetrics != null) {
+                Long latestSnapshotId = snapshotManager.latestSnapshotId();
                 reportCommit(
                         changes.appendTableFiles,
                         changes.appendChangelog,
@@ -371,7 +372,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         changes.compactChangelog,
                         commitDuration,
                         generatedSnapshot,
-                        attempts);
+                        attempts,
+                        latestSnapshotId == null ? 0L : latestSnapshotId);
             }
         }
         return generatedSnapshot;
@@ -384,7 +386,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> compactChangelogFiles,
             long commitDuration,
             int generatedSnapshots,
-            int attempts) {
+            int attempts,
+            long lastCommittedSnapshotId) {
         CommitStats commitStats =
                 new CommitStats(
                         appendTableFiles,
@@ -393,7 +396,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         compactChangelogFiles,
                         commitDuration,
                         generatedSnapshots,
-                        attempts);
+                        attempts,
+                        lastCommittedSnapshotId);
         commitMetrics.reportCommit(commitStats);
     }
 
@@ -528,6 +532,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
             LOG.info("Finished overwrite to table {}, duration {} ms", tableName, commitDuration);
             if (this.commitMetrics != null) {
+                Long latestSnapshotId = snapshotManager.latestSnapshotId();
                 reportCommit(
                         changes.appendTableFiles,
                         emptyList(),
@@ -535,7 +540,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         emptyList(),
                         commitDuration,
                         generatedSnapshot,
-                        attempts);
+                        attempts,
+                        latestSnapshotId == null ? 0L : latestSnapshotId);
             }
         }
         return generatedSnapshot;
