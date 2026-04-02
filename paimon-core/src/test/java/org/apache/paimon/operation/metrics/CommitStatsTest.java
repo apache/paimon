@@ -79,7 +79,7 @@ public class CommitStatsTest {
                         0,
                         0,
                         1,
-                        0L);
+                        -1L);
         assertThat(commitStats.getTableFilesAdded()).isEqualTo(0);
         assertThat(commitStats.getTableFilesDeleted()).isEqualTo(0);
         assertThat(commitStats.getTableFilesAppended()).isEqualTo(0);
@@ -95,7 +95,7 @@ public class CommitStatsTest {
         assertThat(commitStats.getNumBucketsWritten()).isEqualTo(0);
         assertThat(commitStats.getDuration()).isEqualTo(0);
         assertThat(commitStats.getAttempts()).isEqualTo(1);
-        assertThat(commitStats.getLastCommittedSnapshotId()).isEqualTo(0);
+        assertThat(commitStats.getLastCommittedSnapshotId()).isEqualTo(-1);
     }
 
     @Test

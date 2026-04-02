@@ -37,8 +37,6 @@ public class ConsumerProgressCalculator {
 
     private final Map<Integer, Long> consumingSnapshotPerReader;
 
-    private long currentConsumerId = 0L;
-
     public ConsumerProgressCalculator(int parallelism) {
         this.minNextSnapshotPerCheckpoint = new TreeMap<>();
         this.assignedSnapshotPerReader = new HashMap<>(parallelism);
@@ -61,10 +59,8 @@ public class ConsumerProgressCalculator {
             int parallelism) {
         computeMinNextSnapshotId(readersAwaitingSplit, unassignedCalculationFunction, parallelism)
                 .ifPresent(
-                        minNextSnapshotId -> {
-                            minNextSnapshotPerCheckpoint.put(checkpointId, minNextSnapshotId);
-                            currentConsumerId = minNextSnapshotId;
-                        });
+                        minNextSnapshotId ->
+                                minNextSnapshotPerCheckpoint.put(checkpointId, minNextSnapshotId));
     }
 
     public OptionalLong notifyCheckpointComplete(long checkpointId) {
@@ -73,10 +69,6 @@ public class ConsumerProgressCalculator {
         OptionalLong max = nextSnapshots.values().stream().mapToLong(Long::longValue).max();
         nextSnapshots.clear();
         return max;
-    }
-
-    public long getCurrentConsumerId() {
-        return currentConsumerId;
     }
 
     /** Calculate the minimum snapshot currently being consumed by all readers. */

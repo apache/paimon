@@ -121,7 +121,7 @@ public class CommitMetricsTest {
         assertThat(lastChangelogRecordsAppended.getValue()).isEqualTo(0);
         assertThat(lastDeltaRecordsCompacted.getValue()).isEqualTo(0);
         assertThat(lastChangelogRecordsCompacted.getValue()).isEqualTo(0);
-        assertThat(lastCommittedSnapshotId.getValue()).isEqualTo(0);
+        assertThat(lastCommittedSnapshotId.getValue()).isEqualTo(-1);
 
         // report once
         reportOnce(commitMetrics);
