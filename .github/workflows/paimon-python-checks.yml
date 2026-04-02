@@ -80,7 +80,7 @@ jobs:
           mvn -version
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Build Tantivy native library
         run: |
