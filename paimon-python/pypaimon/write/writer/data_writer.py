@@ -142,19 +142,17 @@ class DataWriter(ABC):
         """Merge existing data with new data. Must be implemented by subclasses."""
 
     def _check_and_roll_if_needed(self):
-        if self.pending_data is None:
-            return
-
-        current_size = self.pending_data.nbytes
-        if current_size > self.target_file_size:
+        while self.pending_data is not None:
+            current_size = self.pending_data.nbytes
+            if current_size <= self.target_file_size:
+                break
             split_row = self._find_optimal_split_point(self.pending_data, self.target_file_size)
-            if split_row > 0:
-                data_to_write = self.pending_data.slice(0, split_row)
-                remaining_data = self.pending_data.slice(split_row)
-
-                self._write_data_to_file(data_to_write)
-                self.pending_data = remaining_data
-                self._check_and_roll_if_needed()
+            if split_row <= 0:
+                break
+            data_to_write = self.pending_data.slice(0, split_row)
+            remaining_data = self.pending_data.slice(split_row)
+            self._write_data_to_file(data_to_write)
+            self.pending_data = remaining_data
 
     def _write_data_to_file(self, data: pa.Table):
         if data.num_rows == 0:
