@@ -242,4 +242,52 @@ abstract class PaimonViewTestBase extends PaimonHiveTestBase {
         }
     }
   }
+
+  test("Paimon View: create view on table with VARCHAR columns") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("test_db") {
+          sql("CREATE DATABASE test_db")
+          sql("USE test_db")
+          withTable("t") {
+            withView("v1") {
+              sql("CREATE TABLE t (id INT, name VARCHAR(50), country STRING) USING paimon")
+              sql("INSERT INTO t VALUES (1, 'alice', 'beijing'), (2, 'bob', 'shanghai')")
+              sql("CREATE VIEW v1 AS SELECT * FROM t")
+              checkAnswer(
+                sql("SELECT * FROM v1"),
+                Seq(Row(1, "alice", "beijing"), Row(2, "bob", "shanghai")))
+            }
+          }
+        }
+    }
+  }
+
+  test("Paimon View: create view on table with nested VARCHAR and CHAR columns") {
+    Seq(sparkCatalogName, paimonHiveCatalogName).foreach {
+      catalogName =>
+        sql(s"USE $catalogName")
+        withDatabase("test_db") {
+          sql("CREATE DATABASE test_db")
+          sql("USE test_db")
+          withTable("t") {
+            withView("v1") {
+              sql("""CREATE TABLE t (
+                    |  id INT,
+                    |  tags ARRAY<VARCHAR(100)>,
+                    |  props MAP<STRING, VARCHAR(200)>
+                    |) USING paimon""".stripMargin)
+              sql("""INSERT INTO t VALUES
+                    |  (1, ARRAY('a', 'b'), MAP('k1', 'v1')),
+                    |  (2, ARRAY('c'), MAP('k2', 'v2'))""".stripMargin)
+              sql("CREATE VIEW v1 AS SELECT * FROM t")
+              checkAnswer(
+                sql("SELECT * FROM v1"),
+                Seq(Row(1, Seq("a", "b"), Map("k1" -> "v1")), Row(2, Seq("c"), Map("k2" -> "v2"))))
+            }
+          }
+        }
+    }
+  }
 }
