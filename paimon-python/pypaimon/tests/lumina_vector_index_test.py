@@ -24,6 +24,7 @@ import tempfile
 import unittest
 
 from lumina_data import LuminaBuilder
+from lumina_data._native import is_available as _lumina_available
 
 from pypaimon.globalindex.lumina.lumina_index_meta import LuminaIndexMeta
 
@@ -48,6 +49,7 @@ class _SimpleFileIO(object):
         return open(path, 'rb')
 
 
+@unittest.skipUnless(_lumina_available(), "lumina-data native library not available")
 class LuminaVectorIndexTest(unittest.TestCase):
 
     def test_build_and_read_bruteforce(self):
