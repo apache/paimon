@@ -19,6 +19,7 @@
 package org.apache.paimon.lumina.index;
 
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalVector;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.globalindex.GlobalIndexSingletonWriter;
 import org.apache.paimon.globalindex.ResultEntry;
@@ -26,6 +27,7 @@ import org.apache.paimon.globalindex.io.GlobalIndexFileWriter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.VectorType;
 
 import org.aliyun.lumina.LuminaDataset;
 import org.aliyun.lumina.LuminaFileOutput;
@@ -113,15 +115,25 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
     }
 
     private void validateFieldType(DataType dataType) {
-        if (!(dataType instanceof ArrayType)) {
-            throw new IllegalArgumentException(
-                    "Lumina vector index requires ArrayType, but got: " + dataType);
+        if (dataType instanceof VectorType) {
+            DataType elementType = ((VectorType) dataType).getElementType();
+            if (!(elementType instanceof FloatType)) {
+                throw new IllegalArgumentException(
+                        "Lumina vector index requires float vector, but got: " + elementType);
+            }
+            return;
         }
-        DataType elementType = ((ArrayType) dataType).getElementType();
-        if (!(elementType instanceof FloatType)) {
-            throw new IllegalArgumentException(
-                    "Lumina vector index requires float array, but got: " + elementType);
+        if (dataType instanceof ArrayType) {
+            DataType elementType = ((ArrayType) dataType).getElementType();
+            if (!(elementType instanceof FloatType)) {
+                throw new IllegalArgumentException(
+                        "Lumina vector index requires float array, but got: " + elementType);
+            }
+            return;
         }
+        throw new IllegalArgumentException(
+                "Lumina vector index requires VectorType or ArrayType<FLOAT>, but got: "
+                        + dataType);
     }
 
     @Override
@@ -140,6 +152,12 @@ public class LuminaVectorGlobalIndexWriter implements GlobalIndexSingletonWriter
             checkDimension(vector.length);
             for (int i = 0; i < dim; i++) {
                 writeBuf.putFloat(vector[i]);
+            }
+        } else if (fieldData instanceof InternalVector) {
+            InternalVector vector = (InternalVector) fieldData;
+            checkDimension(vector.size());
+            for (int i = 0; i < dim; i++) {
+                writeBuf.putFloat(vector.getFloat(i));
             }
         } else if (fieldData instanceof InternalArray) {
             InternalArray array = (InternalArray) fieldData;
