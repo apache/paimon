@@ -77,6 +77,11 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
           |INSERT INTO test_tbl VALUES
           |('paimon', 4, 4, null, 4, 4.0, 4.0, 42.12345, true, date('2025-01-18'), binary('b4'))
           |""".stripMargin)
+    sql(
+      """
+        |INSERT INTO test_tbl VALUES
+        |('nan_test', 5, 5, 5, 5, CAST('NaN' AS FLOAT), CAST('NaN' AS DOUBLE), 52.12345, false, date('2025-01-19'), binary('b5'))
+        |""".stripMargin)
   }
 
   override protected def afterAll(): Unit = {
@@ -126,6 +131,13 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     assert(actual.equals(builder.equal(5, 1.0f)))
     checkAnswer(sql(s"SELECT float_col from test_tbl WHERE $filter"), Seq(Row(1.0f)))
     assert(scanFilesCount(filter) == 1)
+
+    // Test NaN handling - equality with NaN should return AlwaysFalse
+    val nanFilter = "float_col = CAST('NaN' AS FLOAT)"
+    val nanPredicate = converter.convert(v2Filter(nanFilter)).get
+    assert(
+      nanPredicate.equals(PredicateBuilder.alwaysFalse()),
+      "NaN equality should return AlwaysFalse")
 
     filter = "double_col = 1.0"
     actual = converter.convert(v2Filter(filter)).get
@@ -505,6 +517,98 @@ abstract class SparkV2FilterConverterTestBase extends PaimonSparkTestBase {
     val filesScanned = scanFilesWithPredicate(paimonPredicate)
     // All 4 files should be scanned because AlwaysTrue in OR matches everything
     assert(filesScanned == 4, s"Expected 4 files but scanned $filesScanned files")
+  }
+
+  test("V2Filter: EqualTo with NaN should return AlwaysFalse") {
+    // Test float_col = NaN should always return false (no matching rows)
+    val filter1 = "float_col = CAST('NaN' AS FLOAT)"
+    val predicate1 = converter.convert(v2Filter(filter1)).get
+    assert(predicate1.equals(PredicateBuilder.alwaysFalse()))
+
+    // Verify no files are scanned (AlwaysFalse should skip all files)
+    val filesScanned1 = scanFilesWithPredicate(predicate1)
+    assert(
+      filesScanned1 == 0,
+      s"Expected 0 files for NaN equality but scanned $filesScanned1 files")
+
+    // Test double_col = NaN should always return false
+    val filter2 = "double_col = CAST('NaN' AS DOUBLE)"
+    val predicate2 = converter.convert(v2Filter(filter2)).get
+    assert(predicate2.equals(PredicateBuilder.alwaysFalse()))
+
+    val filesScanned2 = scanFilesWithPredicate(predicate2)
+    assert(
+      filesScanned2 == 0,
+      s"Expected 0 files for NaN equality but scanned $filesScanned2 files")
+  }
+
+  test("V2Filter: GreaterThan with NaN should return AlwaysFalse") {
+    // Test float_col > NaN should always return false
+    val filter1 = "float_col > CAST('NaN' AS FLOAT)"
+    val predicate1 = converter.convert(v2Filter(filter1)).get
+    assert(predicate1.equals(PredicateBuilder.alwaysFalse()))
+
+    val filesScanned1 = scanFilesWithPredicate(predicate1)
+    assert(
+      filesScanned1 == 0,
+      s"Expected 0 files for NaN comparison but scanned $filesScanned1 files")
+
+    // Test double_col > NaN should always return false
+    val filter2 = "double_col > CAST('NaN' AS DOUBLE)"
+    val predicate2 = converter.convert(v2Filter(filter2)).get
+    assert(predicate2.equals(PredicateBuilder.alwaysFalse()))
+
+    val filesScanned2 = scanFilesWithPredicate(predicate2)
+    assert(
+      filesScanned2 == 0,
+      s"Expected 0 files for NaN comparison but scanned $filesScanned2 files")
+  }
+
+  test("V2Filter: LessThanOrEqual with NaN should return AlwaysFalse") {
+    // Test float_col <= NaN should always return false
+    val filter1 = "float_col <= CAST('NaN' AS FLOAT)"
+    val predicate1 = converter.convert(v2Filter(filter1)).get
+    assert(predicate1.equals(PredicateBuilder.alwaysFalse()))
+
+    val filesScanned1 = scanFilesWithPredicate(predicate1)
+    assert(
+      filesScanned1 == 0,
+      s"Expected 0 files for NaN comparison but scanned $filesScanned1 files")
+  }
+
+  test("V2Filter: float and double normal operations not affected by NaN handling") {
+    // Verify that normal float/double queries still work correctly
+    val filter1 = "float_col = 1.0"
+    val predicate1 = converter.convert(v2Filter(filter1)).get
+    assert(predicate1.equals(builder.equal(5, 1.0f)))
+    checkAnswer(sql(s"SELECT float_col FROM test_tbl WHERE $filter1"), Seq(Row(1.0f)))
+
+    val filter2 = "double_col > 2.0"
+    val predicate2 = converter.convert(v2Filter(filter2)).get
+    assert(predicate2.equals(builder.greaterThan(6, 2.0d)))
+    checkAnswer(
+      sql(s"SELECT double_col FROM test_tbl WHERE $filter2 ORDER BY double_col"),
+      Seq(Row(3.0d), Row(4.0d)))
+
+    val filter3 = "float_col <= 3.0"
+    val predicate3 = converter.convert(v2Filter(filter3)).get
+    assert(predicate3.equals(builder.lessOrEqual(5, 3.0f)))
+    checkAnswer(
+      sql(s"SELECT float_col FROM test_tbl WHERE $filter3 ORDER BY float_col"),
+      Seq(Row(1.0f), Row(2.0f), Row(3.0f)))
+  }
+
+  test("V2Filter: NaN row exists but is not matched by NaN equality") {
+    // The table has a row with NaN values, but NaN = NaN should not match
+    val countQuery = "SELECT COUNT(*) FROM test_tbl WHERE float_col = CAST('NaN' AS FLOAT)"
+    checkAnswer(sql(countQuery), Seq(Row(0)))
+
+    val countQuery2 = "SELECT COUNT(*) FROM test_tbl WHERE double_col = CAST('NaN' AS DOUBLE)"
+    checkAnswer(sql(countQuery2), Seq(Row(0)))
+
+    // But we can verify the NaN row exists by checking the row count
+    val totalCount = sql("SELECT COUNT(*) FROM test_tbl").collect().head.getLong(0)
+    assert(totalCount == 5, s"Expected 5 rows total including NaN row")
   }
 
   private def v2Filter(str: String, tableName: String = "test_tbl"): SparkPredicate = {

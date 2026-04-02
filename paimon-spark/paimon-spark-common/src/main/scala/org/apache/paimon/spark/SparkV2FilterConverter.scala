@@ -44,13 +44,25 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
     }
   }
 
+  private def isNaN(value: Any): Boolean = {
+    value match {
+      case f: Float => f.isNaN
+      case d: Double => d.isNaN
+      case _ => false
+    }
+  }
+
   private def convert(sparkPredicate: SparkPredicate): Predicate = {
     sparkPredicate.name() match {
       case EQUAL_TO =>
         sparkPredicate match {
           case BinaryPredicate(transform, literal) =>
-            // TODO deal with isNaN
-            builder.equal(transform, literal)
+            if (isNaN(literal)) {
+              // NaN != NaN, so equality with NaN should never match
+              PredicateBuilder.alwaysFalse()
+            } else {
+              builder.equal(transform, literal)
+            }
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
@@ -70,7 +82,12 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
       case GREATER_THAN =>
         sparkPredicate match {
           case BinaryPredicate(transform, literal) =>
-            builder.greaterThan(transform, literal)
+            if (isNaN(literal)) {
+              // Any comparison with NaN is false
+              PredicateBuilder.alwaysFalse()
+            } else {
+              builder.greaterThan(transform, literal)
+            }
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
@@ -78,7 +95,12 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
       case GREATER_THAN_OR_EQUAL =>
         sparkPredicate match {
           case BinaryPredicate((transform, literal)) =>
-            builder.greaterOrEqual(transform, literal)
+            if (isNaN(literal)) {
+              // Any comparison with NaN is false
+              PredicateBuilder.alwaysFalse()
+            } else {
+              builder.greaterOrEqual(transform, literal)
+            }
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
@@ -86,7 +108,12 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
       case LESS_THAN =>
         sparkPredicate match {
           case BinaryPredicate(transform, literal) =>
-            builder.lessThan(transform, literal)
+            if (isNaN(literal)) {
+              // Any comparison with NaN is false
+              PredicateBuilder.alwaysFalse()
+            } else {
+              builder.lessThan(transform, literal)
+            }
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }
@@ -94,7 +121,12 @@ case class SparkV2FilterConverter(rowType: RowType) extends Logging {
       case LESS_THAN_OR_EQUAL =>
         sparkPredicate match {
           case BinaryPredicate(transform, literal) =>
-            builder.lessOrEqual(transform, literal)
+            if (isNaN(literal)) {
+              // Any comparison with NaN is false
+              PredicateBuilder.alwaysFalse()
+            } else {
+              builder.lessOrEqual(transform, literal)
+            }
           case _ =>
             throw new UnsupportedOperationException(s"Convert $sparkPredicate is unsupported.")
         }

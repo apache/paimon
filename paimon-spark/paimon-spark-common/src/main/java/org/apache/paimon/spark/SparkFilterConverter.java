@@ -96,12 +96,24 @@ public class SparkFilterConverter {
         }
     }
 
+    private boolean isNaN(Object value) {
+        if (value instanceof Float) {
+            return Float.isNaN((Float) value);
+        } else if (value instanceof Double) {
+            return Double.isNaN((Double) value);
+        }
+        return false;
+    }
+
     public Predicate convert(Filter filter) {
         if (filter instanceof EqualTo) {
             EqualTo eq = (EqualTo) filter;
-            // TODO deal with isNaN
             int index = fieldIndex(eq.attribute());
             Object literal = convertLiteral(index, eq.value());
+            if (isNaN(literal)) {
+                // NaN != NaN, so equality with NaN should never match
+                return PredicateBuilder.alwaysFalse();
+            }
             return builder.equal(index, literal);
         } else if (filter instanceof EqualNullSafe) {
             EqualNullSafe eq = (EqualNullSafe) filter;
@@ -116,21 +128,37 @@ public class SparkFilterConverter {
             GreaterThan gt = (GreaterThan) filter;
             int index = fieldIndex(gt.attribute());
             Object literal = convertLiteral(index, gt.value());
+            if (isNaN(literal)) {
+                // Any comparison with NaN is false
+                return PredicateBuilder.alwaysFalse();
+            }
             return builder.greaterThan(index, literal);
         } else if (filter instanceof GreaterThanOrEqual) {
             GreaterThanOrEqual gt = (GreaterThanOrEqual) filter;
             int index = fieldIndex(gt.attribute());
             Object literal = convertLiteral(index, gt.value());
+            if (isNaN(literal)) {
+                // Any comparison with NaN is false
+                return PredicateBuilder.alwaysFalse();
+            }
             return builder.greaterOrEqual(index, literal);
         } else if (filter instanceof LessThan) {
             LessThan lt = (LessThan) filter;
             int index = fieldIndex(lt.attribute());
             Object literal = convertLiteral(index, lt.value());
+            if (isNaN(literal)) {
+                // Any comparison with NaN is false
+                return PredicateBuilder.alwaysFalse();
+            }
             return builder.lessThan(index, literal);
         } else if (filter instanceof LessThanOrEqual) {
             LessThanOrEqual lt = (LessThanOrEqual) filter;
             int index = fieldIndex(lt.attribute());
             Object literal = convertLiteral(index, lt.value());
+            if (isNaN(literal)) {
+                // Any comparison with NaN is false
+                return PredicateBuilder.alwaysFalse();
+            }
             return builder.lessOrEqual(index, literal);
         } else if (filter instanceof In) {
             In in = (In) filter;
