@@ -30,6 +30,18 @@ from pypaimon.globalindex.vector_search_result import DictBasedScoredIndexResult
 
 LUMINA_VECTOR_ANN_IDENTIFIER = "lumina-vector-ann"
 
+MIN_SEARCH_LIST_SIZE = 16
+
+
+def _ensure_search_list_size(search_options, top_k):
+    """Set diskann.search.list_size when not explicitly configured.
+
+    Mirrors Java LuminaVectorGlobalIndexReader.ensureSearchListSize().
+    """
+    if "diskann.search.list_size" not in search_options:
+        list_size = max(int(top_k * 1.5), MIN_SEARCH_LIST_SIZE)
+        search_options["diskann.search.list_size"] = str(list_size)
+
 
 class LuminaVectorGlobalIndexReader(GlobalIndexReader):
     """Vector global index reader using Lumina.
@@ -57,9 +69,8 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         from lumina_data import MetricType
 
         query = vector_search.vector
-        # Convert to ctypes array once (avoid per-call conversion)
+        # Convert to ctypes array once
         if hasattr(query, 'ctypes'):
-            # numpy array - get pointer directly
             query_arr = ctypes.cast(query.ctypes.data,
                                     ctypes.POINTER(ctypes.c_float))
         elif isinstance(query, ctypes.Array):
@@ -72,24 +83,15 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             query_arr = (ctypes.c_float * len(query))(*query)
 
         limit = vector_search.limit
-        metric = self._index_meta.metric
+        index_metric = self._index_meta.metric
 
         count = self._searcher.get_count()
         effective_k = min(limit, count)
         if effective_k <= 0:
             return None
 
-        # Auto-set diskann.search.list_size if not configured
-        search_opts = {}
-        if "diskann.search.list_size" not in self._index_meta.options:
-            list_size = max(int(effective_k * 1.5), 16)
-            search_opts["diskann.search.list_size"] = str(list_size)
-
-        # Pre-allocate output buffers
-        dist_buf = (ctypes.c_float * effective_k)()
-        label_buf = (ctypes.c_uint64 * effective_k)()
-
         include_row_ids = vector_search.include_row_ids
+
         if include_row_ids is not None:
             filter_ids_list = list(include_row_ids)
             if len(filter_ids_list) == 0:
@@ -97,25 +99,34 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             effective_k = min(effective_k, len(filter_ids_list))
             dist_buf = (ctypes.c_float * effective_k)()
             label_buf = (ctypes.c_uint64 * effective_k)()
+            # Java: searchOptions = options.toLuminaOptions(); searchOptions.putAll(indexMeta.options())
+            search_opts = self._paimon_opts.to_lumina_options()
+            search_opts.update(self._index_meta.options)
+            search_opts["search.thread_safe_filter"] = "true"
+            _ensure_search_list_size(search_opts, effective_k)
             fid_arr = (ctypes.c_uint64 * len(filter_ids_list))(*filter_ids_list)
             self._searcher.search_with_filter(
                 query_arr, 1, effective_k,
                 fid_arr, len(filter_ids_list),
-                dist_buf, label_buf,
-                search_opts if search_opts else None)
+                dist_buf, label_buf, search_opts)
         else:
+            dist_buf = (ctypes.c_float * effective_k)()
+            label_buf = (ctypes.c_uint64 * effective_k)()
+            # Java: searchOptions = options.toLuminaOptions(); searchOptions.putAll(indexMeta.options())
+            search_opts = self._paimon_opts.to_lumina_options()
+            search_opts.update(self._index_meta.options)
+            _ensure_search_list_size(search_opts, effective_k)
             self._searcher.search(
                 query_arr, 1, effective_k,
-                dist_buf, label_buf,
-                search_opts if search_opts else None)
+                dist_buf, label_buf, search_opts)
 
-        # Build scored result directly from ctypes buffers (no list conversion)
+        # Collect results with score conversion (same as Java collectResults)
         id_to_scores = {}
         for i in range(effective_k):
             row_id = label_buf[i]
             if row_id == 0xFFFFFFFFFFFFFFFF:
                 continue
-            score = MetricType.convert_distance_to_score(dist_buf[i], metric)
+            score = MetricType.convert_distance_to_score(dist_buf[i], index_metric)
             id_to_scores[int(row_id)] = score
 
         return DictBasedScoredIndexResult(id_to_scores)
@@ -133,11 +144,11 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         # Deserialize index metadata
         self._index_meta = LuminaIndexMeta.deserialize(self._io_meta.metadata)
 
-        # Build searcher options from index metadata + table options
-        searcher_options = dict(self._index_meta.options)
-        opts = LuminaVectorIndexOptions.from_paimon_options(self._options)
-        for k, v in opts.to_native_options().items():
-            searcher_options.setdefault(k, v)
+        # Java: searcherOptions = options.toLuminaOptions();
+        #        searcherOptions.putAll(indexMeta.options());
+        self._paimon_opts = LuminaVectorIndexOptions(self._options)
+        searcher_options = self._paimon_opts.to_lumina_options()
+        searcher_options.update(self._index_meta.options)
 
         file_path = os.path.join(self._index_path, self._io_meta.file_name)
         stream = self._file_io.new_input_stream(file_path)
