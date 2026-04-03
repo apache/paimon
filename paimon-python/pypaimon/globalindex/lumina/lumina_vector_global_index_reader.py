@@ -20,7 +20,6 @@
 
 Each shard has exactly one Lumina index file. This reader lazy-loads the
 index and performs vector similarity search using the lumina-data SDK.
-Uses stream-based open (no temp file), mirroring the Java implementation.
 """
 
 import os
@@ -34,24 +33,16 @@ MIN_SEARCH_LIST_SIZE = 16
 
 
 def _ensure_search_list_size(search_options, top_k):
-    """Set diskann.search.list_size when not explicitly configured.
-
-    Mirrors Java LuminaVectorGlobalIndexReader.ensureSearchListSize().
-    """
+    """Set diskann.search.list_size when not explicitly configured."""
     if "diskann.search.list_size" not in search_options:
         list_size = max(int(top_k * 1.5), MIN_SEARCH_LIST_SIZE)
         search_options["diskann.search.list_size"] = str(list_size)
 
 
 class LuminaVectorGlobalIndexReader(GlobalIndexReader):
-    """Vector global index reader using Lumina.
-
-    Reads the Lumina index file via lumina-data SDK's LuminaSearcher and
-    performs approximate nearest neighbor search.
-    """
+    """Vector global index reader using Lumina."""
 
     def __init__(self, file_io, index_path, io_metas, options=None):
-        # type: (object, str, List[GlobalIndexIOMeta], Optional[Dict[str, str]]) -> None
         assert len(io_metas) == 1, "Expected exactly one index file per shard"
         self._file_io = file_io
         self._index_path = index_path
@@ -62,7 +53,6 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
         self._stream = None
 
     def visit_vector_search(self, vector_search):
-        # type: (...) -> Optional[ScoredGlobalIndexResult]
         self._ensure_loaded()
 
         import ctypes
@@ -99,7 +89,6 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             effective_k = min(effective_k, len(filter_ids_list))
             dist_buf = (ctypes.c_float * effective_k)()
             label_buf = (ctypes.c_uint64 * effective_k)()
-            # Java: searchOptions = options.toLuminaOptions(); searchOptions.putAll(indexMeta.options())
             search_opts = self._paimon_opts.to_lumina_options()
             search_opts.update(self._index_meta.options)
             search_opts["search.thread_safe_filter"] = "true"
@@ -141,11 +130,7 @@ class LuminaVectorGlobalIndexReader(GlobalIndexReader):
             LuminaVectorIndexOptions,
         )
 
-        # Deserialize index metadata
         self._index_meta = LuminaIndexMeta.deserialize(self._io_meta.metadata)
-
-        # Java: searcherOptions = options.toLuminaOptions();
-        #        searcherOptions.putAll(indexMeta.options());
         self._paimon_opts = LuminaVectorIndexOptions(self._options)
         searcher_options = self._paimon_opts.to_lumina_options()
         searcher_options.update(self._index_meta.options)
