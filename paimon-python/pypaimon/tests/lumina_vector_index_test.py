@@ -49,7 +49,6 @@ class _SimpleFileIO(object):
         return open(path, 'rb')
 
 
-@unittest.skipUnless(_lumina_available(), "lumina-data native library not available")
 class LuminaVectorIndexTest(unittest.TestCase):
 
     def test_build_and_read_bruteforce(self):
