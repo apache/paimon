@@ -390,7 +390,7 @@ public class ChainGroupReadTable extends FallbackReadFileStoreTable {
                                 bucketInAll = totalBuckets;
                             } else {
                                 checkArgument(
-                                        totalBuckets == bucketInAll,
+                                        totalBuckets.equals(bucketInAll),
                                         "Inconsistent bucket num " + dataSplit.bucket());
                             }
 
